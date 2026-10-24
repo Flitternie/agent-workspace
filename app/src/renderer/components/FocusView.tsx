@@ -251,9 +251,9 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
   const mem = snapshot.memory;
   const groups: Array<{ title: string; records: MemoryRecord[]; hint: string }> = [
-    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to {alias}', { alias: task.alias }) },
-    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here') },
-    { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session') },
+    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to {alias}.', { alias: task.alias }) },
+    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here.') },
+    { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session.') },
   ];
   const run = (fn: () => Promise<unknown>) => {
     setError('');
@@ -285,7 +285,7 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
             {g.title}
             <span className="count-muted">{g.records.length}</span>
           </div>
-          {g.records.length === 0 ? <div className="muted small">{g.hint}.</div> : null}
+          {g.records.length === 0 ? <div className="muted small">{g.hint}</div> : null}
           {g.records.map((m) => (
             <div key={m.id} className="memory-record" data-testid="memory-record" data-scope={m.scope}>
               <div className="memory-body">{m.body}</div>

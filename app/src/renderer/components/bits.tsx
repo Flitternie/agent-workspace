@@ -66,7 +66,10 @@ function initial(alias: string): string {
 }
 
 export function displayName(t: { name: string; alias: string }): string {
-  return t.name !== t.alias ? `${t.alias} · ${t.name}` : t.alias;
+  if (t.name === t.alias || !t.name.trim()) return t.alias;
+  // Role first, like a job title: "Database Charlie", "数据库小张".
+  if (/[㐀-鿿]/.test(t.alias)) return `${t.name}${t.alias}`;
+  return `${t.name.charAt(0).toUpperCase()}${t.name.slice(1)} ${t.alias}`;
 }
 
 export function Kbd({ children }: { children: ReactNode }) {

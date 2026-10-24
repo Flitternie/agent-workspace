@@ -80,16 +80,23 @@ export class ClaudeAdapter implements ProviderAdapter {
     };
   }
 
-  async discoverSessions(filter: { cwd: string }): Promise<NativeSessionInfo[]> {
+  async discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]> {
     const sdk = await loadSdk();
-    const sessions = await sdk.listSessions({ dir: filter.cwd, limit: 50 });
+    // Without `dir` the SDK lists sessions from every project on this machine.
+    const sessions = await sdk.listSessions({ dir: filter.cwd, limit: filter.limit ?? 50 });
     return sessions.map((s) => ({
       provider: 'claude' as const,
       nativeSessionId: s.sessionId,
-      cwd: s.cwd ?? filter.cwd,
+      cwd: s.cwd ?? filter.cwd ?? '',
       title: s.customTitle || s.summary || s.firstPrompt || s.sessionId,
       updatedAt: new Date(s.lastModified).toISOString(),
     }));
+  }
+
+  async readHistory(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]> {
+    const events: ProviderEvent[] = [];
+    await new ClaudeSession({ cwd, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId);
+    return events;
   }
 
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession {
@@ -127,6 +134,13 @@ class ClaudeSession implements ProviderSession {
     return this.sessionId;
   }
 
+  /** Emits the saved conversation as history items (read-only; no process is started). */
+  async replayHistory(sessionId: string): Promise<void> {
+    const sdk = await loadSdk();
+    const history = await sdk.getSessionMessages(sessionId, { dir: this.args.cwd });
+    for (const m of history) this.receive(m, true);
+  }
+
   async start(): Promise<void> {
     const sdk = await loadSdk();
     const executable = findExecutable('claude');
@@ -137,8 +151,7 @@ class ClaudeSession implements ProviderSession {
       const info = await sdk.getSessionInfo(resumeId, { dir: this.args.cwd });
       if (!info) throw new Error(`Claude session ${resumeId} was not found for ${this.args.cwd}.`);
       resume = true;
-      const history = await sdk.getSessionMessages(resumeId, { dir: this.args.cwd });
-      for (const m of history) this.receive(m, true);
+      await this.replayHistory(resumeId);
     }
     this.sessionId = resumeId ?? randomUUID();
     this.query = sdk.query({

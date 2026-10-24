@@ -28,8 +28,9 @@ export const ipcSchemas = {
   'task:rename': z.object({ taskId: id, name: z.string().min(1).max(100) }),
   'task:remove': z.object({ taskId: id }),
   'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
+  'sessions:discoverAll': z.object({}),
   'task:importSession': z.object({
-    projectId: id,
+    projectId: id.optional(),
     provider: z.enum(['claude', 'codex']),
     nativeSessionId: id,
     cwd: z.string().min(1).max(4096),

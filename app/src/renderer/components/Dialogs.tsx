@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AgentProvider, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
-import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
+import { timeAgo } from '../state';
+import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
 import { t } from '../i18n';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -160,67 +161,88 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   );
 }
 
-export function ImportDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClose: () => void }) {
-  const [projectId, setProjectId] = useState(snapshot.projects[0]?.projectId ?? '');
-  const [provider, setProvider] = useState<'claude' | 'codex'>('claude');
+/** Recent Claude Code / Codex sessions from any folder on this Mac, newest first. */
+export function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (taskId: string) => void }) {
   const [sessions, setSessions] = useState<NativeSessionInfo[] | null>(null);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [provider, setProvider] = useState<'all' | 'claude' | 'codex'>('all');
+  const [importing, setImporting] = useState('');
+  const now = Date.now();
 
   useEffect(() => {
-    if (!projectId) return;
-    setSessions(null);
-    setError('');
-    setBusy(true);
-    call('sessions:discover', { projectId, provider })
+    call('sessions:discoverAll', {})
       .then(setSessions)
+      .catch((e) => setError(errorText(e)));
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const shown = (sessions ?? []).filter(
+    (s) => (provider === 'all' || s.provider === provider) && (!q || s.title.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q)),
+  );
+  const add = (s: NativeSessionInfo) => {
+    setImporting(s.nativeSessionId);
+    setError('');
+    call('task:importSession', { provider: s.provider as 'claude' | 'codex', nativeSessionId: s.nativeSessionId, cwd: s.cwd, title: s.title.slice(0, 500) || s.nativeSessionId })
+      .then((t) => {
+        onImported(t.taskId);
+        onClose();
+      })
       .catch((e) => setError(errorText(e)))
-      .finally(() => setBusy(false));
-  }, [projectId, provider]);
+      .finally(() => setImporting(''));
+  };
 
   return (
-    <Modal title={t('Resume an existing session')} onClose={onClose}>
+    <Modal title={t('Continue an existing session')} onClose={onClose}>
       <p className="muted small">
         {t(
-          'Lists conversations the provider has saved for this project. Importing re-enters that conversation (historical resume). It does not attach to a session that is currently running in another terminal — close that one first to avoid two writers.',
+          'Conversations you had with Claude Code or Codex on this Mac, in any folder. Importing continues that conversation here with its full history. It does not take over a session that is still open in a terminal — close that one first so the two do not edit at the same time.',
         )}
       </p>
-      <ProjectPicker snapshot={snapshot} value={projectId} onChange={setProjectId} />
-      <div className="field">
-        <label>{t('Agent')}</label>
-        <div className="row">
-          {(['claude', 'codex'] as const).map((p) => (
-            <label key={p} className={`radio${provider === p ? ' selected' : ''}`}>
-              <input type="radio" checked={provider === p} onChange={() => setProvider(p)} /> {PROVIDER_LABEL[p]}
-            </label>
+      <div className="row">
+        <input className="input grow" autoFocus placeholder={t('Search by title or folder')} value={query} onChange={(e) => setQuery(e.target.value)} data-testid="session-search" />
+        <div className="segmented">
+          {(['all', 'claude', 'codex'] as const).map((p) => (
+            <button key={p} className={provider === p ? 'on' : ''} onClick={() => setProvider(p)}>
+              {p === 'all' ? t('All') : PROVIDER_LABEL[p]}
+            </button>
           ))}
         </div>
       </div>
-      {busy ? <div className="muted">{t('Looking for sessions…')}</div> : null}
+      {!sessions && !error ? <div className="muted">{t('Looking for sessions…')}</div> : null}
       {error ? <div className="error-text">{error}</div> : null}
-      {sessions && sessions.length === 0 ? <div className="muted">{t('No un-imported sessions found for this folder.')}</div> : null}
-      <div className="session-list">
-        {sessions?.map((s) => (
-          <div key={s.nativeSessionId} className="session-row">
-            <div>
-              <div>{s.title}</div>
-              <div className="muted small">
-                {s.updatedAt ? new Date(s.updatedAt).toLocaleString() : ''} · <code>{s.nativeSessionId.slice(0, 13)}…</code>
+      {sessions && shown.length === 0 ? <div className="muted">{t('No sessions found.')}</div> : null}
+      <div className="session-list" data-testid="session-list">
+        {shown.map((s) => (
+          <div key={s.nativeSessionId} className="session-row" data-testid="session-row">
+            <div className="session-main">
+              <div className="session-title">
+                <ProviderTag provider={s.provider} /> <span className="truncate">{s.title}</span>
+              </div>
+              <div className="muted small mono session-meta">
+                <span className="truncate" title={s.cwd}>
+                  <Icon name="folder" size={12} /> {shortPath(s.cwd)}
+                </span>
+                {s.updatedAt ? <span>{timeAgo(s.updatedAt, now)}</span> : null}
+                {s.updatedAt && now - Date.parse(s.updatedAt) < 10 * 60_000 ? (
+                  <span className="warn-text" title={t('Active in the last few minutes. If it is still open in a terminal, close it before continuing here.')}>
+                    {t('may still be open')}
+                  </span>
+                ) : null}
               </div>
             </div>
-            <button
-              className="btn"
-              onClick={() =>
-                call('task:importSession', { projectId, provider, nativeSessionId: s.nativeSessionId, cwd: s.cwd, title: s.title })
-                  .then(onClose)
-                  .catch((e) => setError(errorText(e)))
-              }
-            >
-              {t('Import')}
+            <button className="btn" disabled={!!importing} onClick={() => add(s)}>
+              {importing === s.nativeSessionId ? t('Importing…') : t('Import')}
             </button>
           </div>
         ))}
       </div>
     </Modal>
   );
+}
+
+/** "/Users/me/projects/shop/api" → "…/shop/api". */
+function shortPath(p: string): string {
+  const parts = p.split('/').filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p;
 }

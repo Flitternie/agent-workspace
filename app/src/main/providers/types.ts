@@ -100,6 +100,9 @@ export interface ProviderSession {
 export interface ProviderAdapter {
   readonly provider: AgentProvider;
   capabilities(): Promise<ProviderCapabilities>;
-  discoverSessions(filter: { cwd: string }): Promise<NativeSessionInfo[]>;
+  /** Saved sessions for one folder, or across every folder when `cwd` is omitted. */
+  discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]>;
+  /** Read a saved session's transcript without starting or resuming it (history events only). */
+  readHistory?(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]>;
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession;
 }

@@ -74,8 +74,8 @@ export function VoiceDock({
           target.kind === 'coordinator'
             ? tr('Coordinator answered')
             : target.kind === 'create'
-              ? tr('Started a new task') + (t ? ` (${t.alias})` : '')
-              : tr('Sent to {alias}', { alias: t?.alias ?? '?' }) + (t && t.name !== t.alias ? ` (${t.name})` : '');
+              ? tr('Started a new task') + (t ? ` (${displayName(t)})` : '')
+              : tr('Sent to {alias}', { alias: t ? displayName(t) : '?' });
         patch(entry.id, { phase: 'sent', outcome, taskId: target.kind === 'coordinator' ? undefined : r.taskId });
         onDispatched(target.kind === 'coordinator' ? undefined : r.taskId);
         if (target.kind === 'coordinator') setShowLog(true);
@@ -420,8 +420,7 @@ function RoutePreview({
             <span className="route-arrow">→</span>
             <Alias alias={target.alias} size="sm" />
             <strong>
-              {target.alias}
-              {target.name !== target.alias ? ` · ${target.name}` : ''}
+              {displayName(target)}
             </strong>
             <span className="muted small">
               {tr(`${decision.confidence} confidence`)} · {decision.reason}

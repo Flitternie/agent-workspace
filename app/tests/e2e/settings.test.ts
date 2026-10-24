@@ -49,6 +49,20 @@ describe('real entry: first run, settings, language', () => {
     await expect.poll(() => page.locator('.stage-head h1').innerText()).toBe('总览');
     await page.screenshot({ path: join(shots, 'first-run-zh.png') });
 
+    // Sessions from any folder on this Mac can be continued here (import only; nothing is started).
+    await page.getByTestId('resume-session').click();
+    await expect.poll(async () => (await page.getByTestId('session-row').count()) > 0 || (await page.getByRole('dialog').innerText()).includes('没有找到会话'), { timeout: 30_000 }).toBe(true);
+    await page.screenshot({ path: join(shots, 'sessions-zh.png') });
+    if (await page.getByTestId('session-row').count()) {
+      await page.getByTestId('session-row').first().getByRole('button').click();
+      await expect.poll(() => page.getByTestId('composer-target').count(), { timeout: 15_000 }).toBe(1);
+      expect(await page.getByTestId('composer-target').innerText()).toContain('小王');
+      // The past conversation is shown right away, without resuming anything.
+      await expect.poll(() => page.getByTestId('transcript').locator('.msg').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+      await page.screenshot({ path: join(shots, 'session-imported-zh.png') });
+      await page.keyboard.press('Escape');
+    } else await page.keyboard.press('Escape');
+
     await app!.close();
     page = await launch();
     await expect.poll(() => page.locator('.stage-head h1').innerText()).toBe('总览');

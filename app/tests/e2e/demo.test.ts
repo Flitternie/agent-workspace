@@ -90,7 +90,7 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').innerText()).toContain('Alice');
     await shot(page, '03-dock-route-preview');
     await page.getByTestId('route-send').click();
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toContain('Sent to Alice');
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (\w+ )?Alice/);
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob'); // focus did not move
     expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
 

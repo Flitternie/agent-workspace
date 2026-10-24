@@ -70,6 +70,21 @@ export class OpenAiClient {
     return JSON.parse(json.choices?.[0]?.message?.content ?? 'null') as T;
   }
 
+  /** One-word role for an agent from its task title/instruction (title text only is sent). */
+  async suggestRole(text: string, lang: 'en' | 'zh'): Promise<string> {
+    const system =
+      lang === 'zh'
+        ? '给一个编码 Agent 起一个角色名，概括它负责的领域，比如 数据库、前端、后端、测试、文档。只回答一个 2 到 4 个汉字的词。'
+        : 'Name the role of a coding agent from its task, as one capitalized English word describing its area, e.g. Database, Frontend, Backend, Tests, Docs, Billing. Answer with that single word only.';
+    const r = await this.chatJson<{ role: string }>(
+      system,
+      `Task: ${text.slice(0, 500)}`,
+      { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string' } } },
+      'role',
+    );
+    return r?.role ?? '';
+  }
+
   async routeClassify(ctx: RouteContext): Promise<LlmRouteAnswer | null> {
     const focused = ctx.tasks.find((t) => t.taskId === ctx.focusedTaskId);
     const tasks = ctx.tasks

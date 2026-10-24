@@ -36,6 +36,7 @@ interface Outputs {
   'task:rename': void;
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
+  'sessions:discoverAll': NativeSessionInfo[];
   'task:importSession': Task;
   'attention:respond': void;
   'attention:dismiss': void;

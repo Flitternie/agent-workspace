@@ -30,6 +30,8 @@ export function App() {
   const { transcripts, load } = useTranscripts();
   // Every launch starts in Overview (spec 02).
   const [focusId, setFocusId] = useState<string | null>(null);
+  // A task created from a dialog shows up with the next snapshot; focus it then.
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'new' | 'import' | 'settings' | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
@@ -45,6 +47,12 @@ export function App() {
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
+  useEffect(() => {
+    if (pendingFocus && snapshot?.tasks.some((x) => x.taskId === pendingFocus)) {
+      setFocusId(pendingFocus);
+      setPendingFocus(null);
+    }
+  }, [pendingFocus, snapshot]);
 
   const toast = useCallback((text: string, taskId?: string) => {
     const id = Date.now() + Math.random();
@@ -206,7 +214,7 @@ export function App() {
       </div>
 
       {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => toast(t('Task created'), id)} /> : null}
-      {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} /> : null}
+      {dialog === 'import' ? <ImportDialog onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
       {dialog === 'settings' ? <SettingsDialog snapshot={snapshot} onClose={() => setDialog(null)} /> : null}
     </div>
   );

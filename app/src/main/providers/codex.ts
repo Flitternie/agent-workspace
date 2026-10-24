@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
@@ -172,22 +174,36 @@ export class CodexAdapter implements ProviderAdapter {
     };
   }
 
-  async discoverSessions(filter: { cwd: string }): Promise<NativeSessionInfo[]> {
-    const server = AppServer.spawn(filter.cwd);
+  async discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]> {
+    // Listing is read-only; without a cwd filter it covers every folder.
+    const server = AppServer.spawn(filter.cwd ?? homedir());
     try {
       await server.initialize();
-      const result = rec(await server.rpc('thread/list', { cwd: filter.cwd, limit: 50 }));
+      const result = rec(await server.rpc('thread/list', { ...(filter.cwd ? { cwd: filter.cwd } : {}), limit: filter.limit ?? 50, sortKey: 'updated_at' }));
       return (Array.isArray(result.data) ? result.data : []).map((t) => {
         const thread = rec(t);
         const updated = typeof thread.updatedAt === 'number' ? thread.updatedAt : undefined;
         return {
           provider: 'codex' as const,
           nativeSessionId: str(thread.id),
-          cwd: str(thread.cwd) || filter.cwd,
+          cwd: str(thread.cwd) || filter.cwd || '',
           title: str(thread.name) || str(thread.preview) || str(thread.id),
           updatedAt: updated ? new Date(updated * 1000).toISOString() : undefined,
         };
       });
+    } finally {
+      server.kill();
+    }
+  }
+
+  async readHistory(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]> {
+    // thread/read loads the rollout without resuming the thread.
+    const server = AppServer.spawn(existsSync(cwd) ? cwd : homedir());
+    try {
+      await server.initialize();
+      const thread = rec(rec(await server.rpc('thread/read', { threadId: nativeSessionId, includeTurns: true })).thread);
+      const turns = Array.isArray(thread.turns) ? thread.turns : [];
+      return turns.flatMap((turn) => (Array.isArray(rec(turn).items) ? (rec(turn).items as unknown[]) : []).flatMap((item) => itemEvents(item, true, true, cwd)));
     } finally {
       server.kill();
     }

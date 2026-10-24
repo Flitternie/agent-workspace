@@ -37,6 +37,7 @@ const workspace = new Workspace({
   openai,
   log,
   demo: demoMode,
+  hiddenSessionDirs: [join(appRoot, '.cache')],
 });
 
 let win: BrowserWindow | null = null;
@@ -71,6 +72,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
+  'sessions:discoverAll': () => workspace.discoverAllSessions(),
   'task:importSession': (i: Parameters<Workspace['importSession']>[0]) => workspace.importSession(i),
   'attention:respond': (i: { attentionId: string; decision?: string; answers?: Record<string, string> }) =>
     workspace.respondAttention(i.attentionId, i.decision, i.answers),

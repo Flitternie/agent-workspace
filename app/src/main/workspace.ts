@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve, sep } from 'node:path';
 import type {
   AgentProvider,
   AttentionItem,
@@ -27,6 +28,7 @@ import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
 import { decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
+import { cleanRole, guessRole } from './role';
 import { gitRoot, WorktreeService } from './worktree';
 
 const now = () => new Date().toISOString();
@@ -49,6 +51,8 @@ export interface WorkspaceOptions {
   openai?: OpenAiClient;
   log?: (...args: unknown[]) => void;
   demo?: boolean;
+  /** Folders whose sessions are the app's own (test scratch repos) and never offered for import. */
+  hiddenSessionDirs?: string[];
 }
 
 /**
@@ -243,12 +247,63 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
+    if (!args.name?.trim()) this.autoRole(task, `${args.title}\n${args.instruction ?? ''}`);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
       if (!r.ok) throw new Error(r.error);
     }
     return task;
+  }
+
+  /** Shows an imported session's past conversation right away, before anything is resumed. */
+  private async previewHistory(task: Task, provider: 'claude' | 'codex', nativeSessionId: string): Promise<void> {
+    const adapter = this.opts.adapters[provider];
+    if (!adapter?.readHistory) return;
+    try {
+      const events = await adapter.readHistory(nativeSessionId, task.cwd);
+      if (this.live.has(task.taskId) || !this.store.data.tasks.includes(task)) return; // resumed meanwhile, or removed
+      const items: TranscriptItem[] = [];
+      for (const e of events) {
+        if (e.type !== 'transcriptItem') continue;
+        const i = items.findIndex((h) => h.id === e.itemId);
+        const item = mergeItem(i === -1 ? undefined : items[i], { id: e.itemId, taskId: task.taskId, role: e.role, text: e.text, toolLabel: e.toolLabel, toolStatus: e.toolStatus, createdAt: now() }, e.tool);
+        if (i === -1) items.push(item);
+        else items[i] = item;
+      }
+      if (!items.length) return;
+      // A preview: long sessions show their latest part; resuming restores everything.
+      this.store.setTranscript(task.taskId, items.slice(-400));
+      for (const cb of this.transcriptListeners) cb(task.taskId, null);
+      const last = [...items].reverse().find((x) => x.role === 'assistant' && x.text.trim());
+      if (last) task.summary = summaryFor(last.text);
+      this.changed();
+    } catch (error) {
+      this.log('history preview failed', provider, error);
+    }
+  }
+
+  /**
+   * Gives an unnamed agent a one-word role in the language of its name: a keyword
+   * guess now, refined by the LLM when configured. A role the user sets wins.
+   */
+  private autoRole(task: Task, text: string): void {
+    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
+    const guess = guessRole(text, lang);
+    if (guess) task.name = guess;
+    const auto = task.name;
+    const ai = this.opts.openai;
+    if (!ai || !text.trim()) return;
+    void ai
+      .suggestRole(text, lang)
+      .then((raw) => {
+        const role = cleanRole(raw, lang);
+        const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
+        if (!role || !t || t.name !== auto) return;
+        t.name = role;
+        this.changed();
+      })
+      .catch((error) => this.log('role suggestion failed', error));
   }
 
   rename(taskId: string, name: string): void {
@@ -401,9 +456,41 @@ export class Workspace {
     return found.filter((s) => !known.has(s.nativeSessionId));
   }
 
+  /**
+   * Recent Claude Code and Codex sessions from every folder on this machine,
+   * newest first, minus ones already imported and the app's own scratch dirs.
+   */
+  async discoverAllSessions(): Promise<NativeSessionInfo[]> {
+    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
+    const lists = await Promise.all(
+      (['claude', 'codex'] as const).map(async (p) => {
+        const adapter = this.opts.adapters[p];
+        if (!adapter || !this.capabilities.find((c) => c.provider === p)?.available) return [];
+        try {
+          return await adapter.discoverSessions({ limit: 60 });
+        } catch (error) {
+          this.log('discover failed', p, error);
+          return [];
+        }
+      }),
+    );
+    return lists
+      .flat()
+      .filter((s) => s.cwd && !known.has(s.nativeSessionId) && !own.some((dir) => resolve(s.cwd).startsWith(dir)))
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  }
+
   /** Adopts a provider session created outside the app (historical resume, not live attach). */
-  importSession(args: { projectId: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; title: string }): Task {
-    this.project(args.projectId);
+  async importSession(args: { projectId?: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; title: string }): Promise<Task> {
+    if (args.projectId) this.project(args.projectId);
+    else {
+      // From the machine-wide list: the session's folder becomes (or joins) a project.
+      if (!existsSync(args.cwd)) throw new Error(`The session's folder no longer exists: ${args.cwd}`);
+      const inside = this.store.data.projects.find((p) => args.cwd === p.rootPath || args.cwd.startsWith(p.rootPath + sep));
+      args = { ...args, projectId: (inside ?? (await this.addProject(args.cwd))).projectId };
+    }
+    const projectId = args.projectId!;
     const d = this.store.data;
     const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const taskId = `t-${randomUUID().slice(0, 8)}`;
@@ -421,11 +508,11 @@ export class Workspace {
       taskId,
       alias,
       name: alias,
-      projectId: args.projectId,
+      projectId,
       title: clip(args.title, 120),
       provider: args.provider,
       status: 'disconnected',
-      summary: 'Imported from existing history. Resume to continue (this does not attach to a process running elsewhere).',
+      summary: 'Imported with its full history. Send a message to continue.',
       cwd: args.cwd,
       sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => t.alias).join(', ')} — not isolated.` : undefined,
       sessionLocalId: record.localId,
@@ -434,7 +521,9 @@ export class Workspace {
     };
     d.sessions.push(record);
     d.tasks.push(task);
+    this.autoRole(task, task.title);
     this.changed();
+    void this.previewHistory(task, args.provider, args.nativeSessionId);
     return task;
   }
 
@@ -846,11 +935,12 @@ export class Workspace {
   /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
   async seedDemo(demoRepoPath: string): Promise<void> {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
-    const mk = (provider: AgentProvider, name: string, title: string, mockScript: string, instruction: string) =>
-      this.createTask({ projectId: project.projectId, provider, name, title, mockScript, instruction, isolate: true });
-    await mk('mock', 'backend', 'Backend API v2 endpoints', 'ask:Legacy tests depend on the old /v1/orders API. Should I keep a compatibility adapter, or update the tests to v2?', 'Migrate the orders endpoints to API v2.');
-    await mk('mock', 'frontend', 'Frontend dashboard components', 'work', 'Build the dashboard components.');
-    await mk('mock', 'database', 'Database schema migration', 'ask:The schema migration drops the legacy `orders.notes` column, which has data in 1,204 rows. That is a data-loss risk. Should I proceed, or add a backfill step first?', 'Write the schema migration for the new orders table.');
+    // Roles (Backend, Frontend, Database) are filled in automatically from the titles.
+    const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
+      this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });
+    await mk('mock', 'Backend API v2 endpoints', 'ask:Legacy tests depend on the old /v1/orders API. Should I keep a compatibility adapter, or update the tests to v2?', 'Migrate the orders endpoints to API v2.');
+    await mk('mock', 'Frontend dashboard components', 'work', 'Build the dashboard components.');
+    await mk('mock', 'Database schema migration', 'ask:The schema migration drops the legacy `orders.notes` column, which has data in 1,204 rows. That is a data-loss risk. Should I proceed, or add a backfill step first?', 'Write the schema migration for the new orders table.');
   }
 }
 

@@ -1648,6 +1648,32 @@ pre code {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
+.session-list {
+  max-height: 52vh;
+  overflow: auto;
+}
+.session-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.session-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.session-meta {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
 
 /* ------------------------------------------------------------------ structured content */
 

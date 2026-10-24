@@ -70,7 +70,7 @@ export function Sidebar({
                     <span className="dot" aria-label={tr(STATUS_LABEL[t.status])} />
                   </span>
                 </span>
-                <span className="agent-row-sub">{pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : t.summary || t.title}</span>
+                <span className="agent-row-sub">{pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : (t.summary && tr(t.summary)) || t.title}</span>
               </span>
             </button>
           );
@@ -78,8 +78,8 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-foot">
-        <button className="btn btn-block" onClick={onResume} disabled={!snapshot.projects.length}>
-          <Icon name="history" /> {tr('Resume session…')}
+        <button className="btn btn-block" onClick={onResume} data-testid="resume-session">
+          <Icon name="history" /> {tr('Continue a session…')}
         </button>
         <button className="conn-list" onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
           {snapshot.capabilities

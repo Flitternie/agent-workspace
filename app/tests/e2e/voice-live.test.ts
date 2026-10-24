@@ -72,9 +72,9 @@ describe.runIf(enabled)('always-on microphone', () => {
     await expect.poll(() => page.getByTestId('mic-button').getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true');
 
     const toasts = () => page.getByTestId('caption').allInnerTexts().then((t) => t.join('\n'));
-    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Alice/);
+    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (\w+ )?Alice/);
     await page.screenshot({ path: join(shots, 'voice-01-live-caption.png') });
-    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Charlie/);
+    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (\w+ )?Charlie/);
     await page.screenshot({ path: join(shots, 'voice-02-second-command.png') });
 
     const transcript = (alias: string) =>

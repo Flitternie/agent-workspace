@@ -102,7 +102,8 @@ export function AgentCard({
             ) : null}
           </div>
           <div className="report-text" data-testid="card-summary">
-            {task.summary || <span className="muted">{t('No report yet.')}</span>}
+            {/* Placeholder summaries from the backend have translations; agent reports pass through unchanged. */}
+            {(task.summary && t(task.summary)) || <span className="muted">{t('No report yet.')}</span>}
           </div>
         </section>
 
