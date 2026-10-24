@@ -186,7 +186,7 @@ export interface WorkspaceSnapshot {
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   settings: Settings;
-  voice: { sttAvailable: boolean; routerLlmAvailable: boolean; sttModel?: string; routerModel?: string };
+  voice: { sttAvailable: boolean; routerLlmAvailable: boolean; sttModel?: string; routerModel?: string; autoListen: boolean };
   dataDir: string;
   /** Tasks with a live provider session right now (others resume on demand). */
   connectedTaskIds: string[];

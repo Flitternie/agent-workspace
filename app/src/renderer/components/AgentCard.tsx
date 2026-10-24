@@ -1,13 +1,16 @@
-import { useState } from 'react';
-import type { AttentionItem, Project, Task } from '../../shared/types';
+import { useRef, useState } from 'react';
+import type { AttentionItem, Project, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
+import { timeAgo } from '../state';
 import { AttentionView } from './AttentionView';
-import { Alias, ProviderBadge, StatusPill } from './bits';
+import { Alias, displayName, Icon, ProviderTag, StatusDot } from './bits';
 
+/** One participant tile in the meeting-style Overview. */
 export function AgentCard({
   task,
   project,
   items,
+  activity,
   connected,
   flash,
   onOpen,
@@ -16,95 +19,135 @@ export function AgentCard({
   task: Task;
   project?: Project;
   items: AttentionItem[];
+  activity: TranscriptItem[];
   connected: boolean;
   flash: boolean;
   onOpen: () => void;
   now: number;
 }) {
-  const [replying, setReplying] = useState(false);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
-  const needs = items.some((i) => i.kind === 'approval' || i.kind === 'question');
+  const [sending, setSending] = useState(false);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const urgent = items.filter((i) => i.kind !== 'completion');
+  const report = items.find((i) => i.kind === 'completion');
+  const needs = urgent.some((i) => i.kind === 'approval' || i.kind === 'question');
   const highRisk = items.some((i) => i.highRisk);
 
   const send = async () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || sending) return;
     setError('');
+    setSending(true);
     const r = await call('task:send', { taskId: task.taskId, text, via: 'card' }).catch((e) => ({ ok: false, error: errorText(e) }));
-    if (r.ok) {
-      setDraft('');
-      setReplying(false);
-    } else setError(r.error ?? 'Not delivered');
+    setSending(false);
+    if (r.ok) setDraft('');
+    else setError(r.error ?? 'Not delivered');
   };
 
   return (
     <article
-      className={`card status-${task.status}${needs ? ' needs' : ''}${highRisk ? ' high-risk' : ''}${flash ? ' flash' : ''}`}
+      className={`tile status-${task.status}${needs ? ' needs' : ''}${highRisk ? ' high-risk' : ''}${flash ? ' flash' : ''}`}
       data-testid="agent-card"
       data-alias={task.alias}
     >
-      <header className="card-head" onClick={onOpen} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
-        <Alias alias={task.alias} size="lg" />
-        <div className="card-ident">
-          <div className="card-name">
-            {task.name !== task.alias ? task.name : `Agent ${task.alias}`} <ProviderBadge provider={task.provider} />
+      <header className="tile-head">
+        <Alias alias={task.alias} size="md" />
+        <div className="tile-ident" onDoubleClick={onOpen}>
+          <div className="tile-name">
+            <span className="truncate">{displayName(task)}</span>
+            <ProviderTag provider={task.provider} />
           </div>
-          <div className="card-title" title={task.title}>
+          <div className="tile-title truncate" title={task.title}>
             {task.title}
           </div>
-          <div className="card-meta">
-            {project?.name ?? 'unknown project'}
-            {task.worktree ? ` · ${task.worktree.branch}` : ''}
-          </div>
         </div>
-        <StatusPill status={task.status} connected={connected} />
-      </header>
-
-      <div className="card-summary" data-testid="card-summary">
-        {task.summary}
-      </div>
-      {task.sharedCwdWarning ? <div className="warn-text">⚠ {task.sharedCwdWarning}</div> : null}
-
-      <div className="card-attention">
-        {items.length === 0 ? <div className="muted small">Nothing waiting on you.</div> : null}
-        {items.map((item) => (
-          <AttentionView key={item.id} item={item} task={task} compact now={now} onReply={() => setReplying(true)} />
-        ))}
-      </div>
-
-      {replying ? (
-        <div className="card-composer">
-          <div className="to-label">To: Agent {task.alias}</div>
-          <textarea
-            className="input"
-            autoFocus
-            rows={2}
-            value={draft}
-            placeholder={`Reply to ${task.alias}…`}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-              if (e.key === 'Escape') setReplying(false);
-            }}
-          />
-          {error ? <div className="error-text">{error}</div> : null}
-        </div>
-      ) : null}
-
-      <footer className="card-foot">
-        <button className="btn btn-strong" onClick={onOpen}>
-          Open
+        <StatusDot status={task.status} connected={connected} />
+        <button className="icon-btn" aria-label="Open" title="Open (⌘1–9)" onClick={onOpen}>
+          <Icon name="expand" />
         </button>
-        {!replying ? (
-          <button className="btn" onClick={() => setReplying(true)}>
-            Message
-          </button>
+      </header>
+      <div className="tile-meta mono">
+        <span className="truncate" title={task.cwd}>
+          <Icon name="folder" size={12} /> {project?.name ?? 'unknown project'}
+        </span>
+        {task.worktree ? (
+          <span className="truncate" title={task.worktree.path}>
+            <Icon name="branch" size={12} /> {task.worktree.branch}
+          </span>
         ) : null}
+        <span className="tile-updated">{timeAgo(task.updatedAt, now)}</span>
+      </div>
+
+      <div className="tile-body">
+        {task.sharedCwdWarning ? (
+          <div className="warn-text">
+            <Icon name="alert" size={12} /> {task.sharedCwdWarning}
+          </div>
+        ) : null}
+        {urgent.map((item) => (
+          <AttentionView key={item.id} item={item} task={task} compact now={now} onReply={() => input.current?.focus()} />
+        ))}
+
+        <section className={`report${report ? ' report-new' : ''}`}>
+          <div className="section-label">
+            {report ? `New report · ${timeAgo(report.createdAt, now)}` : 'Latest'}
+            {report ? (
+              <button className="link small" onClick={() => void call('attention:dismiss', { attentionId: report.id })}>
+                Mark read
+              </button>
+            ) : null}
+          </div>
+          <div className="report-text" data-testid="card-summary">
+            {task.summary || <span className="muted">No report yet.</span>}
+          </div>
+        </section>
+
+        {activity.length ? (
+          <section>
+            <div className="section-label">Activity</div>
+            <ul className="activity">
+              {activity.map((a) => (
+                <li key={a.id} className={`step step-${a.role}${a.toolStatus ? ` tool-${a.toolStatus}` : ''}`}>
+                  <span className="step-dot" aria-hidden />
+                  <span className="step-text truncate">{stepText(a)}</span>
+                  <span className="step-time">{timeAgo(a.createdAt, now)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
+
+      <footer className="tile-composer">
+        <textarea
+          ref={input}
+          className="composer-input"
+          rows={1}
+          value={draft}
+          aria-label={`Message Agent ${task.alias}`}
+          placeholder={`Message ${task.alias}…`}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void send();
+            }
+            if (e.key === 'Escape') e.currentTarget.blur();
+          }}
+        />
+        <button className="send-btn" aria-label={`Send to ${task.alias}`} disabled={!draft.trim() || sending} onClick={() => void send()}>
+          <Icon name="send" />
+        </button>
       </footer>
+      {error ? <div className="error-text tile-error">{error}</div> : null}
     </article>
   );
+}
+
+function stepText(a: TranscriptItem): string {
+  const first = a.text.replace(/```[\s\S]*?```/g, ' ').replace(/\s+/g, ' ').trim();
+  if (a.role === 'tool') return a.toolLabel ?? 'Tool';
+  if (a.role === 'user') return `You${a.via === 'voice' ? ' (voice)' : ''}: ${first}`;
+  return first;
 }

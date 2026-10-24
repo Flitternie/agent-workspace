@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
-import { PROVIDER_LABEL } from './components/bits';
+import { Icon } from './components/bits';
 import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { FocusView } from './components/FocusView';
+import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
 import { useTick, useTranscripts, useWorkspace } from './state';
 
@@ -11,6 +12,14 @@ interface Toast {
   id: number;
   text: string;
   taskId?: string;
+}
+
+/** Gallery columns like a video call: fill the window, keep tiles roughly square-ish. */
+function columnsFor(n: number): number {
+  if (n <= 1) return 1;
+  if (n === 2 || n === 4) return 2;
+  if (n <= 6) return 3;
+  return 4;
 }
 
 export function App() {
@@ -25,9 +34,11 @@ export function App() {
   const now = useTick();
 
   const focusTask = snapshot?.tasks.find((t) => t.taskId === focusId);
+  const taskIds = snapshot?.tasks.map((t) => t.taskId).join(',') ?? '';
+  // Tiles show recent activity, so every task's transcript is kept current.
   useEffect(() => {
-    if (focusId) load(focusId);
-  }, [focusId, load]);
+    for (const id of taskIds.split(',').filter(Boolean)) load(id);
+  }, [taskIds, load]);
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
@@ -42,11 +53,18 @@ export function App() {
     }
   }, []);
 
+  // Dock sends are confirmed in the captions; the receiving tile lights up briefly.
+  const flashTile = useCallback((taskId?: string) => {
+    if (!taskId) return;
+    setFlash(taskId);
+    setTimeout(() => setFlash((f) => (f === taskId ? null : f)), 1600);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (e.key === 'Escape' && !typing && !dialog) setFocusId(null);
-      if ((e.metaKey || e.ctrlKey) && /^[0-9]$/.test(e.key) && snapshot) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
         if (e.key === '0') setFocusId(null);
         else setFocusId(snapshot.tasks[Number(e.key) - 1]?.taskId ?? null);
@@ -59,96 +77,100 @@ export function App() {
   if (!snapshot) return <div className="loading">Loading workspace…</div>;
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
+  const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
+  const cols = columnsFor(snapshot.tasks.length);
+
+  const loadDemo = () =>
+    call('demo:seed', {})
+      .then(() => toast('Demo loaded: three mock agents in a throwaway repo.'))
+      .catch((e) => setError(errorText(e)));
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand" onClick={() => setFocusId(null)}>
-          Agent Meeting Workspace
-        </div>
-        <div className="topbar-summary" data-testid="topbar-summary">
-          {snapshot.tasks.length} agents · {needYou ? <strong>{needYou} need you</strong> : 'none waiting on you'}
-        </div>
-        <div className="topbar-actions">
-          {snapshot.capabilities.map((c) => (
-            <span key={c.provider} className={`cap${c.available ? '' : ' off'}`} title={c.detail}>
-              {c.available ? '●' : '○'} {PROVIDER_LABEL[c.provider]}
-            </span>
-          ))}
-          <span className={`cap${snapshot.voice.sttAvailable ? '' : ' off'}`} title={snapshot.voice.sttModel ? `STT ${snapshot.voice.sttModel}, router ${snapshot.voice.routerModel}` : 'No OpenAI key found'}>
-            {snapshot.voice.sttAvailable ? '●' : '○'} Voice
-          </span>
-          <label className="small check" title="When off, clearly targeted voice commands are sent immediately">
-            <input type="checkbox" checked={snapshot.settings.alwaysConfirmVoice} onChange={(e) => void call('settings:update', { alwaysConfirmVoice: e.target.checked })} /> Confirm every voice send
-          </label>
-          <button className="btn" onClick={() => setDialog('import')} disabled={!snapshot.projects.length}>
-            Resume session…
-          </button>
-          <button className="btn btn-strong" onClick={() => setDialog('new')} data-testid="new-task">
-            + New task
-          </button>
-        </div>
-      </header>
-      {error ? <div className="error-text pad">{error}</div> : null}
+      <Sidebar
+        snapshot={snapshot}
+        focusId={focusTask ? focusId : null}
+        onSelect={setFocusId}
+        onOverview={() => setFocusId(null)}
+        onNewTask={() => setDialog('new')}
+        onResume={() => setDialog('import')}
+      />
 
-      <main className="main">
+      <div className="stage">
         {focusTask ? (
-          <FocusView
-            snapshot={snapshot}
-            task={focusTask}
-            transcript={transcripts[focusTask.taskId] ?? []}
-            onSelect={setFocusId}
-            onBack={() => setFocusId(null)}
-            now={now}
-          />
-        ) : snapshot.tasks.length === 0 ? (
-          <div className="empty">
-            <h1>Your agents meet here.</h1>
-            <p>
-              Each coding agent gets a card that reports what it did and what it needs from you. Requests stay on their card until you answer them, however long
-              you spend talking to another agent.
-            </p>
-            <div className="row center">
-              <button className="btn btn-strong" onClick={() => setDialog('new')}>
-                + New task
-              </button>
-              <button
-                className="btn"
-                data-testid="load-demo"
-                onClick={() =>
-                  call('demo:seed', {})
-                    .then(() => toast('Demo loaded: three mock agents in a throwaway repo.'))
-                    .catch((e) => setError(errorText(e)))
-                }
-              >
-                Load demo (mock agents)
-              </button>
-            </div>
-          </div>
+          <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} />
         ) : (
-          <div className="grid" data-testid="overview">
-            {snapshot.tasks.map((t) => (
-              <AgentCard
-                key={t.taskId}
-                task={t}
-                project={snapshot.projects.find((p) => p.projectId === t.projectId)}
-                items={openItems.filter((a) => a.taskId === t.taskId)}
-                connected={snapshot.connectedTaskIds.includes(t.taskId)}
-                flash={flash === t.taskId}
-                onOpen={() => setFocusId(t.taskId)}
-                now={now}
-              />
-            ))}
-          </div>
+          <>
+            <header className="stage-head drag">
+              <h1>Overview</h1>
+              <div className="stage-summary" data-testid="topbar-summary">
+                {snapshot.tasks.length} agents
+                {working ? ` · ${working} working` : ''} ·{' '}
+                {needYou ? <strong className="needs-text">{needYou} need you</strong> : <span>none waiting on you</span>}
+              </div>
+              <div className="stage-actions">
+                <button className="btn btn-primary" onClick={() => setDialog('new')} data-testid="new-task">
+                  <Icon name="plus" /> New task
+                </button>
+              </div>
+            </header>
+            {error ? <div className="error-text pad">{error}</div> : null}
+            {snapshot.tasks.length === 0 ? (
+              <div className="empty">
+                <div className="empty-card">
+                  <div className="empty-icon" aria-hidden>
+                    <Icon name="grid" size={22} />
+                  </div>
+                  <h2>Your agents meet here</h2>
+                  <p>Each coding agent joins as a tile that reports what it did and what it needs from you. Requests stay on the tile until you answer, however long you talk to another agent.</p>
+                  <ol className="empty-steps">
+                    <li>
+                      <strong>Add agents</strong> — Claude Code or Codex, each in its own worktree.
+                    </li>
+                    <li>
+                      <strong>Just talk</strong> — the mic is on like in a call. Say “Agent B, …” and it goes to B without changing your view.
+                    </li>
+                    <li>
+                      <strong>Answer from the tile</strong> — questions and permission requests wait on their tile.
+                    </li>
+                  </ol>
+                  <div className="row center">
+                    <button className="btn btn-primary" onClick={() => setDialog('new')}>
+                      <Icon name="plus" /> New task
+                    </button>
+                    <button className="btn" data-testid="load-demo" onClick={() => void loadDemo()}>
+                      Load demo (mock agents)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="gallery" data-testid="overview" style={{ ['--cols' as string]: cols }}>
+                {snapshot.tasks.map((t) => (
+                  <AgentCard
+                    key={t.taskId}
+                    task={t}
+                    project={snapshot.projects.find((p) => p.projectId === t.projectId)}
+                    items={openItems.filter((a) => a.taskId === t.taskId)}
+                    activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system').slice(-5)}
+                    connected={snapshot.connectedTaskIds.includes(t.taskId)}
+                    flash={flash === t.taskId}
+                    onOpen={() => setFocusId(t.taskId)}
+                    now={now}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
-      </main>
 
-      <VoiceDock snapshot={snapshot} focusedTaskId={focusId} onDispatched={(taskId, text) => toast(text, taskId)} />
+        <VoiceDock snapshot={snapshot} focusedTaskId={focusTask ? focusId : null} onDispatched={flashTile} onView={setFocusId} />
+      </div>
 
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className="toast" data-testid="toast">
-            {t.text}
+            <Icon name="check" /> {t.text}
             {t.taskId && t.taskId !== focusId ? (
               <button className="link" onClick={() => setFocusId(t.taskId!)}>
                 View

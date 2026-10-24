@@ -22,7 +22,7 @@ async function launch(): Promise<Page> {
     executablePath: electronPath,
     args: [appDir],
     cwd: appDir,
-    env: { ...env, AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', OPENAI_API_KEY: '' , AMW_OPENAI_KEY_FILE: '/nonexistent' },
+    env: { ...env, AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
   });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
@@ -63,7 +63,7 @@ describe('end-to-end demo script (mock agents)', () => {
     await shot(page, '02-focus-A-after-10-turns');
 
     // 5. Back to overview: C's full request is still there; answer it from its card.
-    await page.getByRole('button', { name: '← Overview' }).click();
+    await page.getByRole('button', { name: /^Overview/ }).click();
     const cItem = card(page, 'C').getByTestId('attention-item').filter({ hasText: 'data-loss risk' });
     await expect.poll(() => cItem.count()).toBe(1);
     await cItem.getByRole('button', { name: 'Reply to C' }).click();
@@ -84,7 +84,7 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').innerText()).toContain('Agent A');
     await shot(page, '03-dock-route-preview');
     await page.getByTestId('route-send').click();
-    await expect.poll(() => page.getByTestId('toast').last().innerText()).toContain('Sent to Agent A');
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toContain('Sent to Agent A');
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Agent B'); // focus did not move
     expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
 

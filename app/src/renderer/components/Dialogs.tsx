@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AgentProvider, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
-import { PROVIDER_LABEL } from './bits';
+import { Icon, PROVIDER_LABEL } from './bits';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
@@ -14,8 +14,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       <div className="modal" role="dialog" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="link" onClick={onClose}>
-            Close
+          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+            <Icon name="x" />
           </button>
         </div>
         {children}
@@ -103,7 +103,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
           {(['claude', 'codex', 'mock'] as const).map((p) => {
             const c = snapshot.capabilities.find((x) => x.provider === p);
             return (
-              <label key={p} className={`radio${c?.available ? '' : ' disabled'}`} title={c?.detail}>
+              <label key={p} className={`radio${c?.available ? '' : ' disabled'}${provider === p ? ' selected' : ''}`} title={c?.detail}>
                 <input type="radio" name="provider" checked={provider === p} disabled={!c?.available} onChange={() => setProvider(p)} /> {PROVIDER_LABEL[p]}
                 {c?.version ? <span className="muted small"> {c.version.split(' ')[0]}</span> : null}
               </label>
@@ -142,7 +142,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn btn-strong" disabled={busy || !projectId || !(title.trim() || instruction.trim())} onClick={() => void create()}>
+        <button className="btn btn-primary" disabled={busy || !projectId || !(title.trim() || instruction.trim())} onClick={() => void create()}>
           {busy ? 'Starting…' : 'Create task'}
         </button>
       </div>
@@ -179,7 +179,7 @@ export function ImportDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
         <label>Provider</label>
         <div className="row">
           {(['claude', 'codex'] as const).map((p) => (
-            <label key={p} className="radio">
+            <label key={p} className={`radio${provider === p ? ' selected' : ''}`}>
               <input type="radio" checked={provider === p} onChange={() => setProvider(p)} /> {PROVIDER_LABEL[p]}
             </label>
           ))}

@@ -149,13 +149,18 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     title: 'Agent Meeting Workspace',
-    backgroundColor: '#0f1115',
+    backgroundColor: '#f4f5f7',
+    // Native-looking frame: traffic lights sit inside the sidebar on macOS.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
+      // The mic opens at launch (meeting-style), before any click; without this
+      // Chromium keeps the AudioContext suspended and the level stays at zero.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {

@@ -12,6 +12,7 @@ export const ROUTER_MODEL = process.env.AMW_ROUTER_MODEL ?? 'gpt-4.1-mini';
 
 /** OPENAI_API_KEY, else AMW_OPENAI_KEY_FILE, else an `openai.key` file in this folder or a parent. */
 export function loadOpenAiKey(startDir: string): string | undefined {
+  if (process.env.AMW_NO_OPENAI === '1') return undefined;
   if (process.env.OPENAI_API_KEY?.trim()) return process.env.OPENAI_API_KEY.trim();
   const candidates: string[] = [];
   if (process.env.AMW_OPENAI_KEY_FILE) candidates.push(process.env.AMW_OPENAI_KEY_FILE);

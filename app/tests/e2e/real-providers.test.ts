@@ -28,7 +28,7 @@ function repo(): string {
 async function launch(): Promise<Page> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !['ELECTRON_RUN_AS_NODE', 'CLAUDECODE'].includes(k)) env[k] = v;
-  app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_DATA_DIR: dataDir } });
+  app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_DATA_DIR: dataDir, AMW_NO_AUTOLISTEN: '1' } });
   const page = await app.firstWindow();
   await page.waitForSelector('.app');
   return page;
@@ -74,7 +74,6 @@ describe.runIf(enabled)('real providers through the app', () => {
 
     // Native approval: ask Claude to write outside its worktree; deny from the card.
     const outside = join(root, '..', `amw-outside-${Date.now()}.txt`);
-    await card(page, 'A').getByRole('button', { name: 'Message' }).click();
     await card(page, 'A').locator('textarea').fill(`Use your Bash tool to run exactly: touch ${outside} . If it is denied, reply DENIED and do not retry.`);
     await card(page, 'A').locator('textarea').press('Enter');
     const approval = card(page, 'A').locator('[data-attention-kind="approval"]');

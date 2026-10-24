@@ -1,34 +1,39 @@
 import type { ReactNode } from 'react';
 import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
 
-const STATUS: Record<AgentStatus, { label: string; icon: string }> = {
-  idle: { label: 'Idle', icon: '○' },
-  starting: { label: 'Starting', icon: '◌' },
-  running: { label: 'Working', icon: '▶' },
-  waiting_for_user: { label: 'Needs you', icon: '!' },
-  done: { label: 'Done', icon: '✓' },
-  failed: { label: 'Failed', icon: '✕' },
-  disconnected: { label: 'Not connected', icon: '⏸' },
+export const STATUS_LABEL: Record<AgentStatus, string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  running: 'Working',
+  waiting_for_user: 'Needs you',
+  done: 'Done',
+  failed: 'Failed',
+  disconnected: 'Not connected',
 };
 
-/** Status is always icon + text, never color alone. */
-export function StatusPill({ status, connected }: { status: AgentStatus; connected: boolean }) {
-  const s = STATUS[status];
+/**
+ * Status is a dot plus text, never colour alone. Colour is reserved for what
+ * needs attention (needs you, failed); routine states stay neutral.
+ */
+export function StatusDot({ status, connected, label = true }: { status: AgentStatus; connected: boolean; label?: boolean }) {
+  const offline = !connected && status !== 'disconnected' && status !== 'idle';
   return (
-    <span className={`pill status-${status}`} title={connected ? 'Provider session connected' : 'No live provider process; resumes on demand'}>
-      <span className="pill-icon" aria-hidden>
-        {s.icon}
-      </span>
-      {s.label}
-      {!connected && status !== 'disconnected' && status !== 'idle' ? <span className="pill-sub"> · offline</span> : null}
+    <span className={`status status-${status}`} title={connected ? 'Provider session connected' : 'No live provider process; resumes on demand'}>
+      <span className="dot" aria-hidden />
+      {label ? (
+        <span className="status-text">
+          {STATUS_LABEL[status]}
+          {offline ? <span className="status-sub"> · offline</span> : null}
+        </span>
+      ) : null}
     </span>
   );
 }
 
 export const PROVIDER_LABEL: Record<AgentProvider, string> = { claude: 'Claude Code', codex: 'Codex', mock: 'Mock' };
 
-export function ProviderBadge({ provider }: { provider: AgentProvider }) {
-  return <span className={`provider provider-${provider}`}>{PROVIDER_LABEL[provider]}</span>;
+export function ProviderTag({ provider }: { provider: AgentProvider }) {
+  return <span className={`tag provider-${provider}`}>{PROVIDER_LABEL[provider]}</span>;
 }
 
 export const KIND_LABEL: Record<AttentionKind, string> = {
@@ -40,7 +45,52 @@ export const KIND_LABEL: Record<AttentionKind, string> = {
 };
 
 export function Alias({ alias, size = 'md' }: { alias: string; size?: 'sm' | 'md' | 'lg' }) {
-  return <span className={`alias alias-${size}`}>{alias}</span>;
+  const hue = ([...alias].reduce((n, c) => n + c.charCodeAt(0), 0) * 67) % 360;
+  return (
+    <span className={`alias alias-${size}`} style={{ ['--hue' as string]: hue }}>
+      {alias}
+    </span>
+  );
+}
+
+export function displayName(t: { name: string; alias: string }): string {
+  return t.name !== t.alias ? t.name : `Agent ${t.alias}`;
+}
+
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="kbd">{children}</kbd>;
+}
+
+const ICONS = {
+  mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z M5 11a7 7 0 0 0 14 0 M12 18v3',
+  stop: 'M7 7h10v10H7z',
+  send: 'M12 19V5 M6 11l6-6 6 6',
+  plus: 'M12 5v14 M5 12h14',
+  expand: 'M15 4h5v5 M9 20H4v-5 M20 4l-6 6 M4 20l6-6',
+  grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
+  history: 'M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5 M12 7v5l3 2',
+  pause: 'M8 5v14 M16 5v14',
+  play: 'M7 5l12 7-12 7z',
+  power: 'M12 3v8 M6.3 6.3a8 8 0 1 0 11.4 0',
+  branch: 'M6 3v12 M18 9a3 3 0 1 0 0-.01 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
+  check: 'M5 12l5 5 9-10',
+  x: 'M6 6l12 12 M18 6L6 18',
+  spark: 'M12 3v4 M12 17v4 M3 12h4 M17 12h4 M6 6l2.5 2.5 M15.5 15.5 18 18 M6 18l2.5-2.5 M15.5 8.5 18 6',
+  note: 'M5 4h10l4 4v12H5z M15 4v4h4 M8 12h8 M8 16h5',
+  reply: 'M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 6 6v5',
+  alert: 'M12 4l9 16H3z M12 10v4 M12 17.5v.01',
+  chevron: 'M9 6l6 6-6 6',
+} as const;
+
+export type IconName = keyof typeof ICONS;
+
+export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
+  return (
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={ICONS[name]} />
+    </svg>
+  );
 }
 
 /** Minimal Markdown: fenced code, inline code, bold. Text is rendered as text (no HTML injection). */

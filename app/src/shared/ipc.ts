@@ -42,7 +42,8 @@ export const ipcSchemas = {
   }),
   'attention:dismiss': z.object({ attentionId: id }),
   'voice:ensureMic': z.object({}),
-  'voice:transcribe': z.object({ audio: z.instanceof(Uint8Array), mimeType: z.string().max(100) }),
+  // One utterance; 16 kHz mono WAV caps at ~1 MB per 30 s.
+  'voice:transcribe': z.object({ audio: z.instanceof(Uint8Array).refine((a) => a.byteLength <= 8_000_000, 'Audio clip too large'), mimeType: z.string().max(100) }),
   'route:decide': z.object({ utterance: text.min(1), focusedTaskId: id.nullable() }),
   'route:dispatch': z.object({
     utterance: text.min(1),
