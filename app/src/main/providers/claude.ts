@@ -8,6 +8,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
+import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
@@ -101,6 +102,9 @@ class ClaudeSession implements ProviderSession {
   /** Open streamed text item and its accumulated text. */
   private stream?: { id: string; text: string };
   private lastAssistantText = '';
+  /** tool_use id → call, to interpret its result. */
+  private tools = new Map<string, { name: string; input: Record<string, unknown> }>();
+  private plans = new ClaudePlanTracker();
 
   constructor(
     private args: StartArgs,
@@ -261,6 +265,7 @@ class ClaudeSession implements ProviderSession {
             question: str(r.question),
             header: str(r.header) || undefined,
             multiSelect: r.multiSelect === true,
+            allowOther: true,
             options: (Array.isArray(r.options) ? r.options : []).map((o, j) => ({
               id: str(rec(o).label) || `o${j}`,
               label: str(rec(o).label),
@@ -275,23 +280,33 @@ class ClaudeSession implements ProviderSession {
           questions,
         });
       } else {
-        const what = describeToolInput(tool, input);
+        const call = claudeToolCall(tool, input, this.args.cwd);
         // The permission ask can precede the tool_use message; label the tool row now.
-        if (options.toolUseID)
-          this.emit({ type: 'transcriptItem', itemId: options.toolUseID, role: 'tool', text: '', toolLabel: `${tool}: ${what}`, toolStatus: 'running' });
+        if (options.toolUseID) {
+          this.tools.set(options.toolUseID, { name: tool, input });
+          this.emit({ type: 'transcriptItem', itemId: options.toolUseID, role: 'tool', text: '', toolStatus: 'awaiting_approval', tool: call });
+        }
+        const plan = tool === 'ExitPlanMode';
         this.emit({
           type: 'approvalRequested',
           requestId,
-          headline: options.title || `${options.displayName || tool}: ${what}`,
-          details: [options.description, options.decisionReason, options.blockedPath, `${tool}\n${JSON.stringify(input, null, 2)}`]
+          headline: plan ? 'Claude proposes a plan. Approve it to start coding?' : options.title || call.title,
+          details: [options.description, options.decisionReason, options.blockedPath && `Outside the allowed paths: ${options.blockedPath}`, call.content.length ? '' : `${tool}\n${JSON.stringify(input, null, 2)}`]
             .filter(Boolean)
             .join('\n'),
-          options: [
-            { id: 'allow', label: 'Allow once' },
-            ...(suggestions?.length ? [{ id: 'allow_always', label: 'Always allow (Claude rule)' }] : []),
-            { id: 'deny', label: 'Deny' },
-          ],
+          options: plan
+            ? [
+                { id: 'allow', label: 'Approve plan', kind: 'allow_once' },
+                { id: 'deny', label: 'Keep planning', kind: 'reject_once' },
+              ]
+            : [
+                { id: 'allow', label: 'Allow once', kind: 'allow_once' },
+                ...(suggestions?.length ? [{ id: 'allow_always', label: 'Always allow (Claude rule)', kind: 'allow_always' as const }] : []),
+                { id: 'deny', label: 'Deny', kind: 'reject_once' },
+              ],
           highRisk: options.defaultToNo === true,
+          toolCallId: options.toolUseID,
+          preview: call.content,
         });
       }
     });
@@ -335,19 +350,21 @@ class ClaudeSession implements ProviderSession {
           }
           this.lastAssistantText = text;
           this.emit({ type: 'transcriptItem', itemId, role: 'assistant', text, history });
+        } else if (block.type === 'thinking') {
+          const text = str(block.thinking);
+          if (text.trim()) this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:${i}`, role: 'thought', text, history });
         } else if (block.type === 'tool_use') {
           const tool = str(block.name);
           if (tool === 'AskUserQuestion') return;
-          this.emit({
-            type: 'transcriptItem',
-            itemId: str(block.id),
-            role: 'tool',
-            text: '',
-            toolLabel: `${tool}: ${describeToolInput(tool, rec(block.input))}`,
-            toolStatus: history ? 'completed' : 'running',
-            history,
-          });
-          if (!history) this.emit({ type: 'progress', text: `${tool}: ${describeToolInput(tool, rec(block.input))}` });
+          const id = str(block.id);
+          const input = rec(block.input);
+          this.tools.set(id, { name: tool, input });
+          const call = claudeToolCall(tool, input, this.args.cwd);
+          // Don't downgrade a row that is already waiting on the user's approval.
+          this.emit({ type: 'transcriptItem', itemId: id, role: 'tool', text: '', toolStatus: history ? 'completed' : undefined, tool: call, history });
+          if (!history) this.emit({ type: 'progress', text: call.title });
+          const plan = this.plans.onToolUse(id, tool, input);
+          if (plan && !history) this.emit({ type: 'planUpdated', entries: plan });
         }
       });
       return;
@@ -359,19 +376,31 @@ class ClaudeSession implements ProviderSession {
           this.emit({ type: 'transcriptItem', itemId: str(m.uuid), role: 'user', text: content, history });
         return;
       }
-      for (const b of Array.isArray(content) ? content : []) {
+      const blocks = Array.isArray(content) ? content : [];
+      // Structured output belongs to the message; it is unambiguous only with one tool_result.
+      const structured = blocks.filter((b) => rec(b).type === 'tool_result').length === 1 ? (m as { tool_use_result?: unknown }).tool_use_result : undefined;
+      for (const b of blocks) {
         const block = rec(b);
         if (block.type === 'tool_result') {
+          const id = str(block.tool_use_id);
           const text = toolResultText(block.content).slice(0, 4000);
-          const denied = /denied|declined|cancelled/i.test(text) && block.is_error === true;
+          const isError = block.is_error === true;
+          const denied = /denied|declined|cancelled|rejected/i.test(text) && isError;
+          const call = this.tools.get(id);
+          const result = call ? claudeToolResult(call.name, call.input, structured, text, isError, this.args.cwd) : undefined;
           this.emit({
             type: 'transcriptItem',
-            itemId: str(block.tool_use_id),
+            itemId: id,
             role: 'tool',
             text,
-            toolStatus: denied ? 'declined' : block.is_error ? 'failed' : 'completed',
+            toolStatus: denied ? 'declined' : isError ? 'failed' : 'completed',
+            tool: result && !denied ? { content: result } : undefined,
             history,
           });
+          if (call) {
+            const plan = this.plans.onToolResult(id, call.name, structured);
+            if (plan && !history) this.emit({ type: 'planUpdated', entries: plan });
+          }
         } else if (block.type === 'text' && history) {
           const text = str(block.text);
           if (text.trim() && !text.startsWith('<'))

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
@@ -113,16 +114,19 @@ class MockSession implements ProviderSession {
       this.later(() => {
         const requestId = `mock-approval-${randomUUID()}`;
         this.pending.set(requestId, { kind: 'approval', command });
+        this.emit({ type: 'transcriptItem', itemId: `${requestId}:tool`, role: 'tool', text: '', tool: { name: 'Bash', kind: 'execute', title: `$ ${command}`, locations: [], content: [{ type: 'terminal', command, output: '' }] } });
         this.emit({
           type: 'approvalRequested',
           requestId,
           headline: `Run command: ${command}`,
           details: `Bash\n${command}\ncwd: ${this.args.cwd}`,
           options: [
-            { id: 'allow', label: 'Allow once' },
-            { id: 'deny', label: 'Deny' },
+            { id: 'allow', label: 'Allow once', kind: 'allow_once' },
+            { id: 'deny', label: 'Deny', kind: 'reject_once' },
           ],
           highRisk: /drop|rm |migrat|delete/i.test(command),
+          toolCallId: `${requestId}:tool`,
+          preview: [{ type: 'terminal', command, cwd: this.args.cwd, output: '' }],
         });
       }, 1);
       return;
@@ -161,6 +165,7 @@ class MockSession implements ProviderSession {
       if (first && script.startsWith('ask:')) {
         reply = `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
       } else if (first) {
+        this.emitDemoWork();
         reply = `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`;
       } else {
         reply =
@@ -209,6 +214,68 @@ class MockSession implements ProviderSession {
   async close(): Promise<void> {
     await this.interrupt();
     this.closed = true;
+  }
+
+  /** Structured activity in the same normalized shape real providers produce. */
+  private emitDemoWork(): void {
+    const id = `${this.history?.id ?? 'mock'}-${Date.now()}`;
+    this.emit({
+      type: 'planUpdated',
+      entries: [
+        { content: 'Read the existing dashboard layout', status: 'completed' },
+        { content: 'Build OrdersTable and RevenueCard', status: 'completed' },
+        { content: 'Wire components to the v2 API', status: 'in_progress' },
+        { content: 'Add component tests', status: 'pending' },
+      ],
+    });
+    this.emit({
+      type: 'transcriptItem',
+      itemId: `${id}:read`,
+      role: 'tool',
+      text: '',
+      toolStatus: 'completed',
+      tool: { name: 'Read', kind: 'read', title: 'Read src/orders.ts', locations: [{ path: 'src/orders.ts' }], content: [] },
+    });
+    this.emit({
+      type: 'transcriptItem',
+      itemId: `${id}:edit`,
+      role: 'tool',
+      text: '',
+      toolStatus: 'completed',
+      tool: {
+        name: 'Edit',
+        kind: 'edit',
+        title: 'Edit src/orders.ts',
+        locations: [{ path: 'src/orders.ts', line: 1 }],
+        content: [
+          {
+            type: 'diff',
+            diff: makeDiff({
+              path: 'src/orders.ts',
+              operation: 'modify',
+              phase: 'applied',
+              hunks: parseUnifiedHunks(
+                '@@ -1,3 +1,6 @@\n-export function listOrders() {\n-  return [];\n+import { api } from \'./api\';\n+\n+export async function listOrders(page = 1) {\n+  const res = await api.get(`/v2/orders?page=${page}`);\n+  return res.items;\n }\n',
+              ),
+            }),
+          },
+        ],
+      },
+    });
+    this.emit({
+      type: 'transcriptItem',
+      itemId: `${id}:test`,
+      role: 'tool',
+      text: '',
+      toolStatus: 'completed',
+      tool: {
+        name: 'Bash',
+        kind: 'execute',
+        title: '$ npm test -- orders',
+        locations: [],
+        content: [{ type: 'terminal', command: 'npm test -- orders', output: ' ✓ listOrders returns v2 items (4 ms)\n ✓ listOrders paginates (2 ms)\n\nTests: 2 passed, 2 total', exitCode: 0 }],
+      },
+    });
   }
 
   private finish(reply: string): void {

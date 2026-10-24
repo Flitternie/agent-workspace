@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MemoryRecord, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
+import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
 import { Alias, displayName, Icon, Kbd, Markdown, PROVIDER_LABEL, ProviderTag, StatusDot } from './bits';
 
 export function FocusView({ snapshot, task, transcript, now }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number }) {
@@ -83,6 +84,11 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
               </div>
             ) : null}
             <Transcript items={transcript} />
+            {task.plan ? (
+              <div className="pinned-plan">
+                <PlanChecklist plan={task.plan} />
+              </div>
+            ) : null}
             <Composer task={task} />
           </div>
           {showMemory ? <MemoryPanel snapshot={snapshot} task={task} /> : null}
@@ -139,30 +145,39 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
     >
       <div className="transcript-inner">
         {items.length === 0 ? <div className="muted pad">No messages yet. Type below to give this agent its first instruction.</div> : null}
-        {items.map((item) =>
-          item.role === 'tool' ? (
-            <details key={item.id} className={`msg tool tool-${item.toolStatus ?? 'completed'}`}>
-              <summary>
-                <span className="tool-status">{toolIcon(item.toolStatus)}</span>
-                <span className="tool-label">{item.toolLabel ?? 'Tool'}</span>
-              </summary>
-              {item.text ? <pre>{item.text}</pre> : null}
-            </details>
-          ) : (
+        {groupTranscript(items).map((entry) => {
+          if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} />;
+          const item = entry;
+          if (item.role === 'tool') return <ToolCallRow key={item.id} item={item} />;
+          if (item.role === 'thought')
+            return (
+              <details key={item.id} className="msg thought">
+                <summary>
+                  <Icon name="bulb" size={13} /> Thinking{item.streaming ? '…' : ''}
+                </summary>
+                <Markdown text={item.text} />
+              </details>
+            );
+          if (item.role === 'plan')
+            return (
+              <div key={item.id} className="msg plan-proposal" data-testid="plan-proposal">
+                <div className="section-label">
+                  <Icon name="list" size={12} /> Proposed plan
+                </div>
+                <Markdown text={item.text} />
+              </div>
+            );
+          return (
             <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
               {item.role === 'user' ? <div className="msg-via">You{item.via === 'voice' ? ' · voice' : item.via === 'card' ? ' · from tile' : ''}</div> : null}
               {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
-          ),
-        )}
+          );
+        })}
       </div>
     </div>
   );
-}
-
-function toolIcon(s?: TranscriptItem['toolStatus']): string {
-  return s === 'running' ? '…' : s === 'failed' ? '✕' : s === 'declined' ? '⊘' : s === 'interrupted' ? '◼' : '✓';
 }
 
 function Composer({ task }: { task: Task }) {

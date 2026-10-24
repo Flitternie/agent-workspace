@@ -78,6 +78,12 @@ describe('end-to-end demo script (mock agents)', () => {
     // 6. Focus B; off-focus "voice" (typed into the global dock, same routing) to A.
     await page.locator('[data-testid="rail-item"][data-alias="B"]').click();
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Agent B');
+    // Structured content renders the same way whichever provider produced it.
+    await expect.poll(() => page.getByTestId('diff').first().innerText()).toContain('src/orders.ts');
+    expect(await page.getByTestId('diff').first().innerText()).toMatch(/\+5[\s\S]*−2/);
+    expect(await page.getByTestId('tool-call').filter({ hasText: 'npm test -- orders' }).count()).toBe(1);
+    expect(await page.getByTestId('plan').innerText()).toContain('Plan 2/4');
+    await shot(page, '02b-focus-B-structured');
     const dock = page.getByTestId('dock-input');
     await dock.fill('Agent A, add a regression test');
     await dock.press('Enter');

@@ -33,6 +33,7 @@ npm start            # builds and launches the app
 | `AMW_E2E_REAL=1 npm run test:e2e` | Also runs Claude Code + Codex through the app (small real model calls) |
 | `AMW_E2E_VOICE=1 npx vitest run --config vitest.e2e.config.ts tests/e2e/voice-live.test.ts` | Always-on mic end to end: a WAV fixture plays as the microphone (Chromium fake device), two spoken commands route to A and C with no click |
 | `npm run smoke:providers [claude\|codex]` | Adapter contract against the real CLIs: create, approve/deny, resume, discover |
+| `npm run smoke:content [claude\|codex]` | Real CLIs make a plan, create + edit a file and run a command; checks both adapters emit the same applied diffs, terminal output and approval previews |
 | `npm run smoke:voice` | TTS fixture → STT → router (rules + LLM) against the OpenAI API |
 | `npm run typecheck` | Strict TypeScript |
 
@@ -43,10 +44,12 @@ src/main/        Electron main = local backend
   workspace.ts   task/session registry, attention queue, dispatch, memory, coordinator
   router.ts      voice routing (rules first, optional LLM, never auto-sends LLM guesses)
   providers/     claude.ts (Agent SDK), codex.ts (app-server JSON-RPC), mock.ts
+                 claude-content.ts / codex-content.ts: provider output → unified content
+src/shared/content.ts  ACP-shaped content model: tool kinds, diffs with hunks, terminal, plan, permission kinds
   worktree.ts    per-task git worktrees
   openai.ts      STT + classifier (key stays in main)
 src/preload/     narrow contextBridge (named, zod-validated channels only)
 src/renderer/    React UI: Overview cards, Focus, voice dock, memory panel
 ```
 
-Provider protocol handling was informed by Parallel Code (MIT, © Johannes Millan).
+Provider protocol handling was informed by Parallel Code (MIT, © Johannes Millan). The unified content model follows the Agent Client Protocol and its claude-code-acp / codex-acp adapters (Apache-2.0, Zed Industries) and vibe-kanban's normalized logs (Apache-2.0, BloopAI); ideas only, no code copied.

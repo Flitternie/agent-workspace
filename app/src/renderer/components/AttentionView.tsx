@@ -3,6 +3,7 @@ import type { AttentionItem, Task } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { Icon, KIND_LABEL, Markdown, PROVIDER_LABEL } from './bits';
+import { ToolContentView } from './Content';
 
 /**
  * One durable attention item. Native approvals/questions are answered only with
@@ -58,12 +59,13 @@ export function AttentionView({
         <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${item.state} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
       </div>
       <div className="attention-headline">{item.headline}</div>
+      {item.preview?.length ? <ToolContentView content={item.preview} compact={compact && !expanded} /> : null}
       {details ? (
         <div className={`attention-details${compact && !expanded ? ' clamp' : ''}`}>
           {item.kind === 'approval' ? <pre>{details}</pre> : <Markdown text={details} />}
         </div>
       ) : null}
-      {details && compact ? (
+      {(details || item.preview?.length) && compact ? (
         <button className="link small" onClick={() => setExpanded(!expanded)}>
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -75,7 +77,7 @@ export function AttentionView({
           {(item.options ?? []).map((o) => (
             <button
               key={o.id}
-              className={/deny|decline/.test(o.id) ? 'btn' : 'btn btn-primary'}
+              className={(o.kind ? o.kind.startsWith('reject') : /deny|decline/.test(o.id)) ? 'btn' : o.kind === 'allow_always' ? 'btn' : 'btn btn-primary'}
               disabled={busy}
               title={o.description}
               onClick={() => act(() => call('attention:respond', { attentionId: item.id, decision: o.id }))}
@@ -94,12 +96,41 @@ export function AttentionView({
               {q.header ? <div className="question-header">{q.header}</div> : null}
               {(item.questions ?? []).length > 1 ? <div>{q.question}</div> : null}
               <div className="question-options">
-                {q.options.map((o) => (
-                  <button key={o.id} className={`chip${answers[q.id] === o.label ? ' chip-selected' : ''}`} title={o.description} onClick={() => setAnswers({ ...answers, [q.id]: o.label })}>
-                    {o.label}
-                  </button>
-                ))}
+                {q.options.map((o) => {
+                  const picked = (answers[q.id] ?? '').split(', ').filter(Boolean);
+                  const on = picked.includes(o.label);
+                  return (
+                    <button
+                      key={o.id}
+                      className={`chip${on ? ' chip-selected' : ''}`}
+                      title={o.description}
+                      aria-pressed={on}
+                      onClick={() =>
+                        setAnswers({
+                          ...answers,
+                          [q.id]: q.multiSelect ? (on ? picked.filter((l) => l !== o.label) : [...picked, o.label]).join(', ') : o.label,
+                        })
+                      }
+                    >
+                      {q.multiSelect ? <span className="check-box">{on ? '✓' : ''}</span> : null}
+                      {o.label}
+                    </button>
+                  );
+                })}
               </div>
+              {q.options.some((o) => o.description) ? (
+                <ul className="option-notes">
+                  {q.options
+                    .filter((o) => o.description)
+                    .map((o) => (
+                      <li key={o.id}>
+                        <strong>{o.label}</strong> — {o.description}
+                      </li>
+                    ))}
+                </ul>
+              ) : null}
+              {q.multiSelect ? <div className="hint">Pick one or more.</div> : null}
+              {q.allowOther === false && q.options.length ? null : (
               <input
                 className="input"
                 type={q.isSecret ? 'password' : 'text'}
@@ -107,6 +138,7 @@ export function AttentionView({
                 value={answers[q.id] ?? ''}
                 onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
               />
+              )}
             </div>
           ))}
           <div className="attention-actions">

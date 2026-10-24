@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
+import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
@@ -132,72 +133,10 @@ class AppServer {
   }
 }
 
-function itemEvents(value: unknown, history: boolean, completed: boolean): ProviderEvent[] {
-  const item = rec(value);
-  const id = str(item.id);
-  if (!id) return [];
-  const type = str(item.type);
-  if (type === 'agentMessage') {
-    const text = str(item.text);
-    return text ? [{ type: 'transcriptItem', itemId: id, role: 'assistant', text, history }] : [];
-  }
-  if (type === 'userMessage') {
-    if (!history) return []; // the workspace already shows what the user sent
-    const content = Array.isArray(item.content) ? item.content : [];
-    const text = content.map((c) => str(rec(c).text)).filter(Boolean).join('\n');
-    return text ? [{ type: 'transcriptItem', itemId: id, role: 'user', text, history }] : [];
-  }
-  const status = str(item.status);
-  const toolStatus =
-    status === 'declined'
-      ? 'declined'
-      : status === 'failed' || (typeof item.exitCode === 'number' && item.exitCode !== 0)
-        ? 'failed'
-        : status === 'inProgress' || !completed
-          ? 'running'
-          : 'completed';
-  if (type === 'commandExecution') {
-    return [
-      {
-        type: 'transcriptItem',
-        itemId: id,
-        role: 'tool',
-        text: str(item.aggregatedOutput).slice(-4000),
-        toolLabel: `$ ${str(item.command)}`,
-        toolStatus: history && toolStatus === 'running' ? 'interrupted' : toolStatus,
-        history,
-      },
-    ];
-  }
-  if (type === 'fileChange') {
-    const changes = Array.isArray(item.changes) ? item.changes : [];
-    const paths = changes.map((c) => str(rec(c).path)).filter(Boolean);
-    return [
-      {
-        type: 'transcriptItem',
-        itemId: id,
-        role: 'tool',
-        text: changes.map((c) => str(rec(c).diff)).join('\n').slice(0, 4000),
-        toolLabel: `Edit ${paths.length === 1 ? paths[0] : `${paths.length} files`}`,
-        toolStatus: history && toolStatus === 'running' ? 'interrupted' : toolStatus,
-        history,
-      },
-    ];
-  }
-  if (type === 'mcpToolCall') {
-    return [
-      {
-        type: 'transcriptItem',
-        itemId: id,
-        role: 'tool',
-        text: str(rec(item.error).message),
-        toolLabel: `${str(item.server)} / ${str(item.tool)}`,
-        toolStatus,
-        history,
-      },
-    ];
-  }
-  return [];
+function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: string): ProviderEvent[] {
+  const v = codexItem(value, { history, completed, cwd });
+  if (!v) return [];
+  return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history }];
 }
 
 export class CodexAdapter implements ProviderAdapter {
@@ -260,6 +199,8 @@ class CodexSession implements ProviderSession {
   private lastAgentText = '';
   /** Our string request id -> the server's original JSON-RPC id and request kind. */
   private requests = new Map<string, { rpcId: string | number; method: string; questionIds?: string[] }>();
+  /** fileChange itemId → latest changes, for approval previews. */
+  private fileChanges = new Map<string, unknown>();
 
   constructor(
     private args: StartArgs,
@@ -300,7 +241,7 @@ class CodexSession implements ProviderSession {
     if (!this.threadId) throw new Error('Codex did not return a thread id.');
     for (const turn of Array.isArray(thread.turns) ? thread.turns : [])
       for (const item of Array.isArray(rec(turn).items) ? (rec(turn).items as unknown[]) : [])
-        for (const e of itemEvents(item, true, true)) this.emit(e);
+        for (const e of itemEvents(item, true, true, this.args.cwd)) this.emit(e);
     this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed: !!resumeId });
   }
 
@@ -357,25 +298,30 @@ class CodexSession implements ProviderSession {
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
       const command = str(p.command);
       const isCommand = method === 'item/commandExecution/requestApproval';
+      const itemId = str(p.itemId) || undefined;
       this.requests.set(requestId, { rpcId, method });
+      // A fileChange approval carries no diff; it lives on the item with the same id.
+      const preview = isCommand
+        ? [{ type: 'terminal' as const, command, cwd: str(p.cwd) || undefined, output: '' }]
+        : codexFileDiffs(itemId ? this.fileChanges.get(itemId) : undefined, 'proposed', this.args.cwd);
       this.emit({
         type: 'approvalRequested',
         requestId,
-        headline: isCommand ? `Run command: ${command || '(command)'}` : 'Apply file changes',
+        headline: isCommand ? `Run command: ${command || '(command)'}` : `Apply changes to ${preview.length === 1 && preview[0].type === 'diff' ? preview[0].diff.path : `${preview.length || 'some'} files`}`,
         details: [
           str(p.reason),
-          command && `$ ${command}`,
-          str(p.cwd) && `cwd: ${str(p.cwd)}`,
-          str(p.grantRoot) && `grant write root: ${str(p.grantRoot)}`,
-          p.networkApprovalContext ? `network: ${JSON.stringify(p.networkApprovalContext)}` : '',
+          str(p.grantRoot) && `Grants write access to: ${str(p.grantRoot)}`,
+          p.networkApprovalContext ? `Network access: ${JSON.stringify(p.networkApprovalContext)}` : '',
         ]
           .filter(Boolean)
           .join('\n'),
         options: [
-          { id: 'accept', label: 'Allow once' },
-          { id: 'acceptForSession', label: 'Allow for this session' },
-          { id: 'decline', label: 'Deny' },
+          { id: 'accept', label: 'Allow once', kind: 'allow_once' },
+          { id: 'acceptForSession', label: 'Allow for this session', kind: 'allow_always' },
+          { id: 'decline', label: 'Deny', kind: 'reject_once' },
         ],
+        toolCallId: itemId,
+        preview,
       });
       return;
     }
@@ -387,6 +333,7 @@ class CodexSession implements ProviderSession {
           question: str(r.question),
           header: str(r.header) || undefined,
           isSecret: r.isSecret === true,
+          allowOther: r.isOther === true || !Array.isArray(r.options) || !r.options.length,
           options: (Array.isArray(r.options) ? r.options : []).map((o, i) => ({
             id: str(rec(o).label) || `o${i}`,
             label: str(rec(o).label),
@@ -400,6 +347,7 @@ class CodexSession implements ProviderSession {
         requestId,
         headline: questions[0]?.question || 'Codex needs your input',
         questions,
+        toolCallId: str(p.itemId) || undefined,
       });
       return;
     }
@@ -414,6 +362,7 @@ class CodexSession implements ProviderSession {
   }
 
   private notification(method: string, p: Rec): void {
+    if (process.env.AMW_DEBUG_CODEX) console.error('[codex]', method, method.includes('plan') ? JSON.stringify(p).slice(0, 300) : '');
     if (p.threadId && this.threadId && p.threadId !== this.threadId) return;
     switch (method) {
       case 'turn/started':
@@ -423,9 +372,11 @@ class CodexSession implements ProviderSession {
       case 'item/completed': {
         const item = rec(p.item);
         if (item.type === 'agentMessage' && str(item.text)) this.lastAgentText = str(item.text);
-        if (method === 'item/started' && item.type === 'commandExecution')
-          this.emit({ type: 'progress', text: `$ ${str(item.command)}` });
-        for (const e of itemEvents(item, false, method === 'item/completed')) this.emit(e);
+        if (item.type === 'fileChange') this.fileChanges.set(str(item.id), item.changes);
+        for (const e of itemEvents(item, false, method === 'item/completed', this.args.cwd)) {
+          this.emit(e);
+          if (method === 'item/started' && e.type === 'transcriptItem' && e.tool?.title) this.emit({ type: 'progress', text: e.tool.title });
+        }
         return;
       }
       case 'item/agentMessage/delta':
@@ -434,11 +385,18 @@ class CodexSession implements ProviderSession {
       case 'item/commandExecution/outputDelta':
         this.emit({ type: 'outputDelta', itemId: str(p.itemId), role: 'tool', delta: str(p.delta) });
         return;
+      case 'item/reasoning/summaryTextDelta':
+        this.emit({ type: 'outputDelta', itemId: str(p.itemId), role: 'thought', delta: str(p.delta) });
+        return;
+      case 'item/fileChange/patchUpdated':
+        this.fileChanges.set(str(p.itemId), p.changes);
+        this.emit({ type: 'transcriptItem', itemId: str(p.itemId), role: 'tool', text: '', tool: { content: codexFileDiffs(p.changes, 'proposed', this.args.cwd) } });
+        return;
       case 'turn/plan/updated': {
-        const plan = Array.isArray(p.plan) ? p.plan.map(rec) : [];
-        const active = plan.find((s) => s.status === 'inProgress' || s.status === 'in_progress');
-        const done = plan.filter((s) => s.status === 'completed').length;
-        if (plan.length) this.emit({ type: 'progress', text: `Plan ${done}/${plan.length}${active ? `: ${str(active.step)}` : ''}` });
+        const entries = codexPlan(p.plan);
+        this.emit({ type: 'planUpdated', entries, explanation: str(p.explanation) || undefined });
+        const active = entries.find((e) => e.status === 'in_progress');
+        if (active) this.emit({ type: 'progress', text: active.content });
         return;
       }
       case 'serverRequest/resolved': {

@@ -1,5 +1,8 @@
 // Normalized application types shared by the main process and the renderer.
 // These are NOT provider wire formats; provider ids are carried alongside.
+import type { PermissionKind, PlanInfo, ToolCallInfo, ToolContent } from './content';
+
+export type { DiffHunk, FileDiff, PermissionKind, PlanEntry, PlanInfo, ToolCallInfo, ToolContent, ToolKind } from './content';
 
 export type AgentProvider = 'claude' | 'codex' | 'mock';
 export type AgentStatus =
@@ -46,6 +49,8 @@ export interface Task {
   sharedCwdWarning?: string;
   sessionLocalId?: string;
   lastError?: string;
+  /** Latest checklist the agent published (TodoWrite / tasks / Codex turn plan). */
+  plan?: PlanInfo;
   /** Memory records injected into the current native session at start/resume (provenance). */
   injectedMemoryIds?: string[];
   /** Mock-provider script name; ignored by native providers. */
@@ -69,6 +74,8 @@ export interface AttentionOption {
   id: string;
   label: string;
   description?: string;
+  /** ACP-style meaning of a permission option, for consistent styling. */
+  kind?: PermissionKind;
 }
 
 export interface AttentionQuestion {
@@ -78,6 +85,8 @@ export interface AttentionQuestion {
   options: AttentionOption[];
   multiSelect?: boolean;
   isSecret?: boolean;
+  /** Free-text answer allowed besides the options. */
+  allowOther?: boolean;
 }
 
 export interface AttentionItem {
@@ -94,6 +103,10 @@ export interface AttentionItem {
   /** Approval decisions offered by the provider (e.g. allow once / deny). */
   options?: AttentionOption[];
   questions?: AttentionQuestion[];
+  /** Transcript tool item this request is about (Claude toolUseID / Codex itemId). */
+  toolCallId?: string;
+  /** What will happen if approved: diff, command, plan… rendered like the tool call. */
+  preview?: ToolContent[];
   /** Provider asked that this not be approvable by a stray keystroke. */
   highRisk?: boolean;
   createdAt: string;
@@ -101,7 +114,7 @@ export interface AttentionItem {
   resolution?: string;
 }
 
-export type TranscriptRole = 'user' | 'assistant' | 'tool' | 'system';
+export type TranscriptRole = 'user' | 'assistant' | 'tool' | 'system' | 'thought' | 'plan';
 
 export interface TranscriptItem {
   /** Stable id (provider item id where available) used for upsert / dedup. */
@@ -112,10 +125,14 @@ export interface TranscriptItem {
   /** How the user message arrived. */
   via?: 'text' | 'voice' | 'card' | 'initial';
   toolLabel?: string;
-  toolStatus?: 'running' | 'completed' | 'failed' | 'declined' | 'interrupted';
+  toolStatus?: ToolStatus;
+  /** Structured tool call (role 'tool'). */
+  tool?: ToolCallInfo;
   streaming?: boolean;
   createdAt: string;
 }
+
+export type ToolStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'declined' | 'interrupted';
 
 export type MemoryScope = 'global' | 'project' | 'task' | 'session';
 

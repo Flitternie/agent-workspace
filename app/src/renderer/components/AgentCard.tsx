@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import type { AttentionItem, Project, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
+import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
+import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
 import { Alias, displayName, Icon, ProviderTag, StatusDot } from './bits';
 
 /** One participant tile in the meeting-style Overview. */
@@ -103,17 +105,29 @@ export function AgentCard({
           </div>
         </section>
 
+        {task.plan ? <PlanChecklist plan={task.plan} compact /> : null}
+
         {activity.length ? (
           <section>
             <div className="section-label">Activity</div>
             <ul className="activity">
-              {activity.map((a) => (
-                <li key={a.id} className={`step step-${a.role}${a.toolStatus ? ` tool-${a.toolStatus}` : ''}`}>
-                  <span className="step-dot" aria-hidden />
-                  <span className="step-text truncate">{stepText(a)}</span>
-                  <span className="step-time">{timeAgo(a.createdAt, now)}</span>
-                </li>
-              ))}
+              {activity.map((a) => {
+                const diffs = (a.tool?.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.diff] : []));
+                const stat = diffs.length ? diffStat(diffs) : undefined;
+                return (
+                  <li key={a.id} className={`step step-${a.role}${a.toolStatus ? ` tool-${a.toolStatus}` : ''}`}>
+                    {a.tool ? (
+                      <span className="step-icon">
+                        <Icon name={KIND_ICON[a.tool.kind]} size={12} />
+                      </span>
+                    ) : (
+                      <span className="step-dot" aria-hidden />
+                    )}
+                    <span className="step-text truncate">{stepText(a)}</span>
+                    {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : <span className="step-time">{timeAgo(a.createdAt, now)}</span>}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}
@@ -147,7 +161,9 @@ export function AgentCard({
 
 function stepText(a: TranscriptItem): string {
   const first = a.text.replace(/```[\s\S]*?```/g, ' ').replace(/\s+/g, ' ').trim();
-  if (a.role === 'tool') return a.toolLabel ?? 'Tool';
+  if (a.role === 'tool') return `${a.tool?.title || a.toolLabel || 'Tool'}${a.toolStatus === 'awaiting_approval' ? ' — needs approval' : a.toolStatus === 'declined' ? ' — declined' : a.toolStatus === 'failed' ? ' — failed' : ''}`;
+  if (a.role === 'thought') return `Thinking: ${first}`;
+  if (a.role === 'plan') return `Proposed a plan: ${first}`;
   if (a.role === 'user') return `You${a.via === 'voice' ? ' (voice)' : ''}: ${first}`;
   return first;
 }

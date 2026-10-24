@@ -15,9 +15,11 @@ import type {
   SessionRecord,
   Settings,
   Task,
+  ToolCallInfo,
   TranscriptItem,
   WorkspaceSnapshot,
 } from '../shared/types';
+import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
 import type { OpenAiClient } from './openai';
@@ -323,7 +325,10 @@ export class Workspace {
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
-          history.push({ id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() });
+          const prev = history.findIndex((h) => h.id === event.itemId);
+          const item = mergeItem(prev === -1 ? undefined : history[prev], { id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() }, event.tool);
+          if (prev === -1) history.push(item);
+          else history[prev] = item;
           return;
         }
         this.handleEvent(taskId, record.localId, event);
@@ -480,16 +485,11 @@ export class Workspace {
         break;
       }
       case 'transcriptItem':
-        this.upsertTranscript(taskId, {
-          id: event.itemId,
+        this.upsertTranscript(
           taskId,
-          role: event.role,
-          text: event.text,
-          toolLabel: event.toolLabel,
-          toolStatus: event.toolStatus,
-          streaming: false,
-          createdAt: now(),
-        });
+          { id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, streaming: false, createdAt: now() },
+          event.tool,
+        );
         if (event.role === 'assistant' && !event.history) task.summary = summaryFor(event.text);
         return this.changedThrottled();
       case 'outputDelta': {
@@ -499,7 +499,9 @@ export class Workspace {
           item = { id: event.itemId, taskId, role: event.role, text: '', streaming: true, createdAt: now() };
           items.push(item);
         }
-        item.text += event.delta;
+        const term = item.tool?.content.find((c) => c.type === 'terminal');
+        if (term && term.type === 'terminal') term.output = clipOutput(term.output + event.delta);
+        else item.text += event.delta;
         this.store.touchTranscript(taskId);
         this.emitTranscript(taskId, item);
         return;
@@ -508,6 +510,9 @@ export class Workspace {
         live.turnActive = true;
         if (!this.hasOpenNative(taskId)) task.status = 'running';
         break;
+      case 'planUpdated':
+        task.plan = event.entries.length ? { entries: event.entries, explanation: event.explanation, updatedAt: now() } : undefined;
+        return this.changedThrottled();
       case 'progress':
         task.summary = clip(event.text, 200);
         return this.changedThrottled();
@@ -522,8 +527,11 @@ export class Workspace {
             details: event.details,
             options: event.options,
             highRisk: event.highRisk,
+            toolCallId: event.toolCallId,
+            preview: event.preview,
           });
         }
+        if (event.toolCallId) this.markTool(taskId, event.toolCallId, 'awaiting_approval');
         task.status = 'waiting_for_user';
         task.summary = `Waiting for your approval: ${clip(event.headline, 140)}`;
         break;
@@ -537,6 +545,7 @@ export class Workspace {
             headline: clip(event.headline, 200),
             details: event.questions.map((q) => q.question).join('\n'),
             questions: event.questions,
+            toolCallId: event.toolCallId,
           });
         }
         task.status = 'waiting_for_user';
@@ -665,22 +674,23 @@ export class Workspace {
 
   // ---------------------------------------------------------------- transcript
 
-  private upsertTranscript(taskId: string, item: TranscriptItem): void {
+  private upsertTranscript(taskId: string, item: TranscriptItem, tool?: Partial<ToolCallInfo>): void {
     const items = this.store.transcript(taskId);
     const i = items.findIndex((x) => x.id === item.id);
-    if (i === -1) items.push(item);
-    else {
-      const prev = items[i];
-      items[i] = {
-        ...prev,
-        ...item,
-        text: item.text || prev.text,
-        toolLabel: item.toolLabel ?? prev.toolLabel,
-        createdAt: prev.createdAt,
-      };
-    }
+    const merged = mergeItem(i === -1 ? undefined : items[i], item, tool);
+    if (i === -1) items.push(merged);
+    else items[i] = merged;
     this.store.touchTranscript(taskId);
-    this.emitTranscript(taskId, items[i === -1 ? items.length - 1 : i]);
+    this.emitTranscript(taskId, merged);
+  }
+
+  /** A pending approval shows on its tool row, not as a separate transcript entry. */
+  private markTool(taskId: string, toolCallId: string, status: TranscriptItem['toolStatus']): void {
+    const item = this.store.transcript(taskId).find((x) => x.id === toolCallId && x.role === 'tool');
+    if (!item || item.toolStatus === 'completed' || item.toolStatus === 'failed') return;
+    item.toolStatus = status;
+    this.store.touchTranscript(taskId);
+    this.emitTranscript(taskId, item);
   }
 
   private appendSystem(taskId: string, text: string): void {
@@ -840,4 +850,18 @@ export class Workspace {
     await mk('mock', 'frontend', 'Frontend dashboard components', 'work', 'Build the dashboard components.');
     await mk('mock', 'database', 'Database schema migration', 'ask:The schema migration drops the legacy `orders.notes` column, which has data in 1,204 rows. That is a data-loss risk. Should I proceed, or add a backfill step first?', 'Write the schema migration for the new orders table.');
   }
+}
+
+/** Merge-by-id: later events refine a tool call (label, status, applied diff, output). */
+function mergeItem(prev: TranscriptItem | undefined, item: TranscriptItem, tool?: Partial<ToolCallInfo>): TranscriptItem {
+  const baseTool = prev?.tool ?? (tool ? { name: '', kind: 'other' as const, title: '', locations: [], content: [] } : undefined);
+  const mergedTool = tool && baseTool ? { ...baseTool, ...Object.fromEntries(Object.entries(tool).filter(([, v]) => v !== undefined)) } : baseTool;
+  const next: TranscriptItem = prev
+    ? { ...prev, ...item, text: item.text || prev.text, toolLabel: item.toolLabel ?? prev.toolLabel, toolStatus: item.toolStatus ?? prev.toolStatus, createdAt: prev.createdAt }
+    : { ...item, toolStatus: item.toolStatus ?? (item.role === 'tool' ? 'running' : undefined) };
+  if (mergedTool) {
+    next.tool = mergedTool;
+    if (!next.toolLabel || tool?.title) next.toolLabel = mergedTool.title || next.toolLabel;
+  }
+  return next;
 }

@@ -1,4 +1,8 @@
 import type {
+  PlanEntry,
+  ToolCallInfo,
+  ToolContent,
+  ToolStatus,
   AgentProvider,
   AttentionOption,
   AttentionQuestion,
@@ -21,11 +25,16 @@ export type ProviderEvent =
       text: string;
       streaming?: boolean;
       toolLabel?: string;
-      toolStatus?: 'running' | 'completed' | 'failed' | 'declined' | 'interrupted';
+      toolStatus?: ToolStatus;
+      /** Structured tool call; fields given here replace the stored ones (merge by item id). */
+      tool?: Partial<ToolCallInfo>;
       /** true when replaying history on resume, not new activity */
       history?: boolean;
     }
-  | { type: 'outputDelta'; itemId: string; role: 'assistant' | 'tool'; delta: string }
+  /** Streaming text. For tool items it extends the terminal output. */
+  | { type: 'outputDelta'; itemId: string; role: 'assistant' | 'tool' | 'thought'; delta: string }
+  /** Full snapshot of the agent's checklist. */
+  | { type: 'planUpdated'; entries: PlanEntry[]; explanation?: string }
   | { type: 'turnStarted' }
   | {
       type: 'turnCompleted';
@@ -41,12 +50,15 @@ export type ProviderEvent =
       details: string;
       options: AttentionOption[];
       highRisk?: boolean;
+      toolCallId?: string;
+      preview?: ToolContent[];
     }
   | {
       type: 'userInputRequested';
       requestId: string;
       headline: string;
       questions: AttentionQuestion[];
+      toolCallId?: string;
     }
   /** The provider itself resolved / withdrew a request (e.g. turn ended). */
   | { type: 'requestResolved'; requestId: string; reason: string }

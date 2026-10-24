@@ -81,6 +81,15 @@ const ICONS = {
   reply: 'M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 6 6v5',
   alert: 'M12 4l9 16H3z M12 10v4 M12 17.5v.01',
   chevron: 'M9 6l6 6-6 6',
+  file: 'M6 3h8l4 4v14H6z M14 3v4h4',
+  terminal: 'M4 17l6-5-6-5 M12 19h8',
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z M21 21l-4.3-4.3',
+  globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z M3 12h18 M12 3a14 14 0 0 1 0 18 M12 3a14 14 0 0 0 0 18',
+  pencil: 'M4 20h4L19 9l-4-4L4 16z M14 6l4 4',
+  bulb: 'M9 18h6 M10 21h4 M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3Z',
+  trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+  list: 'M9 6h11 M9 12h11 M9 18h11 M4 6h.01 M4 12h.01 M4 18h.01',
+  tool: 'M14 6a4 4 0 0 0 5 5l-9 9a2 2 0 0 1-3-3l9-9a4 4 0 0 0-2-2Z',
 } as const;
 
 export type IconName = keyof typeof ICONS;
