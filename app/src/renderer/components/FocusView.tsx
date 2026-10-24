@@ -65,6 +65,16 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
             <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
               <Icon name="note" /> Memory
             </button>
+            <button
+              className="btn"
+              data-testid="remove-task"
+              title="Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk."
+              onClick={() => {
+                if (window.confirm(`Remove ${displayName(task)}? A worktree with uncommitted changes is kept on disk.`)) run(() => call('task:remove', { taskId: task.taskId }));
+              }}
+            >
+              Remove
+            </button>
           </div>
         </header>
         {task.sharedCwdWarning ? (
