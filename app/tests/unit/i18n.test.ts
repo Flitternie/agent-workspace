@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { setLanguage, t } from '../../src/renderer/i18n';
 import { zh } from '../../src/renderer/locales/zh';
+import { aliasFor } from '../../src/main/store';
 
 const root = join(__dirname, '../../src/renderer');
 const files = (dir: string): string[] =>
@@ -30,9 +31,15 @@ describe('i18n', () => {
 
   it('translates with placeholders and falls back to English', () => {
     setLanguage('zh');
-    expect(t('{n} need you', { n: 2 })).toBe('2 个等你处理');
+    expect(t('{n} need you', { n: 2 })).toBe('2 个待你处理');
     expect(t('Something new')).toBe('Something new');
     setLanguage('en');
     expect(t('{n} need you', { n: 2 })).toBe('2 need you');
+  });
+
+  it('names agents per language and numbers repeats', () => {
+    expect([0, 1, 2].map((n) => aliasFor(n))).toEqual(['Alice', 'Bob', 'Charlie']);
+    expect([0, 1, 2].map((n) => aliasFor(n, 'zh'))).toEqual(['小王', '小李', '小张']);
+    expect(aliasFor(26)).toBe('Alice2');
   });
 });

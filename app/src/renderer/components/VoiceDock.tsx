@@ -74,8 +74,8 @@ export function VoiceDock({
           target.kind === 'coordinator'
             ? tr('Coordinator answered')
             : target.kind === 'create'
-              ? tr('Started a new task') + (t ? ` (${tr('Agent {alias}', { alias: t.alias })})` : '')
-              : tr('Sent to Agent {alias}', { alias: t?.alias ?? '?' }) + (t && t.name !== t.alias ? ` (${t.name})` : '');
+              ? tr('Started a new task') + (t ? ` (${t.alias})` : '')
+              : tr('Sent to {alias}', { alias: t?.alias ?? '?' }) + (t && t.name !== t.alias ? ` (${t.name})` : '');
         patch(entry.id, { phase: 'sent', outcome, taskId: target.kind === 'coordinator' ? undefined : r.taskId });
         onDispatched(target.kind === 'coordinator' ? undefined : r.taskId);
         if (target.kind === 'coordinator') setShowLog(true);
@@ -238,7 +238,7 @@ export function VoiceDock({
     mic === 'speaking'
       ? tr('Hearing you…')
       : mic === 'listening'
-        ? tr('Listening — just say “Agent A, …”')
+        ? tr('Listening — just say “Alice, …”')
         : mic === 'starting'
           ? tr('Turning on the microphone…')
           : mic === 'denied'
@@ -352,7 +352,7 @@ export function VoiceDock({
             rows={1}
             value={text}
             data-testid="dock-input"
-            placeholder={focusedTaskId ? tr('Type to any agent — “this” means Agent {alias}', { alias: taskById(focusedTaskId)?.alias ?? '' }) : tr('Type to any agent — “Agent C, hold the migration”')}
+            placeholder={focusedTaskId ? tr('Type to any agent — “this” means {alias}', { alias: taskById(focusedTaskId)?.alias ?? '' }) : tr('Type to any agent — “Charlie, hold the migration”')}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -420,7 +420,7 @@ function RoutePreview({
             <span className="route-arrow">→</span>
             <Alias alias={target.alias} size="sm" />
             <strong>
-              {tr('Agent {alias}', { alias: target.alias })}
+              {target.alias}
               {target.name !== target.alias ? ` · ${target.name}` : ''}
             </strong>
             <span className="muted small">

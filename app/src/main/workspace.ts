@@ -208,7 +208,7 @@ export class Workspace {
     const project = this.project(args.projectId);
     if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
     const d = this.store.data;
-    const alias = aliasFor(d.aliasCounter++);
+    const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const taskId = `t-${randomUUID().slice(0, 8)}`;
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
@@ -223,8 +223,8 @@ export class Workspace {
     }
     const sharers = d.tasks.filter((t) => t.cwd === cwd);
     if (sharers.length) {
-      sharedCwdWarning = `Shares a writable directory with ${sharers.map((t) => `Agent ${t.alias}`).join(', ')} — edits are not isolated.`;
-      for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with Agent ${alias} — edits are not isolated.`;
+      sharedCwdWarning = `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.`;
+      for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
     }
     const task: Task = {
       taskId,
@@ -405,7 +405,7 @@ export class Workspace {
   importSession(args: { projectId: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; title: string }): Task {
     this.project(args.projectId);
     const d = this.store.data;
-    const alias = aliasFor(d.aliasCounter++);
+    const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const taskId = `t-${randomUUID().slice(0, 8)}`;
     const record: SessionRecord = {
       localId: `s-${randomUUID().slice(0, 8)}`,
@@ -427,7 +427,7 @@ export class Workspace {
       status: 'disconnected',
       summary: 'Imported from existing history. Resume to continue (this does not attach to a process running elsewhere).',
       cwd: args.cwd,
-      sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => `Agent ${t.alias}`).join(', ')} — not isolated.` : undefined,
+      sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => t.alias).join(', ')} — not isolated.` : undefined,
       sessionLocalId: record.localId,
       createdAt: now(),
       updatedAt: now(),
@@ -744,7 +744,7 @@ export class Workspace {
     if (target.kind === 'create') {
       try {
         const task = await this.createTask({ projectId: target.projectId, provider: target.provider, title: target.title, instruction: utterance, isolate: true });
-        this.coordinatorSay(`Started Agent ${task.alias} (${task.provider}) for "${task.title}".`, utterance);
+        this.coordinatorSay(`Started ${task.alias} (${task.provider}) for "${task.title}".`, utterance);
         return { ok: true, taskId: task.taskId };
       } catch (error) {
         return { ok: false, error: (error as Error).message };
@@ -786,13 +786,13 @@ export class Workspace {
       }
       if (!scopeId) return 'Not saved: open a task first (or say "for this project" / "globally") so I know the scope.';
       const rec = this.addMemory({ scope, scopeId, body, originTaskId: focused?.taskId, approvedForReuse: scope !== 'task', source: 'voice' });
-      const where = scope === 'global' ? 'global preferences' : scope === 'project' ? `project "${d.projects.find((p) => p.projectId === scopeId)?.name}"` : `Agent ${focused?.alias}'s task notes`;
+      const where = scope === 'global' ? 'global preferences' : scope === 'project' ? `project "${d.projects.find((p) => p.projectId === scopeId)?.name}"` : `${focused?.alias}'s task notes`;
       return `Saved to ${where}: "${clip(rec.body, 100)}". New sessions in that scope will load it; running sessions are not rewritten.`;
     }
     const open = d.attention.filter((a) => a.state === 'open');
     const lines = d.tasks.map((t) => {
       const items = open.filter((a) => a.taskId === t.taskId);
-      return `Agent ${t.alias} (${t.name !== t.alias ? `${t.name}, ` : ''}${t.provider}) — ${t.status.replace(/_/g, ' ')}${items.length ? `; waiting on: ${items.map((a) => a.headline).join(' | ')}` : ''}`;
+      return `${t.alias} (${t.name !== t.alias ? `${t.name}, ` : ''}${t.provider}) — ${t.status.replace(/_/g, ' ')}${items.length ? `; waiting on: ${items.map((a) => a.headline).join(' | ')}` : ''}`;
     });
     if (!lines.length) return 'No tasks yet. Say "start a new Claude task for …" or use New task.';
     return `${open.length} open item(s) across ${d.tasks.length} task(s):\n${lines.join('\n')}`;

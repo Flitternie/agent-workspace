@@ -124,7 +124,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
       </div>
       <div className="row">
         <div className="field grow">
-          <label>{t('Short name (spoken handle)')}</label>
+          <label>{t('Role (optional)')}</label>
           <input className="input" placeholder={t('e.g. database')} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="field grow2">

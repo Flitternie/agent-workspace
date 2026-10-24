@@ -140,7 +140,7 @@ export function AgentCard({
           className="composer-input"
           rows={1}
           value={draft}
-          aria-label={t('Message Agent {alias}', { alias: task.alias })}
+          aria-label={t('Message {alias}', { alias: task.alias })}
           placeholder={t('Message {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

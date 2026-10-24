@@ -217,7 +217,7 @@ function Composer({ task }: { task: Task }) {
           className="composer-input"
           rows={3}
           value={draft}
-          placeholder={t('Message Agent {alias}…', { alias: task.alias })}
+          placeholder={t('Message {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
           onKeyDown={(e) => {
@@ -229,7 +229,7 @@ function Composer({ task }: { task: Task }) {
         />
         <div className="composer-foot">
           <span className="to-label" data-testid="composer-target">
-            {t('To: Agent {alias}', { alias: task.alias })} · {PROVIDER_LABEL[task.provider]}
+            {t('To: {alias}', { alias: task.alias })} · {PROVIDER_LABEL[task.provider]}
             <span className="muted"> — {t('typed text goes only to this agent')}</span>
           </span>
           <span className="hint">
@@ -251,7 +251,7 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
   const mem = snapshot.memory;
   const groups: Array<{ title: string; records: MemoryRecord[]; hint: string }> = [
-    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to Agent {alias}', { alias: task.alias }) },
+    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to {alias}', { alias: task.alias }) },
     { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here') },
     { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session') },
   ];

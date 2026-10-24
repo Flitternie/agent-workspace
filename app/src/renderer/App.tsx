@@ -151,7 +151,7 @@ export function App() {
                       <strong>{t('Add agents')}</strong> — {t('pick a project folder and Claude Code or Codex; each agent gets its own worktree.')}
                     </li>
                     <li>
-                      <strong>{t('Just talk')}</strong> — {t('the mic is on like in a call. Say “Agent B, …” and it goes to B without changing your view.')}
+                      <strong>{t('Just talk')}</strong> — {t('the mic is on like in a call. Say “Bob, …” and it goes to Bob without changing your view.')}
                     </li>
                     <li>
                       <strong>{t('Answer from the tile')}</strong> — {t('questions and permission requests wait on their tile.')}

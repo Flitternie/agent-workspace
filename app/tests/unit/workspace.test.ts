@@ -131,7 +131,7 @@ describe('restart and resume', () => {
 
     const ws2 = open(dataDir);
     const s = ws2.snapshot();
-    expect(s.tasks.map((t) => t.alias)).toEqual(['A', 'B', 'C', 'D']);
+    expect(s.tasks.map((t) => t.alias)).toEqual(['Alice', 'Bob', 'Charlie', 'Diana']);
     expect(s.attention.find((a) => a.taskId === C.taskId && a.kind === 'question')!.state).toBe('open');
     expect(s.attention.find((a) => a.taskId === D.taskId && a.kind === 'approval')!.state).toBe('expired');
     expect(s.tasks.find((t) => t.taskId === D.taskId)!.status).toBe('disconnected');
@@ -149,9 +149,9 @@ describe('voice dispatch', () => {
   it('off-focus dispatch reaches only the target; the focused task history is unchanged', async () => {
     const { ws, A, B } = await demo(open());
     const bBefore = ws.transcript(B.taskId).length;
-    const decision = await ws.decideRoute('Agent A, add a regression test', B.taskId);
+    const decision = await ws.decideRoute('Alice, add a regression test', B.taskId);
     expect(decision).toMatchObject({ kind: 'existing', taskId: A.taskId, confidence: 'high' });
-    const r = await ws.dispatch('Agent A, add a regression test', { kind: 'existing', taskId: A.taskId }, B.taskId);
+    const r = await ws.dispatch('Alice, add a regression test', { kind: 'existing', taskId: A.taskId }, B.taskId);
     expect(r.ok).toBe(true);
     expect(ws.transcript(A.taskId).some((i) => i.via === 'voice' && /regression/.test(i.text))).toBe(true);
     expect(ws.transcript(B.taskId).length).toBe(bBefore);
@@ -172,7 +172,7 @@ describe('voice dispatch', () => {
     const { ws, A, C } = await demo(open());
     const before = ws.transcript(A.taskId).length;
     const r = await ws.dispatch('哪些在等我', { kind: 'coordinator' });
-    expect(r.reply).toMatch(/Agent A/);
+    expect(r.reply).toMatch(/Alice/);
     expect(r.reply).toMatch(/data-loss/);
     expect(ws.transcript(A.taskId).length).toBe(before);
     expect(ws.transcript(C.taskId).some((i) => /哪些/.test(i.text))).toBe(false);

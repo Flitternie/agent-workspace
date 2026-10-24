@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
-import { t, t as tr } from '../i18n';
+import { t } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: 'Idle',
@@ -53,14 +53,20 @@ export const KIND_LABEL: Record<AttentionKind, string> = {
 export function Alias({ alias, size = 'md' }: { alias: string; size?: 'sm' | 'md' | 'lg' }) {
   const hue = ([...alias].reduce((n, c) => n + c.charCodeAt(0), 0) * 67) % 360;
   return (
-    <span className={`alias alias-${size}`} style={{ ['--hue' as string]: hue }}>
-      {alias}
+    <span className={`alias alias-${size}`} style={{ ['--hue' as string]: hue }} title={alias}>
+      {initial(alias)}
     </span>
   );
 }
 
+/** Avatar letter: "Alice" → A, "小王" → 王, legacy "AB" stays. */
+function initial(alias: string): string {
+  if (/[㐀-鿿]/.test(alias)) return alias.replace(/^[小老阿]/, '').charAt(0);
+  return alias.length <= 2 ? alias : alias.charAt(0).toUpperCase();
+}
+
 export function displayName(t: { name: string; alias: string }): string {
-  return t.name !== t.alias ? t.name : tr('Agent {alias}', { alias: t.alias });
+  return t.name !== t.alias ? `${t.alias} · ${t.name}` : t.alias;
 }
 
 export function Kbd({ children }: { children: ReactNode }) {

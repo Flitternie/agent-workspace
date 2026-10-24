@@ -83,6 +83,9 @@ function explicitTargets(ctx: RouteContext): RouteTask[] {
   const hits = new Map<string, RouteTask>();
   for (const t of ctx.tasks) {
     const a = t.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Named agents ("Alice", "小王"): the name anywhere is a handle.
+    if (CJK.test(t.alias) ? u.includes(t.alias) : t.alias.length > 2 && new RegExp(`\\b${a}\\b`, 'i').test(u)) hits.set(t.taskId, t);
+    // Letter aliases from older workspaces ("Agent A", "A号", "@A").
     const patterns = [
       new RegExp(`\\b(agent|task|代理|助手)\\s*${a}\\b`, 'i'),
       new RegExp(`(^|[^A-Za-z])${a}\\s*(agent|号|代理)`), // case-sensitive: "A agent", "A号"
@@ -129,7 +132,7 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
   // 1. Explicit alias / handle.
   const explicit = explicitTargets(ctx);
   if (explicit.length === 1)
-    return sensitive({ kind: 'existing', taskId: explicit[0].taskId, confidence: 'high', reason: `explicitly named Agent ${explicit[0].alias}` }, u);
+    return sensitive({ kind: 'existing', taskId: explicit[0].taskId, confidence: 'high', reason: `explicitly named ${explicit[0].alias}` }, u);
   if (explicit.length > 1)
     return {
       kind: 'clarify',
@@ -171,7 +174,7 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
           kind: 'existing',
           taskId: top.t.taskId,
           confidence: high ? 'high' : 'medium',
-          reason: isFocused ? `matches the focused task "${top.t.title}"` : `refers to "${top.t.title}" (Agent ${top.t.alias})`,
+          reason: isFocused ? `matches the focused task "${top.t.title}"` : `refers to "${top.t.title}" (${top.t.alias})`,
         },
         u,
       );
@@ -180,13 +183,13 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
     return {
       kind: 'clarify',
       candidateTaskIds: close.map((x) => x.t.taskId),
-      question: `This could be for ${close.map((x) => `Agent ${x.t.alias} (${x.t.title})`).join(' or ')}. Which one?`,
+      question: `This could be for ${close.map((x) => `${x.t.alias} (${x.t.title})`).join(' or ')}. Which one?`,
     };
   }
 
   // 4. Deictic local reference defaults to the focused task.
   if (focused && DEICTIC.test(u))
-    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `"this/这个" refers to the focused Agent ${focused.alias}` }, u);
+    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `"this/这个" refers to the focused agent ${focused.alias}` }, u);
   return null;
 }
 
@@ -218,7 +221,7 @@ export async function decideRoute(ctx: RouteContext, llm?: LlmRouter): Promise<R
     }
   }
   if (focused)
-    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'medium', reason: `no other task referenced; defaulting to focused Agent ${focused.alias}` }, ctx.utterance);
+    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'medium', reason: `no other task referenced; defaulting to focused agent ${focused.alias}` }, ctx.utterance);
   if (ctx.tasks.length === 0) return { kind: 'coordinator', reason: 'no tasks yet' };
   return {
     kind: 'clarify',

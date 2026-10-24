@@ -18,7 +18,7 @@ mkdirSync(shots, { recursive: true });
 const electronPath = require('electron') as unknown as string;
 let app: ElectronApplication | undefined;
 
-/** silence · "Agent A, add a regression test…" · pause · "刚才那个数据库的 Agent，先不要改 schema" · silence */
+/** silence · "Alice, add a regression test…" · pause · "刚才那个数据库的 Agent，先不要改 schema" · silence */
 function buildMicFixture(): string {
   const pcm = (f: string) => {
     const b = readFileSync(join(appDir, '.cache', f));
@@ -72,9 +72,9 @@ describe.runIf(enabled)('always-on microphone', () => {
     await expect.poll(() => page.getByTestId('mic-button').getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true');
 
     const toasts = () => page.getByTestId('caption').allInnerTexts().then((t) => t.join('\n'));
-    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Agent A/);
+    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Alice/);
     await page.screenshot({ path: join(shots, 'voice-01-live-caption.png') });
-    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Agent C/);
+    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to Charlie/);
     await page.screenshot({ path: join(shots, 'voice-02-second-command.png') });
 
     const transcript = (alias: string) =>
@@ -86,11 +86,11 @@ describe.runIf(enabled)('always-on microphone', () => {
         return items.filter((i) => i.role === 'user' && i.via === 'voice').map((i) => i.text);
       }, alias);
     // Each spoken command reaches its agent exactly once.
-    expect(await transcript('A')).toHaveLength(1);
-    expect((await transcript('A'))[0]).toMatch(/regression test/i);
-    expect(await transcript('C')).toHaveLength(1);
-    expect((await transcript('C'))[0]).toMatch(/schema/i);
-    expect(await transcript('B')).toEqual([]);
+    expect(await transcript('Alice')).toHaveLength(1);
+    expect((await transcript('Alice'))[0]).toMatch(/regression test/i);
+    expect(await transcript('Charlie')).toHaveLength(1);
+    expect((await transcript('Charlie'))[0]).toMatch(/schema/i);
+    expect(await transcript('Bob')).toEqual([]);
 
     // Mute really releases the microphone.
     await page.getByTestId('mic-button').click();

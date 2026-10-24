@@ -38,6 +38,21 @@ describe('router decision matrix', () => {
     expect(decideDeterministic(ctx('B号把按钮改成蓝色', null))).toMatchObject({ kind: 'existing', taskId: 't-B' });
   });
 
+  it('named agents: the name anywhere is a handle, in English and Chinese', () => {
+    const named = (utterance: string, focusedTaskId: string | null = 't-Bob') => ({
+      utterance,
+      focusedTaskId,
+      tasks: [task('Alice', 'Backend API'), task('Bob', 'Frontend'), task('小张', 'Schema migration')],
+      projects: [{ projectId: 'p', name: 'demo-shop' }],
+    });
+    expect(decideDeterministic(named('Alice, add a regression test'))).toMatchObject({ kind: 'existing', taskId: 't-Alice', confidence: 'high' });
+    expect(decideDeterministic(named('can you ask alice to rerun it'))).toMatchObject({ kind: 'existing', taskId: 't-Alice' });
+    expect(decideDeterministic(named('小张，迁移先停一下'))).toMatchObject({ kind: 'existing', taskId: 't-小张' });
+    expect(decideDeterministic(named('Alice and Bob, sync up'))).toMatchObject({ kind: 'clarify' });
+    // Part of another word is not a name.
+    expect(decideDeterministic(named('fix the bobbing animation', null))).toBeNull();
+  });
+
   it('the English article "a" is not an alias', () => {
     const d = decideDeterministic(ctx('add a regression test for this function', 't-B'));
     expect(d).toMatchObject({ kind: 'existing', taskId: 't-B' });

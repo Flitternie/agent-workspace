@@ -20,7 +20,7 @@ export interface WorkspaceData {
   memory: MemoryRecord[];
   coordinator: CoordinatorEntry[];
   settings: Settings;
-  /** Monotonic counter behind task aliases A, B, … Z, AA, … (never reused). */
+  /** Monotonic counter behind agent names (never reused). */
   aliasCounter: number;
 }
 
@@ -117,12 +117,18 @@ export class JsonStore {
   }
 }
 
-export function aliasFor(n: number): string {
-  let s = '';
-  let x = n;
-  do {
-    s = String.fromCharCode(65 + (x % 26)) + s;
-    x = Math.floor(x / 26) - 1;
-  } while (x >= 0);
-  return s;
+// Agents are addressed by name, as in a meeting: "Alice, add a test" / "小王，跑一下测试".
+// English names have distinct first letters and are not everyday words; the
+// Chinese ones are common "小+surname" handles chosen to sound distinct to STT
+// (no 王/黄, 张/郑, 孙/宋 pairs).
+export const AGENT_NAMES = {
+  en: ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan', 'Fiona', 'George', 'Hannah', 'Isaac', 'Julia', 'Kevin', 'Laura', 'Mason', 'Nora', 'Oscar', 'Penny', 'Quentin', 'Rachel', 'Simon', 'Tara', 'Ulysses', 'Victor', 'Wendy', 'Xavier', 'Yvonne', 'Zack'],
+  zh: ['小王', '小李', '小张', '小刘', '小陈', '小杨', '小赵', '小周', '小徐', '小马', '小朱', '小郭', '小林', '小高', '小罗', '小梁', '小谢', '小宋', '小唐', '小韩', '小冯', '小邓', '小曹', '小魏', '小蒋', '小沈'],
+} as const;
+
+/** n-th agent name; after the list runs out, names repeat with a number (Alice2). */
+export function aliasFor(n: number, lang: 'en' | 'zh' = 'en'): string {
+  const names = AGENT_NAMES[lang];
+  const round = Math.floor(n / names.length);
+  return `${names[n % names.length]}${round ? round + 1 : ''}`;
 }

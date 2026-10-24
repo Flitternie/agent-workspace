@@ -82,9 +82,9 @@ const handlers: { [C in IpcChannel]: Handler } = {
   },
   'voice:transcribe': async (i: { audio: Uint8Array; mimeType: string }) => {
     if (!openai) throw new Error('Speech-to-text is not configured (no OpenAI key). Typed input still works.');
-    // Task names help the recognizer with handles like "Agent C" or project names.
+    // Agent names help the recognizer spell handles like "Charlie" or "小张".
     const s = workspace.snapshot();
-    const hint = ['Agent Meeting Workspace.', ...s.tasks.map((t) => `Agent ${t.alias} ${t.name}: ${t.title}.`)].join(' ');
+    const hint = ['Agent Meeting Workspace.', ...s.tasks.map((t) => `${t.alias}${t.name !== t.alias ? ` (${t.name})` : ''}: ${t.title}.`)].join(' ');
     return { text: await openai.transcribe(i.audio, i.mimeType, hint) };
   },
   'route:decide': (i: { utterance: string; focusedTaskId: string | null }) => workspace.decideRoute(i.utterance, i.focusedTaskId),
