@@ -1,0 +1,12 @@
+{
+  "name": "agent-meeting-workspace-root",
+  "private": true,
+  "description": "Convenience wrapper: the app lives in ./app",
+  "scripts": {
+    "setup": "npm --prefix app run setup",
+    "start": "npm --prefix app start",
+    "test": "npm --prefix app test",
+    "test:e2e": "npm --prefix app run test:e2e",
+    "typecheck": "npm --prefix app run typecheck"
+  }
+}
