@@ -61,11 +61,11 @@ describe.runIf(enabled)('always-on microphone', () => {
       // The sandboxed audio service cannot read the fixture file; test-only.
       args: ['--disable-features=AudioServiceSandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${fixture}%noloop`, appDir],
       cwd: appDir,
-      env: { ...env, AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-voice-')), AMW_MOCK_DELAY_MS: '120' },
+      env: { ...env, AMW_MODE: 'demo', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-voice-')), AMW_MOCK_DELAY_MS: '120' },
     });
     const page: Page = await app.firstWindow();
     await page.waitForSelector('.app');
-    await page.getByTestId('load-demo').click();
+    // The demo entry seeds three mock agents on first launch.
     await expect.poll(() => page.getByTestId('agent-card').count()).toBe(3);
 
     // Nobody clicked the mic: it is open because the app joined "the meeting" listening.

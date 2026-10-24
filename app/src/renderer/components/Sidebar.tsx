@@ -31,6 +31,7 @@ export function Sidebar({
             <Icon name="grid" size={13} />
           </span>
           Agent Meeting
+          {snapshot.demo ? <span className="demo-badge" title="Demo entry: mock agents, separate data (npm run demo)">Demo</span> : null}
         </span>
       </div>
 

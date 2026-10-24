@@ -195,6 +195,8 @@ export interface Settings {
 }
 
 export interface WorkspaceSnapshot {
+  /** Demo entry: mock agents are offered and seeded. */
+  demo: boolean;
   projects: Project[];
   tasks: Task[];
   sessions: SessionRecord[];

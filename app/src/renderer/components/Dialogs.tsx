@@ -59,7 +59,8 @@ export function ProjectPicker({ snapshot, value, onChange }: { snapshot: Workspa
 }
 
 export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void }) {
-  const firstAvailable = (['claude', 'codex', 'mock'] as const).find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? 'mock';
+  const providers = snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const);
+  const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
   const [projectId, setProjectId] = useState(snapshot.projects[0]?.projectId ?? '');
   const [provider, setProvider] = useState<AgentProvider>(firstAvailable);
   const [name, setName] = useState('');
@@ -100,7 +101,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
       <div className="field">
         <label>Agent</label>
         <div className="row">
-          {(['claude', 'codex', 'mock'] as const).map((p) => {
+          {providers.map((p) => {
             const c = snapshot.capabilities.find((x) => x.provider === p);
             return (
               <label key={p} className={`radio${c?.available ? '' : ' disabled'}${provider === p ? ' selected' : ''}`} title={c?.detail}>

@@ -11,6 +11,7 @@
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && bash scripts/electron.sh",
+    "demo": "npm run build && AMW_MODE=demo bash scripts/electron.sh",
     "dev": "npm run build:main && bash scripts/dev.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

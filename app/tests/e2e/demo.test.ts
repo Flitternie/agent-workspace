@@ -22,7 +22,7 @@ async function launch(): Promise<Page> {
     executablePath: electronPath,
     args: [appDir],
     cwd: appDir,
-    env: { ...env, AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+    env: { ...env, AMW_MODE: 'demo', AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
   });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
@@ -41,7 +41,7 @@ describe('end-to-end demo script (mock agents)', () => {
   it('runs the full journey and survives a restart', async () => {
     let page = await launch();
     // 1. Overview first.
-    await page.getByTestId('load-demo').click();
+    // The demo entry seeds three mock agents on first launch.
     await expect.poll(() => page.getByTestId('agent-card').count()).toBe(3);
     // 3/4. Two substantive requests visible on their cards at once.
     await expect.poll(() => card(page, 'A').getByTestId('attention-item').filter({ hasText: 'compatibility adapter' }).count(), { timeout: 15_000 }).toBe(1);

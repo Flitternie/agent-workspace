@@ -138,9 +138,11 @@ export function App() {
                     <button className="btn btn-primary" onClick={() => setDialog('new')}>
                       <Icon name="plus" /> New task
                     </button>
-                    <button className="btn" data-testid="load-demo" onClick={() => void loadDemo()}>
-                      Load demo (mock agents)
-                    </button>
+                    {snapshot.demo ? (
+                      <button className="btn" data-testid="load-demo" onClick={() => void loadDemo()}>
+                        Load demo (mock agents)
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>

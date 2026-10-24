@@ -13,7 +13,10 @@ import { Workspace } from './workspace';
 // All app state lives in one app-owned directory (default: <app>/.data) so the
 // prototype never touches other apps' or the user's global configuration.
 const appRoot = app.getAppPath();
-const dataDir = process.env.AMW_DATA_DIR ?? join(appRoot, '.data');
+// `npm run demo` (AMW_MODE=demo) is a separate entry with mock agents and its own
+// data dir, so the real workspace never fills up with demo tasks.
+const demoMode = process.env.AMW_MODE === 'demo';
+const dataDir = process.env.AMW_DATA_DIR ?? join(appRoot, demoMode ? '.data-demo' : '.data');
 mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', join(dataDir, 'electron'));
 app.setName('Agent Meeting Workspace');
@@ -33,6 +36,7 @@ const workspace = new Workspace({
   },
   openai,
   log,
+  demo: demoMode,
 });
 
 let win: BrowserWindow | null = null;
@@ -92,7 +96,10 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
   'settings:update': (i: { alwaysConfirmVoice?: boolean }) => workspace.updateSettings(i),
-  'demo:seed': () => workspace.seedDemo(ensureDemoRepo()),
+  'demo:seed': () => {
+    if (!demoMode) throw new Error('Demo agents are only available in the demo entry (npm run demo).');
+    return workspace.seedDemo(ensureDemoRepo());
+  },
 };
 
 function registerIpc(): void {
@@ -148,7 +155,7 @@ function createWindow(): void {
     height: 920,
     minWidth: 900,
     minHeight: 600,
-    title: 'Agent Meeting Workspace',
+    title: demoMode ? 'Agent Meeting Workspace — Demo' : 'Agent Meeting Workspace',
     backgroundColor: '#f4f5f7',
     // Native-looking frame: traffic lights sit inside the sidebar on macOS.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } } : {}),
@@ -186,6 +193,7 @@ app.whenReady().then(() => {
   wireEvents();
   createWindow();
   void workspace.refreshCapabilities();
+  if (demoMode && workspace.snapshot().tasks.length === 0) void workspace.seedDemo(ensureDemoRepo());
 });
 
 let quitting = false;

@@ -462,6 +462,15 @@ pre code {
   background: var(--ink);
   color: #fff;
 }
+.demo-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--needs-bg);
+  border: 1px solid var(--needs-border);
+  color: var(--needs);
+  font-size: 11px;
+  font-weight: 600;
+}
 .nav-item {
   display: flex;
   align-items: center;

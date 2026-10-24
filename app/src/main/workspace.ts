@@ -48,6 +48,7 @@ export interface WorkspaceOptions {
   adapters: Partial<Record<AgentProvider, ProviderAdapter>>;
   openai?: OpenAiClient;
   log?: (...args: unknown[]) => void;
+  demo?: boolean;
 }
 
 /**
@@ -152,6 +153,7 @@ export class Workspace {
         autoListen: !!this.opts.openai && process.env.AMW_NO_AUTOLISTEN !== '1',
       },
       dataDir: this.opts.dataDir,
+      demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
     };
   }
