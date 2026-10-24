@@ -1,0 +1,841 @@
+import { randomUUID } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import type {
+  AgentProvider,
+  AttentionItem,
+  CoordinatorEntry,
+  DispatchResult,
+  MemoryRecord,
+  MemoryScope,
+  NativeSessionInfo,
+  Project,
+  ProviderCapabilities,
+  RouteDecision,
+  SessionRecord,
+  Settings,
+  Task,
+  TranscriptItem,
+  WorkspaceSnapshot,
+} from '../shared/types';
+import { asksUser, clip, headlineFor, summaryFor } from './attention';
+import { instructionsFor, memoryForTask } from './memory';
+import type { OpenAiClient } from './openai';
+import { STT_MODEL, ROUTER_MODEL } from './openai';
+import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
+import { decideRoute, type RouteContext } from './router';
+import { aliasFor, JsonStore } from './store';
+import { gitRoot, WorktreeService } from './worktree';
+
+const now = () => new Date().toISOString();
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 30) || 'task';
+
+interface LiveSession {
+  localId: string;
+  session: ProviderSession;
+  turnActive: boolean;
+}
+
+export interface WorkspaceOptions {
+  dataDir: string;
+  adapters: Partial<Record<AgentProvider, ProviderAdapter>>;
+  openai?: OpenAiClient;
+  log?: (...args: unknown[]) => void;
+}
+
+/**
+ * The local backend (spec 03): task + session registry, durable attention queue,
+ * routing, scoped memory and provider lifecycle. Framework-free so it can be
+ * tested without Electron; the Electron layer only forwards IPC and events.
+ */
+export class Workspace {
+  readonly store: JsonStore;
+  private live = new Map<string, LiveSession>(); // taskId -> live provider session
+  private connecting = new Map<string, Promise<LiveSession>>();
+  private capabilities: ProviderCapabilities[] = [];
+  private changeListeners = new Set<() => void>();
+  /** item === null means "the whole transcript was replaced; reload it". */
+  private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
+  private worktrees: WorktreeService;
+  private log: (...args: unknown[]) => void;
+
+  constructor(private opts: WorkspaceOptions) {
+    this.store = new JsonStore(opts.dataDir);
+    this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
+    this.log = opts.log ?? (() => {});
+    this.recoverAfterRestart();
+  }
+
+  // ---------------------------------------------------------------- lifecycle
+
+  /** Nothing is connected after a restart: be honest about it. */
+  private recoverAfterRestart(): void {
+    const d = this.store.data;
+    for (const t of d.tasks) {
+      if (['running', 'starting'].includes(t.status) || (t.status === 'waiting_for_user' && this.hasOpenNative(t.taskId))) {
+        t.status = 'disconnected';
+        t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
+      }
+    }
+    // Native approvals/questions die with the provider process: never show them as still answerable.
+    for (const a of d.attention) {
+      if (a.state === 'open' && a.providerRequestId) {
+        a.state = 'expired';
+        a.resolvedAt = now();
+        a.resolution = 'The provider process ended (app restart) before this was answered.';
+      }
+    }
+    this.store.save();
+  }
+
+  async refreshCapabilities(): Promise<void> {
+    const caps: ProviderCapabilities[] = [];
+    for (const a of Object.values(this.opts.adapters)) {
+      if (!a) continue;
+      try {
+        caps.push(await a.capabilities());
+      } catch (error) {
+        this.log('capabilities failed', a.provider, error);
+      }
+    }
+    this.capabilities = caps;
+    this.changed();
+  }
+
+  async shutdown(): Promise<void> {
+    // Detach first so close-time events are dropped; restart recovery then marks state honestly.
+    const sessions = [...this.live.values()];
+    this.live.clear();
+    for (const l of sessions) await l.session.close().catch(() => {});
+    this.store.flush();
+  }
+
+  onChange(cb: () => void): () => void {
+    this.changeListeners.add(cb);
+    return () => this.changeListeners.delete(cb);
+  }
+
+  onTranscript(cb: (taskId: string, item: TranscriptItem | null) => void): () => void {
+    this.transcriptListeners.add(cb);
+    return () => this.transcriptListeners.delete(cb);
+  }
+
+  private changed(): void {
+    this.store.save();
+    for (const cb of this.changeListeners) cb();
+  }
+
+  snapshot(): WorkspaceSnapshot {
+    const d = this.store.data;
+    return {
+      projects: d.projects,
+      tasks: d.tasks,
+      sessions: d.sessions,
+      attention: d.attention,
+      memory: d.memory,
+      coordinator: d.coordinator.slice(-50),
+      capabilities: this.capabilities,
+      settings: d.settings,
+      voice: {
+        sttAvailable: !!this.opts.openai,
+        routerLlmAvailable: !!this.opts.openai,
+        sttModel: this.opts.openai ? STT_MODEL : undefined,
+        routerModel: this.opts.openai ? ROUTER_MODEL : undefined,
+      },
+      dataDir: this.opts.dataDir,
+      connectedTaskIds: [...this.live.keys()],
+    };
+  }
+
+  transcript(taskId: string): TranscriptItem[] {
+    return this.store.transcript(taskId);
+  }
+
+  // ---------------------------------------------------------------- projects
+
+  async addProject(rootPath: string, name?: string): Promise<Project> {
+    const path = resolve(rootPath);
+    if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
+    const root = (await gitRoot(path)) ?? path;
+    const existing = this.store.data.projects.find((p) => p.rootPath === root);
+    if (existing) return existing;
+    const project: Project = {
+      projectId: `p-${randomUUID().slice(0, 8)}`,
+      name: name?.trim() || basename(root),
+      rootPath: root,
+      isGitRepo: !!(await gitRoot(root)),
+      createdAt: now(),
+    };
+    this.store.data.projects.push(project);
+    this.changed();
+    return project;
+  }
+
+  // ---------------------------------------------------------------- tasks
+
+  private task(taskId: string): Task {
+    const t = this.store.data.tasks.find((x) => x.taskId === taskId);
+    if (!t) throw new Error(`Unknown task ${taskId}`);
+    return t;
+  }
+
+  private project(projectId: string): Project {
+    const p = this.store.data.projects.find((x) => x.projectId === projectId);
+    if (!p) throw new Error(`Unknown project ${projectId}`);
+    return p;
+  }
+
+  async createTask(args: {
+    projectId: string;
+    provider: AgentProvider;
+    title: string;
+    name?: string;
+    instruction?: string;
+    isolate: boolean;
+    mockScript?: string;
+  }): Promise<Task> {
+    const project = this.project(args.projectId);
+    if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
+    const d = this.store.data;
+    const alias = aliasFor(d.aliasCounter++);
+    const taskId = `t-${randomUUID().slice(0, 8)}`;
+    let cwd = project.rootPath;
+    let worktree: Task['worktree'];
+    let sharedCwdWarning: string | undefined;
+    if (args.isolate && project.isGitRepo) {
+      try {
+        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`);
+        cwd = worktree.path;
+      } catch (error) {
+        sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
+      }
+    }
+    const sharers = d.tasks.filter((t) => t.cwd === cwd);
+    if (sharers.length) {
+      sharedCwdWarning = `Shares a writable directory with ${sharers.map((t) => `Agent ${t.alias}`).join(', ')} — edits are not isolated.`;
+      for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with Agent ${alias} — edits are not isolated.`;
+    }
+    const task: Task = {
+      taskId,
+      alias,
+      name: args.name?.trim() || alias,
+      projectId: project.projectId,
+      title: args.title.trim(),
+      provider: args.provider,
+      status: 'idle',
+      summary: 'Not started yet.',
+      cwd,
+      worktree,
+      sharedCwdWarning,
+      mockScript: args.mockScript,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    d.tasks.push(task);
+    this.changed();
+    if (args.instruction?.trim()) {
+      const r = await this.send(taskId, args.instruction, 'initial');
+      if (!r.ok) throw new Error(r.error);
+    }
+    return task;
+  }
+
+  rename(taskId: string, name: string): void {
+    const t = this.task(taskId);
+    t.name = name.trim() || t.alias;
+    t.updatedAt = now();
+    this.changed();
+  }
+
+  async remove(taskId: string): Promise<string> {
+    const t = this.task(taskId);
+    await this.stop(taskId);
+    let note = 'Task removed.';
+    if (t.worktree) {
+      const r = await this.worktrees.removeIfClean(t.worktree);
+      note = r.removed ? 'Task removed; its clean worktree was deleted.' : `Task removed; worktree kept at ${t.worktree.path} because ${r.reason}.`;
+    }
+    const d = this.store.data;
+    d.tasks = d.tasks.filter((x) => x.taskId !== taskId);
+    d.attention = d.attention.filter((a) => a.taskId !== taskId);
+    d.memory = d.memory.filter((m) => !(m.scope === 'task' && m.scopeId === taskId));
+    this.coordinatorSay(note);
+    this.changed();
+    return note;
+  }
+
+  // ---------------------------------------------------------------- sessions
+
+  private currentSession(task: Task): SessionRecord | undefined {
+    return this.store.data.sessions.find((s) => s.localId === task.sessionLocalId);
+  }
+
+  /** Connects the task to its provider: resumes the recorded native session, or creates one. */
+  private connect(taskId: string): Promise<LiveSession> {
+    const existing = this.live.get(taskId);
+    if (existing) return Promise.resolve(existing);
+    const pending = this.connecting.get(taskId);
+    if (pending) return pending;
+    const p = this.doConnect(taskId).finally(() => this.connecting.delete(taskId));
+    this.connecting.set(taskId, p);
+    return p;
+  }
+
+  private async doConnect(taskId: string): Promise<LiveSession> {
+    const task = this.task(taskId);
+    const adapter = this.opts.adapters[task.provider];
+    if (!adapter) throw new Error(`Provider ${task.provider} is not available.`);
+    const prev = this.currentSession(task);
+    const resumeId = prev?.nativeSessionId || undefined;
+    const record: SessionRecord = {
+      localId: `s-${randomUUID().slice(0, 8)}`,
+      taskId,
+      provider: task.provider,
+      nativeSessionId: resumeId ?? '',
+      cwd: task.cwd,
+      integrationMode: resumeId ? 'resumed' : 'managed',
+      createdAt: now(),
+    };
+    this.store.data.sessions.push(record);
+    task.sessionLocalId = record.localId;
+    task.status = 'starting';
+    task.lastError = undefined;
+    const injected = memoryForTask(task, this.store.data.memory);
+    task.injectedMemoryIds = injected.map((m) => m.id);
+    this.changed();
+
+    const history: TranscriptItem[] = [];
+    let replaying = true;
+    const session = adapter.createSession(
+      {
+        cwd: task.cwd,
+        title: task.title,
+        resumeNativeSessionId: resumeId,
+        developerInstructions: instructionsFor(task, injected),
+        mockScript: task.mockScript,
+      },
+      (event) => {
+        if (replaying && event.type === 'transcriptItem' && event.history) {
+          history.push({ id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() });
+          return;
+        }
+        this.handleEvent(taskId, record.localId, event);
+      },
+    );
+    const live: LiveSession = { localId: record.localId, session, turnActive: false };
+    this.live.set(taskId, live);
+    try {
+      await session.start();
+    } catch (error) {
+      this.live.delete(taskId);
+      const message = (error as Error).message;
+      task.status = 'failed';
+      task.lastError = message;
+      task.summary = `Could not ${resumeId ? 'resume' : 'start'} ${task.provider} session: ${clip(message, 140)}`;
+      this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
+      this.changed();
+      throw error;
+    } finally {
+      replaying = false;
+    }
+    // The native session is authoritative for history; replace the display cache with it.
+    if (history.length) {
+      this.store.setTranscript(taskId, [
+        ...history,
+        { id: `sys-${randomUUID()}`, taskId, role: 'system', text: `Resumed native ${task.provider} session ${record.nativeSessionId} (${history.length} items restored).`, createdAt: now() },
+      ]);
+      for (const cb of this.transcriptListeners) cb(taskId, null);
+    } else if (resumeId) {
+      this.appendSystem(taskId, `Resumed native ${task.provider} session ${resumeId}.`);
+    }
+    if (task.status === 'starting') task.status = 'idle';
+    task.summary = resumeId ? 'Session resumed with its previous conversation.' : task.summary;
+    this.changed();
+    return live;
+  }
+
+  async resume(taskId: string): Promise<void> {
+    await this.connect(taskId);
+  }
+
+  async stop(taskId: string): Promise<void> {
+    const l = this.live.get(taskId);
+    if (!l) return;
+    this.live.delete(taskId);
+    await l.session.close().catch(() => {});
+    const t = this.store.data.tasks.find((x) => x.taskId === taskId);
+    if (t) {
+      t.status = 'disconnected';
+      t.summary = 'Stopped. Resume to continue the same native session.';
+      this.expireNative(taskId, l.localId, 'Session stopped before this was answered.');
+      this.changed();
+    }
+  }
+
+  async interrupt(taskId: string): Promise<void> {
+    const l = this.live.get(taskId);
+    if (!l) throw new Error('This task is not connected.');
+    await l.session.interrupt();
+  }
+
+  async discoverSessions(projectId: string, provider: 'claude' | 'codex'): Promise<NativeSessionInfo[]> {
+    const adapter = this.opts.adapters[provider];
+    if (!adapter) throw new Error(`Provider ${provider} is not available.`);
+    const project = this.project(projectId);
+    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const found = await adapter.discoverSessions({ cwd: project.rootPath });
+    return found.filter((s) => !known.has(s.nativeSessionId));
+  }
+
+  /** Adopts a provider session created outside the app (historical resume, not live attach). */
+  importSession(args: { projectId: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; title: string }): Task {
+    this.project(args.projectId);
+    const d = this.store.data;
+    const alias = aliasFor(d.aliasCounter++);
+    const taskId = `t-${randomUUID().slice(0, 8)}`;
+    const record: SessionRecord = {
+      localId: `s-${randomUUID().slice(0, 8)}`,
+      taskId,
+      provider: args.provider,
+      nativeSessionId: args.nativeSessionId,
+      cwd: args.cwd,
+      integrationMode: 'resumed',
+      createdAt: now(),
+    };
+    const sharers = d.tasks.filter((t) => t.cwd === args.cwd);
+    const task: Task = {
+      taskId,
+      alias,
+      name: alias,
+      projectId: args.projectId,
+      title: clip(args.title, 120),
+      provider: args.provider,
+      status: 'disconnected',
+      summary: 'Imported from existing history. Resume to continue (this does not attach to a process running elsewhere).',
+      cwd: args.cwd,
+      sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => `Agent ${t.alias}`).join(', ')} — not isolated.` : undefined,
+      sessionLocalId: record.localId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    d.sessions.push(record);
+    d.tasks.push(task);
+    this.changed();
+    return task;
+  }
+
+  // ---------------------------------------------------------------- messaging
+
+  /** Delivers text to exactly this task's native session. Never re-routed. */
+  async send(taskId: string, text: string, via: TranscriptItem['via']): Promise<DispatchResult> {
+    const task = this.task(taskId);
+    try {
+      const live = await this.connect(taskId);
+      const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now() };
+      this.upsertTranscript(taskId, item);
+      await live.session.send(text);
+      // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision).
+      for (const a of this.store.data.attention)
+        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && a.kind !== 'error')
+          this.closeAttention(a, 'resolved', `Replied: ${clip(text, 80)}`);
+      live.turnActive = true;
+      if (!this.hasOpenNative(taskId)) task.status = 'running';
+      task.summary = `Working on: ${clip(text, 120)}`;
+      task.updatedAt = now();
+      this.changed();
+      return { ok: true, taskId };
+    } catch (error) {
+      const message = (error as Error).message;
+      this.appendSystem(taskId, `Message not delivered: ${message}`);
+      this.changed();
+      return { ok: false, taskId, error: message };
+    }
+  }
+
+  // ---------------------------------------------------------------- provider events
+
+  handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
+    const task = this.store.data.tasks.find((t) => t.taskId === taskId);
+    const live = this.live.get(taskId);
+    // Late events from a replaced or stopped session must not touch the task.
+    if (!task || task.sessionLocalId !== sessionLocalId || !live || live.localId !== sessionLocalId) {
+      this.log('dropped stale event', taskId, sessionLocalId, event.type);
+      return;
+    }
+    task.updatedAt = now();
+    switch (event.type) {
+      case 'sessionStarted': {
+        const rec = this.store.data.sessions.find((s) => s.localId === sessionLocalId);
+        if (rec) {
+          rec.nativeSessionId = event.nativeSessionId;
+          rec.integrationMode = event.resumed ? 'resumed' : 'managed';
+        }
+        break;
+      }
+      case 'transcriptItem':
+        this.upsertTranscript(taskId, {
+          id: event.itemId,
+          taskId,
+          role: event.role,
+          text: event.text,
+          toolLabel: event.toolLabel,
+          toolStatus: event.toolStatus,
+          streaming: false,
+          createdAt: now(),
+        });
+        if (event.role === 'assistant' && !event.history) task.summary = summaryFor(event.text);
+        return this.changedThrottled();
+      case 'outputDelta': {
+        const items = this.store.transcript(taskId);
+        let item = items.find((i) => i.id === event.itemId);
+        if (!item) {
+          item = { id: event.itemId, taskId, role: event.role, text: '', streaming: true, createdAt: now() };
+          items.push(item);
+        }
+        item.text += event.delta;
+        this.store.touchTranscript(taskId);
+        this.emitTranscript(taskId, item);
+        return;
+      }
+      case 'turnStarted':
+        live.turnActive = true;
+        if (!this.hasOpenNative(taskId)) task.status = 'running';
+        break;
+      case 'progress':
+        task.summary = clip(event.text, 200);
+        return this.changedThrottled();
+      case 'approvalRequested':
+        if (!this.findOpenByRequest(taskId, event.requestId)) {
+          this.addAttention({
+            taskId,
+            sessionLocalId,
+            providerRequestId: event.requestId,
+            kind: 'approval',
+            headline: clip(event.headline, 200),
+            details: event.details,
+            options: event.options,
+            highRisk: event.highRisk,
+          });
+        }
+        task.status = 'waiting_for_user';
+        task.summary = `Waiting for your approval: ${clip(event.headline, 140)}`;
+        break;
+      case 'userInputRequested':
+        if (!this.findOpenByRequest(taskId, event.requestId)) {
+          this.addAttention({
+            taskId,
+            sessionLocalId,
+            providerRequestId: event.requestId,
+            kind: 'question',
+            headline: clip(event.headline, 200),
+            details: event.questions.map((q) => q.question).join('\n'),
+            questions: event.questions,
+          });
+        }
+        task.status = 'waiting_for_user';
+        task.summary = `Asked: ${clip(event.headline, 160)}`;
+        break;
+      case 'requestResolved': {
+        const a = this.findOpenByRequest(taskId, event.requestId);
+        if (a) this.closeAttention(a, 'expired', `Withdrawn by the provider (${event.reason}).`);
+        if (!this.hasOpenNative(taskId) && live.turnActive) task.status = 'running';
+        break;
+      }
+      case 'turnCompleted': {
+        live.turnActive = false;
+        for (const it of this.store.transcript(taskId)) if (it.streaming) it.streaming = false;
+        if (event.status === 'interrupted') {
+          task.status = 'idle';
+          task.summary = 'Interrupted. Waiting for your next instruction.';
+          break;
+        }
+        if (event.status === 'failed') {
+          task.status = 'failed';
+          task.lastError = event.error;
+          task.summary = `Turn failed: ${clip(event.error ?? 'unknown error', 160)}`;
+          this.addAttention({ taskId, kind: 'error', headline: task.summary, details: event.error ?? '' });
+          break;
+        }
+        const text = event.finalText?.trim() ?? '';
+        // Supersede this task's older completion notes; other tasks' items are never touched.
+        for (const a of this.store.data.attention)
+          if (a.taskId === taskId && a.state === 'open' && a.kind === 'completion') this.closeAttention(a, 'resolved', 'Superseded by a newer report.');
+        if (text && asksUser(text)) {
+          task.status = 'waiting_for_user';
+          task.summary = summaryFor(text);
+          this.addAttention({ taskId, kind: 'question', headline: headlineFor(text), details: text });
+        } else {
+          task.status = this.hasOpenNative(taskId) ? 'waiting_for_user' : 'done';
+          task.summary = text ? summaryFor(text) : 'Finished the turn.';
+          this.addAttention({ taskId, kind: 'completion', headline: text ? headlineFor(text) : 'Finished the turn.', details: text });
+        }
+        break;
+      }
+      case 'sessionFailed':
+      case 'sessionDisconnected': {
+        this.live.delete(taskId);
+        const reason = event.type === 'sessionFailed' ? event.error : event.reason;
+        task.status = event.type === 'sessionFailed' ? 'failed' : 'disconnected';
+        task.lastError = reason;
+        task.summary = `${event.type === 'sessionFailed' ? 'Session failed' : 'Disconnected'}: ${clip(reason, 140)}`;
+        this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
+        if (event.type === 'sessionFailed') this.addAttention({ taskId, kind: 'error', headline: task.summary, details: reason });
+        break;
+      }
+    }
+    this.changed();
+  }
+
+  private throttle?: NodeJS.Timeout;
+  private changedThrottled(): void {
+    if (this.throttle) return;
+    this.throttle = setTimeout(() => {
+      this.throttle = undefined;
+      this.changed();
+    }, 120);
+  }
+
+  // ---------------------------------------------------------------- attention
+
+  private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
+    const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
+    this.store.data.attention.push(item);
+    return item;
+  }
+
+  private closeAttention(a: AttentionItem, state: AttentionItem['state'], resolution: string): void {
+    a.state = state;
+    a.resolvedAt = now();
+    a.resolution = resolution;
+  }
+
+  private findOpenByRequest(taskId: string, requestId: string): AttentionItem | undefined {
+    return this.store.data.attention.find((a) => a.taskId === taskId && a.providerRequestId === requestId && a.state === 'open');
+  }
+
+  private hasOpenNative(taskId: string): boolean {
+    return this.store.data.attention.some((a) => a.taskId === taskId && a.state === 'open' && !!a.providerRequestId);
+  }
+
+  private expireNative(taskId: string, sessionLocalId: string, why: string): void {
+    for (const a of this.store.data.attention)
+      if (a.taskId === taskId && a.state === 'open' && a.providerRequestId && a.sessionLocalId === sessionLocalId) this.closeAttention(a, 'expired', why);
+  }
+
+  /** Answers a native approval / question through the provider's own request id. */
+  async respondAttention(attentionId: string, decision?: string, answers?: Record<string, string>): Promise<void> {
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    if (!a) throw new Error('Unknown attention item.');
+    if (a.state !== 'open') throw new Error(`This request is already ${a.state}.`);
+    if (!a.providerRequestId) throw new Error('This report is answered by replying to the agent.');
+    const live = this.live.get(a.taskId);
+    if (!live || live.localId !== a.sessionLocalId) {
+      this.closeAttention(a, 'expired', 'The session that asked this is no longer connected.');
+      this.changed();
+      throw new Error('That provider session is no longer connected; the request expired.');
+    }
+    if (a.kind === 'approval' && !a.options?.some((o) => o.id === decision)) throw new Error('Choose one of the provider-offered decisions.');
+    await live.session.respond(a.providerRequestId, { decision, answers });
+    const label = a.kind === 'approval' ? (a.options?.find((o) => o.id === decision)?.label ?? decision) : `Answered: ${clip(Object.values(answers ?? {}).join(', '), 80)}`;
+    this.closeAttention(a, 'resolved', String(label));
+    const task = this.task(a.taskId);
+    if (!this.hasOpenNative(a.taskId)) task.status = live.turnActive ? 'running' : task.status;
+    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${task.provider}: ${label}`);
+    this.changed();
+  }
+
+  dismissAttention(attentionId: string): void {
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    if (!a || a.state !== 'open') return;
+    // Dismissing a native request does not answer it; the provider keeps waiting.
+    if (a.providerRequestId) throw new Error('Native requests must be answered (allow/deny), not dismissed.');
+    this.closeAttention(a, 'dismissed', 'Dismissed by user.');
+    const task = this.task(a.taskId);
+    if (task.status === 'waiting_for_user' && !this.store.data.attention.some((x) => x.taskId === a.taskId && x.state === 'open' && x.kind === 'question'))
+      task.status = 'done';
+    this.changed();
+  }
+
+  // ---------------------------------------------------------------- transcript
+
+  private upsertTranscript(taskId: string, item: TranscriptItem): void {
+    const items = this.store.transcript(taskId);
+    const i = items.findIndex((x) => x.id === item.id);
+    if (i === -1) items.push(item);
+    else {
+      const prev = items[i];
+      items[i] = {
+        ...prev,
+        ...item,
+        text: item.text || prev.text,
+        toolLabel: item.toolLabel ?? prev.toolLabel,
+        createdAt: prev.createdAt,
+      };
+    }
+    this.store.touchTranscript(taskId);
+    this.emitTranscript(taskId, items[i === -1 ? items.length - 1 : i]);
+  }
+
+  private appendSystem(taskId: string, text: string): void {
+    this.upsertTranscript(taskId, { id: `sys-${randomUUID()}`, taskId, role: 'system', text, createdAt: now() });
+  }
+
+  private emitTranscript(taskId: string, item: TranscriptItem): void {
+    for (const cb of this.transcriptListeners) cb(taskId, item);
+  }
+
+  // ---------------------------------------------------------------- routing
+
+  routeContext(utterance: string, focusedTaskId: string | null): RouteContext {
+    const d = this.store.data;
+    return {
+      utterance,
+      focusedTaskId,
+      projects: d.projects.map((p) => ({ projectId: p.projectId, name: p.name })),
+      tasks: d.tasks.map((t) => ({
+        taskId: t.taskId,
+        alias: t.alias,
+        name: t.name,
+        title: t.title,
+        projectId: t.projectId,
+        projectName: d.projects.find((p) => p.projectId === t.projectId)?.name ?? '',
+        provider: t.provider,
+        status: t.status,
+        summary: t.summary,
+        pending: d.attention.filter((a) => a.taskId === t.taskId && a.state === 'open').map((a) => a.headline),
+      })),
+    };
+  }
+
+  async decideRoute(utterance: string, focusedTaskId: string | null): Promise<RouteDecision> {
+    const ai = this.opts.openai;
+    return decideRoute(this.routeContext(utterance, focusedTaskId), ai ? (ctx) => ai.routeClassify(ctx) : undefined);
+  }
+
+  /** Sends a confirmed voice/coordinator utterance. The visual focus is never changed here. */
+  async dispatch(
+    utterance: string,
+    target:
+      | { kind: 'existing'; taskId: string }
+      | { kind: 'coordinator' }
+      | { kind: 'create'; projectId: string; provider: AgentProvider; title: string },
+    focusedTaskId: string | null = null,
+  ): Promise<DispatchResult & { reply?: string }> {
+    if (target.kind === 'existing') return this.send(target.taskId, utterance, 'voice');
+    if (target.kind === 'create') {
+      try {
+        const task = await this.createTask({ projectId: target.projectId, provider: target.provider, title: target.title, instruction: utterance, isolate: true });
+        this.coordinatorSay(`Started Agent ${task.alias} (${task.provider}) for "${task.title}".`, utterance);
+        return { ok: true, taskId: task.taskId };
+      } catch (error) {
+        return { ok: false, error: (error as Error).message };
+      }
+    }
+    const reply = this.coordinatorAnswer(utterance, focusedTaskId);
+    this.coordinatorSay(reply, utterance);
+    this.changed();
+    return { ok: true, reply };
+  }
+
+  private coordinatorSay(text: string, userText?: string): void {
+    const d = this.store.data;
+    if (userText) d.coordinator.push({ id: `c-${randomUUID().slice(0, 8)}`, createdAt: now(), role: 'user', text: userText } satisfies CoordinatorEntry);
+    d.coordinator.push({ id: `c-${randomUUID().slice(0, 8)}`, createdAt: now(), role: 'coordinator', text });
+    if (d.coordinator.length > 200) d.coordinator.splice(0, d.coordinator.length - 200);
+  }
+
+  /** Workspace-level answers, computed locally from the registry (no worker transcript is touched). */
+  private coordinatorAnswer(utterance: string, focusedTaskId: string | null): string {
+    const d = this.store.data;
+    const memory = /^(记住|请记住|保存|remember|save)\s*[:：,，]?\s*/i;
+    if (memory.test(utterance)) {
+      const body = utterance.replace(memory, '').trim();
+      const focused = d.tasks.find((t) => t.taskId === focusedTaskId);
+      const global = /全局|所有项目|all (my )?projects|globally|\bglobal\b|everywhere|always for me/i.test(utterance);
+      const projectScoped = /项目|仓库|repo|project/i.test(utterance);
+      let scope: MemoryScope = 'task';
+      let scopeId = focused?.taskId ?? '';
+      if (global) {
+        scope = 'global';
+        scopeId = 'global';
+      } else if (projectScoped && focused) {
+        scope = 'project';
+        scopeId = focused.projectId;
+      } else if (projectScoped && d.projects.length === 1) {
+        scope = 'project';
+        scopeId = d.projects[0].projectId;
+      }
+      if (!scopeId) return 'Not saved: open a task first (or say "for this project" / "globally") so I know the scope.';
+      const rec = this.addMemory({ scope, scopeId, body, originTaskId: focused?.taskId, approvedForReuse: scope !== 'task', source: 'voice' });
+      const where = scope === 'global' ? 'global preferences' : scope === 'project' ? `project "${d.projects.find((p) => p.projectId === scopeId)?.name}"` : `Agent ${focused?.alias}'s task notes`;
+      return `Saved to ${where}: "${clip(rec.body, 100)}". New sessions in that scope will load it; running sessions are not rewritten.`;
+    }
+    const open = d.attention.filter((a) => a.state === 'open');
+    const lines = d.tasks.map((t) => {
+      const items = open.filter((a) => a.taskId === t.taskId);
+      return `Agent ${t.alias} (${t.name !== t.alias ? `${t.name}, ` : ''}${t.provider}) — ${t.status.replace(/_/g, ' ')}${items.length ? `; waiting on: ${items.map((a) => a.headline).join(' | ')}` : ''}`;
+    });
+    if (!lines.length) return 'No tasks yet. Say "start a new Claude task for …" or use New task.';
+    return `${open.length} open item(s) across ${d.tasks.length} task(s):\n${lines.join('\n')}`;
+  }
+
+  // ---------------------------------------------------------------- memory
+
+  addMemory(m: Omit<MemoryRecord, 'id' | 'updatedAt'>): MemoryRecord {
+    const rec: MemoryRecord = { ...m, id: `m-${randomUUID().slice(0, 8)}`, updatedAt: now() };
+    this.store.data.memory.push(rec);
+    this.changed();
+    return rec;
+  }
+
+  updateMemory(id: string, patch: { body?: string; approvedForReuse?: boolean }): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) throw new Error('Unknown memory record.');
+    if (patch.body !== undefined) m.body = patch.body;
+    if (patch.approvedForReuse !== undefined) m.approvedForReuse = patch.approvedForReuse;
+    m.updatedAt = now();
+    this.changed();
+  }
+
+  deleteMemory(id: string): void {
+    this.store.data.memory = this.store.data.memory.filter((m) => m.id !== id);
+    this.changed();
+  }
+
+  /** Explicit promotion: copies a note upward with provenance; the original stays. */
+  promoteMemory(id: string, scope: 'project' | 'global'): MemoryRecord {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) throw new Error('Unknown memory record.');
+    let scopeId = 'global';
+    if (scope === 'project') {
+      const origin = m.originTaskId ?? (m.scope === 'task' ? m.scopeId : undefined);
+      const task = this.store.data.tasks.find((t) => t.taskId === origin);
+      if (m.scope === 'project') scopeId = m.scopeId;
+      else if (task) scopeId = task.projectId;
+      else throw new Error('Cannot tell which project this note belongs to.');
+    }
+    return this.addMemory({ scope, scopeId, body: m.body, originTaskId: m.originTaskId ?? (m.scope === 'task' ? m.scopeId : undefined), approvedForReuse: true, source: `promoted from ${m.scope} note ${m.id}` });
+  }
+
+  updateSettings(patch: Partial<Settings>): void {
+    Object.assign(this.store.data.settings, patch);
+    this.changed();
+  }
+
+  // ---------------------------------------------------------------- demo
+
+  /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
+  async seedDemo(demoRepoPath: string): Promise<void> {
+    const project = await this.addProject(demoRepoPath, 'demo-shop');
+    const mk = (provider: AgentProvider, name: string, title: string, mockScript: string, instruction: string) =>
+      this.createTask({ projectId: project.projectId, provider, name, title, mockScript, instruction, isolate: true });
+    await mk('mock', 'backend', 'Backend API v2 endpoints', 'ask:Legacy tests depend on the old /v1/orders API. Should I keep a compatibility adapter, or update the tests to v2?', 'Migrate the orders endpoints to API v2.');
+    await mk('mock', 'frontend', 'Frontend dashboard components', 'work', 'Build the dashboard components.');
+    await mk('mock', 'database', 'Database schema migration', 'ask:The schema migration drops the legacy `orders.notes` column, which has data in 1,204 rows. That is a data-loss risk. Should I proceed, or add a backfill step first?', 'Write the schema migration for the new orders table.');
+  }
+}

@@ -1,0 +1,10 @@
+openai.key
+.env
+.DS_Store
+research/
+app/node_modules/
+app/.cache/
+app/.data/
+app/out/
+app/test-results/
+app/.npmrc.local
