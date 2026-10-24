@@ -25,6 +25,12 @@ const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : und
 const filePath = (i: Rec) => str(i.file_path) || str(i.path) || str(i.notebook_path);
 const fileContent = (i: Rec) => str(i.content) || str(i.file_text) || str(i.file_content);
 
+/** First line of a multi-line command (heredocs, scripts), marked as truncated. */
+export function firstLine(command: string): string {
+  const [head, ...rest] = command.trim().split('\n');
+  return rest.length ? `${head} …` : head;
+}
+
 export function displayPath(path: string, cwd: string): string {
   if (!path) return '';
   if (!isAbsolute(path)) return path;
@@ -91,7 +97,8 @@ export function claudeToolCall(name: string, input: Rec, cwd: string): ToolCallI
       break;
     case 'Bash': {
       const command = str(input.command);
-      title = `$ ${command}`;
+      // Claude writes a short description for each command ("Run unit tests"); prefer it.
+      title = str(input.description) || `$ ${firstLine(command)}`;
       content.push({ type: 'terminal', command, output: '', background: input.run_in_background === true });
       break;
     }

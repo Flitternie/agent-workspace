@@ -166,7 +166,26 @@ class MockSession implements ProviderSession {
         reply = `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
       } else if (first) {
         this.emitDemoWork();
-        reply = `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`;
+        // Rich Markdown, as real agents write it: heading, list, task list, table, code.
+        reply = [
+          `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`,
+          '',
+          '### What changed',
+          '- `OrderCard` and `OrderList` now render the **v2** fields',
+          '- Totals are computed in one place: see [orders.ts](https://example.com/orders)',
+          '',
+          '- [x] Cards',
+          '- [ ] Charts',
+          '',
+          '| Component | Status |',
+          '| --- | --- |',
+          '| OrderCard | done |',
+          '| RevenueChart | todo |',
+          '',
+          '```ts',
+          'export const total = (o: Order) => o.items.reduce((sum, i) => sum + i.price, 0);',
+          '```',
+        ].join('\n');
       } else {
         reply =
           `(turn ${userTurns + 1}, I remember ${this.history?.messages.length ?? 0} prior messages) ` +

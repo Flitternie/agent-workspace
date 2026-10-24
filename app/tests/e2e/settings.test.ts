@@ -59,6 +59,8 @@ describe('real entry: first run, settings, language', () => {
       expect(await page.getByTestId('composer-target').innerText()).toContain('小王');
       // The past conversation is shown right away, without resuming anything.
       await expect.poll(() => page.getByTestId('transcript').locator('.msg').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: join(shots, 'session-history-zh.png') });
       await page.screenshot({ path: join(shots, 'session-imported-zh.png') });
       await page.keyboard.press('Escape');
     } else await page.keyboard.press('Escape');

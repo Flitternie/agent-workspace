@@ -5,6 +5,7 @@ export default defineConfig({
   root: 'src/renderer',
   base: './',
   plugins: [react()],
-  build: { outDir: '../../out/renderer', emptyOutDir: true },
+  // Loaded from disk by Electron, so one larger bundle (Markdown + highlight.js) is fine.
+  build: { outDir: '../../out/renderer', emptyOutDir: true, chunkSizeWarningLimit: 1200 },
   server: { port: 5199, strictPort: true },
 });

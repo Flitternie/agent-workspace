@@ -3,7 +3,8 @@ import type { MemoryRecord, Task, TranscriptItem, WorkspaceSnapshot } from '../.
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
-import { Alias, displayName, Icon, Kbd, Markdown, PROVIDER_LABEL, ProviderTag, StatusDot } from './bits';
+import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot } from './bits';
+import { Markdown } from './Markdown';
 import { t } from '../i18n';
 
 export function FocusView({ snapshot, task, transcript, now }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number }) {
@@ -181,7 +182,7 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
           return (
             <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
               {item.role === 'user' ? <div className="msg-via">{t('You')}{item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : ''}</div> : null}
-              {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} />}
+              {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} streaming={item.streaming} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
           );

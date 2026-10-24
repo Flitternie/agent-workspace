@@ -58,3 +58,5 @@ src/renderer/    React UI: Overview cards, Focus, voice dock, memory panel
 ```
 
 Provider protocol handling was informed by Parallel Code (MIT, © Johannes Millan). The unified content model follows the Agent Client Protocol and its claude-code-acp / codex-acp adapters (Apache-2.0, Zed Industries) and vibe-kanban's normalized logs (Apache-2.0, BloopAI); ideas only, no code copied.
+
+Markdown rendering uses react-markdown, remark-gfm, remark-breaks and rehype-highlight (MIT). Its link/HTML safety rules follow Parallel Code's chat renderer (MIT); the library choice follows vibe-kanban (Apache-2.0). Only ideas were borrowed, no code.

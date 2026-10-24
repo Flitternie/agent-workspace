@@ -83,6 +83,14 @@ describe('end-to-end demo script (mock agents)', () => {
     expect(await page.getByTestId('diff').first().innerText()).toMatch(/\+5[\s\S]*−2/);
     expect(await page.getByTestId('tool-call').filter({ hasText: 'npm test -- orders' }).count()).toBe(1);
     expect(await page.getByTestId('plan').innerText()).toContain('Plan 2/4');
+    // Agent Markdown: GFM table, task list, highlighted code with a copy button, safe links.
+    const md = page.getByTestId('transcript').locator('.md').filter({ hasText: 'What changed' });
+    expect(await md.locator('h3').innerText()).toBe('What changed');
+    expect(await md.locator('table tr').count()).toBe(3);
+    expect(await md.locator('input[type="checkbox"]:checked').count()).toBe(1);
+    expect(await md.locator('.md-code .hljs-keyword').count()).toBeGreaterThan(0);
+    expect(await md.locator('a[href="https://example.com/orders"]').count()).toBe(1);
+    await md.locator('h3').scrollIntoViewIfNeeded();
     await shot(page, '02b-focus-B-structured');
     const dock = page.getByTestId('dock-input');
     await dock.fill('Alice, add a regression test');

@@ -6,11 +6,21 @@ const QUESTION_END = /[?？]\s*$/;
 const ASKING =
   /\b(should i|shall i|do you want|would you like|which (one|option)|can you confirm|please confirm|let me know|how would you like)\b|要不要|是否|需要我|你希望|请确认|确认一下/i;
 
-function sentences(text: string): string[] {
+/** Markdown → plain prose for one-line reports: no code blocks, tables or markup. */
+function plain(text: string): string {
   return text
-    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/```[\s\S]*?```/g, '\n')
+    .replace(/^\s*\|.*$/gm, '') // table rows and separators
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s*/gm, '') // task-list markers
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // links and images → their text
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/(\*\*|__|~~)(.*?)\1/g, '$2');
+}
+
+function sentences(text: string): string[] {
+  return plain(text)
     .split(/(?<=[.!?])\s+|(?<=[。！？])|\n+/)
-    .map((s) => s.replace(/^[#>*\-\s]+/, '').replace(/\*\*/g, '').trim())
+    .map((s) => s.replace(/^[#>*\-+\s]+/, '').replace(/^\d+[.)]\s+/, '').trim())
     .filter((s) => s.length > 1);
 }
 

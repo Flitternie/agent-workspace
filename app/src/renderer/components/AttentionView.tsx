@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { AttentionItem, Task } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
-import { Icon, KIND_LABEL, Markdown, PROVIDER_LABEL } from './bits';
+import { Icon, KIND_LABEL, PROVIDER_LABEL } from './bits';
+import { Markdown } from './Markdown';
 import { ToolContentView } from './Content';
 import { t } from '../i18n';
 

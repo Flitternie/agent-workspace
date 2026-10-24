@@ -9,6 +9,7 @@ import type {
 import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
+import { cleanUserText } from './user-text';
 import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
@@ -397,8 +398,8 @@ class ClaudeSession implements ProviderSession {
     if (type === 'user') {
       const content = rec(m.message).content;
       if (typeof content === 'string') {
-        if (history && content.trim() && !content.startsWith('<'))
-          this.emit({ type: 'transcriptItem', itemId: str(m.uuid), role: 'user', text: content, history });
+        const text = history ? cleanUserText(content) : '';
+        if (text) this.emit({ type: 'transcriptItem', itemId: str(m.uuid), role: 'user', text, history });
         return;
       }
       const blocks = Array.isArray(content) ? content : [];
@@ -427,9 +428,8 @@ class ClaudeSession implements ProviderSession {
             if (plan && !history) this.emit({ type: 'planUpdated', entries: plan });
           }
         } else if (block.type === 'text' && history) {
-          const text = str(block.text);
-          if (text.trim() && !text.startsWith('<'))
-            this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:t`, role: 'user', text, history });
+          const text = cleanUserText(str(block.text));
+          if (text) this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:t`, role: 'user', text, history });
         }
       }
       return;

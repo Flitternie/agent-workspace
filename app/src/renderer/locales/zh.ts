@@ -224,6 +224,8 @@ export const zh: Record<string, string> = {
   'Create task': '创建',
   'Looking for sessions…': '查找中…',
   Import: '导入',
+  Copy: '复制',
+  Copied: '已复制',
   'Continue an existing session': '接入已有会话',
   'Conversations you had with Claude Code or Codex on this Mac, in any folder. Importing continues that conversation here with its full history. It does not take over a session that is still open in a terminal — close that one first so the two do not edit at the same time.':
     '这台 Mac 上用 Claude Code 或 Codex 进行过的会话（任意目录）。导入后带着完整历史在这里接着聊。不会接管仍在终端里打开的会话，请先关掉那边，避免两边同时改代码。',

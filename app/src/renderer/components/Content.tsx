@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
-import { Icon, Markdown, type IconName } from './bits';
+import { Icon, type IconName } from './bits';
+import { Markdown } from './Markdown';
 import { t, t as tr } from '../i18n';
 
 // One renderer per normalized content type. Claude and Codex both arrive here in
@@ -205,7 +206,7 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
       <summary>
         <span className="tool-status">{STATUS_ICON[status]}</span>
         <Icon name={KIND_ICON[tool?.kind ?? 'other']} size={13} />
-        <span className="tool-label truncate">{tool?.title || item.toolLabel || t('Tool')}</span>
+        <span className={`tool-label truncate${/^(\$ |Read |Edit |Write |Search |Find |Fetch )/.test(tool?.title ?? '') ? '' : ' prose'}`}>{tool?.title || item.toolLabel || t('Tool')}</span>
         {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : null}
         {STATUS_TEXT[status] ? <span className={`tool-state state-${status}`}>{t(STATUS_TEXT[status]!)}</span> : null}
         {!openByDefault && (hasOutput || item.text) ? <span className="tool-more">{t('details')}</span> : null}

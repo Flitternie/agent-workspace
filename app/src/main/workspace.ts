@@ -247,7 +247,7 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
-    if (!args.name?.trim()) this.autoRole(task, `${args.title}\n${args.instruction ?? ''}`);
+    if (!args.name?.trim()) this.autoRole(task, args.title, args.instruction);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -287,9 +287,11 @@ export class Workspace {
    * Gives an unnamed agent a one-word role in the language of its name: a keyword
    * guess now, refined by the LLM when configured. A role the user sets wins.
    */
-  private autoRole(task: Task, text: string): void {
+  private autoRole(task: Task, title: string, instruction = ''): void {
     const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
-    const guess = guessRole(text, lang);
+    const text = `${title}\n${instruction}`.trim();
+    // The title says what the agent is for; the instruction only breaks ties.
+    const guess = guessRole(title, lang) ?? guessRole(instruction, lang);
     if (guess) task.name = guess;
     const auto = task.name;
     const ai = this.opts.openai;

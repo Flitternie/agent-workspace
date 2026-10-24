@@ -13,7 +13,8 @@ import {
   type ToolContent,
 } from '../../shared/content';
 import type { ToolStatus, TranscriptRole } from '../../shared/types';
-import { displayPath } from './claude-content';
+import { displayPath, firstLine } from './claude-content';
+import { cleanUserText } from './user-text';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : {});
@@ -78,10 +79,12 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
     }
     case 'userMessage': {
       if (!opts.history) return undefined; // the workspace already shows what the user sent
-      const text = arr(item.content)
-        .map((c) => str(rec(c).text))
-        .filter(Boolean)
-        .join('\n');
+      const text = cleanUserText(
+        arr(item.content)
+          .map((c) => str(rec(c).text))
+          .filter(Boolean)
+          .join('\n'),
+      );
       return text ? { id, role: 'user', text } : undefined;
     }
     case 'reasoning': {
@@ -104,7 +107,7 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
         ? `Read ${reads.map((a) => displayPath(str(a.path) || str(a.name), opts.cwd)).join(', ')}`
         : allSearch && actions[0]?.type === 'search' && str(actions[0].query)
           ? `Search “${str(actions[0].query)}”${str(actions[0].path) ? ` in ${displayPath(str(actions[0].path), opts.cwd)}` : ''}`
-          : `$ ${command}`;
+          : `$ ${firstLine(command)}`;
       return {
         id,
         role: 'tool',
