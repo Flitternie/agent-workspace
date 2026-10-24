@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
 import { Alias, displayName, Icon, Kbd, Markdown, PROVIDER_LABEL, ProviderTag, StatusDot } from './bits';
+import { t } from '../i18n';
 
 export function FocusView({ snapshot, task, transcript, now }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
@@ -44,36 +45,36 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
                   {session.integrationMode} · {session.nativeSessionId.slice(0, 8)}
                 </span>
               ) : null}
-              {task.injectedMemoryIds?.length ? <span>{task.injectedMemoryIds.length} memory note(s) loaded</span> : null}
+              {task.injectedMemoryIds?.length ? <span>{t('{n} memory note(s) loaded', { n: task.injectedMemoryIds.length })}</span> : null}
             </div>
           </div>
           <div className="focus-actions">
             {task.status === 'running' && connected ? (
               <button className="btn" onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
-                <Icon name="pause" /> Interrupt
+                <Icon name="pause" /> {t('Interrupt')}
               </button>
             ) : null}
             {!connected ? (
-              <button className="btn" onClick={() => run(() => call('task:resume', { taskId: task.taskId }))} title="Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.">
-                <Icon name="play" /> {session?.nativeSessionId ? 'Resume session' : 'Start session'}
+              <button className="btn" onClick={() => run(() => call('task:resume', { taskId: task.taskId }))} title={t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}>
+                <Icon name="play" /> {session?.nativeSessionId ? t('Resume session') : t('Start session')}
               </button>
             ) : (
               <button className="btn" onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
-                <Icon name="power" /> Stop
+                <Icon name="power" /> {t('Stop')}
               </button>
             )}
             <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
-              <Icon name="note" /> Memory
+              <Icon name="note" /> {t('Memory')}
             </button>
             <button
               className="btn"
               data-testid="remove-task"
-              title="Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk."
+              title={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
               onClick={() => {
-                if (window.confirm(`Remove ${displayName(task)}? A worktree with uncommitted changes is kept on disk.`)) run(() => call('task:remove', { taskId: task.taskId }));
+                if (window.confirm(t('Remove {name}? A worktree with uncommitted changes is kept on disk.', { name: displayName(task) }))) run(() => call('task:remove', { taskId: task.taskId }));
               }}
             >
-              Remove
+              {t('Remove')}
             </button>
           </div>
         </header>
@@ -114,7 +115,7 @@ function TaskName({ task }: { task: Task }) {
   useEffect(() => setName(task.name), [task.name]);
   if (!editing)
     return (
-      <span className="task-name" onDoubleClick={() => setEditing(true)} title="Double-click to rename">
+      <span className="task-name" onDoubleClick={() => setEditing(true)} title={t('Double-click to rename')}>
         {displayName(task)}
       </span>
     );
@@ -154,7 +155,7 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
       }}
     >
       <div className="transcript-inner">
-        {items.length === 0 ? <div className="muted pad">No messages yet. Type below to give this agent its first instruction.</div> : null}
+        {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
         {groupTranscript(items).map((entry) => {
           if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} />;
           const item = entry;
@@ -163,7 +164,7 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
             return (
               <details key={item.id} className="msg thought">
                 <summary>
-                  <Icon name="bulb" size={13} /> Thinking{item.streaming ? '…' : ''}
+                  <Icon name="bulb" size={13} /> {t('Thinking')}{item.streaming ? '…' : ''}
                 </summary>
                 <Markdown text={item.text} />
               </details>
@@ -172,14 +173,14 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
             return (
               <div key={item.id} className="msg plan-proposal" data-testid="plan-proposal">
                 <div className="section-label">
-                  <Icon name="list" size={12} /> Proposed plan
+                  <Icon name="list" size={12} /> {t('Proposed plan')}
                 </div>
                 <Markdown text={item.text} />
               </div>
             );
           return (
             <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
-              {item.role === 'user' ? <div className="msg-via">You{item.via === 'voice' ? ' · voice' : item.via === 'card' ? ' · from tile' : ''}</div> : null}
+              {item.role === 'user' ? <div className="msg-via">{t('You')}{item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : ''}</div> : null}
               {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
@@ -202,7 +203,7 @@ function Composer({ task }: { task: Task }) {
     try {
       const r = await call('task:send', { taskId: task.taskId, text, via: 'text' });
       if (r.ok) setDraft('');
-      else setError(r.error ?? 'Not delivered');
+      else setError(r.error ?? t('Not delivered'));
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -216,7 +217,7 @@ function Composer({ task }: { task: Task }) {
           className="composer-input"
           rows={3}
           value={draft}
-          placeholder={`Message Agent ${task.alias}…`}
+          placeholder={t('Message Agent {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
           onKeyDown={(e) => {
@@ -228,13 +229,13 @@ function Composer({ task }: { task: Task }) {
         />
         <div className="composer-foot">
           <span className="to-label" data-testid="composer-target">
-            To: Agent {task.alias} · {PROVIDER_LABEL[task.provider]}
-            <span className="muted"> — typed text goes only to this agent</span>
+            {t('To: Agent {alias}', { alias: task.alias })} · {PROVIDER_LABEL[task.provider]}
+            <span className="muted"> — {t('typed text goes only to this agent')}</span>
           </span>
           <span className="hint">
-            <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
+            <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
           </span>
-          <button className="send-btn" aria-label="Send" disabled={!draft.trim() || sending} onClick={() => void send()}>
+          <button className="send-btn" aria-label={t('Send')} disabled={!draft.trim() || sending} onClick={() => void send()}>
             <Icon name="send" />
           </button>
         </div>
@@ -250,20 +251,20 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
   const mem = snapshot.memory;
   const groups: Array<{ title: string; records: MemoryRecord[]; hint: string }> = [
-    { title: `This task`, records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: 'Private to Agent ' + task.alias },
-    { title: `Project · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: 'Approved notes load into new sessions here' },
-    { title: 'Global', records: mem.filter((m) => m.scope === 'global'), hint: 'Approved notes load into every new session' },
+    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to Agent {alias}', { alias: task.alias }) },
+    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here') },
+    { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session') },
   ];
   const run = (fn: () => Promise<unknown>) => {
     setError('');
     fn().catch((e) => setError(errorText(e)));
   };
   return (
-    <aside className="memory" aria-label="Scoped memory" data-testid="memory-panel">
-      <div className="panel-title">Memory</div>
-      <p className="muted small">App-owned notes. They never rewrite a running session.</p>
+    <aside className="memory" aria-label={t('Scoped memory')} data-testid="memory-panel">
+      <div className="panel-title">{t('Memory')}</div>
+      <p className="muted small">{t('App-owned notes. They never rewrite a running session.')}</p>
       <div className="memory-add">
-        <textarea className="input" rows={2} placeholder="Add a note for this task…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <textarea className="input" rows={2} placeholder={t('Add a note for this task…')} value={draft} onChange={(e) => setDraft(e.target.value)} />
         <button
           className="btn"
           disabled={!draft.trim()}
@@ -274,7 +275,7 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
             })
           }
         >
-          Add note
+          {t('Add note')}
         </button>
       </div>
       {error ? <div className="error-text">{error}</div> : null}
@@ -290,27 +291,27 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
               <div className="memory-body">{m.body}</div>
               <div className="memory-meta">
                 {m.source}
-                {m.originTaskId ? ` · from ${snapshot.tasks.find((t) => t.taskId === m.originTaskId)?.alias ?? 'removed task'}` : ''}
-                {task.injectedMemoryIds?.includes(m.id) ? ' · loaded in this session' : ''}
+                {m.originTaskId ? ` · ${t('from {alias}', { alias: snapshot.tasks.find((x) => x.taskId === m.originTaskId)?.alias ?? t('removed task') })}` : ''}
+                {task.injectedMemoryIds?.includes(m.id) ? ` · ${t('loaded in this session')}` : ''}
               </div>
               <div className="memory-actions">
                 {m.scope !== 'task' ? (
                   <label className="small check">
-                    <input type="checkbox" checked={m.approvedForReuse} onChange={(e) => run(() => call('memory:update', { id: m.id, approvedForReuse: e.target.checked }))} /> approved for reuse
+                    <input type="checkbox" checked={m.approvedForReuse} onChange={(e) => run(() => call('memory:update', { id: m.id, approvedForReuse: e.target.checked }))} /> {t('approved for reuse')}
                   </label>
                 ) : null}
                 {m.scope === 'task' ? (
                   <button className="link" onClick={() => run(() => call('memory:promote', { id: m.id, scope: 'project' }))}>
-                    Share with project
+                    {t('Share with project')}
                   </button>
                 ) : null}
                 {m.scope !== 'global' ? (
                   <button className="link" onClick={() => run(() => call('memory:promote', { id: m.id, scope: 'global' }))}>
-                    Save as global
+                    {t('Save as global')}
                   </button>
                 ) : null}
                 <button className="link danger" onClick={() => run(() => call('memory:delete', { id: m.id }))}>
-                  Delete
+                  {t('Delete')}
                 </button>
               </div>
             </div>

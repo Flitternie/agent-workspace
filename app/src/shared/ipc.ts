@@ -73,7 +73,8 @@ export const ipcSchemas = {
   }),
   'memory:delete': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
-  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional() }),
+  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional() }),
+  'capabilities:refresh': z.object({}),
   'demo:seed': z.object({}),
 } as const;
 

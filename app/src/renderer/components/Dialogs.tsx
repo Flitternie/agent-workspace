@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AgentProvider, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
-import { Icon, PROVIDER_LABEL } from './bits';
+import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
+import { t } from '../i18n';
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', esc);
@@ -14,7 +15,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       <div className="modal" role="dialog" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button className="icon-btn" aria-label={t('Close')} onClick={onClose}>
             <Icon name="x" />
           </button>
         </div>
@@ -39,10 +40,10 @@ export function ProjectPicker({ snapshot, value, onChange }: { snapshot: Workspa
   };
   return (
     <div className="field">
-      <label>Project</label>
+      <label>{t('Project')}</label>
       <div className="row">
         <select className="input" value={value} onChange={(e) => onChange(e.target.value)} data-testid="project-select">
-          <option value="">Choose…</option>
+          <option value="">{t('Choose…')}</option>
           {snapshot.projects.map((p) => (
             <option key={p.projectId} value={p.projectId}>
               {p.name} — {p.rootPath}
@@ -50,7 +51,7 @@ export function ProjectPicker({ snapshot, value, onChange }: { snapshot: Workspa
           ))}
         </select>
         <button className="btn" onClick={() => void add()}>
-          Add folder…
+          {t('Add folder…')}
         </button>
       </div>
       {error ? <div className="error-text">{error}</div> : null}
@@ -96,55 +97,63 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   };
 
   return (
-    <Modal title="New task" onClose={onClose}>
+    <Modal title={t('New task')} onClose={onClose}>
       <ProjectPicker snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
-        <label>Agent</label>
+        <label>{t('Agent')}</label>
         <div className="row">
           {providers.map((p) => {
             const c = snapshot.capabilities.find((x) => x.provider === p);
             return (
               <label key={p} className={`radio${c?.available ? '' : ' disabled'}${provider === p ? ' selected' : ''}`} title={c?.detail}>
                 <input type="radio" name="provider" checked={provider === p} disabled={!c?.available} onChange={() => setProvider(p)} /> {PROVIDER_LABEL[p]}
-                {c?.version ? <span className="muted small"> {c.version.split(' ')[0]}</span> : null}
+                {c?.version ? <span className="muted small"> {shortVersion(c.version)}</span> : null}
               </label>
             );
           })}
         </div>
-        {cap ? <div className="muted small">{cap.detail} Permissions stay with the provider; nothing is auto-approved.</div> : null}
+        {cap ? (
+          <div className="muted small">
+            {cap.available && cap.auth?.loggedIn === false
+              ? t('{name} is installed but not signed in. Open Settings for how to sign in.', { name: PROVIDER_LABEL[cap.provider] })
+              : cap.available
+                ? t('Uses your existing {name} login. Permissions stay with the agent; nothing is auto-approved.', { name: PROVIDER_LABEL[cap.provider] })
+                : t('{name} CLI not found on PATH.', { name: PROVIDER_LABEL[cap.provider] })}
+          </div>
+        ) : null}
       </div>
       <div className="row">
         <div className="field grow">
-          <label>Short name (spoken handle)</label>
-          <input className="input" placeholder="e.g. database" value={name} onChange={(e) => setName(e.target.value)} />
+          <label>{t('Short name (spoken handle)')}</label>
+          <input className="input" placeholder={t('e.g. database')} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="field grow2">
-          <label>Task title</label>
-          <input className="input" placeholder="e.g. Schema migration for orders" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <label>{t('Task title')}</label>
+          <input className="input" placeholder={t('e.g. Schema migration for orders')} value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
       </div>
       <div className="field">
-        <label>First instruction (optional)</label>
-        <textarea className="input" rows={4} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="What should the agent do?" />
+        <label>{t('First instruction (optional)')}</label>
+        <textarea className="input" rows={4} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the agent do?')} />
       </div>
       {provider === 'mock' ? (
         <div className="field">
-          <label>Mock script</label>
+          <label>{t('Mock script')}</label>
           <input className="input" value={mockScript} onChange={(e) => setMockScript(e.target.value)} />
           <div className="muted small">ask:&lt;question&gt; · approval:&lt;command&gt; · choice:&lt;question&gt; · work</div>
         </div>
       ) : null}
       <label className="check">
         <input type="checkbox" checked={isolate} disabled={!project?.isGitRepo} onChange={(e) => setIsolate(e.target.checked)} />
-        Run in its own git worktree {project && !project.isGitRepo ? '(not a git repo — will share the folder)' : '(isolates edits from other tasks; not a security sandbox)'}
+        {t('Run in its own git worktree')} {project && !project.isGitRepo ? t('(not a git repo — will share the folder)') : t('(isolates edits from other tasks; not a security sandbox)')}
       </label>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>
-          Cancel
+          {t('Cancel')}
         </button>
         <button className="btn btn-primary" disabled={busy || !projectId || !(title.trim() || instruction.trim())} onClick={() => void create()}>
-          {busy ? 'Starting…' : 'Create task'}
+          {busy ? t('Starting…') : t('Create task')}
         </button>
       </div>
     </Modal>
@@ -170,14 +179,15 @@ export function ImportDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
   }, [projectId, provider]);
 
   return (
-    <Modal title="Resume an existing session" onClose={onClose}>
+    <Modal title={t('Resume an existing session')} onClose={onClose}>
       <p className="muted small">
-        Lists conversations the provider has saved for this project. Importing re-enters that conversation (historical resume). It does <strong>not</strong> attach to a
-        session that is currently running in another terminal — close that one first to avoid two writers.
+        {t(
+          'Lists conversations the provider has saved for this project. Importing re-enters that conversation (historical resume). It does not attach to a session that is currently running in another terminal — close that one first to avoid two writers.',
+        )}
       </p>
       <ProjectPicker snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
-        <label>Provider</label>
+        <label>{t('Agent')}</label>
         <div className="row">
           {(['claude', 'codex'] as const).map((p) => (
             <label key={p} className={`radio${provider === p ? ' selected' : ''}`}>
@@ -186,9 +196,9 @@ export function ImportDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
           ))}
         </div>
       </div>
-      {busy ? <div className="muted">Looking for sessions…</div> : null}
+      {busy ? <div className="muted">{t('Looking for sessions…')}</div> : null}
       {error ? <div className="error-text">{error}</div> : null}
-      {sessions && sessions.length === 0 ? <div className="muted">No un-imported sessions found for this folder.</div> : null}
+      {sessions && sessions.length === 0 ? <div className="muted">{t('No un-imported sessions found for this folder.')}</div> : null}
       <div className="session-list">
         {sessions?.map((s) => (
           <div key={s.nativeSessionId} className="session-row">
@@ -206,7 +216,7 @@ export function ImportDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
                   .catch((e) => setError(errorText(e)))
               }
             >
-              Import
+              {t('Import')}
             </button>
           </div>
         ))}

@@ -3,9 +3,12 @@ import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { Icon } from './components/bits';
 import { ImportDialog, NewTaskDialog } from './components/Dialogs';
+import { readiness, ReadinessBadge, SettingsDialog } from './components/Settings';
+import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
 import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
+import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
 
 interface Toast {
@@ -27,7 +30,7 @@ export function App() {
   const { transcripts, load } = useTranscripts();
   // Every launch starts in Overview (spec 02).
   const [focusId, setFocusId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'import' | 'settings' | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -74,7 +77,8 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [dialog, snapshot]);
 
-  if (!snapshot) return <div className="loading">Loading workspace…</div>;
+  if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
+  setLanguage(snapshot.settings.language ?? 'en');
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
   const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
@@ -82,7 +86,7 @@ export function App() {
 
   const loadDemo = () =>
     call('demo:seed', {})
-      .then(() => toast('Demo loaded: three mock agents in a throwaway repo.'))
+      .then(() => toast(t('Demo loaded: three mock agents in a throwaway repo.')))
       .catch((e) => setError(errorText(e)));
 
   return (
@@ -94,6 +98,7 @@ export function App() {
         onOverview={() => setFocusId(null)}
         onNewTask={() => setDialog('new')}
         onResume={() => setDialog('import')}
+        onSettings={() => setDialog('settings')}
       />
 
       <div className="stage">
@@ -102,15 +107,15 @@ export function App() {
         ) : (
           <>
             <header className="stage-head drag">
-              <h1>Overview</h1>
+              <h1>{t('Overview')}</h1>
               <div className="stage-summary" data-testid="topbar-summary">
-                {snapshot.tasks.length} agents
-                {working ? ` · ${working} working` : ''} ·{' '}
-                {needYou ? <strong className="needs-text">{needYou} need you</strong> : <span>none waiting on you</span>}
+                {t('{n} agents', { n: snapshot.tasks.length })}
+                {working ? ` · ${t('{n} working', { n: working })}` : ''} ·{' '}
+                {needYou ? <strong className="needs-text">{t('{n} need you', { n: needYou })}</strong> : <span>{t('none waiting on you')}</span>}
               </div>
               <div className="stage-actions">
                 <button className="btn btn-primary" onClick={() => setDialog('new')} data-testid="new-task">
-                  <Icon name="plus" /> New task
+                  <Icon name="plus" /> {t('New task')}
                 </button>
               </div>
             </header>
@@ -121,26 +126,44 @@ export function App() {
                   <div className="empty-icon" aria-hidden>
                     <Icon name="grid" size={22} />
                   </div>
-                  <h2>Your agents meet here</h2>
-                  <p>Each coding agent joins as a tile that reports what it did and what it needs from you. Requests stay on the tile until you answer, however long you talk to another agent.</p>
+                  <h2>{t('Your agents meet here')}</h2>
+                  <p>{t('Each coding agent joins as a tile that reports what it did and what it needs from you. Requests stay on the tile until you answer, however long you talk to another agent.')}</p>
+                  <div className="setup-check" data-testid="setup-check">
+                    {(['claude', 'codex'] as const).map((p) => {
+                      const c = snapshot.capabilities.find((x) => x.provider === p);
+                      return (
+                        <div key={p} className="setup-row">
+                          <span>{PROVIDER_LABEL[p]}</span>
+                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} />
+                        </div>
+                      );
+                    })}
+                    <div className="setup-row">
+                      <span>{t('Voice')}</span>
+                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} method={snapshot.voice.sttModel} missing="Not configured" />
+                    </div>
+                    <button className="link small" onClick={() => setDialog('settings')}>
+                      {t('Settings, language and sign-in help')}
+                    </button>
+                  </div>
                   <ol className="empty-steps">
                     <li>
-                      <strong>Add agents</strong> — Claude Code or Codex, each in its own worktree.
+                      <strong>{t('Add agents')}</strong> — {t('pick a project folder and Claude Code or Codex; each agent gets its own worktree.')}
                     </li>
                     <li>
-                      <strong>Just talk</strong> — the mic is on like in a call. Say “Agent B, …” and it goes to B without changing your view.
+                      <strong>{t('Just talk')}</strong> — {t('the mic is on like in a call. Say “Agent B, …” and it goes to B without changing your view.')}
                     </li>
                     <li>
-                      <strong>Answer from the tile</strong> — questions and permission requests wait on their tile.
+                      <strong>{t('Answer from the tile')}</strong> — {t('questions and permission requests wait on their tile.')}
                     </li>
                   </ol>
                   <div className="row center">
                     <button className="btn btn-primary" onClick={() => setDialog('new')}>
-                      <Icon name="plus" /> New task
+                      <Icon name="plus" /> {t('New task')}
                     </button>
                     {snapshot.demo ? (
                       <button className="btn" data-testid="load-demo" onClick={() => void loadDemo()}>
-                        Load demo (mock agents)
+                        {t('Load demo (mock agents)')}
                       </button>
                     ) : null}
                   </div>
@@ -170,20 +193,21 @@ export function App() {
       </div>
 
       <div className="toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast" data-testid="toast">
-            <Icon name="check" /> {t.text}
-            {t.taskId && t.taskId !== focusId ? (
-              <button className="link" onClick={() => setFocusId(t.taskId!)}>
-                View
+        {toasts.map((x) => (
+          <div key={x.id} className="toast" data-testid="toast">
+            <Icon name="check" /> {x.text}
+            {x.taskId && x.taskId !== focusId ? (
+              <button className="link" onClick={() => setFocusId(x.taskId!)}>
+                {t('View')}
               </button>
             ) : null}
           </div>
         ))}
       </div>
 
-      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => toast('Task created', id)} /> : null}
+      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => toast(t('Task created'), id)} /> : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} /> : null}
+      {dialog === 'settings' ? <SettingsDialog snapshot={snapshot} onClose={() => setDialog(null)} /> : null}
     </div>
   );
 }

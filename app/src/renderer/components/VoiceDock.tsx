@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import { timeAgo, useTick } from '../state';
 import { ContinuousListener, isLikelyNoise } from '../voice/listener';
 import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL } from './bits';
+import { t as tr } from '../i18n';
 
 type MicState = 'off' | 'starting' | 'listening' | 'speaking' | 'denied' | 'unavailable';
 type EntryPhase = 'transcribing' | 'routing' | 'review' | 'sending' | 'sent' | 'dismissed' | 'error';
@@ -67,14 +68,14 @@ export function VoiceDock({
       patch(entry.id, { phase: 'sending', error: undefined });
       try {
         const r = await call('route:dispatch', { utterance: entry.text, target, focusedTaskId: focusRef.current });
-        if (!r.ok) throw new Error(r.error ?? 'Not delivered');
+        if (!r.ok) throw new Error(r.error ?? tr('Not delivered'));
         const t = r.taskId ? snapRef.current.tasks.find((x) => x.taskId === r.taskId) : undefined;
         const outcome =
           target.kind === 'coordinator'
-            ? 'Coordinator answered'
+            ? tr('Coordinator answered')
             : target.kind === 'create'
-              ? `Started a new task${t ? ` (Agent ${t.alias})` : ''}`
-              : `Sent to Agent ${t?.alias ?? '?'}${t && t.name !== t.alias ? ` (${t.name})` : ''}`;
+              ? tr('Started a new task') + (t ? ` (${tr('Agent {alias}', { alias: t.alias })})` : '')
+              : tr('Sent to Agent {alias}', { alias: t?.alias ?? '?' }) + (t && t.name !== t.alias ? ` (${t.name})` : '');
         patch(entry.id, { phase: 'sent', outcome, taskId: target.kind === 'coordinator' ? undefined : r.taskId });
         onDispatched(target.kind === 'coordinator' ? undefined : r.taskId);
         if (target.kind === 'coordinator') setShowLog(true);
@@ -209,7 +210,7 @@ export function VoiceDock({
   };
 
   const dismiss = (id: number) => {
-    patch(id, { phase: 'dismissed', outcome: 'Not sent' });
+    patch(id, { phase: 'dismissed', outcome: tr('Not sent') });
     setActiveId((a) => (a === id ? null : a));
   };
 
@@ -235,16 +236,16 @@ export function VoiceDock({
 
   const micLabel =
     mic === 'speaking'
-      ? 'Hearing you…'
+      ? tr('Hearing you…')
       : mic === 'listening'
-        ? 'Listening — just say “Agent A, …”'
+        ? tr('Listening — just say “Agent A, …”')
         : mic === 'starting'
-          ? 'Turning on the microphone…'
+          ? tr('Turning on the microphone…')
           : mic === 'denied'
-            ? 'Microphone blocked — allow it in System Settings › Privacy › Microphone'
+            ? tr('Microphone blocked — allow it in System Settings › Privacy › Microphone')
             : stt
-              ? 'Muted'
-              : 'Voice off — no OpenAI key; typing still works';
+              ? tr('Muted')
+              : tr('Voice off — no OpenAI key; typing still works');
 
   return (
     <div className="dock" data-testid="voice-dock">
@@ -252,9 +253,9 @@ export function VoiceDock({
         <div className="popover coord-log" data-testid="coordinator-log">
           <div className="popover-head">
             <span>
-              <Icon name="spark" /> Coordinator
+              <Icon name="spark" /> {tr('Coordinator')}
             </span>
-            <button className="icon-btn" aria-label="Hide coordinator" onClick={() => setShowLog(false)}>
+            <button className="icon-btn" aria-label={tr('Hide coordinator')} onClick={() => setShowLog(false)}>
               <Icon name="x" />
             </button>
           </div>
@@ -271,25 +272,25 @@ export function VoiceDock({
           {recent.map((e) => (
             <div key={e.id} className={`caption phase-${e.phase}`} data-testid="caption">
               <span className="caption-src">{e.source === 'voice' ? <Icon name="mic" size={12} /> : '›'}</span>
-              <span className="caption-text">{e.phase === 'transcribing' ? <span className="muted">Transcribing…</span> : e.text}</span>
+              <span className="caption-text">{e.phase === 'transcribing' ? <span className="muted">{tr('Transcribing…')}</span> : e.text}</span>
               <span className="caption-out">
-                {e.phase === 'routing' ? 'Finding the agent…' : null}
-                {e.phase === 'sending' ? 'Sending…' : null}
+                {e.phase === 'routing' ? tr('Finding the agent…') : null}
+                {e.phase === 'sending' ? tr('Sending…') : null}
                 {e.phase === 'sent' ? (
                   <>
                     <Icon name="check" size={12} /> {e.outcome}
                     {e.taskId && e.taskId !== focusedTaskId && focusedTaskId ? (
                       <button className="link" onClick={() => onView(e.taskId!)}>
-                        View
+                        {tr('View')}
                       </button>
                     ) : null}
                   </>
                 ) : null}
-                {e.phase === 'dismissed' ? 'Not sent' : null}
+                {e.phase === 'dismissed' ? tr('Not sent') : null}
                 {e.phase === 'error' ? <span className="error-text">{e.error}</span> : null}
                 {e.phase === 'review' ? (
                   <button className="link" onClick={() => setActiveId(e.id)}>
-                    Choose target
+                    {tr('Choose target')}
                   </button>
                 ) : null}
               </span>
@@ -324,8 +325,8 @@ export function VoiceDock({
           disabled={!stt}
           onClick={toggleMic}
           aria-pressed={live}
-          aria-label={live ? 'Mute microphone' : 'Unmute microphone'}
-          title={stt ? `${live ? 'Mute' : 'Unmute'} (⌘⇧A)` : 'Speech-to-text is not configured'}
+          aria-label={live ? tr('Mute microphone') : tr('Unmute microphone')}
+          title={stt ? `${live ? tr('Mute') : tr('Unmute')} (⌘⇧A)` : tr('Speech-to-text is not configured')}
           data-testid="mic-button"
           style={{ ['--level' as string]: live ? level.toFixed(2) : '0' }}
         >
@@ -351,7 +352,7 @@ export function VoiceDock({
             rows={1}
             value={text}
             data-testid="dock-input"
-            placeholder={focusedTaskId ? `Type to any agent — “this” means Agent ${taskById(focusedTaskId)?.alias}` : 'Type to any agent — “Agent C, hold the migration”'}
+            placeholder={focusedTaskId ? tr('Type to any agent — “this” means Agent {alias}', { alias: taskById(focusedTaskId)?.alias ?? '' }) : tr('Type to any agent — “Agent C, hold the migration”')}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -362,11 +363,11 @@ export function VoiceDock({
             }}
           />
           <span className="dock-hint">
-            <Kbd>↵</Kbd> route
+            <Kbd>↵</Kbd> {tr('route')}
           </span>
         </div>
         <button className={`btn${showLog ? ' btn-pressed' : ''}`} onClick={() => setShowLog(!showLog)} disabled={!snapshot.coordinator.length}>
-          <Icon name="spark" /> Coordinator
+          <Icon name="spark" /> {tr('Coordinator')}
         </button>
       </div>
     </div>
@@ -409,7 +410,7 @@ function RoutePreview({
     <div className={`route route-${decision.kind}`} data-testid="route-preview" data-route-kind={decision.kind}>
       <div className="route-said">
         <span className="caption-src">{entry.source === 'voice' ? <Icon name="mic" size={12} /> : '›'}</span> “{entry.text}”
-        <button className="icon-btn route-close" aria-label="Don't send" onClick={onDismiss}>
+        <button className="icon-btn route-close" aria-label={tr("Don't send")} onClick={onDismiss}>
           <Icon name="x" />
         </button>
       </div>
@@ -419,19 +420,19 @@ function RoutePreview({
             <span className="route-arrow">→</span>
             <Alias alias={target.alias} size="sm" />
             <strong>
-              Agent {target.alias}
+              {tr('Agent {alias}', { alias: target.alias })}
               {target.name !== target.alias ? ` · ${target.name}` : ''}
             </strong>
             <span className="muted small">
-              {decision.confidence} confidence · {decision.reason}
-              {decision.taskId !== focusedTaskId && focusedTaskId ? ' · your view stays where it is' : ''}
+              {tr(`${decision.confidence} confidence`)} · {decision.reason}
+              {decision.taskId !== focusedTaskId && focusedTaskId ? ` · ${tr('your view stays where it is')}` : ''}
             </span>
           </div>
           <div className="route-actions">
             <button className="btn btn-primary" disabled={busy} onClick={() => onSend({ kind: 'existing', taskId: decision.taskId })} data-testid="route-send">
-              Send to {target.alias}
+              {tr('Send to {alias}', { alias: target.alias })}
             </button>
-            <span className="muted small">or</span>
+            <span className="muted small">{tr('or')}</span>
             {chips(
               entry,
               tasks.filter((t) => t.taskId !== decision.taskId).map((t) => t.taskId),
@@ -444,7 +445,7 @@ function RoutePreview({
           <div className="route-line">
             <span className="route-arrow">?</span>
             <strong>{decision.question}</strong>
-            <span className="muted small">Nothing has been sent.</span>
+            <span className="muted small">{tr('Nothing has been sent.')}</span>
           </div>
           {chips(entry, decision.candidateTaskIds.length ? decision.candidateTaskIds : tasks.map((t) => t.taskId))}
         </>
@@ -455,14 +456,14 @@ function RoutePreview({
             <span className="route-arrow">
               <Icon name="spark" />
             </span>
-            <strong>Coordinator</strong>
+            <strong>{tr('Coordinator')}</strong>
             <span className="muted small">{decision.reason}</span>
           </div>
           <div className="route-actions">
             <button className="btn btn-primary" disabled={busy} onClick={() => onSend({ kind: 'coordinator' })} data-testid="route-send">
-              {decision.reason.startsWith('save') ? 'Save to memory' : 'Ask coordinator'}
+              {decision.reason.startsWith('save') ? tr('Save to memory') : tr('Ask coordinator')}
             </button>
-            <span className="muted small">or send to</span>
+            <span className="muted small">{tr('or send to')}</span>
             {chips(
               entry,
               tasks.map((t) => t.taskId),
@@ -474,7 +475,7 @@ function RoutePreview({
         <>
           <div className="route-line">
             <span className="route-arrow">+</span>
-            <strong>New task:</strong> <span>{decision.proposedTitle}</span>
+            <strong>{tr('New task')}:</strong> <span>{decision.proposedTitle}</span>
           </div>
           <div className="route-actions">
             <select className="input select" value={newProvider} onChange={(e) => setNewProvider(e.target.value as AgentProvider)}>
@@ -485,7 +486,7 @@ function RoutePreview({
               ))}
             </select>
             <select className="input select" value={newProject} onChange={(e) => setNewProject(e.target.value)}>
-              <option value="">Choose project…</option>
+              <option value="">{tr('Choose project…')}</option>
               {snapshot.projects.map((p) => (
                 <option key={p.projectId} value={p.projectId}>
                   {p.name}
@@ -497,7 +498,7 @@ function RoutePreview({
               disabled={busy || !newProject}
               onClick={() => onSend({ kind: 'create', projectId: newProject, provider: newProvider, title: decision.proposedTitle.slice(0, 200) })}
             >
-              Create &amp; send
+              {tr('Create & send')}
             </button>
             {chips(
               entry,

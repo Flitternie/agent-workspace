@@ -32,7 +32,7 @@ const empty = (): WorkspaceData => ({
   attention: [],
   memory: [],
   coordinator: [],
-  settings: { alwaysConfirmVoice: false },
+  settings: { alwaysConfirmVoice: false, autoListen: true },
   aliasCounter: 0,
 });
 

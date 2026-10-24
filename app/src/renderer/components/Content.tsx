@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
 import { Icon, Markdown, type IconName } from './bits';
+import { t, t as tr } from '../i18n';
 
 // One renderer per normalized content type. Claude and Codex both arrive here in
 // the same shape (src/shared/content.ts), so nothing below knows the provider.
@@ -56,8 +57,8 @@ export function DiffView({ diff, maxLines }: { diff: FileDiff; maxLines?: number
           {diff.oldPath ? `${diff.oldPath} → ` : ''}
           {diff.path}
         </span>
-        {OP_LABEL[diff.operation] ? <span className="tag">{OP_LABEL[diff.operation]}</span> : null}
-        {diff.phase === 'proposed' ? <span className="tag tag-proposed">proposed</span> : null}
+        {OP_LABEL[diff.operation] ? <span className="tag">{t(OP_LABEL[diff.operation])}</span> : null}
+        {diff.phase === 'proposed' ? <span className="tag tag-proposed">{t('proposed')}</span> : null}
         <DiffStat added={diff.added} removed={diff.removed} />
       </div>
       {rows.length ? (
@@ -80,14 +81,14 @@ export function DiffView({ diff, maxLines }: { diff: FileDiff; maxLines?: number
           </tbody>
         </table>
       ) : (
-        <div className="muted small pad-x">No line changes.</div>
+        <div className="muted small pad-x">{t('No line changes.')}</div>
       )}
       {rows.length > shown.length ? (
         <button className="diff-more" onClick={() => setAll(true)}>
-          Show all {rows.length} lines
+          {t('Show all {n} lines', { n: rows.length })}
         </button>
       ) : null}
-      {diff.truncated ? <div className="muted small pad-x">Diff truncated; full totals shown above.</div> : null}
+      {diff.truncated ? <div className="muted small pad-x">{t('Diff truncated; full totals shown above.')}</div> : null}
     </div>
   );
 }
@@ -102,10 +103,10 @@ export function TerminalView({ t, compact }: { t: Extract<ToolContent, { type: '
       {t.output && !compact ? <pre className="terminal-out">{t.output}</pre> : null}
       {t.exitCode !== undefined || t.interrupted || t.background || t.cwd ? (
         <div className="terminal-foot">
-          {t.cwd ? <span className="truncate">in {t.cwd}</span> : null}
-          {t.background ? <span>running in background</span> : null}
-          {t.interrupted ? <span>interrupted</span> : null}
-          {t.exitCode !== undefined ? <span className={failed ? 'bad' : 'good'}>exit {t.exitCode}</span> : null}
+          {t.cwd ? <span className="truncate">{tr('in {cwd}', { cwd: t.cwd })}</span> : null}
+          {t.background ? <span>{tr('running in background')}</span> : null}
+          {t.interrupted ? <span>{tr('interrupted')}</span> : null}
+          {t.exitCode !== undefined ? <span className={failed ? 'bad' : 'good'}>{tr('exit {code}', { code: t.exitCode })}</span> : null}
         </div>
       ) : null}
     </div>
@@ -117,8 +118,8 @@ function SearchView({ s }: { s: Extract<ToolContent, { type: 'search' }> }) {
   return (
     <div className="search-result">
       <div className="small muted">
-        {s.total ?? s.files.length} file{(s.total ?? s.files.length) === 1 ? '' : 's'}
-        {s.truncated ? ' (truncated)' : ''}
+        {t((s.total ?? s.files.length) === 1 ? '{n} file' : '{n} files', { n: s.total ?? s.files.length })}
+        {s.truncated ? ` ${t('(truncated)')}` : ''}
       </div>
       <ul className="file-list mono">
         {shown.map((f) => (
@@ -126,7 +127,7 @@ function SearchView({ s }: { s: Extract<ToolContent, { type: 'search' }> }) {
             {f}
           </li>
         ))}
-        {s.files.length > shown.length ? <li className="muted">+{s.files.length - shown.length} more</li> : null}
+        {s.files.length > shown.length ? <li className="muted">{t('+{n} more', { n: s.files.length - shown.length })}</li> : null}
       </ul>
       {s.matches ? <pre>{s.matches}</pre> : null}
     </div>
@@ -204,10 +205,10 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
       <summary>
         <span className="tool-status">{STATUS_ICON[status]}</span>
         <Icon name={KIND_ICON[tool?.kind ?? 'other']} size={13} />
-        <span className="tool-label truncate">{tool?.title || item.toolLabel || 'Tool'}</span>
+        <span className="tool-label truncate">{tool?.title || item.toolLabel || t('Tool')}</span>
         {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : null}
-        {STATUS_TEXT[status] ? <span className={`tool-state state-${status}`}>{STATUS_TEXT[status]}</span> : null}
-        {!openByDefault && (hasOutput || item.text) ? <span className="tool-more">details</span> : null}
+        {STATUS_TEXT[status] ? <span className={`tool-state state-${status}`}>{t(STATUS_TEXT[status]!)}</span> : null}
+        {!openByDefault && (hasOutput || item.text) ? <span className="tool-more">{t('details')}</span> : null}
       </summary>
       {body}
     </details>
@@ -240,10 +241,10 @@ export function groupTranscript(items: TranscriptItem[]): Array<TranscriptItem |
 export function ToolGroup({ items }: { items: TranscriptItem[] }) {
   const n = (k: ToolKind) => items.filter((i) => i.tool?.kind === k).length;
   const parts = [
-    n('read') && `read ${n('read')} file${n('read') > 1 ? 's' : ''}`,
-    n('search') && `searched ${n('search')}×`,
-    n('fetch') && `fetched ${n('fetch')}`,
-    n('think') && `updated plan`,
+    n('read') && t(n('read') > 1 ? 'read {n} files' : 'read {n} file', { n: n('read') }),
+    n('search') && t('searched {n}×', { n: n('search') }),
+    n('fetch') && t('fetched {n}', { n: n('fetch') }),
+    n('think') && t('updated plan'),
   ].filter(Boolean) as string[];
   const label = parts.join(' · ');
   return (
@@ -271,7 +272,7 @@ export function PlanChecklist({ plan, compact }: { plan: PlanInfo; compact?: boo
       <div className="plan-head">
         <Icon name="list" size={12} />
         <span>
-          Plan {done}/{plan.entries.length}
+          {t('Plan {done}/{total}', { done, total: plan.entries.length })}
         </span>
         <span className="plan-bar" aria-hidden>
           <span style={{ width: `${(done / Math.max(1, plan.entries.length)) * 100}%` }} />

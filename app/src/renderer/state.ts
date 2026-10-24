@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TranscriptItem, WorkspaceSnapshot } from '../shared/types';
 import { call } from './api';
+import { t } from './i18n';
 
 /** Snapshot-on-start, then push updates from the main process (spec 03: recover from missed events). */
 export function useWorkspace(): WorkspaceSnapshot | null {
@@ -51,12 +52,12 @@ export function useTranscripts(): {
 
 export function timeAgo(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (s < 45) return 'just now';
+  if (s < 45) return t('just now');
   const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return t('{n}m ago', { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (h < 24) return t('{n}h ago', { n: h });
+  return t('{n}d ago', { n: Math.round(h / 24) });
 }
 
 /** Re-render periodically so relative times stay fresh. */

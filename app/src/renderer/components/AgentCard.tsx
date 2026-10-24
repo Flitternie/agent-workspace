@@ -6,6 +6,7 @@ import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
 import { Alias, displayName, Icon, ProviderTag, StatusDot } from './bits';
+import { t } from '../i18n';
 
 /** One participant tile in the meeting-style Overview. */
 export function AgentCard({
@@ -44,7 +45,7 @@ export function AgentCard({
     const r = await call('task:send', { taskId: task.taskId, text, via: 'card' }).catch((e) => ({ ok: false, error: errorText(e) }));
     setSending(false);
     if (r.ok) setDraft('');
-    else setError(r.error ?? 'Not delivered');
+    else setError(r.error ?? t('Not delivered'));
   };
 
   return (
@@ -65,13 +66,13 @@ export function AgentCard({
           </div>
         </div>
         <StatusDot status={task.status} connected={connected} />
-        <button className="icon-btn" aria-label="Open" title="Open (⌘1–9)" onClick={onOpen}>
+        <button className="icon-btn" aria-label={t('Open')} title={t('Open (⌘1–9)')} onClick={onOpen}>
           <Icon name="expand" />
         </button>
       </header>
       <div className="tile-meta mono">
         <span className="truncate" title={task.cwd}>
-          <Icon name="folder" size={12} /> {project?.name ?? 'unknown project'}
+          <Icon name="folder" size={12} /> {project?.name ?? t('unknown project')}
         </span>
         {task.worktree ? (
           <span className="truncate" title={task.worktree.path}>
@@ -93,15 +94,15 @@ export function AgentCard({
 
         <section className={`report${report ? ' report-new' : ''}`}>
           <div className="section-label">
-            {report ? `New report · ${timeAgo(report.createdAt, now)}` : 'Latest'}
+            {report ? t('New report · {time}', { time: timeAgo(report.createdAt, now) }) : t('Latest')}
             {report ? (
               <button className="link small" onClick={() => void call('attention:dismiss', { attentionId: report.id })}>
-                Mark read
+                {t('Mark read')}
               </button>
             ) : null}
           </div>
           <div className="report-text" data-testid="card-summary">
-            {task.summary || <span className="muted">No report yet.</span>}
+            {task.summary || <span className="muted">{t('No report yet.')}</span>}
           </div>
         </section>
 
@@ -109,7 +110,7 @@ export function AgentCard({
 
         {activity.length ? (
           <section>
-            <div className="section-label">Activity</div>
+            <div className="section-label">{t('Activity')}</div>
             <ul className="activity">
               {activity.map((a) => {
                 const diffs = (a.tool?.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.diff] : []));
@@ -139,8 +140,8 @@ export function AgentCard({
           className="composer-input"
           rows={1}
           value={draft}
-          aria-label={`Message Agent ${task.alias}`}
-          placeholder={`Message ${task.alias}…`}
+          aria-label={t('Message Agent {alias}', { alias: task.alias })}
+          placeholder={t('Message {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -150,7 +151,7 @@ export function AgentCard({
             if (e.key === 'Escape') e.currentTarget.blur();
           }}
         />
-        <button className="send-btn" aria-label={`Send to ${task.alias}`} disabled={!draft.trim() || sending} onClick={() => void send()}>
+        <button className="send-btn" aria-label={t('Send to {alias}', { alias: task.alias })} disabled={!draft.trim() || sending} onClick={() => void send()}>
           <Icon name="send" />
         </button>
       </footer>
@@ -161,9 +162,12 @@ export function AgentCard({
 
 function stepText(a: TranscriptItem): string {
   const first = a.text.replace(/```[\s\S]*?```/g, ' ').replace(/\s+/g, ' ').trim();
-  if (a.role === 'tool') return `${a.tool?.title || a.toolLabel || 'Tool'}${a.toolStatus === 'awaiting_approval' ? ' — needs approval' : a.toolStatus === 'declined' ? ' — declined' : a.toolStatus === 'failed' ? ' — failed' : ''}`;
-  if (a.role === 'thought') return `Thinking: ${first}`;
-  if (a.role === 'plan') return `Proposed a plan: ${first}`;
-  if (a.role === 'user') return `You${a.via === 'voice' ? ' (voice)' : ''}: ${first}`;
+  if (a.role === 'tool') {
+    const state = a.toolStatus === 'awaiting_approval' ? 'needs approval' : a.toolStatus === 'declined' || a.toolStatus === 'failed' ? a.toolStatus : '';
+    return `${a.tool?.title || a.toolLabel || t('Tool')}${state ? ` — ${t(state)}` : ''}`;
+  }
+  if (a.role === 'thought') return `${t('Thinking')}: ${first}`;
+  if (a.role === 'plan') return `${t('Proposed a plan')}: ${first}`;
+  if (a.role === 'user') return `${t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${first}`;
   return first;
 }

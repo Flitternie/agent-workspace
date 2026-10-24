@@ -9,11 +9,15 @@ See `../SPIKE_REPORT.md` for why it is built this way and `../IMPLEMENTATION_LOG
 ```bash
 cd app
 npm run setup        # installs deps; npm + Electron caches stay in app/.cache
-npm start            # builds and launches the app
+npm start            # the real workspace (data in app/.data)
+npm run demo         # separate demo entry: three mock agents, data in app/.data-demo
 ```
 
-- **Try it without any accounts:** click **Load demo (mock agents)** on the empty Overview.
-- **Real agents:** **+ New task** → choose a project folder → Claude Code or Codex. This uses your installed `claude` / `codex` and their existing logins. Nothing is auto-approved, and permission requests appear on the card.
+Both also work from the repo root.
+
+- **Real agents:** **+ New task** → choose a project folder → Claude Code or Codex. This uses your installed `claude` / `codex` and their existing logins; no extra authorization is needed. The empty Overview and **Settings** (bottom of the sidebar) show whether each CLI is installed and signed in (read-only `claude auth status` / `codex login status`) and how to sign in if not. Nothing is auto-approved, and permission requests appear on the card.
+- **Settings:** UI language (English / 中文; the first launch follows the system locale), open mic on launch, confirm every voice send, and where data is stored.
+- **Demo:** `npm run demo` seeds three mock agents on first launch. Mock agents are only offered in the demo entry.
 - **Resume an old conversation:** **Resume session…** lists sessions the provider saved for that folder. This is a historical resume, not attaching to a process that is running in another terminal.
 - **Voice (meeting-style):** the microphone is on from launch, like joining a call. Just talk: "Agent A, add a regression test". Each utterance appears as a caption at the bottom and goes to the agent it names, without changing your view. Click the mic button or press **⌘⇧A** to mute. Voice activity is detected on-device, so only speech segments are uploaded for transcription. Needs an OpenAI key, read from `OPENAI_API_KEY` or an `openai.key` file in this folder or a parent (currently `../openai.key`); `AMW_NO_OPENAI=1` disables it and `AMW_NO_AUTOLISTEN=1` starts muted. Without a key, everything else works, and the bar still accepts typed commands.
 - Keys: **⌘1…9** focus an agent, **⌘0 / Esc** back to Overview.

@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { Icon, KIND_LABEL, Markdown, PROVIDER_LABEL } from './bits';
 import { ToolContentView } from './Content';
+import { t } from '../i18n';
 
 /**
  * One durable attention item. Native approvals/questions are answered only with
@@ -43,7 +44,7 @@ export function AttentionView({
   };
 
   const details = item.details && item.details !== item.headline ? item.details : '';
-  const label = item.kind === 'approval' ? `${PROVIDER_LABEL[task.provider]} asks permission` : KIND_LABEL[item.kind];
+  const label = item.kind === 'approval' ? t('{name} asks permission', { name: PROVIDER_LABEL[task.provider] }) : t(KIND_LABEL[item.kind]);
   return (
     <div
       className={`attention kind-${item.kind} state-${item.state}${item.highRisk ? ' high-risk' : ''}`}
@@ -54,9 +55,9 @@ export function AttentionView({
         <span className="attention-kind">
           <Icon name={item.kind === 'approval' || item.kind === 'error' ? 'alert' : 'reply'} size={12} />
           {label}
-          {item.highRisk ? <span className="risk-tag">high risk</span> : null}
+          {item.highRisk ? <span className="risk-tag">{t('high risk')}</span> : null}
         </span>
-        <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${item.state} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
+        <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${t(item.state)} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
       </div>
       <div className="attention-headline">{item.headline}</div>
       {item.preview?.length ? <ToolContentView content={item.preview} compact={compact && !expanded} /> : null}
@@ -67,7 +68,7 @@ export function AttentionView({
       ) : null}
       {(details || item.preview?.length) && compact ? (
         <button className="link small" onClick={() => setExpanded(!expanded)}>
-          {expanded ? 'Show less' : 'Show more'}
+          {expanded ? t('Show less') : t('Show more')}
         </button>
       ) : null}
       {!openState && item.resolution ? <div className="attention-resolution">{item.resolution}</div> : null}
@@ -82,10 +83,11 @@ export function AttentionView({
               title={o.description}
               onClick={() => act(() => call('attention:respond', { attentionId: item.id, decision: o.id }))}
             >
-              {o.label}
+              {/* Option labels come from our adapters, so they have translations. */}
+              {t(o.label)}
             </button>
           ))}
-          <span className="hint">Answered natively in {PROVIDER_LABEL[task.provider]}</span>
+          <span className="hint">{t('Answered natively in {name}', { name: PROVIDER_LABEL[task.provider] })}</span>
         </div>
       ) : null}
 
@@ -129,12 +131,12 @@ export function AttentionView({
                     ))}
                 </ul>
               ) : null}
-              {q.multiSelect ? <div className="hint">Pick one or more.</div> : null}
+              {q.multiSelect ? <div className="hint">{t('Pick one or more.')}</div> : null}
               {q.allowOther === false && q.options.length ? null : (
               <input
                 className="input"
                 type={q.isSecret ? 'password' : 'text'}
-                placeholder={q.options.length ? 'Or type your own answer' : 'Your answer'}
+                placeholder={q.options.length ? t('Or type your own answer') : t('Your answer')}
                 value={answers[q.id] ?? ''}
                 onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
               />
@@ -147,10 +149,10 @@ export function AttentionView({
               disabled={busy || (item.questions ?? []).some((q) => !answers[q.id]?.trim())}
               onClick={() => act(() => call('attention:respond', { attentionId: item.id, decision: 'answer', answers }))}
             >
-              Send answer
+              {t('Send answer')}
             </button>
             <button className="btn" disabled={busy} onClick={() => act(() => call('attention:respond', { attentionId: item.id, decision: 'deny' }))}>
-              Decline
+              {t('Decline')}
             </button>
           </div>
         </div>
@@ -160,11 +162,11 @@ export function AttentionView({
         <div className="attention-actions">
           {onReply && item.kind !== 'error' ? (
             <button className="btn btn-primary" onClick={onReply}>
-              Reply to {task.alias}
+              {t('Reply to {alias}', { alias: task.alias })}
             </button>
           ) : null}
           <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => call('attention:dismiss', { attentionId: item.id }))}>
-            Dismiss
+            {t('Dismiss')}
           </button>
         </div>
       ) : null}
@@ -172,3 +174,4 @@ export function AttentionView({
     </div>
   );
 }
+

@@ -160,6 +160,8 @@ export interface ProviderCapabilities {
   readOnlyMonitor: boolean;
   structuredApprovals: boolean;
   structuredQuestions: boolean;
+  /** Login state read from the CLI's own status command (never its credentials). */
+  auth?: { loggedIn: boolean; method?: string };
 }
 
 export interface NativeSessionInfo {
@@ -192,7 +194,13 @@ export interface CoordinatorEntry {
 export interface Settings {
   /** When true every voice route needs a click, even if high confidence. */
   alwaysConfirmVoice: boolean;
+  /** Open the mic on launch, like joining a call. */
+  autoListen: boolean;
+  /** UI language; set from the system locale on first launch. */
+  language?: Language;
 }
+
+export type Language = 'en' | 'zh';
 
 export interface WorkspaceSnapshot {
   /** Demo entry: mock agents are offered and seeded. */

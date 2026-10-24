@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
-import type { TranscriptItem } from '../shared/types';
+import type { Settings, TranscriptItem } from '../shared/types';
 import { loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
@@ -95,7 +95,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
-  'settings:update': (i: { alwaysConfirmVoice?: boolean }) => workspace.updateSettings(i),
+  'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
+  'capabilities:refresh': () => workspace.refreshCapabilities(),
   'demo:seed': () => {
     if (!demoMode) throw new Error('Demo agents are only available in the demo entry (npm run demo).');
     return workspace.seedDemo(ensureDemoRepo());
@@ -189,6 +190,7 @@ app.whenReady().then(() => {
     callback(audioOnly && wc === win?.webContents);
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
+  if (!workspace.snapshot().settings.language) workspace.updateSettings({ language: app.getLocale().startsWith('zh') ? 'zh' : 'en' });
   registerIpc();
   wireEvents();
   createWindow();

@@ -1,6 +1,6 @@
 import type { WorkspaceSnapshot } from '../../shared/types';
-import { call } from '../api';
 import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, STATUS_LABEL } from './bits';
+import { t as tr } from '../i18n';
 
 /**
  * Always-visible participant list. In Focus it doubles as the rail that keeps
@@ -13,6 +13,7 @@ export function Sidebar({
   onOverview,
   onNewTask,
   onResume,
+  onSettings,
 }: {
   snapshot: WorkspaceSnapshot;
   focusId: string | null;
@@ -20,6 +21,7 @@ export function Sidebar({
   onOverview: () => void;
   onNewTask: () => void;
   onResume: () => void;
+  onSettings: () => void;
 }) {
   const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion');
   const needYou = new Set(open.map((a) => a.taskId)).size;
@@ -31,24 +33,24 @@ export function Sidebar({
             <Icon name="grid" size={13} />
           </span>
           Agent Meeting
-          {snapshot.demo ? <span className="demo-badge" title="Demo entry: mock agents, separate data (npm run demo)">Demo</span> : null}
+          {snapshot.demo ? <span className="demo-badge" title={tr('Demo entry: mock agents, separate data (npm run demo)')}>{tr('Demo')}</span> : null}
         </span>
       </div>
 
-      <button className={`nav-item${focusId ? '' : ' active'}`} onClick={onOverview} title="Overview (⌘0 / Esc)">
+      <button className={`nav-item${focusId ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
         <Icon name="grid" />
-        <span>Overview</span>
+        <span>{tr('Overview')}</span>
         {needYou ? <span className="count">{needYou}</span> : null}
       </button>
 
       <div className="sidebar-section">
-        <span>Agents</span>
-        <button className="icon-btn" aria-label="New task" title="New task" onClick={onNewTask}>
+        <span>{tr('Agents')}</span>
+        <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask}>
           <Icon name="plus" />
         </button>
       </div>
       <nav className="agent-list" aria-label="Agents">
-        {snapshot.tasks.length === 0 ? <div className="muted small pad-x">No agents yet.</div> : null}
+        {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
         {snapshot.tasks.map((t, i) => {
           const pending = open.filter((a) => a.taskId === t.taskId);
           return (
@@ -58,17 +60,17 @@ export function Sidebar({
               onClick={() => onSelect(t.taskId)}
               data-testid="rail-item"
               data-alias={t.alias}
-              title={`${displayName(t)} · ${PROVIDER_LABEL[t.provider]} · ${STATUS_LABEL[t.status]}${i < 9 ? ` (⌘${i + 1})` : ''}`}
+              title={`${displayName(t)} · ${PROVIDER_LABEL[t.provider]} · ${tr(STATUS_LABEL[t.status])}${i < 9 ? ` (⌘${i + 1})` : ''}`}
             >
               <Alias alias={t.alias} size="sm" />
               <span className="agent-row-text">
                 <span className="agent-row-name">
                   <span className="truncate">{displayName(t)}</span>
                   <span className={`status status-${t.status}`}>
-                    <span className="dot" aria-label={STATUS_LABEL[t.status]} />
+                    <span className="dot" aria-label={tr(STATUS_LABEL[t.status])} />
                   </span>
                 </span>
-                <span className="agent-row-sub">{pending.length ? `${pending.length} waiting: ${pending[0].headline}` : t.summary || t.title}</span>
+                <span className="agent-row-sub">{pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : t.summary || t.title}</span>
               </span>
             </button>
           );
@@ -77,33 +79,29 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         <button className="btn btn-block" onClick={onResume} disabled={!snapshot.projects.length}>
-          <Icon name="history" /> Resume session…
+          <Icon name="history" /> {tr('Resume session…')}
         </button>
-        <div className="sidebar-section">
-          <span>Connections</span>
-        </div>
-        <div className="conn-list">
-          {snapshot.capabilities.map((c) => (
-            <span key={c.provider} className={`conn${c.available ? ' on' : ''}`} title={c.detail}>
-              <span className="conn-dot" /> {PROVIDER_LABEL[c.provider]}
-              {c.version ? <span className="muted"> {c.version.split(' ')[0]}</span> : null}
-            </span>
-          ))}
-          <span className={`conn${snapshot.voice.sttAvailable ? ' on' : ''}`} title={snapshot.voice.sttModel ? `STT ${snapshot.voice.sttModel}, router ${snapshot.voice.routerModel}` : 'No OpenAI key found'}>
-            <span className="conn-dot" /> Voice
-            {snapshot.voice.sttModel ? <span className="muted"> {snapshot.voice.sttModel}</span> : null}
+        <button className="conn-list" onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
+          {snapshot.capabilities
+            .filter((c) => c.provider !== 'mock')
+            .map((c) => (
+              <span key={c.provider} className={`conn${c.available && c.auth?.loggedIn !== false ? ' on' : ''}`}>
+                <span className="conn-dot" /> {PROVIDER_LABEL[c.provider]}
+              </span>
+            ))}
+          <span className={`conn${snapshot.voice.sttAvailable ? ' on' : ''}`}>
+            <span className="conn-dot" /> {tr('Voice')}
           </span>
-        </div>
-        <label className="toggle" title="When off, voice commands that clearly name an agent are sent immediately">
-          <input type="checkbox" checked={snapshot.settings.alwaysConfirmVoice} onChange={(e) => void call('settings:update', { alwaysConfirmVoice: e.target.checked })} />
-          <span>Confirm every voice send</span>
-        </label>
+          <span className="conn-settings">
+            <Icon name="gear" /> {tr('Settings')}
+          </span>
+        </button>
         <div className="tips">
           <div>
-            <Kbd>⌘⇧A</Kbd> mute / unmute
+            <Kbd>⌘⇧A</Kbd> {tr('mute / unmute')}
           </div>
           <div>
-            <Kbd>⌘1–9</Kbd> focus agent · <Kbd>Esc</Kbd> overview
+            <Kbd>⌘1–9</Kbd> {tr('focus agent')} · <Kbd>Esc</Kbd> {tr('overview')}
           </div>
         </div>
       </div>

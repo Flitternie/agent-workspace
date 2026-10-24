@@ -583,9 +583,27 @@ pre code {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 0 8px;
+  padding: 6px 8px;
   font-size: 12px;
   color: var(--text-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.conn-list:hover {
+  background: var(--hover);
+}
+.conn-settings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  color: var(--text);
+  font-weight: 550;
 }
 .conn {
   display: flex;
@@ -1998,4 +2016,135 @@ details[open] > summary .tool-more {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Settings */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.settings-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.settings-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+.settings-section p {
+  margin: 0;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.settings-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-row-main .badge {
+  margin-left: auto;
+}
+.settings-section code,
+.setup-check code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  background: var(--hover);
+  padding: 1px 5px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.segmented button {
+  border: 0;
+  background: var(--panel);
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.segmented button + button {
+  border-left: 1px solid var(--border-strong);
+}
+.segmented button.on {
+  background: var(--ink);
+  color: #fff;
+}
+.btn-sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.badge-ready {
+  color: var(--ok);
+  border-color: rgba(22, 163, 74, 0.3);
+  background: rgba(22, 163, 74, 0.07);
+}
+.badge-signed_out,
+.badge-missing {
+  color: var(--needs);
+  border-color: var(--needs-border);
+  background: var(--needs-bg);
+}
+.setup-check {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px auto 14px;
+  padding: 10px 12px;
+  width: min(360px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  text-align: left;
+}
+.setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.setup-check .link {
+  align-self: flex-start;
+}
+.settings-section .check {
+  align-items: flex-start;
+  font-size: 13px;
+}
+.settings-section .check input {
+  margin-top: 3px;
 }

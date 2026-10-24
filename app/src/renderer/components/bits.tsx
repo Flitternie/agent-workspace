@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
+import { t, t as tr } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: 'Idle',
@@ -18,12 +19,12 @@ export const STATUS_LABEL: Record<AgentStatus, string> = {
 export function StatusDot({ status, connected, label = true }: { status: AgentStatus; connected: boolean; label?: boolean }) {
   const offline = !connected && status !== 'disconnected' && status !== 'idle';
   return (
-    <span className={`status status-${status}`} title={connected ? 'Provider session connected' : 'No live provider process; resumes on demand'}>
+    <span className={`status status-${status}`} title={connected ? t('Provider session connected') : t('No live provider process; resumes on demand')}>
       <span className="dot" aria-hidden />
       {label ? (
         <span className="status-text">
-          {STATUS_LABEL[status]}
-          {offline ? <span className="status-sub"> · offline</span> : null}
+          {t(STATUS_LABEL[status])}
+          {offline ? <span className="status-sub"> · {t('offline')}</span> : null}
         </span>
       ) : null}
     </span>
@@ -31,6 +32,11 @@ export function StatusDot({ status, connected, label = true }: { status: AgentSt
 }
 
 export const PROVIDER_LABEL: Record<AgentProvider, string> = { claude: 'Claude Code', codex: 'Codex', mock: 'Mock' };
+
+/** "2.1.310 (Claude Code)" / "codex-cli 0.162.1" → the version number. */
+export function shortVersion(v: string): string {
+  return /\d+\.\d+[\w.-]*/.exec(v)?.[0] ?? v;
+}
 
 export function ProviderTag({ provider }: { provider: AgentProvider }) {
   return <span className={`tag provider-${provider}`}>{PROVIDER_LABEL[provider]}</span>;
@@ -54,7 +60,7 @@ export function Alias({ alias, size = 'md' }: { alias: string; size?: 'sm' | 'md
 }
 
 export function displayName(t: { name: string; alias: string }): string {
-  return t.name !== t.alias ? t.name : `Agent ${t.alias}`;
+  return t.name !== t.alias ? t.name : tr('Agent {alias}', { alias: t.alias });
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
@@ -89,6 +95,7 @@ const ICONS = {
   bulb: 'M9 18h6 M10 21h4 M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3Z',
   trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
   list: 'M9 6h11 M9 12h11 M9 18h11 M4 6h.01 M4 12h.01 M4 18h.01',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z',
   tool: 'M14 6a4 4 0 0 0 5 5l-9 9a2 2 0 0 1-3-3l9-9a4 4 0 0 0-2-2Z',
 } as const;
 

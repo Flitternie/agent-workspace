@@ -48,9 +48,21 @@ export class ClaudeAdapter implements ProviderAdapter {
   async capabilities(): Promise<ProviderCapabilities> {
     const path = findExecutable('claude');
     let version: string | undefined;
-    if (path) version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
+    let auth: ProviderCapabilities['auth'];
+    if (path) {
+      version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
+      // Read-only; prints JSON. Only the login flag and method are kept (no email or org).
+      const status = await run(path, ['auth', 'status'], { timeoutMs: 15_000 });
+      try {
+        const s = JSON.parse(status.stdout) as { loggedIn?: boolean; authMethod?: string };
+        auth = { loggedIn: s.loggedIn === true, method: s.authMethod };
+      } catch {
+        auth = { loggedIn: status.code === 0 };
+      }
+    }
     return {
       provider: 'claude',
+      auth,
       available: !!path,
       version,
       detail: path

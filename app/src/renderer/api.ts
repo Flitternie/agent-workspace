@@ -48,6 +48,7 @@ interface Outputs {
   'memory:delete': void;
   'memory:promote': MemoryRecord;
   'settings:update': void;
+  'capabilities:refresh': void;
   'demo:seed': void;
 }
 

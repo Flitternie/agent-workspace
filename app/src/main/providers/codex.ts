@@ -145,9 +145,18 @@ export class CodexAdapter implements ProviderAdapter {
   async capabilities(): Promise<ProviderCapabilities> {
     const path = findExecutable('codex');
     let version: string | undefined;
-    if (path) version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
+    let auth: ProviderCapabilities['auth'];
+    if (path) {
+      version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
+      // Read-only; exits 0 and prints e.g. "Logged in using ChatGPT" when signed in.
+      const status = await run(path, ['login', 'status'], { timeoutMs: 15_000 });
+      const text = `${status.stdout}\n${status.stderr}`;
+      const using = /Logged in using (.+)/i.exec(text)?.[1]?.trim();
+      auth = { loggedIn: status.code === 0 && !/not logged in/i.test(text), method: using };
+    }
     return {
       provider: 'codex',
+      auth,
       available: !!path,
       version,
       detail: path

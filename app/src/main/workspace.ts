@@ -150,7 +150,7 @@ export class Workspace {
         sttModel: this.opts.openai ? STT_MODEL : undefined,
         routerModel: this.opts.openai ? ROUTER_MODEL : undefined,
         // Meeting-style: the mic is open from launch unless disabled (tests, kiosk use).
-        autoListen: !!this.opts.openai && process.env.AMW_NO_AUTOLISTEN !== '1',
+        autoListen: !!this.opts.openai && process.env.AMW_NO_AUTOLISTEN !== '1' && d.settings.autoListen,
       },
       dataDir: this.opts.dataDir,
       demo: !!this.opts.demo,
