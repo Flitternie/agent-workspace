@@ -23,11 +23,4 @@ Everything the app writes stays inside `app/` (data, worktrees, downloaded model
 
 ## Repository
 
-| Path | What |
-|---|---|
-| `app/` | The Electron + React + TypeScript app. See [app/README.md](app/README.md) for scripts, tests and layout |
-| `agent_workspace_spec/`, `AGENT_WORKSPACE_FULL_SPEC.md` | The product and architecture spec the app was built from |
-| `SPIKE_REPORT.md` | Phase-0 investigation: which open-source bases and provider integrations were evaluated, and why |
-| `IMPLEMENTATION_LOG.md` | What was built in each step and how it was verified (including probes against the real CLIs) |
-
-Third-party ideas and libraries are credited in [app/README.md](app/README.md).
+The app (Electron + React + TypeScript) lives in `app/`. See [app/README.md](app/README.md) for scripts, tests, layout and third-party credits.
