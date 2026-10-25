@@ -1215,6 +1215,12 @@ export class Workspace {
     // Roles (Backend, Frontend, Database) are filled in automatically from the titles.
     const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
       this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });
+    if (this.store.data.settings.language === 'zh') {
+      await mk('mock', '后端 API v2 接口', 'ask:旧的 /v1/orders 接口还有测试在用。要保留一层兼容适配，还是把测试改成 v2？', '把订单接口迁移到 API v2。');
+      await mk('mock', '前端看板组件', 'work', '实现看板组件。');
+      await mk('mock', '数据库结构迁移', 'ask:这次迁移会删除旧的 `orders.notes` 列，里面有 1,204 行数据，有丢数据的风险。直接执行，还是先加一步数据回填？', '为新的订单表写数据库迁移。');
+      return;
+    }
     await mk('mock', 'Backend API v2 endpoints', 'ask:Legacy tests depend on the old /v1/orders API. Should I keep a compatibility adapter, or update the tests to v2?', 'Migrate the orders endpoints to API v2.');
     await mk('mock', 'Frontend dashboard components', 'work', 'Build the dashboard components.');
     await mk('mock', 'Database schema migration', 'ask:The schema migration drops the legacy `orders.notes` column, which has data in 1,204 rows. That is a data-loss risk. Should I proceed, or add a backfill step first?', 'Write the schema migration for the new orders table.');

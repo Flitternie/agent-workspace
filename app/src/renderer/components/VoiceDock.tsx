@@ -448,7 +448,7 @@ export function VoiceDock({
             </span>
           </div>
           {mainTranscript
-            .filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'Read'))
+            .filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'Read' && i.tool?.name !== 'ToolSearch'))
             .slice(-6)
             .map((i) =>
               i.role === 'tool' ? (

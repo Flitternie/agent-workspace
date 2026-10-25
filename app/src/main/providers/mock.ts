@@ -123,7 +123,7 @@ class MockSession implements ProviderSession {
     this.emit({ type: 'turnStarted' });
     const script = this.args.mockScript ?? 'work';
     const first = userTurns === 0;
-    this.later(() => this.emit({ type: 'progress', text: `Reading ${this.args.title} context…` }), 0.3);
+    this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${this.args.title}”的上下文…` : `Reading ${this.args.title} context…` }), 0.3);
     if (first && script.startsWith('approval:')) {
       const command = script.slice('approval:'.length);
       this.later(() => {
@@ -178,11 +178,31 @@ class MockSession implements ProviderSession {
             .join('\n')}\n\n`
         : '';
       if (first && script.startsWith('ask:')) {
-        reply = `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
+        reply = this.zh ? `我看了一下“${this.args.title}”。\n\n${script.slice('ask:'.length)}` : `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
       } else if (first) {
         this.emitDemoWork();
         // Rich Markdown, as real agents write it: heading, list, task list, table, code.
-        reply = [
+        reply = this.zh
+          ? [
+              `“${this.args.title}”第一轮完成：5 个组件做好了 3 个，继续推进。`,
+              '',
+              '### 改了什么',
+              '- `OrderCard` 和 `OrderList` 已改用 **v2** 字段',
+              '- 金额统一在一个地方计算：见 [orders.ts](https://example.com/orders)',
+              '',
+              '- [x] 卡片',
+              '- [ ] 图表',
+              '',
+              '| 组件 | 状态 |',
+              '| --- | --- |',
+              '| OrderCard | 完成 |',
+              '| RevenueChart | 待做 |',
+              '',
+              '```ts',
+              'export const total = (o: Order) => o.items.reduce((sum, i) => sum + i.price, 0);',
+              '```',
+            ].join('\n')
+          : [
           `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`,
           '',
           '### What changed',
@@ -205,8 +225,11 @@ class MockSession implements ProviderSession {
         // A short, plausible report. The request number comes from the saved history,
         // so after a resume it shows the mock really kept its earlier conversation.
         const said = text.length > 120 ? `${text.slice(0, 117)}…` : text;
-        reply =
-          userTurns % 2 === 0
+        reply = this.zh
+          ? userTurns % 2 === 0
+            ? `已完成：“${said}”。改动在我的 worktree 里。（本次会话第 ${userTurns + 1} 个请求）`
+            : `收到：“${said}”。要不要顺便加个测试？（本次会话第 ${userTurns + 1} 个请求）`
+          : userTurns % 2 === 0
             ? `Done: “${said}”. Changes are in my worktree. (Request ${userTurns + 1} in this session.)`
             : `On it: “${said}”. Want me to add a test for this as well? (Request ${userTurns + 1} in this session.)`;
       }
@@ -253,16 +276,21 @@ class MockSession implements ProviderSession {
     this.closed = true;
   }
 
+  /** Demo tasks seeded in a Chinese workspace speak Chinese. */
+  private get zh(): boolean {
+    return /[\u4e00-\u9fff]/.test(this.args.title);
+  }
+
   /** Structured activity in the same normalized shape real providers produce. */
   private emitDemoWork(): void {
     const id = `${this.history?.id ?? 'mock'}-${Date.now()}`;
     this.emit({
       type: 'planUpdated',
       entries: [
-        { content: 'Read the existing dashboard layout', status: 'completed' },
-        { content: 'Build OrdersTable and RevenueCard', status: 'completed' },
-        { content: 'Wire components to the v2 API', status: 'in_progress' },
-        { content: 'Add component tests', status: 'pending' },
+        { content: this.zh ? '阅读现有的看板布局' : 'Read the existing dashboard layout', status: 'completed' },
+        { content: this.zh ? '实现 OrdersTable 和 RevenueCard' : 'Build OrdersTable and RevenueCard', status: 'completed' },
+        { content: this.zh ? '把组件接到 v2 接口' : 'Wire components to the v2 API', status: 'in_progress' },
+        { content: this.zh ? '补组件测试' : 'Add component tests', status: 'pending' },
       ],
     });
     this.emit({

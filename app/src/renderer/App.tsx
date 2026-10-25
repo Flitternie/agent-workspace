@@ -208,7 +208,7 @@ export function App() {
                     task={t}
                     project={snapshot.projects.find((p) => p.projectId === t.projectId)}
                     items={openItems.filter((a) => a.taskId === t.taskId)}
-                    activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system').slice(-5)}
+                    activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system' && x.tool?.name !== 'ToolSearch').slice(-5)}
                     connected={snapshot.connectedTaskIds.includes(t.taskId)}
                     flash={flash === t.taskId}
                     selected={selectedId === t.taskId}

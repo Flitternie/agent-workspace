@@ -214,7 +214,7 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
     >
       <div className="transcript-inner">
         {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
-        {groupTranscript(items).map((entry) => {
+        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch')).map((entry) => {
           if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} />;
           const item = entry;
           if (item.role === 'tool') return <ToolCallRow key={item.id} item={item} />;
