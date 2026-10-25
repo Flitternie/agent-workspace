@@ -1,5 +1,5 @@
 {
-  "name": "agent-meeting-workspace",
+  "name": "agent-workspace",
   "version": "0.1.0",
   "private": true,
   "description": "Attention-centric meeting-style workspace for parallel coding agents (MVP)",

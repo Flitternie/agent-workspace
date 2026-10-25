@@ -16,7 +16,7 @@ import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, Provid
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : {});
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-const CLIENT_INFO = { name: 'agent_meeting_workspace', title: 'Agent Meeting Workspace', version: '0.1.0' };
+const CLIENT_INFO = { name: 'agent_workspace', title: 'Agent Workspace', version: '0.1.0' };
 
 /** Minimal JSON-RPC (newline-delimited) client for one app-server process. */
 class AppServer {
@@ -427,7 +427,7 @@ class CodexSession implements ProviderSession {
       return;
     }
     // Never leave an unsupported request hanging, and never silently approve it.
-    this.server?.replyError(rpcId, `Agent Meeting Workspace does not support ${method} yet.`);
+    this.server?.replyError(rpcId, `Agent Workspace does not support ${method} yet.`);
     this.emit({ type: 'progress', text: `Codex requested an unsupported interaction (${method}); it was refused.` });
   }
 

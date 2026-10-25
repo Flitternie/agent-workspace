@@ -34,7 +34,7 @@ const ctx = (utterance: string, focusedTaskId: string | null, zh = false): Route
 
 (async () => {
   console.log(`STT ${STT_MODEL}, router ${ROUTER_MODEL}`);
-  const hint = 'Agent Meeting Workspace. ' + tasks.map((t) => `${t.alias} (${t.name}): ${t.title}.`).join(' ');
+  const hint = 'Agent Workspace. ' + tasks.map((t) => `${t.alias} (${t.name}): ${t.title}.`).join(' ');
   const cases: Array<{ say: string; focus: string | null; expect: string; zh?: boolean }> = [
     { say: 'Alice, add a regression test for the orders endpoint.', focus: 't-B', expect: 'existing:t-A' },
     { say: '刚才那个数据库的 Agent，先不要改 schema。', focus: 't-A', expect: 'existing:t-C' },
@@ -52,7 +52,7 @@ const ctx = (utterance: string, focusedTaskId: string | null, zh = false): Route
     const audio = await speak(c.say);
     writeFileSync(join(process.cwd(), '.cache', `voice-${cases.indexOf(c)}.wav`), audio);
     const t0 = Date.now();
-    const heard = await ai.transcribe(audio, 'audio/wav', c.zh ? 'Agent Meeting Workspace. ' + tasksZh.map((t) => `${t.alias} (${t.name}): ${t.title}.`).join(' ') : hint);
+    const heard = await ai.transcribe(audio, 'audio/wav', c.zh ? 'Agent Workspace. ' + tasksZh.map((t) => `${t.alias} (${t.name}): ${t.title}.`).join(' ') : hint);
     const t1 = Date.now();
     const d = await decideRoute(ctx(heard, c.focus, c.zh), (x) => ai.routeClassify(x));
     const t2 = Date.now();

@@ -1,5 +1,5 @@
 {
-  "name": "agent-meeting-workspace-root",
+  "name": "agent-workspace-root",
   "private": true,
   "description": "Convenience wrapper: the app lives in ./app",
   "scripts": {

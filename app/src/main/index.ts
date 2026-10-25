@@ -20,7 +20,7 @@ const demoMode = process.env.AMW_MODE === 'demo';
 const dataDir = process.env.AMW_DATA_DIR ?? join(appRoot, demoMode ? '.data-demo' : '.data');
 mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', join(dataDir, 'electron'));
-app.setName('Agent Meeting Workspace');
+app.setName('Agent Workspace');
 
 const log = (...args: unknown[]) => {
   if (process.env.AMW_DEBUG) console.log('[amw]', ...args);
@@ -52,7 +52,7 @@ function ensureDemoRepo(): string {
   const dir = join(dataDir, 'demo-repo');
   if (!existsSync(join(dir, '.git'))) {
     mkdirSync(join(dir, 'src'), { recursive: true });
-    writeFileSync(join(dir, 'README.md'), '# demo-shop\n\nA tiny demo repository for Agent Meeting Workspace.\n');
+    writeFileSync(join(dir, 'README.md'), '# demo-shop\n\nA tiny demo repository for Agent Workspace.\n');
     writeFileSync(join(dir, 'src', 'orders.ts'), 'export function listOrders() {\n  return [];\n}\n');
     execFileSync('git', ['init', '-q'], { cwd: dir });
     execFileSync('git', ['add', '.'], { cwd: dir });
@@ -163,7 +163,7 @@ function createWindow(): void {
     height: 920,
     minWidth: 900,
     minHeight: 600,
-    title: demoMode ? 'Agent Meeting Workspace — Demo' : 'Agent Meeting Workspace',
+    title: demoMode ? 'Agent Workspace — Demo' : 'Agent Workspace',
     backgroundColor: '#f4f5f7',
     // Native-looking frame: traffic lights sit inside the sidebar on macOS.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } } : {}),

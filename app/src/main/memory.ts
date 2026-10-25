@@ -30,7 +30,7 @@ export function instructionsFor(task: Task, records: MemoryRecord[]): string | u
   if (!records.length) return undefined;
   const label = (m: MemoryRecord) => (m.scope === 'global' ? 'user preference' : m.scope === 'project' ? 'project convention' : 'task note');
   return [
-    '## Workspace memory (provided by Agent Meeting Workspace)',
+    '## Workspace memory (provided by Agent Workspace)',
     'The user saved these notes for this scope. Follow them unless the user says otherwise.',
     ...records.map((m) => `- [${label(m)}] ${m.body.replace(/\s+/g, ' ').trim()}`),
   ].join('\n');

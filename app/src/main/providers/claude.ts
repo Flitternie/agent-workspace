@@ -245,7 +245,7 @@ class ClaudeSession implements ProviderSession {
         ...(remember ? { updatedPermissions: p.suggestions } : {}),
       });
     } else {
-      p.finish({ behavior: 'deny', message: 'User denied this request in Agent Meeting Workspace.' });
+      p.finish({ behavior: 'deny', message: 'User denied this request in Agent Workspace.' });
     }
   }
 

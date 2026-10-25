@@ -31,7 +31,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-top drag">
         <span className="brand">
-          Agent Meeting
+          Agent Workspace
           {snapshot.demo ? <span className="demo-badge" title={tr('Demo entry: mock agents, separate data (npm run demo)')}>{tr('Demo')}</span> : null}
         </span>
       </div>

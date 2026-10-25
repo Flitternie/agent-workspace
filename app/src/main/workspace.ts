@@ -98,7 +98,7 @@ export class Workspace {
     const local = this.localModelId();
     if (local) return this.opts.localStt!.transcribe(local, audio, tasks.map((t) => t.alias));
     if (!this.opts.openai) throw new Error('Speech-to-text is not configured. Download a local model in Settings › Voice, or add an OpenAI key. Typed input still works.');
-    const hint = ['Agent Meeting Workspace.', ...tasks.map((t) => `${t.alias}${t.name !== t.alias ? ` (${t.name})` : ''}: ${t.title}.`)].join(' ');
+    const hint = ['Agent Workspace.', ...tasks.map((t) => `${t.alias}${t.name !== t.alias ? ` (${t.name})` : ''}: ${t.title}.`)].join(' ');
     return this.opts.openai.transcribe(audio, mimeType, hint);
   }
 

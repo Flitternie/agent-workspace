@@ -1,4 +1,4 @@
-# Agent Meeting Workspace — app
+# Agent Workspace — app
 
 A meeting-style overview for parallel coding agents. Each Claude Code or Codex task is a card that reports what it did and what it needs from you. Requests stay on their card until they are answered. Global voice routes a spoken instruction to the right agent without moving your view, and typed text goes only to the agent you selected.
 
