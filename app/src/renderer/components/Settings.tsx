@@ -271,10 +271,92 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
   );
 }
 
+/**
+ * The OpenAI key for cloud speech recognition and routing. It is checked against
+ * the API, then stored encrypted by the main process; this page never sees it again.
+ */
+function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+  const info = snapshot.voice.openaiKey;
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    setNote('');
+    try {
+      const r = await call('openai:setKey', { key: draft.trim() });
+      if (!r.ok) setError(r.error ?? t('The key was not saved.'));
+      else {
+        setDraft('');
+        setNote(r.overriddenByEnv ? t('Saved, but OPENAI_API_KEY in the environment is used while it is set.') : t('Saved and in use.'));
+      }
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tail = info.last4 ? ` (…${info.last4})` : '';
+  const status =
+    info.source === 'env'
+      ? t('Using OPENAI_API_KEY from the environment') + tail
+      : info.source === 'saved'
+        ? t('Saved on this Mac, encrypted') + tail
+        : info.source === 'file'
+          ? t('Read from an openai.key file') + tail
+          : t('No key yet');
+  return (
+    <div className="openai-key" data-testid="openai-key">
+      <p className="muted small">
+        {t('Used for cloud speech recognition and for routing messages you do not address by name. Optional: with an on-device speech model, voice works without it.')}{' '}
+        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
+          {t('Get a key')}
+        </a>
+      </p>
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <strong>{t('API key')}</strong>
+          <span className="small" data-testid="openai-key-status">
+            {status}
+          </span>
+          <span className={`badge ${info.source ? 'badge-ready' : 'badge-missing'}`}>{info.source ? t('Ready') : t('Not configured')}</span>
+        </div>
+      </div>
+      <div className="row key-row">
+        <input
+          className="input grow"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={info.source ? t('Paste a new key to replace it') : 'sk-…'}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && draft.trim() && void save()}
+          data-testid="openai-key-input"
+        />
+        <button className="btn btn-primary" disabled={busy || draft.trim().length < 20} onClick={() => void save()} data-testid="openai-key-save">
+          {busy ? t('Checking…') : t('Save key')}
+        </button>
+        {info.source === 'saved' ? (
+          <button className="btn" onClick={() => void call('openai:clearKey', {})} data-testid="openai-key-remove">
+            {t('Remove')}
+          </button>
+        ) : null}
+      </div>
+      {error ? <div className="error-text small">{error}</div> : null}
+      {note ? <div className="small ok-text">{note}</div> : null}
+      <div className="muted small">{t('The key is checked with OpenAI, then stored encrypted (macOS Keychain) in the app’s data folder. It is never shown again or written to logs.')}</div>
+    </div>
+  );
+}
+
 const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
+  { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
   { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'data', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
 ];
@@ -392,6 +474,10 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
       <Section id="permissions" query={query}>
         <p className="muted small">{t('Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.')}</p>
         <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
+      </Section>
+
+      <Section id="openai" query={query}>
+        <OpenAiKey snapshot={snapshot} />
       </Section>
 
       <Section id="voice" query={query}>

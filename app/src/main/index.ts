@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
-import { loadOpenAiKey, OpenAiClient } from './openai';
+import { KeyStore } from './keystore';
+import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
@@ -26,6 +27,8 @@ const log = (...args: unknown[]) => {
   if (process.env.AMW_DEBUG) console.log('[amw]', ...args);
 };
 
+// OpenAI key: environment > saved in Settings (encrypted, read once the app is ready) > openai.key file.
+const keyStore = new KeyStore(dataDir);
 const key = loadOpenAiKey(appRoot);
 // On-device speech models are shared by the real and demo entries and kept inside the app folder.
 let notifyModels = () => {};
@@ -45,6 +48,19 @@ const workspace = new Workspace({
   hiddenSessionDirs: [join(appRoot, '.cache')],
 });
 notifyModels = () => workspace.notifyChanged();
+const keySource = (): 'env' | 'file' | null => (envOpenAiKey() ? 'env' : key ? 'file' : null);
+if (key) workspace.setOpenAi(openai, { source: keySource(), last4: key.slice(-4) });
+
+/** Applies the best available key: environment, then the one saved in Settings, then the key file. */
+function useBestKey(): void {
+  if (process.env.AMW_NO_OPENAI === '1') return;
+  const env = envOpenAiKey();
+  if (env) return workspace.setOpenAi(new OpenAiClient(env), { source: 'env', last4: env.slice(-4) });
+  const saved = keyStore.load();
+  if (saved) return workspace.setOpenAi(new OpenAiClient(saved), { source: 'saved', last4: saved.slice(-4) });
+  const file = loadOpenAiKey(appRoot);
+  workspace.setOpenAi(file ? new OpenAiClient(file) : undefined, file ? { source: 'file', last4: file.slice(-4) } : { source: null });
+}
 
 let win: BrowserWindow | null = null;
 
@@ -103,7 +119,20 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
   'capabilities:refresh': () => workspace.refreshCapabilities(),
-  'models:list': async () => (openai ? openai.listModels() : []),
+  'models:list': async () => workspace.openAi()?.listModels() ?? [],
+  'openai:setKey': async (i: { key: string }) => {
+    if (process.env.AMW_NO_OPENAI === '1') return { ok: false, error: 'OpenAI is disabled for this run (AMW_NO_OPENAI=1).' };
+    const k = i.key.trim();
+    const problem = await checkOpenAiKey(k);
+    if (problem) return { ok: false, error: problem };
+    keyStore.save(k);
+    useBestKey();
+    return { ok: true, overriddenByEnv: !!envOpenAiKey() };
+  },
+  'openai:clearKey': () => {
+    keyStore.clear();
+    useBestKey();
+  },
   'demo:seed': () => {
     if (!demoMode) throw new Error('Demo agents are only available in the demo entry (npm run demo).');
     return workspace.seedDemo(ensureDemoRepo());
@@ -190,6 +219,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  useBestKey(); // safeStorage can decrypt the saved key only after 'ready'
   // Microphone only (no camera, no screen), and only for our own window.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
     const media = details as { mediaTypes?: string[] };

@@ -19,6 +19,23 @@ export function chatParams(model: string): Record<string, unknown> {
   return { temperature: 0 };
 }
 
+/** A key set in the environment wins over one saved in Settings or a key file. */
+export function envOpenAiKey(): string | undefined {
+  if (process.env.AMW_NO_OPENAI === '1') return undefined;
+  return process.env.OPENAI_API_KEY?.trim() || undefined;
+}
+
+/** Checks a key against the API before it is saved. Resolves with an error message, or undefined if it works. */
+export async function checkOpenAiKey(key: string): Promise<string | undefined> {
+  try {
+    const res = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    if (res.ok) return undefined;
+    return res.status === 401 ? 'OpenAI rejected this key (401).' : `OpenAI answered ${res.status}; the key was not saved.`;
+  } catch (error) {
+    return `Could not reach OpenAI: ${(error as Error).message}`;
+  }
+}
+
 /** OPENAI_API_KEY, else AMW_OPENAI_KEY_FILE, else an `openai.key` file in this folder or a parent. */
 export function loadOpenAiKey(startDir: string): string | undefined {
   if (process.env.AMW_NO_OPENAI === '1') return undefined;

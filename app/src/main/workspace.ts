@@ -82,6 +82,20 @@ export class Workspace {
     this.recoverAfterRestart();
   }
 
+  private keyInfo: WorkspaceSnapshot['voice']['openaiKey'] = { source: null };
+
+  /** Swaps the OpenAI client at runtime (key added, changed or removed in Settings). */
+  setOpenAi(client: OpenAiClient | undefined, info: WorkspaceSnapshot['voice']['openaiKey']): void {
+    this.opts.openai = client;
+    this.keyInfo = info;
+    this.applyModels();
+    this.changed();
+  }
+
+  openAi(): OpenAiClient | undefined {
+    return this.opts.openai;
+  }
+
   /** The on-device model in use, if one is selected and downloaded. */
   private localModelId(): string | undefined {
     const m = /^local:(.+)$/.exec(this.store.data.settings.sttModel ?? '')?.[1];
@@ -193,6 +207,7 @@ export class Workspace {
         // Meeting-style: the mic is open from launch unless disabled (tests, kiosk use).
         autoListen: this.sttReady() && process.env.AMW_NO_AUTOLISTEN !== '1' && d.settings.autoListen,
         cloudAvailable: !!this.opts.openai,
+        openaiKey: this.keyInfo,
         localModels: this.opts.localStt?.states() ?? [],
       },
       dataDir: this.opts.dataDir,

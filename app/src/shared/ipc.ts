@@ -81,6 +81,8 @@ export const ipcSchemas = {
   'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional() }),
   'capabilities:refresh': z.object({}),
   'models:list': z.object({}),
+  'openai:setKey': z.object({ key: z.string().min(20).max(400).regex(/^\S+$/) }),
+  'openai:clearKey': z.object({}),
   'stt:download': z.object({ id }),
   'stt:cancel': z.object({ id }),
   'stt:delete': z.object({ id }),

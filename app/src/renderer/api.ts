@@ -52,6 +52,8 @@ interface Outputs {
   'settings:update': void;
   'capabilities:refresh': void;
   'models:list': string[];
+  'openai:setKey': { ok: boolean; error?: string; overriddenByEnv?: boolean };
+  'openai:clearKey': void;
   'stt:download': void;
   'stt:cancel': void;
   'stt:delete': void;

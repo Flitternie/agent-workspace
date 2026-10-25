@@ -2706,3 +2706,20 @@ details[open] > summary .tool-more {
 .tile {
   cursor: default;
 }
+
+/* OpenAI key */
+.openai-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.openai-key .settings-row-main .badge {
+  margin-left: auto;
+}
+.key-row {
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.ok-text {
+  color: var(--ok);
+}
