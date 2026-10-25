@@ -33,7 +33,7 @@ You still need the `claude` and/or `codex` CLI installed and signed in; the app 
 
 ## Release
 
-Bump `version` in `app/package.json`, then push a matching tag (`git tag v0.5.0 && git push origin v0.5.0`). GitHub Actions builds the DMG and the Windows installer and attaches them to a draft release to review and publish. To build locally: `npm --prefix app run dist:mac` (output in `app/release/`).
+Bump `version` in `app/package.json` on `main` (`cd app && npm version minor --no-git-tag-version`, commit, push). GitHub Actions tags the commit `v<version>`, runs the unit tests, builds the DMG and the Windows installer, and publishes the release with generated notes once both are attached. Pushes that keep the version release nothing. To build locally: `npm --prefix app run dist:mac` (output in `app/release/`; the .dmg file also gets the app icon in Finder).
 
 ## Repository
 

@@ -1,20 +1,60 @@
-# Builds installers on GitHub's runners.
-# - Push a tag like v0.5.0 (matching app/package.json "version"): the macOS DMG and the
-#   Windows installer are attached to a draft release; check it, then publish it.
+# Builds installers on GitHub's runners and publishes them as a GitHub release.
+# - Bump "version" in app/package.json on main (e.g. `npm version minor --no-git-tag-version`
+#   in app/): this tags the commit v<version>, builds the macOS DMG and the Windows installer,
+#   and publishes the release once both are attached. Pushes that keep the version only run
+#   nothing here.
+# - Pushing a tag like v0.6.0 by hand does the same for that tag.
 # - Run it by hand (Actions → Release → Run workflow): builds only; download the files
 #   from the run's artifacts.
 name: Release
 
 on:
   push:
+    branches: [main]
+    paths: ['app/package.json']
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Decides what this run releases: a new version on main gets its tag here.
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      publish: ${{ steps.pick.outputs.publish }}
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          version=$(node -p "require('./app/package.json').version")
+          tag="v$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" == "$tag" ]] || { echo "::error::Tag $GITHUB_REF_NAME does not match app/package.json version $version"; exit 1; }
+            echo "tag=$tag" "publish=true" "ref=$GITHUB_REF" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "$tag already exists; nothing to release."
+              echo "publish=skip" >> "$GITHUB_OUTPUT"
+            else
+              git tag "$tag" "$GITHUB_SHA"
+              git push origin "refs/tags/$tag"
+              echo "tag=$tag" "publish=true" "ref=refs/tags/$tag" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "publish=false" "ref=$GITHUB_SHA" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: tag
+    if: needs.tag.outputs.publish != 'skip'
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +70,8 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -46,8 +88,9 @@ jobs:
         if: runner.os == 'macOS'
         run: npm run typecheck && npm test
 
+      # Uploads go to a draft release for the tag; it is published below once every platform is in.
       - name: Build installer
-        run: bash scripts/dist.sh ${{ matrix.target }} --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+        run: bash scripts/dist.sh ${{ matrix.target }} --publish ${{ needs.tag.outputs.publish == 'true' && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,3 +101,16 @@ jobs:
             app/release/*.dmg
             app/release/*.exe
           if-no-files-found: error
+
+  publish:
+    needs: [tag, build]
+    if: needs.tag.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        run: |
+          notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body)
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest --title "Agent Workspace $TAG" --notes "$notes"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.tag.outputs.tag }}

@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Run Claude Code and Codex agents in parallel from one meeting-style workspace, with a main agent and always-on voice.",
   "main": "out/main/index.cjs",
@@ -56,7 +56,7 @@
   "build": {
     "appId": "com.flitternie.agentworkspace",
     "productName": "Agent Workspace",
-    "copyright": "\u00a9 2026 Flitternie",
+    "copyright": "© 2026 Flitternie",
     "directories": {
       "output": "release",
       "buildResources": "build"
