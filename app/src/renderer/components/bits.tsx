@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
-import { t } from '../i18n';
+import { t, t as tr } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: 'Idle',
@@ -65,7 +65,21 @@ function initial(alias: string): string {
   return alias.length <= 2 ? alias : alias.charAt(0).toUpperCase();
 }
 
-export function displayName(t: { name: string; alias: string }): string {
+/** System notes written by the main process, shown in the UI language. */
+export function systemText(text: string): string {
+  const m = /^(.+?) is waiting on you \((permission|question)\): ([\s\S]*)$/.exec(text);
+  if (m) return tr(m[2] === 'permission' ? '{alias} needs your permission: {what}' : '{alias} is asking you: {what}', { alias: m[1], what: m[3] });
+  const settled = /^(.+?)'s request is settled: ([\s\S]*)$/.exec(text);
+  return settled ? tr('{alias}’s request is settled: {what}', { alias: settled[1], what: settled[2] }) : text;
+}
+
+/** The main agent is stored like a task, with a reserved id. */
+export function isMainAgent(t: { taskId?: string } | undefined): boolean {
+  return !!t?.taskId?.startsWith('t-main-');
+}
+
+export function displayName(t: { name: string; alias: string; taskId?: string }): string {
+  if (isMainAgent(t)) return tr('Main agent');
   if (t.name === t.alias || !t.name.trim()) return t.alias;
   // Role first, like a job title: "Database Charlie", "数据库小张".
   if (/[㐀-鿿]/.test(t.alias)) return `${t.name}${t.alias}`;

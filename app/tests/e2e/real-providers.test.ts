@@ -28,7 +28,7 @@ function repo(): string {
 async function launch(): Promise<Page> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !['ELECTRON_RUN_AS_NODE', 'CLAUDECODE'].includes(k)) env[k] = v;
-  app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_DATA_DIR: dataDir, AMW_NO_AUTOLISTEN: '1' } });
+  app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: dataDir, AMW_NO_AUTOLISTEN: '1' } });
   const page = await app.firstWindow();
   await page.waitForSelector('.app');
   return page;

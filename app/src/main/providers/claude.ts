@@ -10,6 +10,7 @@ import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapa
 import { childEnv, findExecutable, run } from '../util/exec';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
+import type { WorkspaceTool } from '../main-agent';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
@@ -41,6 +42,31 @@ function toolResultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((b) => str(rec(b).text)).filter(Boolean).join('\n');
   return '';
+}
+
+/**
+ * Main agent: the workspace tools as an in-process MCP server (they run in this
+ * app), pre-approved; tools that change files or run commands are removed.
+ */
+function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: WorkspaceTool[]) {
+  const server = sdk.createSdkMcpServer({
+    name: 'workspace',
+    version: '1.0.0',
+    tools: tools.map((t) =>
+      sdk.tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
+        try {
+          return { content: [{ type: 'text' as const, text: await t.run(args) }] };
+        } catch (error) {
+          return { content: [{ type: 'text' as const, text: (error as Error).message }], isError: true };
+        }
+      }),
+    ),
+  });
+  return {
+    mcpServers: { workspace: server },
+    allowedTools: [...tools.map((t) => `mcp__workspace__${t.name}`), 'Read', 'Grep', 'Glob'],
+    disallowedTools: ['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Agent', 'Task', 'KillShell', 'BashOutput'],
+  };
 }
 
 const CLAUDE_MODE: Record<PermissionMode, 'auto' | 'acceptEdits' | 'default'> = { auto: 'auto', edits: 'acceptEdits', ask: 'default' };
@@ -177,6 +203,7 @@ class ClaudeSession implements ProviderSession {
         // will not approve, and everything in 'default', reaches canUseTool → the tile.
         permissionMode: CLAUDE_MODE[this.args.permissionMode ?? 'auto'],
         canUseTool: this.canUseTool,
+        ...(this.args.tools?.length ? mainAgentOptions(sdk, this.args.tools) : {}),
         stderr: () => {
           /* diagnostics may contain private tool arguments; never forwarded */
         },

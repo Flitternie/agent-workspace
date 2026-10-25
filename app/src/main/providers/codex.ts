@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
+import { z } from 'zod';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
@@ -257,7 +258,11 @@ class CodexSession implements ProviderSession {
     await server.initialize();
     const resumeId = this.args.resumeNativeSessionId;
     // Always sandboxed to the workspace; never bypass. The mode decides who reviews escalations.
-    const policy = { ...codexPolicy(this.args.permissionMode ?? 'auto'), sandbox: 'workspace-write' };
+    const tools = this.args.tools ?? [];
+    // Main agent: read-only sandbox, never asks, plus the workspace tools (answered via item/tool/call).
+    const policy = tools.length
+      ? { approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) }
+      : { ...codexPolicy(this.args.permissionMode ?? 'auto'), sandbox: 'workspace-write' };
     const instructions = this.args.developerInstructions
       ? { developerInstructions: this.args.developerInstructions }
       : {};
@@ -320,7 +325,7 @@ class CodexSession implements ProviderSession {
           threadId: this.threadId,
           input,
           // Applies to this turn and later ones (a mode change takes effect here).
-          ...(this.modeChanged ? codexPolicy(this.args.permissionMode ?? 'auto') : {}),
+          ...(this.modeChanged && !this.args.tools?.length ? codexPolicy(this.args.permissionMode ?? 'auto') : {}),
         }),
       );
       this.turnId = str(rec(result.turn).id) || this.turnId;
@@ -365,6 +370,17 @@ class CodexSession implements ProviderSession {
 
   private request(rpcId: string | number, method: string, p: Rec): void {
     const requestId = `codex-${String(rpcId)}-${str(p.itemId) || Date.now()}`;
+    if (method === 'item/tool/call') {
+      // A workspace tool call from the main agent: run it here and answer.
+      const tool = this.args.tools?.find((t) => t.name === str(p.tool));
+      const reply = (text: string, success: boolean) => this.server?.reply(rpcId, { contentItems: [{ type: 'inputText', text }], success });
+      if (!tool) return reply(`Unknown tool ${str(p.tool)}`, false);
+      void tool
+        .run(rec(p.arguments))
+        .then((text) => reply(text, true))
+        .catch((error: unknown) => reply((error as Error).message, false));
+      return;
+    }
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
       const command = str(p.command);
       const isCommand = method === 'item/commandExecution/requestApproval';

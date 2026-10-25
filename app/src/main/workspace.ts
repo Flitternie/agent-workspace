@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import type {
@@ -28,10 +28,17 @@ import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
-import { decideRoute, type RouteContext } from './router';
+import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
+import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+
+/** Words that clearly approve (zh / en). */
+const APPROVAL = /(批准|允许|同意|可以|行|好的|确认|执行吧|跑吧|\b(yes|yep|allow|approve|approved|go ahead|ok|okay|sure|do it|confirm)\b)/i;
+
+/** "不行 / 别 / don't": never read as approval. */
+const NEGATION = /(不|别|没|勿|\b(no|not|don'?t|never|deny|stop)\b)/i;
 
 const now = () => new Date().toISOString();
 const slugify = (s: string) =>
@@ -129,7 +136,7 @@ export class Workspace {
   /** Nothing is connected after a restart: be honest about it. */
   private recoverAfterRestart(): void {
     const d = this.store.data;
-    for (const t of d.tasks) {
+    for (const t of [...d.tasks, ...(d.mainAgent ? [d.mainAgent] : [])]) {
       if (['running', 'starting'].includes(t.status) || (t.status === 'waiting_for_user' && this.hasOpenNative(t.taskId))) {
         t.status = 'disconnected';
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
@@ -157,6 +164,7 @@ export class Workspace {
       }
     }
     this.capabilities = caps;
+    this.syncMainAgent();
     this.changed();
   }
 
@@ -211,6 +219,7 @@ export class Workspace {
         localModels: this.opts.localStt?.states() ?? [],
       },
       dataDir: this.opts.dataDir,
+      main: d.mainAgent,
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
     };
@@ -242,8 +251,14 @@ export class Workspace {
 
   // ---------------------------------------------------------------- tasks
 
+  /** A worker task, or the main agent. */
+  private findTask(taskId: string): Task | undefined {
+    const d = this.store.data;
+    return d.tasks.find((x) => x.taskId === taskId) ?? (d.mainAgent?.taskId === taskId ? d.mainAgent : undefined);
+  }
+
   private task(taskId: string): Task {
-    const t = this.store.data.tasks.find((x) => x.taskId === taskId);
+    const t = this.findTask(taskId);
     if (!t) throw new Error(`Unknown task ${taskId}`);
     return t;
   }
@@ -439,6 +454,7 @@ export class Workspace {
     task.injectedMemoryIds = injected.map((m) => m.id);
     this.changed();
 
+    const isMain = task === this.store.data.mainAgent;
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -446,9 +462,11 @@ export class Workspace {
         cwd: task.cwd,
         title: task.title,
         resumeNativeSessionId: resumeId,
-        developerInstructions: instructionsFor(task, injected),
+        // The main agent gets its role and the workspace tools; it never edits code itself.
+        developerInstructions: isMain ? [MAIN_AGENT_PROMPT, instructionsFor(task, injected)].filter(Boolean).join('\n\n') : instructionsFor(task, injected),
         mockScript: task.mockScript,
-        permissionMode: this.permissionModeOf(task),
+        permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
+        tools: isMain ? workspaceTools(this) : undefined,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
@@ -502,7 +520,7 @@ export class Workspace {
     if (!l) return;
     this.live.delete(taskId);
     await l.session.close().catch(() => {});
-    const t = this.store.data.tasks.find((x) => x.taskId === taskId);
+    const t = this.findTask(taskId);
     if (t) {
       t.status = 'disconnected';
       t.summary = 'Stopped. Resume to continue the same native session.';
@@ -631,7 +649,7 @@ export class Workspace {
   // ---------------------------------------------------------------- provider events
 
   handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
-    const task = this.store.data.tasks.find((t) => t.taskId === taskId);
+    const task = this.findTask(taskId);
     const live = this.live.get(taskId);
     // Late events from a replaced or stopped session must not touch the task.
     if (!task || task.sessionLocalId !== sessionLocalId || !live || live.localId !== sessionLocalId) {
@@ -742,6 +760,11 @@ export class Workspace {
           break;
         }
         const text = event.finalText?.trim() ?? '';
+        if (task === this.store.data.mainAgent) {
+          task.status = 'done';
+          task.summary = text ? summaryFor(text) : 'Finished.';
+          break;
+        }
         // Supersede this task's older completion notes; other tasks' items are never touched.
         for (const a of this.store.data.attention)
           if (a.taskId === taskId && a.state === 'open' && a.kind === 'completion') this.closeAttention(a, 'resolved', 'Superseded by a newer report.');
@@ -785,13 +808,25 @@ export class Workspace {
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
     this.store.data.attention.push(item);
+    // The main agent's conversation lists what workers need from the user (a note, not a model turn).
+    const main = this.store.data.mainAgent;
+    const worker = this.store.data.tasks.find((t) => t.taskId === a.taskId);
+    if (main && worker && (a.kind === 'question' || a.kind === 'approval'))
+      this.appendSystem(main.taskId, `${worker.alias} is waiting on you (${a.kind === 'approval' ? 'permission' : 'question'}): ${clip(a.headline, 200)}`);
     return item;
   }
 
   private closeAttention(a: AttentionItem, state: AttentionItem['state'], resolution: string): void {
+    const wasOpen = a.state === 'open';
     a.state = state;
     a.resolvedAt = now();
     a.resolution = resolution;
+    // One state for every view: however it was settled (card, direct message, main agent),
+    // the main agent's conversation records that it no longer waits on the user.
+    const main = this.store.data.mainAgent;
+    const worker = this.store.data.tasks.find((t) => t.taskId === a.taskId);
+    if (wasOpen && main && worker && (a.kind === 'question' || a.kind === 'approval'))
+      this.appendSystem(main.taskId, `${worker.alias}'s request is settled: ${clip(resolution, 160)}`);
   }
 
   private findOpenByRequest(taskId: string, requestId: string): AttentionItem | undefined {
@@ -893,7 +928,16 @@ export class Workspace {
     };
   }
 
-  async decideRoute(utterance: string, focusedTaskId: string | null): Promise<RouteDecision> {
+  /**
+   * `namedOnly`: the main agent handles everything else, so only report an agent
+   * named explicitly (no classifier call, no guessing).
+   */
+  async decideRoute(utterance: string, focusedTaskId: string | null, namedOnly = false): Promise<RouteDecision> {
+    if (namedOnly) {
+      const d = decideDeterministic(this.routeContext(utterance, null));
+      // A named agent keeps its decision, including the sensitive-command confirmation.
+      return d?.kind === 'existing' && /^explicitly named/.test(d.reason) ? d : { kind: 'coordinator', reason: 'for the main agent' };
+    }
     const ai = this.opts.openai;
     return decideRoute(this.routeContext(utterance, focusedTaskId), ai ? (ctx) => ai.routeClassify(ctx) : undefined);
   }
@@ -1007,7 +1051,160 @@ export class Workspace {
   updateSettings(patch: Partial<Settings>): void {
     Object.assign(this.store.data.settings, patch);
     this.applyModels();
+    if ('mainAgent' in patch) this.syncMainAgent();
     this.changed();
+  }
+
+  // ---------------------------------------------------------------- main agent
+
+  private providerReady(p: AgentProvider): boolean {
+    const c = this.capabilities.find((x) => x.provider === p);
+    return !!c?.available && c.auth?.loggedIn !== false;
+  }
+
+  /**
+   * Keeps the main agent in line with Settings: created on the chosen (or first
+   * ready) CLI, replaced when the choice changes, removed when turned off.
+   */
+  private syncMainAgent(): void {
+    const d = this.store.data;
+    if (!this.capabilities.length) return; // not probed yet: keep what we have
+    const setting = (process.env.AMW_MAIN_AGENT as Settings['mainAgent']) || d.settings.mainAgent;
+    const want = pickMainProvider(setting, (p) => this.providerReady(p));
+    const cur = d.mainAgent;
+    if (cur && cur.provider === want) return;
+    if (cur) {
+      void this.stop(cur.taskId).catch(() => {});
+      d.mainAgent = undefined;
+    }
+    if (want) {
+      const cwd = join(this.opts.dataDir, 'main-agent');
+      mkdirSync(cwd, { recursive: true });
+      d.mainAgent = {
+        taskId: `t-main-${randomUUID().slice(0, 6)}`,
+        alias: 'Main',
+        name: 'Main',
+        projectId: '',
+        title: 'Main agent',
+        provider: want,
+        status: 'idle',
+        summary: 'Ready. Tell me what you need; I will pass it to the right agent.',
+        cwd,
+        createdAt: now(),
+        updatedAt: now(),
+      };
+    }
+    this.changed();
+  }
+
+  // MainAgentHost: what the main agent's tools can do.
+  listAgents() {
+    const d = this.store.data;
+    return d.tasks.map((t) => ({
+      task: t,
+      projectName: d.projects.find((p) => p.projectId === t.projectId)?.name ?? '',
+      pending: d.attention.filter((a) => a.taskId === t.taskId && a.state === 'open' && a.kind !== 'completion').map((a) => clip(a.headline, 160)),
+      connected: this.live.has(t.taskId),
+    }));
+  }
+
+  listProjects() {
+    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name, rootPath: p.rootPath }));
+  }
+
+  findAgent(name: string): Task | undefined {
+    const n = name.trim().toLowerCase();
+    const tasks = this.store.data.tasks;
+    const exact = tasks.find((t) => t.alias.toLowerCase() === n || `${t.name} ${t.alias}`.toLowerCase() === n || `${t.name}${t.alias}`.toLowerCase() === n);
+    if (exact) return exact;
+    const byRole = tasks.filter((t) => t.name.toLowerCase() === n);
+    return byRole.length === 1 ? byRole[0] : undefined;
+  }
+
+  transcriptText(taskId: string, limit: number): string {
+    return this.store
+      .transcript(taskId)
+      .filter((i) => i.role !== 'thought')
+      .slice(-limit)
+      .map((i) => {
+        if (i.role === 'tool') {
+          const out = (i.tool?.content ?? [])
+            .map((c) => (c.type === 'diff' ? `diff ${c.diff.path} +${c.diff.added}/-${c.diff.removed}` : c.type === 'terminal' ? `$ ${c.command}\n${clip(c.output, 600)}` : ''))
+            .filter(Boolean)
+            .join('\n');
+          return `[tool${i.toolStatus ? ` ${i.toolStatus}` : ''}] ${i.tool?.title ?? i.toolLabel ?? ''}${out ? `\n${out}` : ''}`;
+        }
+        const who = i.role === 'user' ? (i.via === 'main' ? 'main agent' : 'user') : i.role;
+        return `[${who}] ${clip(i.text, 1500)}`;
+      })
+      .join('\n\n');
+  }
+
+  sendFromMain(taskId: string, text: string, interrupt: boolean) {
+    return this.send(taskId, text, 'main', { interrupt });
+  }
+
+  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
+    return this.createTask({ ...args, name: args.role, isolate: true });
+  }
+
+  async stopFromMain(taskId: string): Promise<void> {
+    await this.interrupt(taskId);
+  }
+
+  saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void {
+    this.addMemory({ scope, scopeId: scope === 'project' ? projectId! : 'global', body, approvedForReuse: true, source: 'main agent' });
+  }
+
+  listRequests() {
+    const d = this.store.data;
+    return d.attention
+      .filter((a) => a.state === 'open' && a.kind !== 'completion' && d.tasks.some((t) => t.taskId === a.taskId))
+      .map((a) => ({ item: a, agent: d.tasks.find((t) => t.taskId === a.taskId)!.alias }));
+  }
+
+  /** The user's latest message to the main agent: the only source of a permission decision it may pass on. */
+  lastUserWordsToMain(): string {
+    const main = this.store.data.mainAgent;
+    if (!main) return '';
+    return [...this.store.transcript(main.taskId)].reverse().find((i) => i.role === 'user' && i.via !== 'main')?.text ?? '';
+  }
+
+  async answerFromMain(attentionId: string, args: { choice?: string; answer?: string; userWords?: string }): Promise<string> {
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    if (!a || a.state !== 'open') return 'That request is no longer open (answered, expired or unknown). Call list_requests.';
+    const task = this.task(a.taskId);
+    if (!a.providerRequestId) {
+      // The agent asked in its reply: answering means replying to it.
+      if (!args.answer?.trim()) return 'Pass answer: the reply to send to the agent.';
+      const r = await this.send(a.taskId, args.answer, 'main');
+      return r.ok ? `Replied to ${task.alias}.` : `Not delivered: ${r.error}`;
+    }
+    if (a.kind === 'question') {
+      const qs = a.questions ?? [];
+      if (!args.answer?.trim() || !qs.length) return 'Pass answer (for several questions, one answer per line in order).';
+      const parts = qs.length > 1 ? args.answer.split('\n').map((s) => s.trim()) : [args.answer.trim()];
+      await this.respondAttention(attentionId, 'answer', Object.fromEntries(qs.map((q, i) => [q.id, parts[i] ?? ''])));
+      return `Answered ${task.alias}'s question.`;
+    }
+    // Permission request: refusing is always allowed; allowing must be the user's own, explicit words.
+    const opt = (a.options ?? []).find((o) => o.id === args.choice || o.label.toLowerCase() === String(args.choice ?? '').toLowerCase());
+    if (!opt) return `Choose one of: ${(a.options ?? []).map((o) => `${o.id} (${o.label})`).join(', ')}.`;
+    const refusing = (opt.kind ?? '').startsWith('reject') || /deny|decline|cancel|keep planning/i.test(`${opt.id} ${opt.label}`);
+    if (!refusing) {
+      const said = this.lastUserWordsToMain();
+      const words = (args.userWords ?? '').trim();
+      const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ');
+      if (!words || !norm(said).includes(norm(words)))
+        return 'Not allowed: quote, in user_words, the user’s own words from their latest message that approve this. If they have not said so, ask them.';
+      if (!APPROVAL.test(words) || NEGATION.test(words)) return 'Those words do not clearly approve the request. Ask the user to confirm, or have them approve it on the agent’s card.';
+    }
+    await this.respondAttention(attentionId, opt.id);
+    return `${opt.label} — sent to ${task.alias}.`;
+  }
+
+  availableProviders(): AgentProvider[] {
+    return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
   }
 
   // ---------------------------------------------------------------- demo

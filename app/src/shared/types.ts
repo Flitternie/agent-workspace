@@ -125,7 +125,7 @@ export interface TranscriptItem {
   role: TranscriptRole;
   text: string;
   /** How the user message arrived. */
-  via?: 'text' | 'voice' | 'card' | 'initial';
+  via?: 'text' | 'voice' | 'card' | 'initial' | 'main';
   /** User messages sent while the agent was working. */
   delivery?: 'steer' | 'interrupt';
   toolLabel?: string;
@@ -202,6 +202,8 @@ export interface Settings {
   autoListen: boolean;
   /** Default permission mode for new agents. */
   permissionMode?: PermissionMode;
+  /** Which CLI runs the main agent; unset = the first one installed and signed in. */
+  mainAgent?: 'claude' | 'codex' | 'off';
   /** Speech-to-text model (OpenAI id). */
   sttModel?: string;
   /** Model that decides which agent a spoken message is for (and names roles). */
@@ -242,6 +244,8 @@ export type PermissionMode = 'auto' | 'edits' | 'ask';
 export interface WorkspaceSnapshot {
   /** Demo entry: mock agents are offered and seeded. */
   demo: boolean;
+  /** The main agent the user talks to by default (not one of `tasks`). */
+  main?: Task;
   projects: Project[];
   tasks: Task[];
   sessions: SessionRecord[];

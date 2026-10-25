@@ -42,8 +42,9 @@ export function App() {
   const [error, setError] = useState('');
   const now = useTick();
 
-  const focusTask = snapshot?.tasks.find((t) => t.taskId === focusId);
-  const taskIds = snapshot?.tasks.map((t) => t.taskId).join(',') ?? '';
+  // The main agent opens in the same Focus view as any agent.
+  const focusTask = snapshot?.tasks.find((t) => t.taskId === focusId) ?? (snapshot?.main?.taskId === focusId ? snapshot.main : undefined);
+  const taskIds = [...(snapshot?.tasks ?? []), ...(snapshot?.main ? [snapshot.main] : [])].map((t) => t.taskId).join(',');
   // Tiles show recent activity, so every task's transcript is kept current.
   useEffect(() => {
     for (const id of taskIds.split(',').filter(Boolean)) load(id);
@@ -133,7 +134,7 @@ export function App() {
         {settingsOpen ? (
           <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
         ) : focusTask ? (
-          <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} />
+          <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
         ) : (
           <>
             <header className="stage-head drag">
@@ -221,7 +222,7 @@ export function App() {
           </>
         )}
 
-        <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} />
+        <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} mainTranscript={snapshot.main ? (transcripts[snapshot.main.taskId] ?? []) : []} />
       </div>
 
       <div className="toasts" aria-live="polite">

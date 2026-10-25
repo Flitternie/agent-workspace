@@ -42,6 +42,28 @@ export function Sidebar({
         {needYou ? <span className="count">{needYou}</span> : null}
       </button>
 
+      {snapshot.main ? (
+        <button
+          className={`agent-row main-row status-${snapshot.main.status}${snapshot.main.taskId === focusId ? ' active' : ''}`}
+          onClick={() => onSelect(snapshot.main!.taskId)}
+          data-testid="main-agent-row"
+          title={`${tr('Main agent')} · ${PROVIDER_LABEL[snapshot.main.provider]}`}
+        >
+          <span className="alias alias-sm main-mark" aria-hidden>
+            <Icon name="spark" size={12} />
+          </span>
+          <span className="agent-row-text">
+            <span className="agent-row-name">
+              <span className="truncate">{tr('Main agent')}</span>
+              <span className={`status status-${snapshot.main.status}`}>
+                <span className="dot" aria-label={tr(STATUS_LABEL[snapshot.main.status])} />
+              </span>
+            </span>
+            <span className="agent-row-sub">{tr(snapshot.main.summary)}</span>
+          </span>
+        </button>
+      ) : null}
+
       <div className="sidebar-section">
         <span>{tr('Agents')}</span>
         <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask}>

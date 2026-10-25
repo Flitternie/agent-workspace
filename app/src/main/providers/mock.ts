@@ -202,10 +202,13 @@ class MockSession implements ProviderSession {
           '```',
         ].join('\n');
       } else {
+        // A short, plausible report. The request number comes from the saved history,
+        // so after a resume it shows the mock really kept its earlier conversation.
+        const said = text.length > 120 ? `${text.slice(0, 117)}…` : text;
         reply =
-          `(turn ${userTurns + 1}, I remember ${this.history?.messages.length ?? 0} prior messages) ` +
-          `You said: "${text.slice(0, 200)}". ` +
-          (userTurns % 2 === 0 ? 'Understood — applying that.' : 'Should I also update the related tests?');
+          userTurns % 2 === 0
+            ? `Done: “${said}”. Changes are in my worktree. (Request ${userTurns + 1} in this session.)`
+            : `On it: “${said}”. Want me to add a test for this as well? (Request ${userTurns + 1} in this session.)`;
       }
       this.finish(first ? memory + reply : reply);
     }, 1);

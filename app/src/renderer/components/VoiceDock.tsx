@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import type { AgentProvider, RouteDecision, Task, WorkspaceSnapshot } from '../../shared/types';
+import type { AgentProvider, RouteDecision, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import { Markdown } from './Markdown';
+import { WaitingOnYou } from './FocusView';
 import { call, errorText } from '../api';
 import { timeAgo, useTick } from '../state';
 import { holdMs, joinSpeech, stopIntent } from '../voice/compose';
 import { ContinuousListener, isLikelyNoise } from '../voice/listener';
-import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL } from './bits';
+import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, systemText } from './bits';
 import { t as tr } from '../i18n';
 
 type MicState = 'off' | 'starting' | 'listening' | 'speaking' | 'denied' | 'unavailable';
@@ -58,11 +60,14 @@ export function VoiceDock({
   focusedTaskId,
   onDispatched,
   onView,
+  mainTranscript,
 }: {
   snapshot: WorkspaceSnapshot;
   focusedTaskId: string | null;
   onDispatched: (taskId: string | undefined) => void;
   onView: (taskId: string) => void;
+  /** The main agent's conversation, for the reply panel above the bar. */
+  mainTranscript: TranscriptItem[];
 }) {
   const [mic, setMic] = useState<MicState>('off');
   const now = useTick(2000);
@@ -71,6 +76,7 @@ export function VoiceDock({
   const [activeId, setActiveId] = useState<number | null>(null);
   const [text, setText] = useState('');
   const [showLog, setShowLog] = useState(false);
+  const [showMain, setShowMain] = useState(false);
   const [newProvider, setNewProvider] = useState<AgentProvider>('claude');
   const [newProject, setNewProject] = useState('');
   const listener = useRef<ContinuousListener | null>(null);
@@ -80,7 +86,8 @@ export function VoiceDock({
   const snapRef = useRef(snapshot);
   snapRef.current = snapshot;
   const tasks = snapshot.tasks;
-  const taskById = (id?: string) => tasks.find((t) => t.taskId === id);
+  // The main agent counts as an agent here (names, captions), though it is not one of `tasks`.
+  const taskById = (id?: string) => tasks.find((t) => t.taskId === id) ?? (snapshot.main?.taskId === id ? snapshot.main : undefined);
   const stt = snapshot.voice.sttAvailable;
 
   const patch = useCallback((id: number, p: Partial<Entry>) => setEntries((list) => list.map((e) => (e.id === id ? { ...e, ...p } : e))), []);
@@ -91,7 +98,8 @@ export function VoiceDock({
       try {
         const r = await call('route:dispatch', { utterance: entry.text, target, focusedTaskId: focusRef.current, interrupt: entry.interrupt, typed: entry.source === 'typed' });
         if (!r.ok) throw new Error(r.error ?? tr('Not delivered'));
-        const t = r.taskId ? snapRef.current.tasks.find((x) => x.taskId === r.taskId) : undefined;
+        const s = snapRef.current;
+        const t = r.taskId ? (s.tasks.find((x) => x.taskId === r.taskId) ?? (s.main?.taskId === r.taskId ? s.main : undefined)) : undefined;
         const name = t ? displayName(t) : '?';
         // A busy agent gets the message without stopping (steer) unless it was told to stop.
         const outcome =
@@ -119,6 +127,26 @@ export function VoiceDock({
     async (entry: Entry) => {
       patch(entry.id, { phase: 'routing' });
       try {
+        // With a main agent, a message that does not go to the selected/open agent goes to
+        // the main agent, which decides what to do. Only an agent named outright is sent
+        // to directly (instant, no tokens); a sensitive command to it still asks first.
+        const main = snapRef.current.main;
+        const ctx = focusRef.current;
+        if (main && (!ctx || ctx === main.taskId)) {
+          if (ctx !== main.taskId) {
+            const named = await call('route:decide', { utterance: entry.text, focusedTaskId: null, namedOnly: true });
+            if (named.kind === 'existing') {
+              patch(entry.id, { decision: named, phase: 'review' });
+              const confirm = named.confidence !== 'high' || (entry.source === 'voice' && snapRef.current.settings.alwaysConfirmVoice);
+              if (confirm) setActiveId(entry.id);
+              else await dispatch(entry, { kind: 'existing', taskId: named.taskId });
+              return;
+            }
+          }
+          setShowMain(true);
+          await dispatch(entry, { kind: 'existing', taskId: main.taskId });
+          return;
+        }
         const d = await call('route:decide', { utterance: entry.text, focusedTaskId: focusRef.current });
         patch(entry.id, { decision: d, phase: 'review' });
         if (d.kind === 'create') {
@@ -402,7 +430,44 @@ export function VoiceDock({
 
   return (
     <div className="dock" data-testid="voice-dock">
-      {showLog && snapshot.coordinator.length ? (
+      {/* The reply panel is for when the main agent's own conversation is not on screen. */}
+      {snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
+        <div className="popover main-reply" data-testid="main-reply">
+          <div className="popover-head">
+            <span>
+              <Icon name="spark" /> {tr('Main agent')}
+              <span className="muted small"> · {PROVIDER_LABEL[snapshot.main.provider]}</span>
+            </span>
+            <span className="row">
+              <button className="link small" onClick={() => onView(snapshot.main!.taskId)}>
+                {tr('Open conversation')}
+              </button>
+              <button className="icon-btn" aria-label={tr('Hide')} onClick={() => setShowMain(false)}>
+                <Icon name="x" />
+              </button>
+            </span>
+          </div>
+          {mainTranscript
+            .filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'Read'))
+            .slice(-6)
+            .map((i) =>
+              i.role === 'tool' ? (
+                <div key={i.id} className="main-step">
+                  <Icon name="tool" size={11} /> {i.tool?.title ?? i.toolLabel}
+                </div>
+              ) : (
+                <div key={i.id} className={`main-msg ${i.role}`}>
+                  {i.role === 'user' ? <span className="muted">{tr('You')}: </span> : null}
+                  {i.role === 'system' ? <Icon name="alert" size={11} /> : null}
+                  {i.role === 'assistant' ? <Markdown text={i.text} streaming={i.streaming} /> : i.role === 'system' ? systemText(i.text) : i.text}
+                </div>
+              ),
+            )}
+          {snapshot.main.status === 'running' || snapshot.main.status === 'starting' ? <div className="muted small">{tr('Working…')}</div> : null}
+          <WaitingOnYou snapshot={snapshot} now={now} onOpen={onView} compact limit={2} />
+        </div>
+      ) : null}
+      {!snapshot.main && showLog && snapshot.coordinator.length ? (
         <div className="popover coord-log" data-testid="coordinator-log">
           <div className="popover-head">
             <span>
@@ -522,7 +587,9 @@ export function VoiceDock({
             placeholder={
               focusedTaskId
                 ? tr('Talking to {alias} — name another agent to switch', { alias: (() => { const x = taskById(focusedTaskId); return x ? displayName(x) : ''; })() })
-                : tr('Type to any agent — “Charlie, hold the migration”')
+                : snapshot.main
+                  ? tr('Talk to the main agent — or name an agent: “Charlie, hold the migration”')
+                  : tr('Type to any agent — “Charlie, hold the migration”')
             }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -541,9 +608,15 @@ export function VoiceDock({
             <Kbd>↵</Kbd> {tr('route')}
           </span>
         </div>
-        <button className={`btn${showLog ? ' btn-pressed' : ''}`} onClick={() => setShowLog(!showLog)} disabled={!snapshot.coordinator.length}>
-          <Icon name="spark" /> {tr('Coordinator')}
-        </button>
+        {snapshot.main ? (
+          <button className={`btn${showMain ? ' btn-pressed' : ''}`} onClick={() => setShowMain(!showMain)} data-testid="main-toggle">
+            <Icon name="spark" /> {tr('Main agent')}
+          </button>
+        ) : (
+          <button className={`btn${showLog ? ' btn-pressed' : ''}`} onClick={() => setShowLog(!showLog)} disabled={!snapshot.coordinator.length}>
+            <Icon name="spark" /> {tr('Coordinator')}
+          </button>
+        )}
       </div>
     </div>
   );

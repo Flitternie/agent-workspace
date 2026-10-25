@@ -11,6 +11,7 @@ import type {
   ProviderCapabilities,
   TranscriptRole,
 } from '../../shared/types';
+import type { WorkspaceTool } from '../main-agent';
 
 /**
  * Normalized provider events. Each event is emitted by one ProviderSession, which
@@ -76,6 +77,8 @@ export interface StartArgs {
   /** Mock only. */
   mockScript?: string;
   permissionMode?: PermissionMode;
+  /** Main agent only: workspace tools it may call; the session is limited to these plus read-only tools. */
+  tools?: WorkspaceTool[];
   title: string;
 }
 

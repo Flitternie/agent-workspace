@@ -46,7 +46,7 @@ export const ipcSchemas = {
   'voice:ensureMic': z.object({}),
   // One utterance; 16 kHz mono WAV caps at ~1 MB per 30 s.
   'voice:transcribe': z.object({ audio: z.instanceof(Uint8Array).refine((a) => a.byteLength <= 8_000_000, 'Audio clip too large'), mimeType: z.string().max(100) }),
-  'route:decide': z.object({ utterance: text.min(1), focusedTaskId: id.nullable() }),
+  'route:decide': z.object({ utterance: text.min(1), focusedTaskId: id.nullable(), namedOnly: z.boolean().optional() }),
   'route:dispatch': z.object({
     utterance: text.min(1),
     focusedTaskId: id.nullable(),
@@ -78,7 +78,7 @@ export const ipcSchemas = {
   }),
   'memory:delete': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
-  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional() }),
+  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional() }),
   'capabilities:refresh': z.object({}),
   'models:list': z.object({}),
   'openai:setKey': z.object({ key: z.string().min(20).max(400).regex(/^\S+$/) }),

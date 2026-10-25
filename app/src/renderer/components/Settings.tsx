@@ -355,6 +355,7 @@ function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
+  { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
   { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
@@ -469,6 +470,29 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             </div>
           );
         })}
+      </Section>
+
+      <Section id="main" query={query}>
+        <p className="muted small">
+          {t('The main agent is who you talk to when no agent is selected. It sees every agent, passes your instructions on, starts new agents and answers status questions. It runs on your own Claude Code or Codex, does not edit code itself, and cannot approve other agents’ permission requests.')}
+        </p>
+        <div className="segmented" role="radiogroup" aria-label={t('Main agent')}>
+          {(['claude', 'codex', 'off'] as const).map((p) => {
+            const on = (s.mainAgent ?? (snapshot.main?.provider as 'claude' | 'codex' | undefined) ?? 'off') === p;
+            const c = snapshot.capabilities.find((x) => x.provider === p);
+            const usable = p === 'off' || readiness(c) === 'ready';
+            return (
+              <button key={p} role="radio" aria-checked={on} className={on ? 'on' : ''} disabled={!usable} onClick={() => update({ mainAgent: p })} data-testid={`main-${p}`} title={usable ? undefined : t('Not installed or not signed in')}>
+                {p === 'off' ? t('Off') : PROVIDER_LABEL[p]}
+              </button>
+            );
+          })}
+        </div>
+        <div className="muted small">
+          {snapshot.main
+            ? t('Changing it starts a new main-agent conversation.')
+            : t('Off: messages are routed by name and the routing model instead.')}
+        </div>
       </Section>
 
       <Section id="permissions" query={query}>

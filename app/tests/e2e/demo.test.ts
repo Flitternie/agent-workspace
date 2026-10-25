@@ -22,7 +22,7 @@ async function launch(): Promise<Page> {
     executablePath: electronPath,
     args: [appDir],
     cwd: appDir,
-    env: { ...env, AMW_MODE: 'demo', AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+    env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: dataDir, AMW_MOCK_DELAY_MS: '120', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
   });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
@@ -56,7 +56,7 @@ describe('end-to-end demo script (mock agents)', () => {
     for (let i = 1; i <= 10; i++) {
       await input.fill(`Turn ${i}: let's look at edge case ${i}`);
       await input.press('Enter');
-      await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toContain(`turn ${i + 1}, I remember`);
+      await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toContain(`Request ${i + 1} in this session`);
     }
     // C's request stays visible in the rail while we talk to A.
     await expect.poll(() => page.locator('[data-testid="rail-item"][data-alias="Charlie"]').innerText()).toContain('data-loss');
@@ -149,7 +149,7 @@ describe('end-to-end demo script (mock agents)', () => {
     await page.getByTestId('composer-input').fill('Where were we?');
     await page.getByTestId('composer-input').press('Enter');
     await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toMatch(/Resumed native mock session/);
-    await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toMatch(/I remember (2[0-9]|[3-9][0-9]) prior messages/);
+    await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toMatch(/Request (1[2-9]|[2-9][0-9]) in this session/);
     // The native history replaces the display cache: no duplicated messages.
     expect(await page.locator('[data-role="user"]', { hasText: "Turn 1: let's look at edge case 1" }).count()).toBe(1);
     await shot(page, '07-resumed-A');

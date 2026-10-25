@@ -182,6 +182,6 @@ function stepText(a: TranscriptItem): string {
   }
   if (a.role === 'thought') return `${t('Thinking')}: ${first}`;
   if (a.role === 'plan') return `${t('Proposed a plan')}: ${first}`;
-  if (a.role === 'user') return `${t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${first}`;
+  if (a.role === 'user') return `${a.via === 'main' ? t('Main agent') : t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${first}`;
   return first;
 }

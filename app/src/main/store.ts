@@ -22,6 +22,8 @@ export interface WorkspaceData {
   settings: Settings;
   /** Monotonic counter behind agent names (never reused). */
   aliasCounter: number;
+  /** The main agent's task record (kept apart from `tasks`: not a worker). */
+  mainAgent?: Task;
 }
 
 const empty = (): WorkspaceData => ({

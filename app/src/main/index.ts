@@ -109,7 +109,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'stt:download': (i: { id: string }) => void localStt.download(i.id),
   'stt:cancel': (i: { id: string }) => localStt.cancel(i.id),
   'stt:delete': (i: { id: string }) => localStt.remove(i.id),
-  'route:decide': (i: { utterance: string; focusedTaskId: string | null }) => workspace.decideRoute(i.utterance, i.focusedTaskId),
+  'route:decide': (i: { utterance: string; focusedTaskId: string | null; namedOnly?: boolean }) => workspace.decideRoute(i.utterance, i.focusedTaskId, i.namedOnly),
   'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean; typed?: boolean }) =>
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt, typed: i.typed }),
   'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; originTaskId?: string; approvedForReuse: boolean }) =>

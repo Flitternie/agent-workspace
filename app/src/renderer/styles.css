@@ -2723,3 +2723,68 @@ details[open] > summary .tool-more {
 .ok-text {
   color: var(--ok);
 }
+
+/* Main agent */
+.main-mark {
+  background: var(--ink);
+  color: #fff;
+}
+.main-row {
+  margin-bottom: 4px;
+}
+.main-reply {
+  width: 520px;
+  max-height: 380px;
+}
+.main-msg {
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.main-msg.user {
+  color: var(--text-2);
+}
+.main-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  padding: 2px 0;
+}
+
+/* Main agent: what the agents are waiting on */
+.waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 12px 24px 4px;
+  /* Never crowd out the conversation: the list scrolls on its own. */
+  max-height: 34%;
+  overflow-y: auto;
+  flex: none;
+}
+.waiting.compact {
+  padding: 8px 0 0;
+  border-top: 1px solid var(--border);
+}
+.waiting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.waiting-from {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.main-msg.system {
+  color: var(--needs);
+  font-size: 12px;
+}

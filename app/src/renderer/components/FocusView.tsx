@@ -4,11 +4,11 @@ import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
-import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot } from './bits';
+import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
 import { Markdown } from './Markdown';
 import { t } from '../i18n';
 
-export function FocusView({ snapshot, task, transcript, now }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number }) {
+export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
   const items = snapshot.attention.filter((a) => a.taskId === task.taskId && a.state === 'open' && a.kind !== 'completion');
   const connected = snapshot.connectedTaskIds.includes(task.taskId);
@@ -25,7 +25,13 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
     <div className="focus">
       <section className="focus-main">
         <header className="focus-head drag">
-          <Alias alias={task.alias} size="lg" />
+          {isMainAgent(task) ? (
+            <span className="alias alias-lg main-mark" aria-hidden>
+              <Icon name="spark" size={18} />
+            </span>
+          ) : (
+            <Alias alias={task.alias} size="lg" />
+          )}
           <div className="focus-ident">
             <div className="focus-name">
               <TaskName task={task} /> <ProviderTag provider={task.provider} /> <StatusDot status={task.status} connected={connected} />
@@ -51,6 +57,7 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
             </div>
           </div>
           <div className="focus-actions">
+            {isMainAgent(task) ? null : (
             <select
               className="input select perm-select"
               value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
@@ -65,6 +72,7 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
                 </option>
               ))}
             </select>
+            )}
             {task.status === 'running' && connected ? (
               <button className="btn" onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
                 <Icon name="pause" /> {t('Interrupt')}
@@ -82,6 +90,7 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
             <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
               <Icon name="note" /> {t('Memory')}
             </button>
+            {isMainAgent(task) ? null : (
             <button
               className="btn"
               data-testid="remove-task"
@@ -92,6 +101,7 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
             >
               {t('Remove')}
             </button>
+            )}
           </div>
         </header>
         {task.sharedCwdWarning ? (
@@ -110,6 +120,7 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
                 ))}
               </div>
             ) : null}
+            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <Transcript items={transcript} />
             {task.plan ? (
               <div className="pinned-plan">
@@ -121,6 +132,37 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
           {showMemory ? <MemoryPanel snapshot={snapshot} task={task} /> : null}
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * In the main agent's view: everything the agents are waiting on, answerable right
+ * here (same buttons as on their cards), or by telling the main agent.
+ */
+export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapshot: WorkspaceSnapshot; now: number; onOpen?: (taskId: string) => void; compact?: boolean; limit?: number }) {
+  const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId));
+  if (!open.length) return null;
+  return (
+    <div className={`waiting${compact ? ' compact' : ''}`} data-testid="waiting-on-you">
+      <div className="section-label">{t('Waiting on you · {n}', { n: open.length })}</div>
+      {open.slice(0, limit ?? open.length).map((a) => {
+        const worker = snapshot.tasks.find((x) => x.taskId === a.taskId)!;
+        return (
+          <div key={a.id} className="waiting-item">
+            <div className="waiting-from">
+              <Alias alias={worker.alias} size="sm" /> {displayName(worker)}
+              {onOpen ? (
+                <button className="link small" onClick={() => onOpen(worker.taskId)}>
+                  {t('Open')}
+                </button>
+              ) : null}
+            </div>
+            <AttentionView item={a} task={worker} compact now={now} />
+          </div>
+        );
+      })}
+      {limit && open.length > limit ? <div className="muted small">{t('+{n} more', { n: open.length - limit })}</div> : null}
     </div>
   );
 }
@@ -197,12 +239,12 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
           return (
             <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
               {item.role === 'user' ? <div className="msg-via">
-                  {t('You')}
-                  {item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : ''}
+                  {item.via === 'main' ? t('Main agent') : t('You')}
+                  {item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : item.via === 'main' ? ` · ${t('on your behalf')}` : ''}
                   {item.delivery === 'steer' ? <span className="delivery-tag">{t('added mid-turn')}</span> : null}
                   {item.delivery === 'interrupt' ? <span className="delivery-tag interrupt">{t('stopped the turn')}</span> : null}
                 </div> : null}
-              {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} streaming={item.streaming} />}
+              {item.role === 'system' ? <div className="msg-system">{systemText(item.text)}</div> : <Markdown text={item.text} streaming={item.streaming} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
           );
@@ -241,7 +283,7 @@ function Composer({ task }: { task: Task }) {
           className="composer-input"
           rows={3}
           value={draft}
-          placeholder={t('Message {alias}…', { alias: task.alias })}
+          placeholder={t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
           onKeyDown={(e) => {
@@ -253,7 +295,7 @@ function Composer({ task }: { task: Task }) {
         />
         <div className="composer-foot">
           <span className="to-label" data-testid="composer-target">
-            {t('To: {alias}', { alias: task.alias })} · {PROVIDER_LABEL[task.provider]}
+            {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
             <span className="muted"> — {t('typed text goes only to this agent')}</span>
           </span>
           <span className="hint" data-testid="composer-hint">

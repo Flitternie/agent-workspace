@@ -24,7 +24,7 @@ describe.runIf(enabled)('local speech-to-text', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, AMW_MODE: 'demo', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_MOCK_DELAY_MS: '50', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-local-stt-')) },
+      env: { ...env, AMW_MODE: 'demo', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_MOCK_DELAY_MS: '50', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-local-stt-')) },
     });
     const page = await app.firstWindow();
     await page.waitForSelector('.app');

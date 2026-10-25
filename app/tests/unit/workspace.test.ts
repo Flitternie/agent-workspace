@@ -137,7 +137,7 @@ describe('restart and resume', () => {
     expect(s.tasks.find((t) => t.taskId === D.taskId)!.status).toBe('disconnected');
     // Sending resumes the same native session with its prior context.
     await ws2.send(A.taskId, 'keep the adapter', 'text');
-    await until(() => ws2.transcript(A.taskId).some((i) => /I remember \d+ prior messages/.test(i.text)));
+    await until(() => ws2.transcript(A.taskId).some((i) => /Request \d+ in this session/.test(i.text)));
     const resumed = ws2.snapshot().sessions.filter((x) => x.taskId === A.taskId).at(-1)!;
     expect(resumed.nativeSessionId).toBe(native);
     expect(resumed.integrationMode).toBe('resumed');
@@ -242,5 +242,91 @@ describe('worktrees', () => {
     await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'one', isolate: false });
     const two = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
     expect(two.sharedCwdWarning).toMatch(/not isolated/);
+  });
+});
+
+describe('main agent tools', () => {
+  it('see every agent, find them by name or role, and message them on the user’s behalf', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', name: 'backend', title: 'Backend API', isolate: true, instruction: 'Migrate API.' });
+    const B = await ws.createTask({ projectId: project.projectId, provider: 'mock', name: 'frontend', title: 'Dashboard', isolate: true, instruction: 'Build cards.' });
+    await until(() => ws.snapshot().tasks.every((t) => t.status === 'done' || t.status === 'waiting_for_user'));
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+
+    const list = await tools.list_agents.run({});
+    expect(list).toContain('Alice (role: backend)');
+    expect(list).toContain('Bob (role: frontend)');
+    expect(ws.findAgent('alice')?.taskId).toBe(A.taskId);
+    expect(ws.findAgent('frontend')?.taskId).toBe(B.taskId);
+    expect(ws.findAgent('Frontend Bob')?.taskId).toBe(B.taskId);
+
+    expect(await tools.send_to_agent.run({ agent: 'Bob', message: 'Use the shared Button component.' })).toMatch(/Sent to Bob/);
+    const msg = ws.transcript(B.taskId).find((i) => i.role === 'user' && i.text === 'Use the shared Button component.');
+    expect(msg?.via).toBe('main');
+    expect(ws.transcript(A.taskId).some((i) => i.text === 'Use the shared Button component.')).toBe(false);
+
+    expect(await tools.read_agent.run({ agent: 'Alice', limit: 5 })).toContain('[user] Migrate API.');
+    await expect(tools.send_to_agent.run({ agent: 'Zed', message: 'hi' })).rejects.toThrow(/No agent named "Zed"/);
+    expect(await tools.create_agent.run({ project: 'nope', title: 'x', instruction: 'y' })).toMatch(/Unknown project/);
+  });
+});
+
+describe('main agent answering requests', () => {
+  it('passes on answers, but approves a permission request only with the user’s own words', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'Cleanup', isolate: true, mockScript: 'approval:rm -rf build', instruction: 'Clean the build.' });
+    await until(() => ws.listRequests().length === 1);
+    const req = ws.listRequests()[0].item;
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    expect(await tools.list_requests.run({})).toContain(`request_id ${req.id} · Alice · PERMISSION REQUEST`);
+
+    // A main agent conversation where the user has said something.
+    const internal = ws as unknown as { store: { data: { mainAgent?: unknown } }; upsertTranscript(id: string, item: unknown): void };
+    internal.store.data.mainAgent = { taskId: 't-main-x', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: '/tmp', createdAt: '', updatedAt: '' };
+    const userSays = (text: string) => internal.upsertTranscript('t-main-x', { id: `u-${text}`, taskId: 't-main-x', role: 'user', text, via: 'text', createdAt: '' });
+
+    userSays('what does Alice need?');
+    expect(await tools.answer_request.run({ request_id: req.id, choice: 'allow' })).toMatch(/Not allowed/);
+    expect(await tools.answer_request.run({ request_id: req.id, choice: 'allow', user_words: 'yes go ahead' })).toMatch(/Not allowed/); // not what the user said
+    userSays('不行，先别删');
+    expect(await tools.answer_request.run({ request_id: req.id, choice: 'allow', user_words: '不行，先别删' })).toMatch(/do not clearly approve/);
+    userSays('好的，批准 Alice 删 build');
+    expect(await tools.answer_request.run({ request_id: req.id, choice: 'allow', user_words: '批准 Alice 删 build' })).toMatch(/Allow once — sent to Alice/);
+    expect(ws.listRequests()).toHaveLength(0);
+    await until(() => ws.transcript(A.taskId).some((i) => /command executed/.test(i.text)));
+  });
+
+  it('can always refuse, and answers a question the agent asked in its reply', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'Deploy', isolate: true, mockScript: 'approval:git push --force', instruction: 'Ship it.' });
+    const B = await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'API', isolate: true, mockScript: 'ask:Keep the v1 adapter?', instruction: 'Migrate.' });
+    await until(() => ws.listRequests().length === 2);
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    const [perm, question] = [ws.listRequests().find((r) => r.item.kind === 'approval')!.item, ws.listRequests().find((r) => r.item.kind === 'question')!.item];
+    expect(await tools.answer_request.run({ request_id: perm.id, choice: 'deny' })).toMatch(/Deny — sent to Alice/);
+    expect(await tools.answer_request.run({ request_id: question.id, answer: 'Yes, keep it for one release.' })).toMatch(/Replied to Bob/);
+    expect(ws.transcript(B.taskId).some((i) => i.role === 'user' && i.via === 'main' && /keep it for one release/.test(i.text))).toBe(true);
+  });
+});
+
+describe('one pending state for every view', () => {
+  it('a question answered directly on the agent disappears from the main agent’s list and is noted there', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    const internal = ws as unknown as { store: { data: { mainAgent?: unknown } } };
+    internal.store.data.mainAgent = { taskId: 't-main-y', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: '/tmp', createdAt: '', updatedAt: '' };
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'API', isolate: true, mockScript: 'ask:Keep the v1 adapter?', instruction: 'Migrate.' });
+    await until(() => ws.listRequests().length === 1);
+    expect(ws.transcript('t-main-y').some((i) => /Alice is waiting on you \(question\): .*Keep the v1 adapter\?/.test(i.text))).toBe(true);
+
+    await ws.send(A.taskId, 'Keep it for one release.', 'text'); // straight to Alice, not via the main agent
+    expect(ws.listRequests()).toHaveLength(0);
+    expect(ws.transcript('t-main-y').some((i) => /Alice's request is settled: Replied: Keep it for one release\./.test(i.text))).toBe(true);
   });
 });
