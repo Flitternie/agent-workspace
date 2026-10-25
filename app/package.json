@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Run Claude Code and Codex agents in parallel from one meeting-style workspace, with a main agent and always-on voice.",
   "main": "out/main/index.cjs",

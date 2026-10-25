@@ -51,6 +51,13 @@ jobs:
           else
             echo "publish=false" "ref=$GITHUB_SHA" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
           fi
+      # One draft for both platforms: left to each build, the two would race and create two.
+      - name: Create the draft release
+        if: steps.pick.outputs.publish == 'true'
+        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --title "Agent Workspace $TAG" --notes ""
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.pick.outputs.tag }}
 
   build:
     needs: tag
