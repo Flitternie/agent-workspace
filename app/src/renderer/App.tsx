@@ -35,6 +35,8 @@ export function App() {
   const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
   // Settings is a page in the main area, like VS Code, not a dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Overview: a clicked card is who you are talking to (voice/typed default target) without opening it.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -49,6 +51,9 @@ export function App() {
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
+  useEffect(() => {
+    if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
+  }, [selectedId, snapshot]);
   useEffect(() => {
     if (pendingFocus && snapshot?.tasks.some((x) => x.taskId === pendingFocus)) {
       setFocusId(pendingFocus);
@@ -77,8 +82,11 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (e.key === 'Escape' && !typing && !dialog) {
-        setSettingsOpen(false);
-        setFocusId(null);
+        // Esc steps back one level: settings / focus first, then the Overview selection.
+        if (settingsOpen || focusId) {
+          setSettingsOpen(false);
+          setFocusId(null);
+        } else setSelectedId(null);
       }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
@@ -88,7 +96,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, snapshot]);
+  }, [dialog, snapshot, settingsOpen, focusId]);
 
   if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
   setLanguage(snapshot.settings.language ?? 'en');
@@ -192,7 +200,7 @@ export function App() {
                 </div>
               </div>
             ) : (
-              <div className="gallery" data-testid="overview" style={{ ['--cols' as string]: cols }}>
+              <div className="gallery" data-testid="overview" style={{ ['--cols' as string]: cols }} onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}>
                 {snapshot.tasks.map((t) => (
                   <AgentCard
                     key={t.taskId}
@@ -202,6 +210,8 @@ export function App() {
                     activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system').slice(-5)}
                     connected={snapshot.connectedTaskIds.includes(t.taskId)}
                     flash={flash === t.taskId}
+                    selected={selectedId === t.taskId}
+                    onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
                     onOpen={() => setFocusId(t.taskId)}
                     now={now}
                   />
@@ -211,7 +221,7 @@ export function App() {
           </>
         )}
 
-        <VoiceDock snapshot={snapshot} focusedTaskId={focusTask ? focusId : null} onDispatched={flashTile} onView={setFocusId} />
+        <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} />
       </div>
 
       <div className="toasts" aria-live="polite">

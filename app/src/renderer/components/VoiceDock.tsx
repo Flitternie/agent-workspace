@@ -86,10 +86,10 @@ export function VoiceDock({
   const patch = useCallback((id: number, p: Partial<Entry>) => setEntries((list) => list.map((e) => (e.id === id ? { ...e, ...p } : e))), []);
 
   const dispatch = useCallback(
-    async (entry: Pick<Entry, 'id' | 'text' | 'interrupt'>, target: Target) => {
+    async (entry: Pick<Entry, 'id' | 'text' | 'interrupt'> & { source?: Entry['source'] }, target: Target) => {
       patch(entry.id, { phase: 'sending', error: undefined });
       try {
-        const r = await call('route:dispatch', { utterance: entry.text, target, focusedTaskId: focusRef.current, interrupt: entry.interrupt });
+        const r = await call('route:dispatch', { utterance: entry.text, target, focusedTaskId: focusRef.current, interrupt: entry.interrupt, typed: entry.source === 'typed' });
         if (!r.ok) throw new Error(r.error ?? tr('Not delivered'));
         const t = r.taskId ? snapRef.current.tasks.find((x) => x.taskId === r.taskId) : undefined;
         const name = t ? displayName(t) : '?';
@@ -125,10 +125,13 @@ export function VoiceDock({
           setNewProvider(d.provider ?? 'claude');
           setNewProject(d.projectId ?? snapRef.current.projects[0]?.projectId ?? '');
         }
+        // The agent in view or selected on the Overview is who you are talking to: a message
+        // that names nobody else goes to it directly. A sensitive command still asks first.
+        const toContext = d.kind === 'existing' && d.context === true && d.taskId === focusRef.current && !/sensitive command/.test(d.reason);
         const auto =
-          entry.source === 'voice' &&
-          !snapRef.current.settings.alwaysConfirmVoice &&
-          ((d.kind === 'existing' && d.confidence === 'high') || (d.kind === 'coordinator' && d.reason === 'workspace status question'));
+          (entry.source === 'voice' || toContext) &&
+          (!snapRef.current.settings.alwaysConfirmVoice || entry.source === 'typed') &&
+          ((d.kind === 'existing' && (d.confidence === 'high' || toContext)) || (d.kind === 'coordinator' && d.reason === 'workspace status question'));
         if (auto) await dispatch(entry, d.kind === 'existing' ? { kind: 'existing', taskId: d.taskId } : { kind: 'coordinator' });
         else setActiveId(entry.id);
       } catch (e) {
@@ -516,7 +519,11 @@ export function VoiceDock({
             rows={1}
             value={text}
             data-testid="dock-input"
-            placeholder={focusedTaskId ? tr('Type to any agent — “this” means {alias}', { alias: taskById(focusedTaskId)?.alias ?? '' }) : tr('Type to any agent — “Charlie, hold the migration”')}
+            placeholder={
+              focusedTaskId
+                ? tr('Talking to {alias} — name another agent to switch', { alias: (() => { const x = taskById(focusedTaskId); return x ? displayName(x) : ''; })() })
+                : tr('Type to any agent — “Charlie, hold the migration”')
+            }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

@@ -61,6 +61,8 @@ export const ipcSchemas = {
       }),
     ]),
     interrupt: z.boolean().optional(),
+    /** Typed into the bar rather than spoken. */
+    typed: z.boolean().optional(),
   }),
   'memory:add': z.object({
     scope: z.enum(['global', 'project', 'task']),

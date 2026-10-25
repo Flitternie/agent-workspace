@@ -189,7 +189,7 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
 
   // 4. Deictic local reference defaults to the focused task.
   if (focused && DEICTIC.test(u))
-    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `"this/这个" refers to the focused agent ${focused.alias}` }, u);
+    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `"this/这个" refers to the focused agent ${focused.alias}`, context: true }, u);
   return null;
 }
 
@@ -221,7 +221,7 @@ export async function decideRoute(ctx: RouteContext, llm?: LlmRouter): Promise<R
     }
   }
   if (focused)
-    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'medium', reason: `no other task referenced; defaulting to focused agent ${focused.alias}` }, ctx.utterance);
+    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'medium', reason: `no other task referenced; defaulting to focused agent ${focused.alias}`, context: true }, ctx.utterance);
   if (ctx.tasks.length === 0) return { kind: 'coordinator', reason: 'no tasks yet' };
   return {
     kind: 'clarify',

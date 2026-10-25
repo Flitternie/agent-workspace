@@ -129,6 +129,21 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('agent-card').count()).toBe(3);
     await expect.poll(() => page.getByTestId('overview').isVisible()).toBe(true);
     await shot(page, '06-after-restart');
+    // Overview selection: click a card to talk to it without opening it; double-click opens.
+    await card(page, 'Bob').getByTestId('card-summary').click();
+    await expect.poll(() => card(page, 'Bob').getAttribute('aria-selected')).toBe('true');
+    const bar = page.getByTestId('dock-input');
+    expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend Bob');
+    await bar.fill('Make the cards a bit bigger.');
+    await bar.press('Enter');
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to Frontend Bob/);
+    expect(await page.getByTestId('route-preview').count()).toBe(0);
+    await shot(page, '06b-overview-selected');
+    await card(page, 'Bob').getByTestId('card-summary').dblclick();
+    await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob');
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('Make the cards a bit bigger.');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByTestId('overview').isVisible()).toBe(true);
     // Resume A's native (mock) session with real prior context.
     await card(page, 'Alice').getByRole('button', { name: 'Open' }).click();
     await page.getByTestId('composer-input').fill('Where were we?');

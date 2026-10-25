@@ -891,9 +891,9 @@ export class Workspace {
       | { kind: 'coordinator' }
       | { kind: 'create'; projectId: string; provider: AgentProvider; title: string },
     focusedTaskId: string | null = null,
-    opts: { interrupt?: boolean } = {},
+    opts: { interrupt?: boolean; typed?: boolean } = {},
   ): Promise<DispatchResult & { reply?: string }> {
-    if (target.kind === 'existing') return this.send(target.taskId, utterance, 'voice', opts);
+    if (target.kind === 'existing') return this.send(target.taskId, utterance, opts.typed ? 'text' : 'voice', { interrupt: opts.interrupt });
     if (target.kind === 'create') {
       try {
         const task = await this.createTask({ projectId: target.projectId, provider: target.provider, title: target.title, instruction: utterance, isolate: true });

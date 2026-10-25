@@ -177,7 +177,7 @@ export interface NativeSessionInfo {
 }
 
 export type RouteDecision =
-  | { kind: 'existing'; taskId: string; confidence: 'high' | 'medium'; reason: string }
+  | { kind: 'existing'; taskId: string; confidence: 'high' | 'medium'; reason: string; /** Chosen because it is the agent in view or selected, not because it was named. */ context?: boolean }
   | {
       kind: 'create';
       proposedTitle: string;

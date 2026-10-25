@@ -51,6 +51,8 @@ export const zh: Record<string, string> = {
   Permissions: '权限',
   Cloud: '云端',
   Accuracy: '准确度',
+  'Talking to {alias} — name another agent to switch': '正在对{alias}说 — 点名其他 Agent 可切换',
+  'Selected — messages without a name go here. Double-click to open.': '已选中：没点名的消息会发给它。双击打开。',
   '99 languages': '99 种语言',
   Speed: '速度',
   'Not rated': '未评级',

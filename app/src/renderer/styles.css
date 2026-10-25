@@ -2697,3 +2697,12 @@ details[open] > summary .tool-more {
 .model-empty {
   padding: 4px 2px;
 }
+
+/* Overview selection: the card you are talking to */
+.tile.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-1);
+}
+.tile {
+  cursor: default;
+}

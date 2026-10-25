@@ -16,6 +16,8 @@ export function AgentCard({
   activity,
   connected,
   flash,
+  selected,
+  onSelect,
   onOpen,
   now,
 }: {
@@ -25,6 +27,8 @@ export function AgentCard({
   activity: TranscriptItem[];
   connected: boolean;
   flash: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onOpen: () => void;
   now: number;
 }) {
@@ -50,13 +54,18 @@ export function AgentCard({
 
   return (
     <article
-      className={`tile status-${task.status}${needs ? ' needs' : ''}${highRisk ? ' high-risk' : ''}${flash ? ' flash' : ''}`}
+      className={`tile status-${task.status}${needs ? ' needs' : ''}${highRisk ? ' high-risk' : ''}${flash ? ' flash' : ''}${selected ? ' selected' : ''}`}
       data-testid="agent-card"
       data-alias={task.alias}
+      aria-selected={selected}
+      title={selected ? t('Selected — messages without a name go here. Double-click to open.') : undefined}
+      // Click selects (the voice/typed default target); double-click opens. Controls inside keep their own clicks.
+      onClick={(e) => !isControl(e.target) && onSelect()}
+      onDoubleClick={(e) => !isControl(e.target) && onOpen()}
     >
       <header className="tile-head">
         <Alias alias={task.alias} size="md" />
-        <div className="tile-ident" onDoubleClick={onOpen}>
+        <div className="tile-ident">
           <div className="tile-name">
             <span className="truncate">{displayName(task)}</span>
             <ProviderTag provider={task.provider} />
@@ -159,6 +168,10 @@ export function AgentCard({
       {error ? <div className="error-text tile-error">{error}</div> : null}
     </article>
   );
+}
+
+function isControl(target: EventTarget): boolean {
+  return target instanceof Element && !!target.closest('button, a, textarea, input, select, details, summary, [role="radio"]');
 }
 
 function stepText(a: TranscriptItem): string {
