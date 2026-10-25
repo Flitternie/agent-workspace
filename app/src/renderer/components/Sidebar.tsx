@@ -14,6 +14,7 @@ export function Sidebar({
   onNewTask,
   onResume,
   onSettings,
+  settingsOpen,
 }: {
   snapshot: WorkspaceSnapshot;
   focusId: string | null;
@@ -22,6 +23,7 @@ export function Sidebar({
   onNewTask: () => void;
   onResume: () => void;
   onSettings: () => void;
+  settingsOpen?: boolean;
 }) {
   const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion');
   const needYou = new Set(open.map((a) => a.taskId)).size;
@@ -34,7 +36,7 @@ export function Sidebar({
         </span>
       </div>
 
-      <button className={`nav-item${focusId ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
+      <button className={`nav-item${focusId || settingsOpen ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
         <Icon name="grid" />
         <span>{tr('Overview')}</span>
         {needYou ? <span className="count">{needYou}</span> : null}
@@ -78,7 +80,7 @@ export function Sidebar({
         <button className="btn btn-block" onClick={onResume} data-testid="resume-session">
           <Icon name="history" /> {tr('Continue a session…')}
         </button>
-        <button className="conn-list" onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
+        <button className={`conn-list${settingsOpen ? ' active' : ''}`} onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
           {snapshot.capabilities
             .filter((c) => c.provider !== 'mock')
             .map((c) => (

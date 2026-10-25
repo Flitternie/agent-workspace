@@ -114,5 +114,42 @@ describe.runIf(enabled)('real providers through the app', () => {
     expect((await page.getByTestId('transcript').innerText()).split('Remember the codeword MANGO-7').length - 1).toBe(1);
     expect(await page.getByTestId('transcript').innerText()).not.toMatch(/▶ ?⊘ Tool\n/);
     await page.screenshot({ path: join(shots, 'real-03-claude-resumed.png') });
-  });
+
+    // Steering: a message sent while the agent works joins the running turn (no restart),
+    // and the task still finishes (it used to stay "running" after Claude folded the message in).
+    type Snap = { tasks: Array<{ taskId: string; alias: string; status: string }> };
+    const idOf = async (alias: string) => ((await invoke(page, 'workspace:snapshot', {})) as Snap).tasks.find((x) => x.alias === alias)!.taskId;
+    const statusOf = async (alias: string) => ((await invoke(page, 'workspace:snapshot', {})) as Snap).tasks.find((x) => x.alias === alias)!.status;
+    const lastReply = async (alias: string) => {
+      const items = (await invoke(page, 'transcript:get', { taskId: await idOf(alias) })) as Array<{ role: string; text: string }>;
+      return items.filter((i) => i.role === 'assistant').at(-1)?.text ?? '';
+    };
+    const LONG = 'Run these shell commands one at a time, each as its own tool call: `sleep 6 && echo STEP1`, then `sleep 6 && echo STEP2`, then `sleep 6 && echo STEP3`. Then reply with the outputs.';
+    await invoke(page, 'task:setPermissionMode', { taskId: await idOf('Alice'), mode: 'auto' });
+    for (const alias of ['Alice', 'Bob']) {
+      const taskId = await idOf(alias);
+      await invoke(page, 'task:send', { taskId, text: LONG, via: 'text' });
+      await expect.poll(() => statusOf(alias), { timeout: 60_000 }).toBe('running');
+      await page.waitForTimeout(4000);
+      const r = (await invoke(page, 'task:send', { taskId, text: 'Change of plan: skip any remaining sleep steps and end your reply with the word BANANA.', via: 'text' })) as { delivery?: string };
+      expect(r.delivery, alias).toBe('steer');
+      await expect.poll(() => lastReply(alias), { timeout: 240_000 }).toMatch(/BANANA/);
+      await expect.poll(() => statusOf(alias), { timeout: 30_000 }).not.toBe('running');
+    }
+    await page.locator('[data-testid="rail-item"][data-alias="Bob"]').click();
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toMatch(/added mid-turn/);
+    await page.screenshot({ path: join(shots, 'real-04-steered.png') });
+
+    // Interrupt: stop the running turn and start over with the new message.
+    for (const alias of ['Alice', 'Bob']) {
+      const taskId = await idOf(alias);
+      await invoke(page, 'task:send', { taskId, text: LONG, via: 'text' });
+      await expect.poll(() => statusOf(alias), { timeout: 60_000 }).toBe('running');
+      await page.waitForTimeout(3000);
+      const r = (await invoke(page, 'task:send', { taskId, text: 'Reply with only the word KIWI.', via: 'text', interrupt: true })) as { delivery?: string };
+      expect(r.delivery, alias).toBe('interrupt');
+      await expect.poll(() => lastReply(alias), { timeout: 180_000 }).toMatch(/KIWI/);
+      await expect.poll(() => statusOf(alias), { timeout: 30_000 }).not.toBe('running');
+    }
+  }, 1_200_000);
 });

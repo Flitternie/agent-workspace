@@ -44,6 +44,8 @@ const ctx = (utterance: string, focusedTaskId: string | null, zh = false): Route
     { say: '小张，迁移先停一下，等我确认。', focus: 't-A', expect: 'existing:t-C', zh: true },
     { say: '小王，帮我把订单接口的测试跑一遍。', focus: 't-B', expect: 'existing:t-A', zh: true },
     { say: '让小李把结算按钮调大一点。', focus: 't-A', expect: 'existing:t-B', zh: true },
+    // Leading stop word + name (used by tests/e2e/voice-live as voice-7.wav).
+    { say: '等一下，Charlie，先别删那个表。', focus: 't-A', expect: 'existing:t-C' },
   ];
   let failures = 0;
   for (const c of cases) {

@@ -3,7 +3,7 @@ import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { Icon } from './components/bits';
 import { ImportDialog, NewTaskDialog } from './components/Dialogs';
-import { readiness, ReadinessBadge, SettingsDialog } from './components/Settings';
+import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
 import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
 import { Sidebar } from './components/Sidebar';
@@ -32,7 +32,9 @@ export function App() {
   const [focusId, setFocusId] = useState<string | null>(null);
   // A task created from a dialog shows up with the next snapshot; focus it then.
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'import' | 'settings' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
+  // Settings is a page in the main area, like VS Code, not a dialog.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -74,7 +76,10 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
-      if (e.key === 'Escape' && !typing && !dialog) setFocusId(null);
+      if (e.key === 'Escape' && !typing && !dialog) {
+        setSettingsOpen(false);
+        setFocusId(null);
+      }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
         if (e.key === '0') setFocusId(null);
@@ -102,15 +107,24 @@ export function App() {
       <Sidebar
         snapshot={snapshot}
         focusId={focusTask ? focusId : null}
-        onSelect={setFocusId}
-        onOverview={() => setFocusId(null)}
+        onSelect={(id) => {
+          setSettingsOpen(false);
+          setFocusId(id);
+        }}
+        onOverview={() => {
+          setSettingsOpen(false);
+          setFocusId(null);
+        }}
         onNewTask={() => setDialog('new')}
         onResume={() => setDialog('import')}
-        onSettings={() => setDialog('settings')}
+        onSettings={() => setSettingsOpen(true)}
+        settingsOpen={settingsOpen}
       />
 
       <div className="stage">
-        {focusTask ? (
+        {settingsOpen ? (
+          <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
+        ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} />
         ) : (
           <>
@@ -150,7 +164,7 @@ export function App() {
                       <span>{t('Voice')}</span>
                       <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
                     </div>
-                    <button className="link small" onClick={() => setDialog('settings')}>
+                    <button className="link small" onClick={() => setSettingsOpen(true)}>
                       {t('Settings, language and sign-in help')}
                     </button>
                   </div>
@@ -215,7 +229,6 @@ export function App() {
 
       {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => toast(t('Task created'), id)} /> : null}
       {dialog === 'import' ? <ImportDialog onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
-      {dialog === 'settings' ? <SettingsDialog snapshot={snapshot} onClose={() => setDialog(null)} /> : null}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
-import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
 // stdio, using the user's installed CLI and its existing login. Approvals and
@@ -228,6 +228,7 @@ class CodexSession implements ProviderSession {
   private working = false;
   private interruptRequested = false;
   private modeChanged = false;
+  private idleWaiters: Array<() => void> = [];
   private lastAgentText = '';
   /** Our string request id -> the server's original JSON-RPC id and request kind. */
   private requests = new Map<string, { rpcId: string | number; method: string; questionIds?: string[] }>();
@@ -277,9 +278,38 @@ class CodexSession implements ProviderSession {
     this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed: !!resumeId });
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
     if (!this.server || this.server.closed || !this.threadId) throw new Error('Codex session is not connected.');
-    if (this.working) throw new Error('Codex is still working on the previous turn. Wait or interrupt first.');
+    const input = [{ type: 'text', text, text_elements: [] }];
+    if (this.working && this.turnId && !opts?.interrupt) {
+      // turn/steer adds the message to the running turn; Codex reads it right away.
+      try {
+        await this.server.rpc('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input });
+        return 'steer';
+      } catch (error) {
+        // The turn ended or cannot be steered (e.g. a review turn): start a new one instead.
+        if (process.env.AMW_DEBUG_CODEX) console.error('[codex] steer failed', (error as Error).message);
+        if (this.working) await this.waitForIdle(() => this.interrupt());
+      }
+    } else if (this.working) {
+      await this.waitForIdle(() => this.interrupt());
+      await this.startTurn(input);
+      return 'interrupt';
+    }
+    await this.startTurn(input);
+    return 'turn';
+  }
+
+  /** Resolves once the current turn has completed (after `stop`, if given). */
+  private waitForIdle(stop?: () => Promise<void>): Promise<void> {
+    if (!this.working) return Promise.resolve();
+    const done = new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+    void stop?.();
+    return Promise.race([done, new Promise<void>((resolve) => setTimeout(resolve, 15_000))]);
+  }
+
+  private async startTurn(input: unknown[]): Promise<void> {
+    if (!this.server || !this.threadId) throw new Error('Codex session is not connected.');
     this.working = true;
     this.interruptRequested = false;
     this.lastAgentText = '';
@@ -288,7 +318,7 @@ class CodexSession implements ProviderSession {
       const result = rec(
         await this.server.rpc('turn/start', {
           threadId: this.threadId,
-          input: [{ type: 'text', text, text_elements: [] }],
+          input,
           // Applies to this turn and later ones (a mode change takes effect here).
           ...(this.modeChanged ? codexPolicy(this.args.permissionMode ?? 'auto') : {}),
         }),
@@ -467,6 +497,7 @@ class CodexSession implements ProviderSession {
           finalText: this.lastAgentText,
           error: str(rec(turn.error).message) || undefined,
         });
+        for (const resolve of this.idleWaiters.splice(0)) resolve();
         return;
       }
       case 'error':

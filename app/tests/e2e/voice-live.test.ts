@@ -18,7 +18,11 @@ mkdirSync(shots, { recursive: true });
 const electronPath = require('electron') as unknown as string;
 let app: ElectronApplication | undefined;
 
-/** silence · "Alice, add a regression test…" · pause · "刚才那个数据库的 Agent，先不要改 schema" · silence */
+/**
+ * silence · "Alice, add a regression test…" · long pause · "刚才那个数据库的 Agent，先不要改 schema" ·
+ * long pause · "等一下，Charlie，先别删那个表" · silence. Pauses are longer than the send hold
+ * (shorter ones would join the sentences into one message, by design).
+ */
 function buildMicFixture(): string {
   const pcm = (f: string) => {
     const b = readFileSync(join(appDir, '.cache', f));
@@ -26,7 +30,7 @@ function buildMicFixture(): string {
     return b.subarray(44);
   };
   const silence = (ms: number) => Buffer.alloc(Math.round((24_000 * ms) / 1000) * 2);
-  const data = Buffer.concat([silence(1500), pcm('voice-0.wav'), silence(2000), pcm('voice-1.wav'), silence(6000)]);
+  const data = Buffer.concat([silence(1500), pcm('voice-0.wav'), silence(4500), pcm('voice-1.wav'), silence(4500), pcm('voice-7.wav'), silence(7000)]);
   const h = Buffer.alloc(44);
   h.write('RIFF', 0);
   h.writeUInt32LE(36 + data.length, 4);
@@ -88,8 +92,11 @@ describe.runIf(enabled)('always-on microphone', () => {
     // Each spoken command reaches its agent exactly once.
     expect(await transcript('Alice')).toHaveLength(1);
     expect((await transcript('Alice'))[0]).toMatch(/regression test/i);
-    expect(await transcript('Charlie')).toHaveLength(1);
+    // The stop word is not part of the instruction Charlie receives.
+    await expect.poll(() => transcript('Charlie'), { timeout: 60_000 }).toHaveLength(2);
     expect((await transcript('Charlie'))[0]).toMatch(/schema/i);
+    expect((await transcript('Charlie'))[1]).toMatch(/删/);
+    expect((await transcript('Charlie'))[1]).not.toMatch(/^等一下/);
     expect(await transcript('Bob')).toEqual([]);
 
     // Mute really releases the microphone.

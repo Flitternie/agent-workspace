@@ -65,7 +65,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   },
   'project:add': (i: { rootPath: string; name?: string }) => workspace.addProject(i.rootPath, i.name),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
-  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card' }) => workspace.send(i.taskId, i.text, i.via),
+  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt }),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
@@ -91,8 +91,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
     return { text: await openai.transcribe(i.audio, i.mimeType, hint) };
   },
   'route:decide': (i: { utterance: string; focusedTaskId: string | null }) => workspace.decideRoute(i.utterance, i.focusedTaskId),
-  'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1] }) =>
-    workspace.dispatch(i.utterance, i.target, i.focusedTaskId),
+  'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean }) =>
+    workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt }),
   'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; originTaskId?: string; approvedForReuse: boolean }) =>
     workspace.addMemory({ ...i, source: 'user' }),
   'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),

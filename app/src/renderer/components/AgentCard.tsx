@@ -37,12 +37,12 @@ export function AgentCard({
   const needs = urgent.some((i) => i.kind === 'approval' || i.kind === 'question');
   const highRisk = items.some((i) => i.highRisk);
 
-  const send = async () => {
+  const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
     setError('');
     setSending(true);
-    const r = await call('task:send', { taskId: task.taskId, text, via: 'card' }).catch((e) => ({ ok: false, error: errorText(e) }));
+    const r = await call('task:send', { taskId: task.taskId, text, via: 'card', interrupt }).catch((e) => ({ ok: false, error: errorText(e) }));
     setSending(false);
     if (r.ok) setDraft('');
     else setError(r.error ?? t('Not delivered'));
@@ -142,12 +142,12 @@ export function AgentCard({
           rows={1}
           value={draft}
           aria-label={t('Message {alias}', { alias: task.alias })}
-          placeholder={t('Message {alias}…', { alias: task.alias })}
+          placeholder={task.status === 'running' ? t('Add to {alias}’s work… (⌘↵ stops it first)', { alias: task.alias }) : t('Message {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void send();
+              void send(e.metaKey || e.ctrlKey); // ⌘Enter stops the current turn first
             }
             if (e.key === 'Escape') e.currentTarget.blur();
           }}

@@ -43,7 +43,12 @@ describe('real entry: first run, settings, language', () => {
     await page.getByTestId('open-settings').click();
     await expect.poll(() => page.getByTestId('provider-claude').count()).toBe(1);
     await page.getByTestId('lang-zh').click();
-    await expect.poll(() => page.getByRole('dialog').innerText()).toContain('Agent 连接');
+    await expect.poll(() => page.getByTestId('settings-page').innerText()).toContain('Agent 连接');
+    // Settings is a page with search, not a dialog.
+    expect(await page.getByRole('dialog').count()).toBe(0);
+    await page.getByTestId('settings-search').fill('权限');
+    await expect.poll(() => page.locator('.settings-section').count()).toBe(1);
+    await page.getByTestId('settings-search').fill('');
     await page.getByTestId('perm-auto').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(shots, 'settings-zh.png') });
     await page.keyboard.press('Escape');

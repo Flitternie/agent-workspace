@@ -196,7 +196,12 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
             );
           return (
             <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
-              {item.role === 'user' ? <div className="msg-via">{t('You')}{item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : ''}</div> : null}
+              {item.role === 'user' ? <div className="msg-via">
+                  {t('You')}
+                  {item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : ''}
+                  {item.delivery === 'steer' ? <span className="delivery-tag">{t('added mid-turn')}</span> : null}
+                  {item.delivery === 'interrupt' ? <span className="delivery-tag interrupt">{t('stopped the turn')}</span> : null}
+                </div> : null}
               {item.role === 'system' ? <div className="msg-system">{item.text}</div> : <Markdown text={item.text} streaming={item.streaming} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
@@ -211,13 +216,16 @@ function Composer({ task }: { task: Task }) {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  const send = async () => {
+  // While the agent works, Enter adds to what it is doing (read at its next step);
+  // ⌘Enter stops the current turn and starts over with this message.
+  const working = task.status === 'running' || task.status === 'starting';
+  const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setError('');
     try {
-      const r = await call('task:send', { taskId: task.taskId, text, via: 'text' });
+      const r = await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
       if (r.ok) setDraft('');
       else setError(r.error ?? t('Not delivered'));
     } catch (e) {
@@ -239,7 +247,7 @@ function Composer({ task }: { task: Task }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void send();
+              void send(e.metaKey || e.ctrlKey);
             }
           }}
         />
@@ -248,9 +256,22 @@ function Composer({ task }: { task: Task }) {
             {t('To: {alias}', { alias: task.alias })} · {PROVIDER_LABEL[task.provider]}
             <span className="muted"> — {t('typed text goes only to this agent')}</span>
           </span>
-          <span className="hint">
-            <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
+          <span className="hint" data-testid="composer-hint">
+            {working ? (
+              <>
+                <Kbd>↵</Kbd> {t('add to current work')} · <Kbd>⌘↵</Kbd> {t('stop and send')}
+              </>
+            ) : (
+              <>
+                <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
+              </>
+            )}
           </span>
+          {working ? (
+            <button className="btn btn-sm" disabled={!draft.trim() || sending} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
+              {t('Stop & send')}
+            </button>
+          ) : null}
           <button className="send-btn" aria-label={t('Send')} disabled={!draft.trim() || sending} onClick={() => void send()}>
             <Icon name="send" />
           </button>

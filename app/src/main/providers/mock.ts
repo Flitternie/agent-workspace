@@ -3,7 +3,7 @@ import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
-import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { Delivery, ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 /**
  * Deterministic scripted agent used for UI tests and the demo. It behaves like a
@@ -65,6 +65,8 @@ class MockSession implements ProviderSession {
   private pending = new Map<string, { kind: 'approval' | 'question'; command?: string }>();
   private closed = false;
   private busy = false;
+  /** Messages that arrived mid-turn (steering). */
+  private steered: string[] = [];
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -99,9 +101,22 @@ class MockSession implements ProviderSession {
     this.emit({ type: 'sessionStarted', nativeSessionId: this.history.id, resumed: !!resumeId });
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
     if (this.closed || !this.history) throw new Error('Mock session is closed.');
-    if (this.busy) throw new Error('Mock agent is busy; wait for the current turn to finish.');
+    if (this.busy && !opts?.interrupt) {
+      // Like Claude/Codex steering: noted now, acknowledged in this turn's reply.
+      this.record('user', text);
+      this.steered.push(text);
+      return 'steer';
+    }
+    const delivery: Delivery = this.busy ? 'interrupt' : 'turn';
+    if (this.busy) await this.interrupt();
+    this.startTurn(text);
+    return delivery;
+  }
+
+  private startTurn(text: string): void {
+    if (!this.history) return;
     this.busy = true;
     const userTurns = this.history.messages.filter((m) => m.role === 'user').length;
     this.record('user', text);
@@ -298,6 +313,8 @@ class MockSession implements ProviderSession {
   }
 
   private finish(reply: string): void {
+    if (this.steered.length) reply = `${reply}\n\nAlso noted while working: ${this.steered.map((s) => `"${s.slice(0, 120)}"`).join(', ')}.`;
+    this.steered = [];
     this.record('assistant', reply);
     this.busy = false;
     this.emit({ type: 'turnCompleted', status: 'completed', finalText: reply });

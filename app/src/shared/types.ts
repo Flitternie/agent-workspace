@@ -126,6 +126,8 @@ export interface TranscriptItem {
   text: string;
   /** How the user message arrived. */
   via?: 'text' | 'voice' | 'card' | 'initial';
+  /** User messages sent while the agent was working. */
+  delivery?: 'steer' | 'interrupt';
   toolLabel?: string;
   toolStatus?: ToolStatus;
   /** Structured tool call (role 'tool'). */
@@ -204,6 +206,8 @@ export interface Settings {
   sttModel?: string;
   /** Model that decides which agent a spoken message is for (and names roles). */
   routerModel?: string;
+  /** Silence after speech before a spoken message is sent (pauses shorter than this continue it). */
+  voicePauseMs?: number;
   /** UI language; set from the system locale on first launch. */
   language?: Language;
 }
@@ -240,4 +244,6 @@ export interface DispatchResult {
   ok: boolean;
   taskId?: string;
   error?: string;
+  /** turn: started work; steer: added to the running turn; interrupt: stopped it and started over. */
+  delivery?: 'turn' | 'steer' | 'interrupt';
 }

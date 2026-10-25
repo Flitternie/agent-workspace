@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Language, PermissionMode, ProviderCapabilities, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
-import { Modal } from './Dialogs';
 
 const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
@@ -146,7 +145,37 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
   );
 }
 
-export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClose: () => void }) {
+const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
+  { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
+  { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
+  { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
+  { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI'] },
+  { id: 'data', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
+];
+
+/** A settings group; hidden when the search does not match its title or contents. */
+function Section({ id, query, actions, children }: { id: string; query: string; actions?: ReactNode; children: ReactNode }) {
+  const meta = SECTIONS.find((x) => x.id === id)!;
+  const q = query.trim().toLowerCase();
+  const haystack = [meta.title, t(meta.title), ...meta.keywords, ...meta.keywords.map((k) => t(k))].join(' ').toLowerCase();
+  if (q && !haystack.includes(q)) return null;
+  return (
+    <section className="settings-section" id={`settings-${id}`} data-testid={`settings-${id}`}>
+      <div className="settings-head">
+        <h2>{t(meta.title)}</h2>
+        {actions}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Settings as a page in the main area (like VS Code): a fixed header with search,
+ * a section index on the left, and the settings themselves scrolling on the right.
+ */
+export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClose: () => void }) {
+  const [query, setQuery] = useState('');
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const s = snapshot.settings;
@@ -158,10 +187,38 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
     setChecking(false);
   };
 
+  const jump = (id: string) => document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   return (
-    <Modal title={t('Settings')} onClose={onClose}>
-      <section className="settings-section">
-        <h3>{t('Language')}</h3>
+    <div className="settings-page" data-testid="settings-page">
+      <header className="stage-head drag">
+        <h1>{t('Settings')}</h1>
+        <input className="input settings-search" placeholder={t('Search settings')} value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // Esc clears the search first, then closes the page.
+            if (e.key !== 'Escape') return;
+            if (query) setQuery('');
+            else onClose();
+          }}
+          data-testid="settings-search"
+        />
+        <div className="stage-actions">
+          <button className="icon-btn" aria-label={t('Close')} title={t('Close (Esc)')} onClick={onClose}>
+            <Icon name="x" />
+          </button>
+        </div>
+      </header>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label={t('Settings')}>
+          {SECTIONS.map((sec) => (
+            <button key={sec.id} className="settings-nav-item" onClick={() => jump(sec.id)}>
+              {t(sec.title)}
+            </button>
+          ))}
+        </nav>
+        <div className="settings-content">
+      <Section id="language" query={query}>
         <div className="segmented" role="radiogroup" aria-label={t('Language')}>
           {LANGUAGES.map((l) => (
             <button key={l.id} role="radio" aria-checked={s.language === l.id} className={s.language === l.id ? 'on' : ''} onClick={() => update({ language: l.id })} data-testid={`lang-${l.id}`}>
@@ -169,15 +226,17 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
             </button>
           ))}
         </div>
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <div className="settings-head">
-          <h3>{t('Coding agents')}</h3>
+      <Section
+        id="agents"
+        query={query}
+        actions={
           <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
             {checking ? t('Checking…') : t('Recheck')}
           </button>
-        </div>
+        }
+      >
         <p className="muted small">
           {t(
             'Agents run through the Claude Code and Codex already installed on this Mac and use the account you are signed in with there. No extra authorization or API key is needed, and this app never reads or stores those credentials.',
@@ -202,16 +261,14 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
             </div>
           );
         })}
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h3>{t('Permissions')}</h3>
+      <Section id="permissions" query={query}>
         <p className="muted small">{t('Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.')}</p>
         <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h3>{t('Voice')}</h3>
+      <Section id="voice" query={query}>
         <div className="settings-row">
           <div className="settings-row-main">
             <strong>{t('Speech recognition')}</strong>
@@ -227,6 +284,22 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
             <span className="muted small"> — {t('like joining a call; macOS asks for microphone access the first time')}</span>
           </span>
         </label>
+        <div className="settings-inline">
+          <span>
+            {t('Send after a pause of')}
+            <span className="muted small"> — {t('shorter pauses keep adding to the same message')}</span>
+          </span>
+          <div className="segmented" role="radiogroup" aria-label={t('Send after a pause of')}>
+            {[1500, 2500, 4000].map((ms) => {
+              const on = (s.voicePauseMs ?? 2500) === ms;
+              return (
+                <button key={ms} role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => update({ voicePauseMs: ms })} data-testid={`pause-${ms}`}>
+                  {t('{n} s', { n: ms / 1000 })}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label className="check">
           <input type="checkbox" checked={s.alwaysConfirmVoice} onChange={(e) => update({ alwaysConfirmVoice: e.target.checked })} />
           <span>
@@ -234,16 +307,17 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
             <span className="muted small"> — {t('when off, commands that clearly name an agent are sent right away')}</span>
           </span>
         </label>
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h3>{t('Data')}</h3>
+      <Section id="data" query={query}>
         <div className="small">
           {t('Workspace data is stored in')} <code>{snapshot.dataDir}</code>
         </div>
         <div className="muted small">{snapshot.demo ? t('This is the demo entry; its data is separate from your real workspace.') : t('To try mock agents without touching this workspace, run npm run demo.')}</div>
-      </section>
+      </Section>
       {error ? <div className="error-text">{error}</div> : null}
-    </Modal>
+        </div>
+      </div>
+    </div>
   );
 }

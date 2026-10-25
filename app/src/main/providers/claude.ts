@@ -10,7 +10,7 @@ import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapa
 import { childEnv, findExecutable, run } from '../util/exec';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
-import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
 // installed `claude` binary (its login, settings, CLAUDE.md and permission rules).
@@ -115,7 +115,8 @@ class ClaudeSession implements ProviderSession {
   private wake?: () => void;
   private closed = false;
   /** User turns sent but not yet answered by a result message. */
-  private inFlight = 0;
+  /** A turn is running. Messages sent meanwhile are folded into it by Claude Code. */
+  private active = false;
   private interruptRequested = false;
   private permissions = new Map<
     string,
@@ -197,18 +198,34 @@ class ClaudeSession implements ProviderSession {
     }
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
     if (this.closed || !this.query) throw new Error('Claude session is not connected.');
+    let delivery: Delivery = 'turn';
+    if (this.active && opts?.interrupt) {
+      // Stop now; the message below then starts the next turn.
+      this.interruptRequested = true;
+      await this.query.interrupt();
+      delivery = 'interrupt';
+    } else if (this.active) {
+      // Claude Code folds a queued message into the running turn at the next tool boundary.
+      delivery = 'steer';
+    } else {
+      this.beginTurn();
+    }
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },
       parent_tool_use_id: null,
     } as SDKUserMessage);
-    if (this.inFlight++ === 0) {
-      this.interruptRequested = false;
-      this.emit({ type: 'turnStarted' });
-    }
     this.wake?.();
+    return delivery;
+  }
+
+  private beginTurn(): void {
+    if (this.active) return;
+    this.active = true;
+    this.interruptRequested = false;
+    this.emit({ type: 'turnStarted' });
   }
 
   async respond(requestId: string, response: ApprovalResponse): Promise<void> {
@@ -238,7 +255,7 @@ class ClaudeSession implements ProviderSession {
   }
 
   async interrupt(): Promise<void> {
-    if (!this.query || this.inFlight === 0) return;
+    if (!this.query || !this.active) return;
     this.interruptRequested = true;
     await this.query.interrupt();
   }
@@ -358,6 +375,8 @@ class ClaudeSession implements ProviderSession {
       }
       return;
     }
+    // Output after a result means a queued message started a new turn.
+    if ((type === 'stream_event' || type === 'assistant') && !history) this.beginTurn();
     if (type === 'stream_event') {
       const event = rec(m.event);
       if (event.type === 'content_block_start' && rec(event.content_block).type === 'text') {
@@ -444,9 +463,8 @@ class ClaudeSession implements ProviderSession {
     }
     if (type === 'result') {
       if (history) return;
-      this.inFlight = Math.max(0, this.inFlight - 1);
-      if (this.inFlight > 0 && !this.interruptRequested) return; // a queued message continues the work
-      this.inFlight = 0;
+      // One result per turn, however many messages were folded into it.
+      this.active = false;
       const success = m.subtype === 'success' && m.is_error !== true;
       const status = this.interruptRequested ? 'interrupted' : success ? 'completed' : 'failed';
       this.interruptRequested = false;

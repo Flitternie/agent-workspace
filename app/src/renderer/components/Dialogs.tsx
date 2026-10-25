@@ -20,7 +20,8 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
             <Icon name="x" />
           </button>
         </div>
-        {children}
+        {/* Only the body scrolls, so the title stays put and the corners stay round. */}
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

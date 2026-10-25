@@ -556,23 +556,26 @@ export class Workspace {
   // ---------------------------------------------------------------- messaging
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
-  async send(taskId: string, text: string, via: TranscriptItem['via']): Promise<DispatchResult> {
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     try {
       const live = await this.connect(taskId);
-      const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now() };
+      const busy = live.turnActive;
+      const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
-      await live.session.send(text);
+      const delivery = await live.session.send(text, opts);
+      if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision).
       for (const a of this.store.data.attention)
         if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && a.kind !== 'error')
           this.closeAttention(a, 'resolved', `Replied: ${clip(text, 80)}`);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
-      task.summary = `Working on: ${clip(text, 120)}`;
+      // Steering adds to the work in progress; the summary keeps describing it.
+      if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
       task.updatedAt = now();
       this.changed();
-      return { ok: true, taskId };
+      return { ok: true, taskId, delivery };
     } catch (error) {
       const message = (error as Error).message;
       this.appendSystem(taskId, `Message not delivered: ${message}`);
@@ -676,7 +679,12 @@ export class Workspace {
       }
       case 'turnCompleted': {
         live.turnActive = false;
-        for (const it of this.store.transcript(taskId)) if (it.streaming) it.streaming = false;
+        // Text that was still streaming when the turn ended (e.g. cut off by a steer) is final now; tell the UI.
+        for (const it of this.store.transcript(taskId))
+          if (it.streaming) {
+            it.streaming = false;
+            for (const cb of this.transcriptListeners) cb(taskId, { ...it });
+          }
         if (event.status === 'interrupted') {
           task.status = 'idle';
           task.summary = 'Interrupted. Waiting for your next instruction.';
@@ -854,8 +862,9 @@ export class Workspace {
       | { kind: 'coordinator' }
       | { kind: 'create'; projectId: string; provider: AgentProvider; title: string },
     focusedTaskId: string | null = null,
+    opts: { interrupt?: boolean } = {},
   ): Promise<DispatchResult & { reply?: string }> {
-    if (target.kind === 'existing') return this.send(target.taskId, utterance, 'voice');
+    if (target.kind === 'existing') return this.send(target.taskId, utterance, 'voice', opts);
     if (target.kind === 'create') {
       try {
         const task = await this.createTask({ projectId: target.projectId, provider: target.provider, title: target.title, instruction: utterance, isolate: true });

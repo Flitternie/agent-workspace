@@ -86,13 +86,20 @@ export interface ApprovalResponse {
   answers?: Record<string, string>;
 }
 
+/** How a message reached the agent. */
+export type Delivery = 'turn' | 'steer' | 'interrupt';
+
 export interface ProviderSession {
   readonly provider: AgentProvider;
   /** Known after sessionStarted. */
   nativeSessionId(): string | undefined;
   start(): Promise<void>;
-  /** Sends a user turn. Rejects if the provider cannot accept it right now. */
-  send(text: string): Promise<void>;
+  /**
+   * Sends a user message. Idle: starts a turn. Working: steers the current turn
+   * (read at the next safe point, no restart), or with `interrupt` stops the turn
+   * and starts a new one with this message. Resolves with what actually happened.
+   */
+  send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery>;
   /** Answers a native approval / question by its provider request id. */
   respond(requestId: string, response: ApprovalResponse): Promise<void>;
   interrupt(): Promise<void>;
