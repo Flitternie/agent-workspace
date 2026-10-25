@@ -42,3 +42,6 @@ app/build/*
 !app/build/background.tiff
 app/scripts/render-assets.sh
 app/scripts/assets/
+
+# Promo video work (sources, renders, voiceover) stays local
+video/
