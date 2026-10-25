@@ -3,6 +3,7 @@
 A desktop workspace for running several coding agents (Claude Code and Codex) in parallel, designed like a meeting rather than a set of terminals.
 
 - **Overview as a meeting.** Every agent is a card that reports what it did and what it needs from you. Questions and permission requests stay on their card until you answer, however long you spend with another agent.
+- **A main agent to talk to.** Unless you pick an agent, you talk to a main agent (your own Claude Code or Codex) that sees every agent, passes instructions on, starts new agents, answers status questions and collects what they need from you, so you can run the whole team from one conversation. It never edits code itself and cannot approve another agent's permission request on its own.
 - **Talk to them.** The microphone stays open like a call. Say "Alice, add a regression test" or "小张，迁移先停一下" and it goes to that agent without changing your view. Short pauses join one message; a leading "stop / 等一下" halts the agent at once.
 - **Steer or interrupt.** A message to a busy agent joins its current turn by default. ⌘Enter, or a spoken "stop", interrupts it and starts over.
 - **Uses what you already have.** Agents run through the Claude Code and Codex CLIs installed on your Mac, with your existing logins. Permissions default to each tool's own auto mode (never bypassed), and can be set per agent.
