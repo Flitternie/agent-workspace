@@ -395,7 +395,7 @@ export function VoiceDock({
             ? tr('Microphone blocked — allow it in System Settings › Privacy › Microphone')
             : stt
               ? tr('Muted')
-              : tr('Voice off — no OpenAI key; typing still works');
+              : tr('Voice off — choose a speech model in Settings; typing still works');
 
   return (
     <div className="dock" data-testid="voice-dock">

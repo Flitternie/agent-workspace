@@ -8,7 +8,8 @@ const common = {
   format: 'cjs',
   target: 'node22',
   sourcemap: true,
-  external: ['electron', '@anthropic-ai/claude-agent-sdk'],
+  // Native addons and the SDK's CLI stay as runtime requires.
+  external: ['electron', '@anthropic-ai/claude-agent-sdk', 'sherpa-onnx-node'],
   logLevel: 'warning',
 };
 await build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'out/main/index.cjs' });

@@ -8,6 +8,7 @@ import { loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
+import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
 
 // All app state lives in one app-owned directory (default: <app>/.data) so the
@@ -26,6 +27,9 @@ const log = (...args: unknown[]) => {
 };
 
 const key = loadOpenAiKey(appRoot);
+// On-device speech models are shared by the real and demo entries and kept inside the app folder.
+let notifyModels = () => {};
+const localStt = new LocalStt(process.env.AMW_MODELS_DIR ?? join(appRoot, '.models'), () => notifyModels());
 const openai = key ? new OpenAiClient(key) : undefined;
 const workspace = new Workspace({
   dataDir,
@@ -35,10 +39,12 @@ const workspace = new Workspace({
     mock: new MockAdapter(join(dataDir, 'mock-sessions')),
   },
   openai,
+  localStt,
   log,
   demo: demoMode,
   hiddenSessionDirs: [join(appRoot, '.cache')],
 });
+notifyModels = () => workspace.notifyChanged();
 
 let win: BrowserWindow | null = null;
 
@@ -83,13 +89,10 @@ const handlers: { [C in IpcChannel]: Handler } = {
     if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true;
     return systemPreferences.askForMediaAccess('microphone');
   },
-  'voice:transcribe': async (i: { audio: Uint8Array; mimeType: string }) => {
-    if (!openai) throw new Error('Speech-to-text is not configured (no OpenAI key). Typed input still works.');
-    // Agent names help the recognizer spell handles like "Charlie" or "小张".
-    const s = workspace.snapshot();
-    const hint = ['Agent Meeting Workspace.', ...s.tasks.map((t) => `${t.alias}${t.name !== t.alias ? ` (${t.name})` : ''}: ${t.title}.`)].join(' ');
-    return { text: await openai.transcribe(i.audio, i.mimeType, hint) };
-  },
+  'voice:transcribe': async (i: { audio: Uint8Array; mimeType: string }) => ({ text: await workspace.transcribe(i.audio, i.mimeType) }),
+  'stt:download': (i: { id: string }) => void localStt.download(i.id),
+  'stt:cancel': (i: { id: string }) => localStt.cancel(i.id),
+  'stt:delete': (i: { id: string }) => localStt.remove(i.id),
   'route:decide': (i: { utterance: string; focusedTaskId: string | null }) => workspace.decideRoute(i.utterance, i.focusedTaskId),
   'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean }) =>
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt }),

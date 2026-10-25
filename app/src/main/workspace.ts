@@ -25,6 +25,7 @@ import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
 import type { OpenAiClient } from './openai';
+import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
 import { decideRoute, type RouteContext } from './router';
@@ -52,6 +53,7 @@ export interface WorkspaceOptions {
   openai?: OpenAiClient;
   log?: (...args: unknown[]) => void;
   demo?: boolean;
+  localStt?: LocalStt;
   /** Folders whose sessions are the app's own (test scratch repos) and never offered for import. */
   hiddenSessionDirs?: string[];
 }
@@ -80,11 +82,31 @@ export class Workspace {
     this.recoverAfterRestart();
   }
 
+  /** The on-device model in use, if one is selected and downloaded. */
+  private localModelId(): string | undefined {
+    const m = /^local:(.+)$/.exec(this.store.data.settings.sttModel ?? '')?.[1];
+    return m && this.opts.localStt?.installed(m) ? m : undefined;
+  }
+
+  private sttReady(): boolean {
+    return !!this.localModelId() || !!this.opts.openai;
+  }
+
+  /** Speech → text with the chosen model: on-device, or OpenAI with agent names as a spelling hint. */
+  async transcribe(audio: Uint8Array, mimeType: string): Promise<string> {
+    const tasks = this.store.data.tasks;
+    const local = this.localModelId();
+    if (local) return this.opts.localStt!.transcribe(local, audio, tasks.map((t) => t.alias));
+    if (!this.opts.openai) throw new Error('Speech-to-text is not configured. Download a local model in Settings › Voice, or add an OpenAI key. Typed input still works.');
+    const hint = ['Agent Meeting Workspace.', ...tasks.map((t) => `${t.alias}${t.name !== t.alias ? ` (${t.name})` : ''}: ${t.title}.`)].join(' ');
+    return this.opts.openai.transcribe(audio, mimeType, hint);
+  }
+
   private applyModels(): void {
     const ai = this.opts.openai;
     const s = this.store.data.settings;
     if (!ai) return;
-    if (!process.env.AMW_STT_MODEL) ai.sttModel = s.sttModel || STT_MODEL;
+    if (!process.env.AMW_STT_MODEL) ai.sttModel = s.sttModel && !s.sttModel.startsWith('local:') ? s.sttModel : STT_MODEL;
     if (!process.env.AMW_ROUTER_MODEL) ai.routerModel = s.routerModel || ROUTER_MODEL;
   }
 
@@ -142,6 +164,11 @@ export class Workspace {
     return () => this.transcriptListeners.delete(cb);
   }
 
+  /** For state owned outside the workspace (local model downloads) that the snapshot reports. */
+  notifyChanged(): void {
+    this.changedThrottled();
+  }
+
   private changed(): void {
     this.store.save();
     for (const cb of this.changeListeners) cb();
@@ -159,12 +186,14 @@ export class Workspace {
       capabilities: this.capabilities,
       settings: d.settings,
       voice: {
-        sttAvailable: !!this.opts.openai,
+        sttAvailable: this.sttReady(),
         routerLlmAvailable: !!this.opts.openai,
-        sttModel: this.opts.openai?.sttModel,
+        sttModel: this.localModelId() ? d.settings.sttModel : this.opts.openai?.sttModel,
         routerModel: this.opts.openai?.routerModel,
         // Meeting-style: the mic is open from launch unless disabled (tests, kiosk use).
-        autoListen: !!this.opts.openai && process.env.AMW_NO_AUTOLISTEN !== '1' && d.settings.autoListen,
+        autoListen: this.sttReady() && process.env.AMW_NO_AUTOLISTEN !== '1' && d.settings.autoListen,
+        cloudAvailable: !!this.opts.openai,
+        localModels: this.opts.localStt?.states() ?? [],
       },
       dataDir: this.opts.dataDir,
       demo: !!this.opts.demo,

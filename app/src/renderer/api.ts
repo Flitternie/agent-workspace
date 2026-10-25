@@ -52,6 +52,9 @@ interface Outputs {
   'settings:update': void;
   'capabilities:refresh': void;
   'models:list': string[];
+  'stt:download': void;
+  'stt:cancel': void;
+  'stt:delete': void;
   'demo:seed': void;
 }
 

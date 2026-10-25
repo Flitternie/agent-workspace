@@ -214,6 +214,22 @@ export interface Settings {
 
 export type Language = 'en' | 'zh';
 
+/** A downloadable on-device speech model (Settings › Voice). */
+export interface LocalModelState {
+  id: string;
+  label: string;
+  sizeMb: number;
+  languages: string;
+  note: string;
+  /** 1–5 ratings shown as dots. */
+  accuracy: number;
+  speed: number;
+  installed: boolean;
+  /** 0–1 while downloading. */
+  progress?: number;
+  error?: string;
+}
+
 /**
  * How much an agent may do without asking. Never a bypass:
  * - auto: the provider's own reviewer decides (Claude Code auto mode, Codex auto_review);
@@ -234,7 +250,16 @@ export interface WorkspaceSnapshot {
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   settings: Settings;
-  voice: { sttAvailable: boolean; routerLlmAvailable: boolean; sttModel?: string; routerModel?: string; autoListen: boolean };
+  voice: {
+    sttAvailable: boolean;
+    routerLlmAvailable: boolean;
+    /** OpenAI id, or `local:<id>` for an on-device model. */
+    sttModel?: string;
+    routerModel?: string;
+    autoListen: boolean;
+    cloudAvailable: boolean;
+    localModels: LocalModelState[];
+  };
   dataDir: string;
   /** Tasks with a live provider session right now (others resume on demand). */
   connectedTaskIds: string[];

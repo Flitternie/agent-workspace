@@ -2555,3 +2555,145 @@ details[open] > summary .tool-more {
 .conn-list.active {
   background: var(--selected);
 }
+
+/* Speech model picker: cloud / on-device cards */
+.model-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.model-pick-head > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.local-models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.model-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.model-card.on {
+  border-color: var(--ok);
+  background: rgba(22, 163, 74, 0.04);
+}
+.model-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.model-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.model-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms;
+}
+
+/* Model lists: scrollable, card per model, dot ratings */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.model-list.short {
+  max-height: 260px;
+}
+.model-group {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 4px 2px 0;
+  position: sticky;
+  top: -8px;
+  background: var(--panel-2);
+  z-index: 1;
+}
+.model-card.clickable {
+  cursor: pointer;
+}
+.model-card.clickable:hover {
+  border-color: var(--border-strong);
+}
+.model-card.disabled .model-card-main {
+  opacity: 0.75;
+}
+.model-radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.model-card.on .model-radio {
+  border: 4px solid var(--ok);
+}
+.model-ratings {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.dots-label {
+  margin-right: 3px;
+}
+.dots .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.dots .dot.on {
+  background: var(--accent);
+}
+.model-more {
+  align-self: flex-start;
+  padding: 2px;
+}
+.model-empty {
+  padding: 4px 2px;
+}

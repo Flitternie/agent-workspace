@@ -66,81 +66,207 @@ export function PermissionChoice({ value, onChange }: { value: PermissionMode; o
 
 // Two separate models: one turns speech into text, the other decides which agent a
 // sentence is for (and names agent roles). Nothing rewrites what you said.
-const STT_CHOICES: Array<{ id: string; note: string }> = [
-  { id: 'gpt-4o-transcribe', note: 'Most accurate; best with mixed Chinese and English' },
-  { id: 'gpt-4o-mini-transcribe', note: 'Faster and cheaper, slightly less accurate' },
-  { id: 'whisper-1', note: 'Older Whisper model' },
+// Both are picked from scrollable card lists with 1–5 dot ratings (as in VoiceInk),
+// so more models can be added without the picker getting harder to read.
+
+interface ModelOption {
+  id: string;
+  label: string;
+  note: string;
+  accuracy?: number;
+  speed?: number;
+  detail?: string;
+}
+
+// Ratings come from this app's own tests (mixed Chinese/English clips, routing cases).
+const CLOUD_STT: ModelOption[] = [
+  { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', note: 'Most accurate; best with mixed Chinese and English', accuracy: 5, speed: 3 },
+  { id: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe', note: 'Faster and cheaper, slightly less accurate', accuracy: 4, speed: 4 },
+  { id: 'whisper-1', label: 'whisper-1', note: 'Older Whisper model', accuracy: 3, speed: 3 },
 ];
-const ROUTER_CHOICES: Array<{ id: string; note: string }> = [
-  { id: 'gpt-5.4-mini', note: 'Recommended: accurate, about 1 s' },
-  { id: 'gpt-5.4-nano', note: 'Fastest, about 0.8 s; occasionally misroutes' },
-  { id: 'gpt-5.5', note: 'Most capable, slower' },
-  { id: 'gpt-4.1-mini', note: 'Previous default' },
+const ROUTERS: ModelOption[] = [
+  { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini', note: 'Recommended: accurate, about 1 s', accuracy: 5, speed: 4 },
+  { id: 'gpt-5.4-nano', label: 'gpt-5.4-nano', note: 'Fastest, about 0.8 s; occasionally misroutes', accuracy: 3, speed: 5 },
+  { id: 'gpt-5.5', label: 'gpt-5.5', note: 'Most capable, slower', accuracy: 5, speed: 2 },
+  { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini', note: 'Previous default', accuracy: 3, speed: 4 },
 ];
 const OTHER_STT = /^(gpt-[\w.-]*transcribe|whisper-\d)$/;
 const OTHER_ROUTER = /^(gpt-(4\.1|4o|5)[\w.-]*|o\d(-mini)?)$/;
 // gpt-4.1-nano is still listed by the API but deprecated for chat.
 const NOT_ROUTER = /audio|realtime|search|transcribe|tts|image|codex|pro|chat-latest|diarize|\d{4}-\d\d-\d\d|^gpt-4\.1-nano$/;
 
-function ModelSelect({ label, hint, value, choices, other, testId, onChange }: { label: string; hint: string; value: string; choices: Array<{ id: string; note: string }>; other: string[]; testId: string; onChange: (id: string) => void }) {
-  const known = new Set(choices.map((c) => c.id));
+/** "●●●●○": a rating out of five. */
+function Dots({ label, value }: { label: string; value?: number }) {
+  if (!value) return null;
   return (
-    <label className="model-pick">
-      <span>
-        <strong>{label}</strong>
-        <span className="muted small">{hint}</span>
-      </span>
-      <select className="input select" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId}>
-        {choices.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.id} — {t(c.note)}
-          </option>
-        ))}
-        {other.filter((id) => !known.has(id)).length ? (
-          <optgroup label={t('Other models on your key')}>
-            {other
-              .filter((id) => !known.has(id))
-              .map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-          </optgroup>
-        ) : null}
-      </select>
-    </label>
+    <span className="dots" title={`${label} ${value}/5`} aria-label={`${label} ${value}/5`}>
+      <span className="dots-label">{label}</span>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span key={n} className={n <= value ? 'dot on' : 'dot'} />
+      ))}
+    </span>
   );
 }
 
-function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onChange: (p: { sttModel?: string; routerModel?: string }) => void }) {
+/** One selectable model: name, tags, ratings, a short note, and optional actions (download…). */
+function ModelCard({ m, selected, disabled, tags, actions, onSelect, testId, children }: { m: ModelOption; selected: boolean; disabled?: boolean; tags?: ReactNode; actions?: ReactNode; onSelect?: () => void; testId: string; children?: ReactNode }) {
+  return (
+    <div
+      className={`model-card${selected ? ' on' : ''}${disabled ? ' disabled' : ''}${onSelect && !disabled ? ' clickable' : ''}`}
+      role="radio"
+      aria-checked={selected}
+      tabIndex={onSelect && !disabled ? 0 : -1}
+      data-testid={testId}
+      onClick={() => !disabled && onSelect?.()}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !disabled && onSelect?.()}
+    >
+      <span className="model-radio" aria-hidden />
+      <div className="model-card-main">
+        <div className="model-card-title">
+          <strong>{m.label}</strong>
+          {tags}
+        </div>
+        {m.accuracy || m.speed ? (
+          <div className="model-ratings">
+            <Dots label={t('Accuracy')} value={m.accuracy} />
+            <Dots label={t('Speed')} value={m.speed} />
+          </div>
+        ) : null}
+        <div className="muted small">
+          {m.detail ? `${m.detail} · ` : ''}
+          {t(m.note)}
+        </div>
+        {children}
+      </div>
+      {actions ? (
+        <div className="model-card-actions" onClick={(e) => e.stopPropagation()}>
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Models this key can use (cached per page view). */
+function useOpenAiModels(enabled: boolean): string[] | null {
   const [available, setAvailable] = useState<string[] | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     call('models:list', {})
       .then(setAvailable)
       .catch(() => setAvailable(null));
-  }, []);
+  }, [enabled]);
+  return available;
+}
+
+function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onChange: (p: { sttModel?: string; routerModel?: string }) => void }) {
+  const v = snapshot.voice;
+  const available = useOpenAiModels(v.cloudAvailable);
+  const [moreStt, setMoreStt] = useState(false);
+  const [moreRouter, setMoreRouter] = useState(false);
+  const current = v.sttModel ?? '';
+  const inUseLocal = /^local:(.+)$/.exec(current)?.[1];
   // Only offer what this key can use, once we know.
-  const usable = (list: Array<{ id: string; note: string }>) => (available ? list.filter((c) => available.includes(c.id)) : list);
+  const usable = (list: ModelOption[]) => (available ? list.filter((c) => available.includes(c.id)) : list);
+  const extra = (re: RegExp, known: ModelOption[], not?: RegExp) =>
+    (available ?? []).filter((id) => re.test(id) && !(not && not.test(id)) && !known.some((k) => k.id === id) && !/\d{4}-\d\d-\d\d|diarize/.test(id));
+
   return (
     <div className="model-picks">
-      <ModelSelect
-        label={t('Speech recognition model')}
-        hint={t('Turns what you say into text.')}
-        value={snapshot.voice.sttModel ?? ''}
-        choices={usable(STT_CHOICES)}
-        other={(available ?? []).filter((id) => OTHER_STT.test(id) && !/\d{4}-\d\d-\d\d|diarize/.test(id))}
-        testId="stt-model"
-        onChange={(id) => onChange({ sttModel: id })}
-      />
-      <ModelSelect
-        label={t('Routing model')}
-        hint={t('Decides which agent a sentence is for when you do not name one, and names agent roles. It does not rewrite what you said.')}
-        value={snapshot.voice.routerModel ?? ''}
-        choices={usable(ROUTER_CHOICES)}
-        other={(available ?? []).filter((id) => OTHER_ROUTER.test(id) && !NOT_ROUTER.test(id))}
-        testId="router-model"
-        onChange={(id) => onChange({ routerModel: id })}
-      />
+      <div className="model-pick-head">
+        <span>
+          <strong>{t('Speech recognition model')}</strong>
+          <span className="muted small">{t('Turns what you say into text. Ratings are from this app’s own tests.')}</span>
+        </span>
+      </div>
+      <div className="model-list" role="radiogroup" aria-label={t('Speech recognition model')} data-testid="stt-list">
+        <div className="model-group">{t('On this Mac')} · <span className="muted">{t('audio never leaves the computer')}</span></div>
+        {v.localModels.map((m, i) => (
+          <ModelCard
+            key={m.id}
+            m={{ id: m.id, label: m.label, note: m.note, accuracy: m.accuracy, speed: m.speed, detail: `${t(m.languages)} · ${m.sizeMb} MB` }}
+            selected={inUseLocal === m.id}
+            disabled={!m.installed}
+            onSelect={() => onChange({ sttModel: `local:${m.id}` })}
+            testId={`local-model-${m.id}`}
+            tags={i === 0 ? <span className="tag">{t('Recommended')}</span> : null}
+            actions={
+              m.progress !== undefined ? (
+                <>
+                  <span className="muted small">{Math.round(m.progress * 100)}%</span>
+                  <button className="btn btn-sm" onClick={() => void call('stt:cancel', { id: m.id })}>
+                    {t('Cancel')}
+                  </button>
+                </>
+              ) : m.installed ? (
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => {
+                    if (window.confirm(t('Delete {name} from this Mac?', { name: m.label }))) void call('stt:delete', { id: m.id });
+                  }}
+                >
+                  {t('Delete')}
+                </button>
+              ) : (
+                <button className="btn btn-sm" onClick={() => void call('stt:download', { id: m.id })} data-testid={`download-${m.id}`}>
+                  {t('Download')}
+                </button>
+              )
+            }
+          >
+            {m.progress !== undefined ? (
+              <div className="progress" aria-label={t('Downloading')}>
+                <span style={{ width: `${Math.round(m.progress * 100)}%` }} />
+              </div>
+            ) : null}
+            {m.error ? <div className="error-text small">{m.error}</div> : null}
+          </ModelCard>
+        ))}
+        <div className="model-group">{t('Cloud')} · <span className="muted">OpenAI</span></div>
+        {v.cloudAvailable ? (
+          <>
+            {usable(CLOUD_STT).map((m) => (
+              <ModelCard key={m.id} m={m} selected={current === m.id} onSelect={() => onChange({ sttModel: m.id })} testId={`stt-${m.id}`} />
+            ))}
+            {moreStt
+              ? extra(OTHER_STT, CLOUD_STT).map((id) => (
+                  <ModelCard key={id} m={{ id, label: id, note: 'Not rated' }} selected={current === id} onSelect={() => onChange({ sttModel: id })} testId={`stt-${id}`} />
+                ))
+              : extra(OTHER_STT, CLOUD_STT).length ? (
+                  <button className="link small model-more" onClick={() => setMoreStt(true)}>
+                    {t('Show {n} more models on your key', { n: extra(OTHER_STT, CLOUD_STT).length })}
+                  </button>
+                ) : null}
+          </>
+        ) : (
+          <div className="muted small model-empty">{t('No OpenAI key found. Put it in openai.key next to the app or set OPENAI_API_KEY, then restart.')}</div>
+        )}
+      </div>
+
+      <div className="model-pick-head">
+        <span>
+          <strong>{t('Routing model')}</strong>
+          <span className="muted small">{t('Decides which agent a sentence is for when you do not name one, and names agent roles. It does not rewrite what you said.')}</span>
+        </span>
+      </div>
+      {v.cloudAvailable ? (
+        <div className="model-list short" role="radiogroup" aria-label={t('Routing model')} data-testid="router-list">
+          {usable(ROUTERS).map((m) => (
+            <ModelCard key={m.id} m={m} selected={v.routerModel === m.id} onSelect={() => onChange({ routerModel: m.id })} testId={`router-${m.id}`} />
+          ))}
+          {moreRouter
+            ? extra(OTHER_ROUTER, ROUTERS, NOT_ROUTER).map((id) => (
+                <ModelCard key={id} m={{ id, label: id, note: 'Not rated' }} selected={v.routerModel === id} onSelect={() => onChange({ routerModel: id })} testId={`router-${id}`} />
+              ))
+            : extra(OTHER_ROUTER, ROUTERS, NOT_ROUTER).length ? (
+                <button className="link small model-more" onClick={() => setMoreRouter(true)}>
+                  {t('Show {n} more models on your key', { n: extra(OTHER_ROUTER, ROUTERS, NOT_ROUTER).length })}
+                </button>
+              ) : null}
+        </div>
+      ) : (
+        <div className="muted small">{t('Without an OpenAI key, a spoken message goes to the agent it names (or the one you are looking at).')}</div>
+      )}
     </div>
   );
 }
@@ -149,7 +275,7 @@ const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
-  { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI'] },
+  { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'data', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
 ];
 
@@ -274,9 +400,9 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             <strong>{t('Speech recognition')}</strong>
             <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
           </div>
-          {!snapshot.voice.sttAvailable ? <div className="small">{t('No OpenAI key found. Put it in openai.key next to the app or set OPENAI_API_KEY, then restart. Typing still works.')}</div> : null}
+          {!snapshot.voice.sttAvailable ? <div className="small">{t('Pick a model below: download one to run on this Mac, or add an OpenAI key. Typing works either way.')}</div> : null}
         </div>
-        {snapshot.voice.sttAvailable ? <ModelPickers snapshot={snapshot} onChange={update} /> : null}
+        <ModelPickers snapshot={snapshot} onChange={update} />
         <label className="check">
           <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
           <span>

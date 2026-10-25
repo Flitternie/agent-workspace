@@ -6,6 +6,7 @@ app/node_modules/
 app/.cache/
 app/.data/
 app/.data-demo/
+app/.models/
 app/out/
 app/test-results/
 app/.npmrc.local
