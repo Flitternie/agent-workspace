@@ -1,12 +1,26 @@
+# Secrets: never commit keys or local env files
 openai.key
+*.key
 .env
+.env.*
+
+# Local tool / editor state
 .DS_Store
+.claude/
+.vscode/
+.idea/
+*.log
+
+# Reference repos cloned for research (read-only, not ours)
 research/
-app/node_modules/
+
+# Dependencies, builds and app-owned runtime data
+node_modules/
+app/out/
 app/.cache/
 app/.data/
 app/.data-demo/
 app/.models/
-app/out/
 app/test-results/
 app/.npmrc.local
+coverage/

@@ -1,4 +1,4 @@
-# Agent Meeting Workspace — v0.1
+# Agent Meeting Workspace — app
 
 A meeting-style overview for parallel coding agents. Each Claude Code or Codex task is a card that reports what it did and what it needs from you. Requests stay on their card until they are answered. Global voice routes a spoken instruction to the right agent without moving your view, and typed text goes only to the agent you selected.
 
@@ -33,28 +33,36 @@ Both also work from the repo root.
 
 | Command | What |
 |---|---|
-| `npm test` | 27 unit tests (router matrix, attention lifecycle, stale events, approvals, restart, memory scoping, worktrees) |
-| `npm run test:e2e` | Drives the built app through the spec's demo script with mock agents (screenshots in `test-results/`) |
-| `AMW_E2E_REAL=1 npm run test:e2e` | Also runs Claude Code + Codex through the app (small real model calls) |
-| `AMW_E2E_VOICE=1 npx vitest run --config vitest.e2e.config.ts tests/e2e/voice-live.test.ts` | Always-on mic end to end: a WAV fixture plays as the microphone (Chromium fake device), two spoken commands route to A and C with no click |
+| `npm test` | Unit tests: router matrix, attention lifecycle, stale events, approvals, restart, memory scoping, worktrees, content mapping, i18n coverage, voice composition, local STT post-processing |
+| `npm run test:e2e` | Drives the built app with mock agents (demo script, settings, selection); screenshots in `test-results/` |
+| `AMW_E2E_REAL=1 npm run test:e2e` | Also runs Claude Code + Codex through the app: worktrees, permission modes, native approval, steer/interrupt, restart + resume (small real model calls) |
+| `AMW_E2E_VOICE=1 npm run test:e2e` | Always-on mic end to end: a WAV fixture plays as the microphone; spoken commands (incl. a leading "等一下") route to the named agents with no click |
+| `AMW_E2E_LOCAL_STT=1 npm run test:e2e` | On-device speech recognition in Electron without an OpenAI key (needs SenseVoice in `app/.models`) |
 | `npm run smoke:providers [claude\|codex]` | Adapter contract against the real CLIs: create, approve/deny, resume, discover |
-| `npm run smoke:content [claude\|codex]` | Real CLIs make a plan, create + edit a file and run a command; checks both adapters emit the same applied diffs, terminal output and approval previews |
-| `npm run smoke:voice` | TTS fixture → STT → router (rules + LLM) against the OpenAI API |
+| `npm run smoke:content [claude\|codex]` | Real CLIs edit a file and run a command; both adapters must emit the same diffs, terminal output and approval previews |
+| `npm run smoke:voice` | TTS fixtures → STT → router (rules + LLM) against the OpenAI API |
 | `npm run typecheck` | Strict TypeScript |
 
 ## Layout
 
 ```
-src/main/        Electron main = local backend
-  workspace.ts   task/session registry, attention queue, dispatch, memory, coordinator
-  router.ts      voice routing (rules first, optional LLM, never auto-sends LLM guesses)
-  providers/     claude.ts (Agent SDK), codex.ts (app-server JSON-RPC), mock.ts
-                 claude-content.ts / codex-content.ts: provider output → unified content
-src/shared/content.ts  ACP-shaped content model: tool kinds, diffs with hunks, terminal, plan, permission kinds
-  worktree.ts    per-task git worktrees
-  openai.ts      STT + classifier (key stays in main)
-src/preload/     narrow contextBridge (named, zod-validated channels only)
-src/renderer/    React UI: Overview cards, Focus, voice dock, memory panel
+src/main/                 Electron main = local backend
+  workspace.ts            task/session registry, attention queue, dispatch, permission modes, memory, coordinator
+  router.ts               voice routing (rules first, optional LLM, never auto-sends a guess)
+  providers/              claude.ts (Agent SDK), codex.ts (app-server JSON-RPC), mock.ts
+    *-content.ts          provider output → unified content (diffs, terminal, plans, approvals)
+    user-text.ts          strips harness markup from saved user turns
+  stt/local.ts            on-device speech models (sherpa-onnx): catalogue, download, transcribe
+  openai.ts               cloud STT + routing model (key stays in main)
+  role.ts, attention.ts, memory.ts, store.ts, worktree.ts
+src/shared/               types, zod-validated IPC schemas, ACP-shaped content model
+src/preload/              narrow contextBridge (named channels only)
+src/renderer/             React UI
+  components/             Overview cards, Focus view, Settings page, voice dock, Markdown, dialogs
+  voice/                  always-on listener (VAD) and pause/stop-word composition
+  i18n.ts, locales/zh.ts  English + Simplified Chinese
+src/smoke/                real-provider / real-API smoke scripts
+tests/unit, tests/e2e     vitest + Playwright (Electron)
 ```
 
 Provider protocol handling was informed by Parallel Code (MIT, © Johannes Millan). The unified content model follows the Agent Client Protocol and its claude-code-acp / codex-acp adapters (Apache-2.0, Zed Industries) and vibe-kanban's normalized logs (Apache-2.0, BloopAI); ideas only, no code copied.
