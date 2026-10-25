@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { open, readdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   CanUseTool,
   PermissionResult,
@@ -8,6 +11,8 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
+import { sshError, sshRun } from '../util/ssh';
+import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteSessionStore, remoteSpawn, scanRemoteSessions } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
@@ -69,10 +74,67 @@ function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: Works
   };
 }
 
+/** Entrypoints of saved sessions on this Mac, from the first lines of each transcript. */
+async function localEntrypoints(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const root = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
+  const wanted = new Set(ids);
+  const dirs = await readdir(root).catch(() => [] as string[]);
+  await Promise.all(
+    dirs.map(async (dir) => {
+      for (const name of await readdir(join(root, dir)).catch(() => [] as string[])) {
+        const id = name.replace(/\.jsonl$/, '');
+        if (name === id || !wanted.has(id)) continue;
+        const file = await open(join(root, dir, name)).catch(() => undefined);
+        if (!file) continue;
+        try {
+          const { buffer, bytesRead } = await file.read(Buffer.alloc(32 * 1024), 0, 32 * 1024, 0);
+          const m = /"entrypoint":"([^"]+)"/.exec(buffer.toString('utf8', 0, bytesRead));
+          if (m) out.set(id, m[1]);
+        } finally {
+          await file.close();
+        }
+      }
+    }),
+  );
+  return out;
+}
+
 const CLAUDE_MODE: Record<PermissionMode, 'auto' | 'acceptEdits' | 'default'> = { auto: 'auto', edits: 'acceptEdits', ask: 'default' };
+
+/** From `claude auth status` (JSON). Only the login flag and method are kept (no email or org). */
+function authState(code: number, stdout: string): ProviderCapabilities['auth'] {
+  try {
+    const s = JSON.parse(stdout) as { loggedIn?: boolean; authMethod?: string };
+    return { loggedIn: s.loggedIn === true, method: s.authMethod };
+  } catch {
+    return { loggedIn: code === 0 };
+  }
+}
+
+function describe(available: boolean, version: string | undefined, auth: ProviderCapabilities['auth'], detail: string): ProviderCapabilities {
+  return {
+    provider: 'claude',
+    auth,
+    available,
+    version,
+    detail,
+    createSession: available,
+    resumeHistorical: available,
+    importHistory: available,
+    // Resume re-enters the persisted conversation; it never takes over a PTY
+    // that another terminal is running.
+    attachExternalRunning: false,
+    readOnlyMonitor: false,
+    structuredApprovals: true,
+    structuredQuestions: true,
+  };
+}
 
 export class ClaudeAdapter implements ProviderAdapter {
   readonly provider = 'claude' as const;
+  readonly remote = true;
 
   async capabilities(): Promise<ProviderCapabilities> {
     const path = findExecutable('claude');
@@ -80,51 +142,74 @@ export class ClaudeAdapter implements ProviderAdapter {
     let auth: ProviderCapabilities['auth'];
     if (path) {
       version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
-      // Read-only; prints JSON. Only the login flag and method are kept (no email or org).
       const status = await run(path, ['auth', 'status'], { timeoutMs: 15_000 });
-      try {
-        const s = JSON.parse(status.stdout) as { loggedIn?: boolean; authMethod?: string };
-        auth = { loggedIn: s.loggedIn === true, method: s.authMethod };
-      } catch {
-        auth = { loggedIn: status.code === 0 };
-      }
+      auth = authState(status.code, status.stdout);
     }
-    return {
-      provider: 'claude',
-      auth,
-      available: !!path,
-      version,
-      detail: path
-        ? `Agent SDK → ${path}. Uses your existing Claude Code login and settings.`
-        : 'Claude Code CLI not found on PATH.',
-      createSession: !!path,
-      resumeHistorical: !!path,
-      importHistory: !!path,
-      // Resume re-enters the persisted conversation; it never takes over a PTY
-      // that another terminal is running.
-      attachExternalRunning: false,
-      readOnlyMonitor: false,
-      structuredApprovals: true,
-      structuredQuestions: true,
-    };
+    return describe(!!path, version, auth, path ? `Agent SDK → ${path}. Uses your existing Claude Code login and settings.` : 'Claude Code CLI not found on PATH.');
   }
 
-  async discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]> {
+  async hostCapabilities(host: string): Promise<ProviderCapabilities> {
+    const r = await sshRun(host, 'command -v claude >/dev/null || exit 127; claude --version; echo __AMW_STATUS__; claude auth status 2>/dev/null; echo "__AMW_CODE__$?"');
+    if (r.code === 255) throw new Error(sshError(host, r.stderr));
+    const found = r.code !== 127;
+    const [version, status = ''] = r.stdout.split('__AMW_STATUS__');
+    const code = Number(/__AMW_CODE__(\d+)/.exec(status)?.[1] ?? 1);
+    return describe(found, version.trim() || undefined, found ? authState(code, status.replace(/__AMW_CODE__\d+/, '')) : undefined, found ? `Agent SDK → claude over SSH on ${host}, with the login and settings there.` : `Claude Code not found on ${host} (in its login shell's PATH).`);
+  }
+
+  async discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]> {
+    if (filter.host) return this.discoverRemote(filter.host, filter.cwd, filter.limit ?? 50);
     const sdk = await loadSdk();
-    // Without `dir` the SDK lists sessions from every project on this machine.
-    const sessions = await sdk.listSessions({ dir: filter.cwd, limit: filter.limit ?? 50 });
-    return sessions.map((s) => ({
+    // Without `dir` the SDK lists sessions from every project on this machine. Listed twice so
+    // a burst of `claude -p` runs (often another agent's sub-agents) cannot crowd out the
+    // interactive ones; the headless rest is sorted by entrypoint (app sessions stay visible).
+    const limit = filter.limit ?? 50;
+    const [interactive, all] = await Promise.all([
+      sdk.listSessions({ dir: filter.cwd, limit, includeProgrammatic: false }),
+      sdk.listSessions({ dir: filter.cwd, limit: limit * 3, includeProgrammatic: true }),
+    ]);
+    const mine = new Set(interactive.map((s) => s.sessionId));
+    const headless = all.filter((s) => !mine.has(s.sessionId));
+    const entrypoints = await localEntrypoints(headless.map((s) => s.sessionId));
+    const counts = { shown: 0, sub: 0 };
+    const rest = headless.filter((s) => {
+      const k = isSubAgentEntrypoint(entrypoints.get(s.sessionId)) ? 'sub' : 'shown';
+      return counts[k]++ < limit;
+    });
+    return [...interactive, ...rest].map((s) => ({
       provider: 'claude' as const,
       nativeSessionId: s.sessionId,
       cwd: s.cwd ?? filter.cwd ?? '',
       title: s.customTitle || s.summary || s.firstPrompt || s.sessionId,
       updatedAt: new Date(s.lastModified).toISOString(),
+      ...(isSubAgentEntrypoint(entrypoints.get(s.sessionId)) ? { automated: true } : {}),
     }));
   }
 
-  async readHistory(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]> {
+  /** The host's newest transcripts, titled by the SDK from a few lines of each. */
+  private async discoverRemote(host: string, cwd: string | undefined, limit: number): Promise<NativeSessionInfo[]> {
+    const sdk = await loadSdk();
+    // Sub-agent runs can far outnumber the user's own sessions, so look further back and keep up to `limit` of each.
+    const scanned = await scanRemoteSessions(host, 300);
+    const byId = new Map(scanned.map((s) => [s.sessionId, s]));
+    const store = { append: async () => {}, load: async (k: { sessionId: string }) => byId.get(k.sessionId)?.entries ?? null };
+    const out: NativeSessionInfo[] = [];
+    const counts = { user: 0, automated: 0 };
+    for (const s of scanned) {
+      const automated = isSubAgentEntrypoint(entrypointOf(s.entries as Array<Record<string, unknown>>));
+      if (counts[automated ? 'automated' : 'user'] >= limit) continue;
+      const info = await sdk.getSessionInfo(s.sessionId, { dir: '/', sessionStore: store }).catch(() => undefined);
+      const dir = info?.cwd;
+      if (!dir || (cwd && dir !== cwd && !dir.startsWith(`${cwd}/`))) continue;
+      counts[automated ? 'automated' : 'user']++;
+      out.push({ provider: 'claude', nativeSessionId: s.sessionId, cwd: dir, host, title: info.customTitle || info.summary || info.firstPrompt || s.sessionId, updatedAt: new Date(s.mtime).toISOString(), ...(automated ? { automated } : {}) });
+    }
+    return out;
+  }
+
+  async readHistory(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]> {
     const events: ProviderEvent[] = [];
-    await new ClaudeSession({ cwd, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId);
+    await new ClaudeSession({ cwd, host, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId);
     return events;
   }
 
@@ -167,29 +252,39 @@ class ClaudeSession implements ProviderSession {
   /** Emits the saved conversation as history items (read-only; no process is started). */
   async replayHistory(sessionId: string): Promise<void> {
     const sdk = await loadSdk();
-    const history = await sdk.getSessionMessages(sessionId, { dir: this.args.cwd });
+    const history = await sdk.getSessionMessages(sessionId, { dir: this.args.cwd, ...this.store() });
     for (const m of history) this.receive(m, true);
+  }
+
+  /** On an SSH host, transcripts are read from there. */
+  private store() {
+    return this.args.host ? { sessionStore: remoteSessionStore(this.args.host) } : {};
   }
 
   async start(): Promise<void> {
     const sdk = await loadSdk();
-    const executable = findExecutable('claude');
+    const host = this.args.host;
+    // On a host the SDK only needs some path here; the host's own `claude` runs.
+    const executable = findExecutable('claude') ?? (host ? process.execPath : null);
     if (!executable) throw new Error('Claude Code CLI not found on PATH.');
+    if (host) await checkRemoteStart(host, this.args.cwd);
     const resumeId = this.args.resumeNativeSessionId;
     let resume = false;
     if (resumeId) {
-      const info = await sdk.getSessionInfo(resumeId, { dir: this.args.cwd });
-      if (!info) throw new Error(`Claude session ${resumeId} was not found for ${this.args.cwd}.`);
+      const info = await sdk.getSessionInfo(resumeId, { dir: this.args.cwd, ...this.store() });
+      if (!info) throw new Error(`Claude session ${resumeId} was not found for ${this.args.cwd}${host ? ` on ${host}` : ''}.`);
       resume = true;
       await this.replayHistory(resumeId);
     }
     this.sessionId = resumeId ?? randomUUID();
+    const env = childEnv();
     this.query = sdk.query({
       prompt: this.prompts(),
       options: {
         cwd: this.args.cwd,
-        env: childEnv(),
+        env,
         pathToClaudeCodeExecutable: executable,
+        ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, this.args.cwd, env) } : {}),
         ...(resume ? { resume: this.sessionId } : { sessionId: this.sessionId }),
         systemPrompt: {
           type: 'preset',

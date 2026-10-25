@@ -13,6 +13,7 @@ import type {
   PermissionMode,
   Project,
   ProviderCapabilities,
+  RemoteHostStatus,
   RouteDecision,
   SessionRecord,
   Settings,
@@ -33,6 +34,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
 const APPROVAL = /(批准|允许|同意|可以|行|好的|确认|执行吧|跑吧|\b(yes|yep|allow|approve|approved|go ahead|ok|okay|sure|do it|confirm)\b)/i;
@@ -75,6 +77,7 @@ export class Workspace {
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
   private connecting = new Map<string, Promise<LiveSession>>();
   private capabilities: ProviderCapabilities[] = [];
+  private hostStatus = new Map<string, RemoteHostStatus>();
   private changeListeners = new Set<() => void>();
   /** item === null means "the whole transcript was replaced; reload it". */
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
@@ -166,6 +169,86 @@ export class Workspace {
     this.capabilities = caps;
     this.syncMainAgent();
     this.changed();
+    void this.refreshHosts();
+  }
+
+  // ---------------------------------------------------------------- remote hosts
+
+  /** Hosts enabled in Settings that are still in ~/.ssh/config. */
+  private enabledHosts(): string[] {
+    const known = sshHosts();
+    return (this.store.data.settings.remoteHosts ?? []).filter((h) => known.includes(h));
+  }
+
+  private requireHost(host: string): void {
+    if (!this.enabledHosts().includes(host)) throw new Error(`${host} is not enabled in Settings › Remote machines.`);
+  }
+
+  /** Background check of every enabled host (keys saved in the Keychain are reloaded first). */
+  async refreshHosts(): Promise<void> {
+    const hosts = this.enabledHosts();
+    if (!hosts.length) return;
+    await loadKeychainKeys();
+    await Promise.all(hosts.map((h) => this.checkHost(h).catch((error) => this.log('host check failed', h, error))));
+  }
+
+  /** Whether `host` is reachable without prompting, and Claude Code / Codex there. Never prompts. */
+  async checkHost(host: string): Promise<RemoteHostStatus> {
+    const prev = this.hostStatus.get(host);
+    this.hostStatus.set(host, { host, ssh: 'checking', capabilities: prev?.capabilities ?? [] });
+    this.changed();
+    const probe = await sshProbe(host);
+    const capabilities =
+      probe.state === 'ok'
+        ? await Promise.all(
+            Object.values(this.opts.adapters)
+              .filter((a): a is ProviderAdapter => !!a?.remote && !!a.hostCapabilities)
+              .map((a) => a.hostCapabilities!(host).catch((error): ProviderCapabilities => ({ provider: a.provider, available: false, detail: (error as Error).message, createSession: false, resumeHistorical: false, importHistory: false, attachExternalRunning: false, readOnlyMonitor: false, structuredApprovals: false, structuredQuestions: false }))),
+          )
+        : [];
+    const status: RemoteHostStatus = { host, ssh: probe.state, error: probe.error, capabilities, checkedAt: now() };
+    if (this.enabledHosts().includes(host)) this.hostStatus.set(host, status);
+    this.changed();
+    return status;
+  }
+
+  setHostEnabled(host: string, enabled: boolean): void {
+    if (!sshHosts().includes(host)) throw new Error(`${host} is not a Host in ~/.ssh/config.`);
+    const d = this.store.data.settings;
+    d.remoteHosts = [...new Set([...(d.remoteHosts ?? []).filter((h) => h !== host), ...(enabled ? [host] : [])])];
+    if (enabled) void loadKeychainKeys().then(() => this.checkHost(host)).catch((error) => this.log('host check failed', host, error));
+    else this.hostStatus.delete(host);
+    this.changed();
+  }
+
+  /**
+   * User-initiated: unlocks the host's key (passphrase to ssh-add and the Keychain) or
+   * logs in with a password / 2FA / new host key through a native prompt; the login is
+   * then shared by every session on that host.
+   */
+  async connectHost(host: string): Promise<RemoteHostStatus> {
+    this.requireHost(host);
+    const state = this.hostStatus.get(host)?.ssh;
+    const r = state === 'needs_key' ? await unlockKeys(host) : await sshConnect(host);
+    const status = await this.checkHost(host);
+    if (!r.ok && status.ssh !== 'ok') throw new Error(r.error);
+    return status;
+  }
+
+  async openHostTerminal(host: string): Promise<void> {
+    this.requireHost(host);
+    await openInTerminal(host);
+  }
+
+  /** Throws when `provider` is known not to work on `host`. */
+  private requireOnHost(provider: AgentProvider, host: string): void {
+    this.requireHost(host);
+    if (!this.opts.adapters[provider]?.remote) throw new Error(`${provider} agents cannot run on SSH hosts.`);
+    const status = this.hostStatus.get(host);
+    const cap = status?.capabilities.find((c) => c.provider === provider);
+    if (status && status.ssh !== 'ok' && status.ssh !== 'checking') throw new Error(status.error ?? `Cannot reach ${host}.`);
+    if (cap && !cap.available) throw new Error(cap.detail ?? `${provider} is not installed on ${host}.`);
+    if (cap?.auth?.loggedIn === false) throw new Error(`${provider === 'claude' ? 'Claude Code' : 'Codex'} on ${host} is not signed in. Sign in there once (${provider === 'claude' ? 'claude' : 'codex login'}), then recheck.`);
   }
 
   async shutdown(): Promise<void> {
@@ -206,6 +289,7 @@ export class Workspace {
       memory: d.memory,
       coordinator: d.coordinator.slice(-50),
       capabilities: this.capabilities,
+      remoteHosts: this.enabledHosts().map((host) => this.hostStatus.get(host) ?? { host, ssh: 'checking', capabilities: [] }),
       settings: d.settings,
       voice: {
         sttAvailable: this.sttReady(),
@@ -231,11 +315,12 @@ export class Workspace {
 
   // ---------------------------------------------------------------- projects
 
-  async addProject(rootPath: string, name?: string): Promise<Project> {
+  async addProject(rootPath: string, name?: string, host?: string): Promise<Project> {
+    if (host) return this.addRemoteProject(host, rootPath, name);
     const path = resolve(rootPath);
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
     const root = (await gitRoot(path)) ?? path;
-    const existing = this.store.data.projects.find((p) => p.rootPath === root);
+    const existing = this.store.data.projects.find((p) => !p.host && p.rootPath === root);
     if (existing) return existing;
     const project: Project = {
       projectId: `p-${randomUUID().slice(0, 8)}`,
@@ -247,6 +332,38 @@ export class Workspace {
     this.store.data.projects.push(project);
     this.changed();
     return project;
+  }
+
+  /** A folder on an SSH host; agents there run that host's own CLI (Codex for now). */
+  private async addRemoteProject(host: string, rootPath: string, name?: string): Promise<Project> {
+    this.requireHost(host);
+    const path = rootPath.trim().replace(/\/+$/, '') || '/';
+    if (!path.startsWith('/') && path !== '~' && !path.startsWith('~/')) throw new Error(`Use an absolute path on ${host} (or one starting with ~/).`);
+    const dir = path === '~' ? '~' : path.startsWith('~/') ? `~/${shq(path.slice(2))}` : shq(path);
+    // Markers: a login shell may print a banner before our output.
+    const r = await sshRun(host, `cd ${dir} && printf '__AMW_DIR__%s\\n' "$(pwd -P)" && printf '__AMW_GIT__%s\\n' "$(git rev-parse --show-toplevel 2>/dev/null)"`);
+    if (r.code === 255) throw new Error(sshError(host, r.stderr));
+    const found = /__AMW_DIR__(.*)/.exec(r.stdout)?.[1]?.trim();
+    if (r.code !== 0 || !found) throw new Error(`Not a directory on ${host}: ${path}`);
+    const git = /__AMW_GIT__(.*)/.exec(r.stdout)?.[1]?.trim();
+    const root = git || found;
+    const existing = this.store.data.projects.find((p) => p.host === host && p.rootPath === root);
+    if (existing) return existing;
+    const project: Project = {
+      projectId: `p-${randomUUID().slice(0, 8)}`,
+      name: name?.trim() || basename(root),
+      rootPath: root,
+      host,
+      isGitRepo: !!git,
+      createdAt: now(),
+    };
+    this.store.data.projects.push(project);
+    this.changed();
+    return project;
+  }
+
+  sshHosts(): SshHostEntry[] {
+    return sshHostEntries();
   }
 
   // ---------------------------------------------------------------- tasks
@@ -280,13 +397,16 @@ export class Workspace {
   }): Promise<Task> {
     const project = this.project(args.projectId);
     if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
+    if (project.host) this.requireOnHost(args.provider, project.host);
     const d = this.store.data;
     const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const taskId = `t-${randomUUID().slice(0, 8)}`;
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
-    if (args.isolate && project.isGitRepo) {
+    if (args.isolate && project.isGitRepo && project.host) {
+      sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
+    } else if (args.isolate && project.isGitRepo) {
       try {
         worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`);
         cwd = worktree.path;
@@ -294,7 +414,7 @@ export class Workspace {
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
       }
     }
-    const sharers = d.tasks.filter((t) => t.cwd === cwd);
+    const sharers = d.tasks.filter((t) => t.cwd === cwd && t.host === project.host);
     if (sharers.length) {
       sharedCwdWarning = `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.`;
       for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
@@ -309,6 +429,7 @@ export class Workspace {
       status: 'idle',
       summary: 'Not started yet.',
       cwd,
+      host: project.host,
       worktree,
       sharedCwdWarning,
       mockScript: args.mockScript,
@@ -330,7 +451,7 @@ export class Workspace {
     const adapter = this.opts.adapters[provider];
     if (!adapter?.readHistory) return;
     try {
-      const events = await adapter.readHistory(nativeSessionId, task.cwd);
+      const events = await adapter.readHistory(nativeSessionId, task.cwd, task.host);
       if (this.live.has(task.taskId) || !this.store.data.tasks.includes(task)) return; // resumed meanwhile, or removed
       const items: TranscriptItem[] = [];
       for (const e of events) {
@@ -460,6 +581,7 @@ export class Workspace {
     const session = adapter.createSession(
       {
         cwd: task.cwd,
+        host: task.host,
         title: task.title,
         resumeNativeSessionId: resumeId,
         // The main agent gets its role and the workspace tools; it never edits code itself.
@@ -539,9 +661,28 @@ export class Workspace {
     const adapter = this.opts.adapters[provider];
     if (!adapter) throw new Error(`Provider ${provider} is not available.`);
     const project = this.project(projectId);
+    if (project.host && !adapter.remote) return [];
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
-    const found = await adapter.discoverSessions({ cwd: project.rootPath });
+    const found = await adapter.discoverSessions({ cwd: project.rootPath, host: project.host });
     return found.filter((s) => !known.has(s.nativeSessionId));
+  }
+
+  /**
+   * Recent Claude Code and Codex sessions saved on an SSH host (including those the
+   * Claude and ChatGPT desktop apps created there through their SSH connections).
+   */
+  async discoverHostSessions(host: string): Promise<NativeSessionInfo[]> {
+    this.requireHost(host);
+    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const caps = this.hostStatus.get(host)?.capabilities;
+    const adapters = Object.values(this.opts.adapters).filter((a): a is ProviderAdapter => !!a?.remote && caps?.find((c) => c.provider === a.provider)?.available !== false);
+    const results = await Promise.allSettled(adapters.map((a) => a.discoverSessions({ limit: 60, host })));
+    if (results.length && results.every((r) => r.status === 'rejected')) throw (results[0] as PromiseRejectedResult).reason;
+    const lists = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
+    return lists
+      .flat()
+      .filter((s) => s.cwd && !known.has(s.nativeSessionId))
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
   }
 
   /**
@@ -570,12 +711,16 @@ export class Workspace {
   }
 
   /** Adopts a provider session created outside the app (historical resume, not live attach). */
-  async importSession(args: { projectId?: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; title: string }): Promise<Task> {
-    if (args.projectId) this.project(args.projectId);
-    else {
+  async importSession(args: { projectId?: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; host?: string; title: string }): Promise<Task> {
+    if (args.host) this.requireOnHost(args.provider, args.host);
+    if (args.projectId) args = { ...args, host: this.project(args.projectId).host };
+    else if (args.host) {
+      const inside = this.store.data.projects.find((p) => p.host === args.host && (args.cwd === p.rootPath || args.cwd.startsWith(p.rootPath + '/')));
+      args = { ...args, projectId: (inside ?? (await this.addProject(args.cwd, undefined, args.host))).projectId };
+    } else {
       // From the machine-wide list: the session's folder becomes (or joins) a project.
       if (!existsSync(args.cwd)) throw new Error(`The session's folder no longer exists: ${args.cwd}`);
-      const inside = this.store.data.projects.find((p) => args.cwd === p.rootPath || args.cwd.startsWith(p.rootPath + sep));
+      const inside = this.store.data.projects.find((p) => !p.host && (args.cwd === p.rootPath || args.cwd.startsWith(p.rootPath + sep)));
       args = { ...args, projectId: (inside ?? (await this.addProject(args.cwd))).projectId };
     }
     const projectId = args.projectId!;
@@ -591,7 +736,7 @@ export class Workspace {
       integrationMode: 'resumed',
       createdAt: now(),
     };
-    const sharers = d.tasks.filter((t) => t.cwd === args.cwd);
+    const sharers = d.tasks.filter((t) => t.cwd === args.cwd && t.host === args.host);
     const task: Task = {
       taskId,
       alias,
@@ -602,6 +747,7 @@ export class Workspace {
       status: 'disconnected',
       summary: 'Imported with its full history. Send a message to continue.',
       cwd: args.cwd,
+      host: args.host,
       sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => t.alias).join(', ')} — not isolated.` : undefined,
       sessionLocalId: record.localId,
       createdAt: now(),
@@ -1109,7 +1255,7 @@ export class Workspace {
   }
 
   listProjects() {
-    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name, rootPath: p.rootPath }));
+    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name, rootPath: p.host ? `${p.host}:${p.rootPath} (over SSH, Codex only)` : p.rootPath }));
   }
 
   findAgent(name: string): Task | undefined {

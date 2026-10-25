@@ -5,6 +5,7 @@ import type {
   MemoryRecord,
   NativeSessionInfo,
   Project,
+  RemoteHostStatus,
   RouteDecision,
   Task,
   TranscriptItem,
@@ -28,6 +29,11 @@ interface Outputs {
   'transcript:get': TranscriptItem[];
   'project:pickDirectory': string | null;
   'project:add': Project;
+  'ssh:hosts': Array<{ host: string; hostName?: string; user?: string }>;
+  'ssh:setEnabled': void;
+  'ssh:check': RemoteHostStatus;
+  'ssh:connect': RemoteHostStatus;
+  'ssh:terminal': void;
   'task:create': Task;
   'task:send': DispatchResult;
   'task:interrupt': void;
@@ -38,6 +44,7 @@ interface Outputs {
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
   'sessions:discoverAll': NativeSessionInfo[];
+  'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;
   'attention:respond': void;
   'attention:dismiss': void;

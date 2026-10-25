@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { Language, PermissionMode, ProviderCapabilities, WorkspaceSnapshot } from '../../shared/types';
+import type { Language, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
@@ -352,9 +352,167 @@ function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   );
 }
 
+const SSH_STATE: Record<RemoteHostStatus['ssh'], { label: string; action?: string; hint?: string }> = {
+  checking: { label: 'Checking…' },
+  ok: { label: 'Connected' },
+  needs_key: { label: 'Key locked', action: 'Unlock key…', hint: 'Your SSH key has a passphrase and is not in the SSH agent. Unlock it once; macOS Keychain keeps the passphrase, so it is not asked again.' },
+  needs_login: { label: 'Needs login', action: 'Log in…', hint: 'This server asks for a password or a second factor. Log in once; the connection is reused for a few hours. Setting up key login (ssh-copy-id) avoids this.' },
+  unknown_host_key: { label: 'Unknown host key', action: 'Check and trust…', hint: 'This app has not connected to this server before. Confirm its fingerprint once.' },
+  unreachable: { label: 'Unreachable' },
+};
+
+type HostEntry = { host: string; hostName?: string; user?: string };
+const address = (e?: HostEntry) => (e?.hostName ? `${e.user ? `${e.user}@` : ''}${e.hostName}` : undefined);
+
+/**
+ * Machines added from ~/.ssh/config, one line each; the rest stay behind "Add machine"
+ * (a searchable list), so a long config does not fill the page.
+ */
+function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+  const [hosts, setHosts] = useState<HostEntry[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState<{ host: string; text: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    call('ssh:hosts', {})
+      .then(setHosts)
+      .catch(() => setHosts([]));
+  }, []);
+  const act = async (host: string, f: () => Promise<unknown>) => {
+    setBusy(host);
+    setError(null);
+    try {
+      await f();
+    } catch (e) {
+      setError({ host, text: errorText(e) });
+    } finally {
+      setBusy('');
+    }
+  };
+  if (!hosts) return null;
+  if (!hosts.length) return <div className="muted small">{t('No hosts in ~/.ssh/config yet. Add one there (Host, HostName, User), then reopen Settings.')}</div>;
+  const available = hosts.filter((e) => !snapshot.remoteHosts.some((h) => h.host === e.host));
+  const q = query.trim().toLowerCase();
+  const matches = available.filter((e) => !q || [e.host, e.hostName, e.user].some((v) => v?.toLowerCase().includes(q)));
+  const closePicker = () => {
+    setPicking(false);
+    setQuery('');
+  };
+  const add = (host: string) => {
+    closePicker();
+    void act(host, () => call('ssh:setEnabled', { host, enabled: true }));
+  };
+  return (
+    <div className="host-list">
+      {snapshot.remoteHosts.map((status) => {
+        const host = status.host;
+        const state = SSH_STATE[status.ssh];
+        const addr = address(hosts.find((e) => e.host === host));
+        const signedOut = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'signed_out') : [];
+        return (
+          <div key={host} className="settings-row" data-testid={`host-${host}`}>
+            <div className="settings-row-main">
+              <strong className="mono">{host}</strong>
+              {addr ? <span className="muted small mono host-addr">{addr}</span> : null}
+              <span className="host-actions">
+                {status.ssh === 'ok' ? (
+                  (['claude', 'codex'] as const).map((p) => {
+                    const c = status.capabilities.find((x) => x.provider === p);
+                    const r = readiness(c);
+                    const detail = r === 'ready' ? (c?.auth?.method ? t('Signed in · {method}', { method: c.auth.method }) : t('Ready')) : r === 'signed_out' ? t('Not signed in') : t('Not installed');
+                    return (
+                      <span key={p} className={`badge badge-${r}`} title={detail} data-testid="readiness" data-provider={p} data-state={r}>
+                        <Icon name={r === 'ready' ? 'check' : 'alert'} size={12} />
+                        {PROVIDER_LABEL[p]}
+                        {r === 'ready' && c?.version ? <span className="mono host-version">{shortVersion(c.version)}</span> : null}
+                        {r !== 'ready' ? <span className="host-version">· {detail}</span> : null}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span className={`badge badge-${status.ssh === 'checking' ? 'checking' : 'signed_out'}`} data-testid="host-state" data-state={status.ssh}>
+                    {t(state.label)}
+                  </span>
+                )}
+                {state.action ? (
+                  <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => void act(host, () => call('ssh:connect', { host }))} data-testid="host-connect">
+                    {busy === host ? t('Waiting for you…') : t(state.action)}
+                  </button>
+                ) : null}
+                {status.ssh !== 'ok' && status.ssh !== 'checking' ? (
+                  <button className="btn btn-sm" onClick={() => void act(host, () => call('ssh:terminal', { host }))} title={t('Opens Terminal with ssh {host}, for anything the app cannot handle', { host })}>
+                    {t('Open in Terminal')}
+                  </button>
+                ) : null}
+                <button className="btn btn-sm btn-ghost" disabled={!!busy || status.ssh === 'checking'} onClick={() => void act(host, () => call('ssh:check', { host }))}>
+                  {t('Recheck')}
+                </button>
+                <button className="icon-btn" disabled={busy === host} title={t('Remove from this list (nothing changes on the machine)')} aria-label={t('Remove')} onClick={() => void act(host, () => call('ssh:setEnabled', { host, enabled: false }))} data-testid="host-remove">
+                  <Icon name="x" size={14} />
+                </button>
+              </span>
+            </div>
+            {signedOut.map((p) => (
+              <div key={p} className="muted small">
+                {t('Sign in on {host}:', { host })} <code>{SIGN_IN[p]}</code>
+              </div>
+            ))}
+            {state.hint ? <div className="muted small">{t(state.hint)}</div> : null}
+            {status.ssh === 'unreachable' && status.error ? <div className="muted small">{status.error}</div> : null}
+            {error?.host === host ? <div className="error-text small">{error.text}</div> : null}
+          </div>
+        );
+      })}
+      {picking ? (
+        <div className="host-picker" data-testid="host-picker">
+          <div className="row">
+            <input
+              className="input grow"
+              autoFocus
+              placeholder={t('Search {n} hosts in ~/.ssh/config', { n: available.length })}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  closePicker();
+                } else if (e.key === 'Enter' && matches[0]) add(matches[0].host);
+              }}
+              data-testid="host-search"
+            />
+            <button className="btn" onClick={closePicker}>
+              {t('Cancel')}
+            </button>
+          </div>
+          <div className="host-options">
+            {matches.map((e) => (
+              <button key={e.host} className="host-option" onClick={() => add(e.host)} data-testid="host-option">
+                <span className="mono">{e.host}</span>
+                {address(e) ? <span className="muted small mono">{address(e)}</span> : null}
+              </button>
+            ))}
+            {!matches.length ? <div className="muted small host-options-empty">{available.length ? t('No matching host.') : t('Every host in ~/.ssh/config is already added.')}</div> : null}
+          </div>
+        </div>
+      ) : (
+        <div className="host-add-row">
+          <button className="btn btn-sm" onClick={() => setPicking(true)} disabled={!available.length} data-testid="host-add">
+            <Icon name="plus" size={14} />
+            {t('Add machine')}
+          </button>
+          {!snapshot.remoteHosts.length ? <span className="muted small">{t('{n} hosts found in ~/.ssh/config.', { n: hosts.length })}</span> : null}
+        </div>
+      )}
+      {error && !snapshot.remoteHosts.some((h) => h.host === error.host) ? <div className="error-text small">{error.text}</div> : null}
+    </div>
+  );
+}
+
 const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
+  { id: 'remote', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
   { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
@@ -470,6 +628,15 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             </div>
           );
         })}
+      </Section>
+
+      <Section id="remote" query={query}>
+        <p className="muted small">
+          {t(
+            'Run agents on machines in your ~/.ssh/config, with the Claude Code and Codex installed and signed in there; their sessions stay on those machines. Add the ones you use: they become sources in Continue a session and places for new folders. Nothing asks for a password in the background; logging in or unlocking a key only happens when you click.',
+          )}
+        </p>
+        <RemoteHosts snapshot={snapshot} />
       </Section>
 
       <Section id="main" query={query}>

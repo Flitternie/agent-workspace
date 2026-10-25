@@ -70,6 +70,8 @@ export type ProviderEvent =
 
 export interface StartArgs {
   cwd: string;
+  /** SSH alias to run the CLI on; unset = this Mac. */
+  host?: string;
   /** Resume this provider-native session instead of creating one. */
   resumeNativeSessionId?: string;
   /** App-owned scoped memory, injected through the provider's instruction channel. */
@@ -114,9 +116,13 @@ export interface ProviderSession {
 export interface ProviderAdapter {
   readonly provider: AgentProvider;
   capabilities(): Promise<ProviderCapabilities>;
-  /** Saved sessions for one folder, or across every folder when `cwd` is omitted. */
-  discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]>;
+  /** Runs sessions on SSH hosts (see StartArgs.host). */
+  readonly remote?: boolean;
+  /** Saved sessions for one folder, or across every folder when `cwd` is omitted; on `host` when given. */
+  discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]>;
   /** Read a saved session's transcript without starting or resuming it (history events only). */
-  readHistory?(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]>;
+  readHistory?(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]>;
+  /** The CLI as installed and signed in on `host` (reached without prompts). */
+  hostCapabilities?(host: string): Promise<ProviderCapabilities>;
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession;
 }

@@ -14,9 +14,11 @@ npm run demo         # separate demo entry: three mock agents, data in app/.data
 Both also work from the repo root.
 
 - **Real agents:** **+ New task** → choose a project folder → Claude Code or Codex. This uses your installed `claude` / `codex` and their existing logins; no extra authorization is needed. The empty Overview and **Settings** (bottom of the sidebar) show whether each CLI is installed and signed in (read-only `claude auth status` / `codex login status`) and how to sign in if not. Nothing is auto-approved, and permission requests appear on the card.
+- **Remote machines (SSH):** **Settings › Remote machines** lets you add hosts from `~/.ssh/config` (**Add machine** searches them by alias, user or address); each added host shows whether SSH works without a prompt and whether Claude Code and Codex are installed and signed in there. Folders on those machines can then be added from **+ New task** (**Remote folder…**), and **Continue a session…** gets a source filter (all machines, this Mac, or one host) that also finds sessions the Claude and ChatGPT desktop apps started on that host over SSH. Agents run the CLIs installed on the host, with its login and settings, and their sessions stay there (Codex through `codex app-server` over SSH, Claude Code through the Agent SDK's `spawnClaudeCodeProcess` and a read-only SSH session store). Background checks never prompt; a locked key (**Unlock key…**, passphrase goes to `ssh-add` and the macOS Keychain), a password or 2FA login (**Log in…**) or a new host key (**Check and trust…**) is handled only when you click, through a native dialog, and the login is shared for a few hours through an OpenSSH control master. Worktrees are not created on remote folders yet.
 - **Settings:** UI language (English / 中文; the first launch follows the system locale), open mic on launch, confirm every voice send, and where data is stored.
 - **Demo:** `npm run demo` seeds three mock agents on first launch. Mock agents are only offered in the demo entry.
 - **Resume an old conversation:** **Resume session…** lists sessions the provider saved for that folder. This is a historical resume, not attaching to a process that is running in another terminal.
+- **Sub-agent sessions:** **Continue a session…** lists the sessions you or an app started (terminal, IDE, desktop apps, this app). Sessions an agent started for itself inside a task — `claude -p` and `codex exec` runs, Codex sub-agent threads — are hidden behind **Also show sub-agent sessions**; Claude Code's own Task sub-agents live inside their parent session and show there as steps.
 - **Agent names:** agents join with a name you can say out loud: Alice, Bob, Charlie… (Chinese UI: 小王, 小李, 小张…). The name is the handle; an optional role (e.g. "database") is shown next to it.
 - **Voice (meeting-style):** the microphone is on from launch, like joining a call. Just talk: "Alice, add a regression test" / "小张，迁移先停一下". Each utterance appears as a caption at the bottom and goes to the agent it names, without changing your view. Click the mic button or press **⌘⇧A** to mute. Voice activity is detected on-device, so only speech segments are uploaded for transcription. Needs an OpenAI key, read from `OPENAI_API_KEY` or an `openai.key` file in this folder or a parent (currently `../openai.key`); `AMW_NO_OPENAI=1` disables it and `AMW_NO_AUTOLISTEN=1` starts muted. Without a key, everything else works, and the bar still accepts typed commands.
 - Keys: **⌘1…9** focus an agent, **⌘0 / Esc** back to Overview.
@@ -26,6 +28,7 @@ Both also work from the repo root.
 - App state: `app/.data` (override with `AMW_DATA_DIR`). Electron's own profile is also under it.
 - New tasks in a git repo get their own worktree under `app/.data/worktrees/…` on a branch `amw/<name>-<id>`. A worktree is removed only when it is clean and has no new commits.
 - Not touched: `~/.claude`, `~/.codex`, repo `CLAUDE.md` / `AGENTS.md`, global npm and Electron caches. Provider sessions are stored by the providers themselves, as usual.
+- SSH: connection-sharing sockets and the password-prompt helper live in `/tmp/amw-ssh-<uid>/`. Only when you click **Unlock key…** or **Check and trust…** does SSH itself add the key to your agent / Keychain or the host to `~/.ssh/known_hosts`; `~/.ssh/config` is only read.
 
 ## Scripts
 
@@ -33,6 +36,8 @@ Both also work from the repo root.
 |---|---|
 | `npm test` | Unit tests: router matrix, attention lifecycle, stale events, approvals, restart, memory scoping, worktrees, content mapping, i18n coverage, voice composition, local STT post-processing |
 | `npm run test:e2e` | Drives the built app with mock agents (demo script, settings, selection); screenshots in `test-results/` |
+| `AMW_E2E_SSH_HOST=<alias> npm run test:e2e -- ssh-remote` | Opt-in: Claude Code and Codex on that SSH host (scratch repo there, run, restart + resume, import remote sessions, no leftover processes) |
+| `AMW_E2E_SSH_HOST=<alias> npm run test:e2e -- ssh-robust` | Opt-in: on that host, native approval (deny), steer and interrupt, the SSH connection dropping mid-session (next message resumes), and the app killed mid-turn (nothing left running) |
 | `AMW_E2E_REAL=1 npm run test:e2e` | Also runs Claude Code + Codex through the app: worktrees, permission modes, native approval, steer/interrupt, restart + resume (small real model calls) |
 | `AMW_E2E_VOICE=1 npm run test:e2e` | Always-on mic end to end: a WAV fixture plays as the microphone; spoken commands (incl. a leading "等一下") route to the named agents with no click |
 | `AMW_E2E_LOCAL_STT=1 npm run test:e2e` | On-device speech recognition in Electron without an OpenAI key (needs SenseVoice in `app/.models`) |

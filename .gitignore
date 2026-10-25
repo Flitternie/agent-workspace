@@ -1,6 +1,7 @@
 # Secrets: never commit keys or local env files
 openai.key
 *.key
+*.pem
 .env
 .env.*
 

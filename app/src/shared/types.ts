@@ -21,6 +21,8 @@ export interface Project {
   projectId: string;
   name: string;
   rootPath: string;
+  /** SSH alias (from ~/.ssh/config) when the folder is on another machine; unset = this Mac. */
+  host?: string;
   isGitRepo: boolean;
   createdAt: string;
 }
@@ -44,6 +46,8 @@ export interface Task {
   /** Debounced, human-readable progress line for the Overview card. */
   summary: string;
   cwd: string;
+  /** SSH alias the agent runs on (its project's host); unset = this Mac. */
+  host?: string;
   worktree?: WorktreeInfo;
   /** Set when another task shares this writable directory. */
   sharedCwdWarning?: string;
@@ -172,8 +176,15 @@ export interface NativeSessionInfo {
   provider: AgentProvider;
   nativeSessionId: string;
   cwd: string;
+  /** SSH alias the session lives on; unset = this Mac. */
+  host?: string;
   title: string;
   updatedAt?: string;
+  /**
+   * Started by an agent inside another task (`claude -p`, `codex exec`, a Codex sub-agent
+   * thread), not by a person or an app; hidden from pickers by default.
+   */
+  automated?: boolean;
 }
 
 export type RouteDecision =
@@ -212,6 +223,22 @@ export interface Settings {
   voicePauseMs?: number;
   /** UI language; set from the system locale on first launch. */
   language?: Language;
+  /** SSH aliases (from ~/.ssh/config) whose agents and sessions the app uses. */
+  remoteHosts?: string[];
+}
+
+/**
+ * An enabled SSH host. `ssh`: whether a background (no-prompt) connection works —
+ * needs_key: a passphrase-protected key is not in the SSH agent; needs_login: the
+ * server wants a password / 2FA; unknown_host_key: its host key is not trusted yet.
+ */
+export interface RemoteHostStatus {
+  host: string;
+  ssh: 'checking' | 'ok' | 'needs_key' | 'needs_login' | 'unknown_host_key' | 'unreachable';
+  error?: string;
+  /** Claude Code and Codex as installed and signed in on that host. */
+  capabilities: ProviderCapabilities[];
+  checkedAt?: string;
 }
 
 export type Language = 'en' | 'zh';
@@ -253,6 +280,8 @@ export interface WorkspaceSnapshot {
   memory: MemoryRecord[];
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
+  /** Enabled SSH hosts and what works on them. */
+  remoteHosts: RemoteHostStatus[];
   settings: Settings;
   voice: {
     sttAvailable: boolean;

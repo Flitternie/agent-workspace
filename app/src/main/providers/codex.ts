@@ -4,13 +4,16 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
+import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
 import { z } from 'zod';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
 // stdio, using the user's installed CLI and its existing login. Approvals and
-// questions are answered by replying to the server's own request id.
+// questions are answered by replying to the server's own request id. On an SSH host
+// the same protocol runs over the SSH channel against the codex installed there, so
+// its sessions (and the ChatGPT app's remote-project threads) stay on that machine.
 // Protocol handling informed by Parallel Code (MIT, electron/ipc/codex-chat.ts) and
 // checked against `codex app-server generate-ts` output for codex-cli 0.162.
 
@@ -28,7 +31,12 @@ class AppServer {
   onRequest: (id: string | number, method: string, params: Rec) => void = () => {};
   onExit: (reason: string) => void = () => {};
 
-  constructor(private proc: ChildProcessWithoutNullStreams) {
+  private stderrTail = '';
+
+  constructor(
+    private proc: ChildProcessWithoutNullStreams,
+    private host?: string,
+  ) {
     const lines = createInterface({ input: proc.stdout });
     lines.on('line', (line) => {
       if (!line.trim()) return;
@@ -40,14 +48,19 @@ class AppServer {
       }
       this.receive(msg);
     });
-    // stderr can contain private diagnostics or tokens; drain it, never forward it.
-    proc.stderr.resume();
-    proc.on('exit', (code, signal) => this.shutdown(`Codex app-server exited (${signal ?? code}).`));
+    // stderr can contain private diagnostics or tokens; never forward it. Over SSH,
+    // keep its last lines only to explain a failed connection (ssh's own messages).
+    if (host) proc.stderr.on('data', (d: Buffer) => (this.stderrTail = (this.stderrTail + d.toString()).slice(-2000)));
+    else proc.stderr.resume();
+    proc.on('exit', (code, signal) =>
+      this.shutdown(host && code === 255 ? sshError(host, this.stderrTail) : `Codex app-server${host ? ` on ${host}` : ''} exited (${signal ?? code}).`),
+    );
     proc.on('error', (err) => this.shutdown(err.message));
     proc.stdin.on('error', (err) => this.shutdown(err.message));
   }
 
-  static spawn(cwd: string): AppServer {
+  static spawn(cwd: string, host?: string): AppServer {
+    if (host) return new AppServer(sshSpawn(host, `cd ${cwd === '~' ? '' : shq(cwd)} 2>/dev/null; exec codex app-server`), host);
     const exe = findExecutable('codex');
     if (!exe) throw new Error('Codex CLI not found on PATH.');
     const proc = spawn(needsShell(exe) ? `"${exe}"` : exe, ['app-server'], { cwd, env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32', shell: needsShell(exe) });
@@ -142,6 +155,21 @@ function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: s
   return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history }];
 }
 
+/** From `codex login status`; only the method is kept (e.g. "ChatGPT", "an API key"), never the key. */
+function loginState(code: number, text: string): ProviderCapabilities['auth'] {
+  const using = /Logged in using ([^-\n]+)/i.exec(text)?.[1]?.trim();
+  return { loggedIn: code === 0 && !/not logged in/i.test(text), method: using };
+}
+
+/** Thread sources beyond the interactive default (see ThreadSourceKind). */
+const OTHER_SOURCES = ['appServer', 'exec', 'subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther'];
+
+/** Spawned by an agent inside another task: a Codex sub-agent thread, or a `codex exec` run. */
+function isSubAgentThread(thread: Rec): boolean {
+  const source = thread.source;
+  return !!str(thread.parentThreadId) || source === 'exec' || (!!source && typeof source === 'object' && 'subagent' in source);
+}
+
 /** auto: Codex's auto_review approves or denies escalations; otherwise they come to the user. */
 function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsReviewer: string } {
   if (mode === 'ask') return { approvalPolicy: 'untrusted', approvalsReviewer: 'user' };
@@ -150,31 +178,27 @@ function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsR
 
 export class CodexAdapter implements ProviderAdapter {
   readonly provider = 'codex' as const;
+  readonly remote = true;
 
-  async capabilities(): Promise<ProviderCapabilities> {
-    const path = findExecutable('codex');
-    let version: string | undefined;
-    let auth: ProviderCapabilities['auth'];
-    if (path) {
-      version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
-      // Read-only; exits 0 and prints e.g. "Logged in using ChatGPT" when signed in. Only the
-      // method is kept: with an API key the line goes on with a masked fragment of it.
-      const status = await run(path, ['login', 'status'], { timeoutMs: 15_000 });
-      const text = `${status.stdout}\n${status.stderr}`;
-      const using = /Logged in using ([^-\n]+)/i.exec(text)?.[1]?.trim();
-      auth = { loggedIn: status.code === 0 && !/not logged in/i.test(text), method: using };
-    }
+  async hostCapabilities(host: string): Promise<ProviderCapabilities> {
+    const r = await sshRun(host, 'command -v codex >/dev/null || exit 127; codex --version; echo __AMW_STATUS__; codex login status 2>&1; echo "__AMW_CODE__$?"');
+    if (r.code === 255) throw new Error(sshError(host, r.stderr));
+    const found = r.code !== 127;
+    const [version, status = ''] = r.stdout.split('__AMW_STATUS__');
+    const code = Number(/__AMW_CODE__(\d+)/.exec(status)?.[1] ?? 1);
+    return this.describe(found, version.trim() || undefined, found ? loginState(code, status) : undefined, found ? `codex app-server over SSH on ${host}, with the login there.` : `Codex CLI not found on ${host} (in its login shell's PATH).`);
+  }
+
+  private describe(available: boolean, version: string | undefined, auth: ProviderCapabilities['auth'], detail: string): ProviderCapabilities {
     return {
       provider: 'codex',
       auth,
-      available: !!path,
+      available,
       version,
-      detail: path
-        ? `codex app-server (stdio) → ${path}. Uses your existing Codex login.`
-        : 'Codex CLI not found on PATH.',
-      createSession: !!path,
-      resumeHistorical: !!path,
-      importHistory: !!path,
+      detail,
+      createSession: available,
+      resumeHistorical: available,
+      importHistory: available,
       attachExternalRunning: false,
       readOnlyMonitor: false,
       structuredApprovals: true,
@@ -182,31 +206,59 @@ export class CodexAdapter implements ProviderAdapter {
     };
   }
 
-  async discoverSessions(filter: { cwd?: string; limit?: number }): Promise<NativeSessionInfo[]> {
+  async capabilities(): Promise<ProviderCapabilities> {
+    const path = findExecutable('codex');
+    let version: string | undefined;
+    let auth: ProviderCapabilities['auth'];
+    if (path) {
+      version = (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim() || undefined;
+      // Read-only; exits 0 and prints e.g. "Logged in using ChatGPT" when signed in.
+      const status = await run(path, ['login', 'status'], { timeoutMs: 15_000 });
+      auth = loginState(status.code, `${status.stdout}\n${status.stderr}`);
+    }
+    return this.describe(!!path, version, auth, path ? `codex app-server (stdio) → ${path}. Uses your existing Codex login.` : 'Codex CLI not found on PATH.');
+  }
+
+  async discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]> {
     // Listing is read-only; without a cwd filter it covers every folder.
-    const server = AppServer.spawn(filter.cwd ?? homedir());
+    const server = AppServer.spawn(filter.cwd ?? (filter.host ? '~' : homedir()), filter.host);
     try {
       await server.initialize();
-      const result = rec(await server.rpc('thread/list', { ...(filter.cwd ? { cwd: filter.cwd } : {}), limit: filter.limit ?? 50, sortKey: 'updated_at' }));
-      return (Array.isArray(result.data) ? result.data : []).map((t) => {
+      const list = async (sourceKinds?: string[]) =>
+        rec(await server.rpc('thread/list', { ...(filter.cwd ? { cwd: filter.cwd } : {}), limit: filter.limit ?? 50, sortKey: 'updated_at', ...(sourceKinds ? { sourceKinds } : {}) })).data;
+      // Without sourceKinds the server lists interactive threads only (CLI, IDE, the ChatGPT app);
+      // app-server clients, `codex exec` and sub-agents come from a second, optional call.
+      const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+      const interactive = arr(await list());
+      const other = arr(await list(OTHER_SOURCES).catch(() => []));
+      const seen = new Set<string>();
+      return [...interactive, ...other].flatMap((t) => {
         const thread = rec(t);
+        const id = str(thread.id);
+        if (!id || seen.has(id)) return [];
+        seen.add(id);
         const updated = typeof thread.updatedAt === 'number' ? thread.updatedAt : undefined;
-        return {
-          provider: 'codex' as const,
-          nativeSessionId: str(thread.id),
-          cwd: str(thread.cwd) || filter.cwd || '',
-          title: str(thread.name) || str(thread.preview) || str(thread.id),
-          updatedAt: updated ? new Date(updated * 1000).toISOString() : undefined,
-        };
+        const isAutomated = isSubAgentThread(thread);
+        return [
+          {
+            provider: 'codex' as const,
+            nativeSessionId: id,
+            cwd: str(thread.cwd) || filter.cwd || '',
+            host: filter.host,
+            title: str(thread.name) || str(thread.preview) || id,
+            updatedAt: updated ? new Date(updated * 1000).toISOString() : undefined,
+            ...(isAutomated ? { automated: true } : {}),
+          },
+        ];
       });
     } finally {
       server.kill();
     }
   }
 
-  async readHistory(nativeSessionId: string, cwd: string): Promise<ProviderEvent[]> {
+  async readHistory(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]> {
     // thread/read loads the rollout without resuming the thread.
-    const server = AppServer.spawn(existsSync(cwd) ? cwd : homedir());
+    const server = AppServer.spawn(host || existsSync(cwd) ? cwd : homedir(), host);
     try {
       await server.initialize();
       const thread = rec(rec(await server.rpc('thread/read', { threadId: nativeSessionId, includeTurns: true })).thread);
@@ -247,7 +299,7 @@ class CodexSession implements ProviderSession {
   }
 
   async start(): Promise<void> {
-    const server = AppServer.spawn(this.args.cwd);
+    const server = AppServer.spawn(this.args.cwd, this.args.host);
     this.server = server;
     server.onNotification = (m, p) => this.notification(m, p);
     server.onRequest = (id, m, p) => this.request(id, m, p);

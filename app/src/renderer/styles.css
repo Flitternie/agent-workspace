@@ -2788,3 +2788,80 @@ details[open] > summary .tool-more {
   color: var(--needs);
   font-size: 12px;
 }
+
+/* Settings › Remote machines */
+.host-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.host-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.host-addr {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.host-actions .badge {
+  margin-left: 0;
+}
+.host-version {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.host-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.host-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.host-options {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.host-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.host-option:hover,
+.host-option:focus-visible {
+  background: var(--hover);
+}
+.host-options-empty {
+  padding: 6px 8px;
+}
+.badge-checking {
+  color: var(--text-3);
+}
+.session-auto {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}

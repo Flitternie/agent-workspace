@@ -5,13 +5,20 @@ import { z } from 'zod';
 // refuses any channel not listed here. There is deliberately no generic exec.
 
 const id = z.string().min(1).max(200);
+/** An SSH alias from ~/.ssh/config (same rule as util/ssh HOST_RE). */
+const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
 
 export const ipcSchemas = {
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),
   'project:pickDirectory': z.object({}),
-  'project:add': z.object({ rootPath: z.string().min(1).max(4096), name: z.string().max(200).optional() }),
+  'project:add': z.object({ rootPath: z.string().min(1).max(4096), name: z.string().max(200).optional(), host: host.optional() }),
+  'ssh:hosts': z.object({}),
+  'ssh:setEnabled': z.object({ host, enabled: z.boolean() }),
+  'ssh:check': z.object({ host }),
+  'ssh:connect': z.object({ host }),
+  'ssh:terminal': z.object({ host }),
   'task:create': z.object({
     projectId: id,
     provider: z.enum(['claude', 'codex', 'mock']),
@@ -30,11 +37,13 @@ export const ipcSchemas = {
   'task:remove': z.object({ taskId: id }),
   'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
   'sessions:discoverAll': z.object({}),
+  'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({
     projectId: id.optional(),
     provider: z.enum(['claude', 'codex']),
     nativeSessionId: id,
     cwd: z.string().min(1).max(4096),
+    host: host.optional(),
     title: z.string().min(1).max(500),
   }),
   'attention:respond': z.object({

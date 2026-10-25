@@ -80,8 +80,9 @@ export function AgentCard({
         </button>
       </header>
       <div className="tile-meta mono">
-        <span className="truncate" title={task.cwd}>
-          <Icon name="folder" size={12} /> {project?.name ?? t('unknown project')}
+        <span className="truncate" title={task.host ? `${task.host}:${task.cwd}` : task.cwd}>
+          <Icon name="folder" size={12} /> {task.host ? `${task.host}:` : ''}
+          {project?.name ?? t('unknown project')}
         </span>
         {task.worktree ? (
           <span className="truncate" title={task.worktree.path}>

@@ -88,7 +88,12 @@ const handlers: { [C in IpcChannel]: Handler } = {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   },
-  'project:add': (i: { rootPath: string; name?: string }) => workspace.addProject(i.rootPath, i.name),
+  'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
+  'ssh:hosts': () => workspace.sshHosts(),
+  'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
+  'ssh:check': (i: { host: string }) => workspace.checkHost(i.host),
+  'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
+  'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt }),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
@@ -99,6 +104,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
+  'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),
   'task:importSession': (i: Parameters<Workspace['importSession']>[0]) => workspace.importSession(i),
   'attention:respond': (i: { attentionId: string; decision?: string; answers?: Record<string, string> }) =>
     workspace.respondAttention(i.attentionId, i.decision, i.answers),

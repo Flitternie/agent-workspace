@@ -40,8 +40,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <span className="truncate" title={task.title}>
                 {task.title}
               </span>
-              <span title={task.cwd}>
-                <Icon name="folder" size={12} /> {project?.name}
+              <span title={task.host ? `${task.host}:${task.cwd}` : task.cwd}>
+                <Icon name="folder" size={12} /> {task.host ? `${task.host}:` : ''}
+                {project?.name}
               </span>
               {task.worktree ? (
                 <span title={task.worktree.path}>
