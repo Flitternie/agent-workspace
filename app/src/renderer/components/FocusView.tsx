@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { MemoryRecord, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
@@ -50,6 +51,20 @@ export function FocusView({ snapshot, task, transcript, now }: { snapshot: Works
             </div>
           </div>
           <div className="focus-actions">
+            <select
+              className="input select perm-select"
+              value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
+              title={t('Permissions')}
+              aria-label={t('Permissions')}
+              data-testid="task-permission"
+              onChange={(e) => run(() => call('task:setPermissionMode', { taskId: task.taskId, mode: e.target.value as PermissionMode }))}
+            >
+              {PERMISSION_MODES.map((m) => (
+                <option key={m.id} value={m.id} title={t(m.detail)}>
+                  {t(m.label)}
+                </option>
+              ))}
+            </select>
             {task.status === 'running' && connected ? (
               <button className="btn" onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
                 <Icon name="pause" /> {t('Interrupt')}

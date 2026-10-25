@@ -66,12 +66,20 @@ describe.runIf(enabled)('real providers through the app', () => {
     });
     await expect.poll(() => card(page, 'Alice').getByTestId('card-summary').innerText(), { timeout: 180_000 }).toMatch(/ready/i);
     await expect.poll(() => card(page, 'Bob').getByTestId('card-summary').innerText(), { timeout: 180_000 }).toMatch(/ready/i);
-    const snap = (await invoke(page, 'workspace:snapshot', {})) as { tasks: Array<{ alias: string; cwd: string; worktree?: { branch: string } }> };
+    const snap = (await invoke(page, 'workspace:snapshot', {})) as { tasks: Array<{ taskId: string; alias: string; cwd: string; worktree?: { branch: string } }> };
     const [a, b] = snap.tasks;
     expect(a.cwd).not.toBe(b.cwd);
     expect(a.worktree?.branch).toMatch(/^amw\//);
     await page.screenshot({ path: join(shots, 'real-01-overview.png') });
 
+    // Default mode is auto (Claude Code's classifier, as in the CLI): routine commands run without asking.
+    await card(page, 'Alice').locator('textarea').fill('Use your Bash tool to run exactly: git status --short && ls . Then reply with the single word AUTO-OK.');
+    await card(page, 'Alice').locator('textarea').press('Enter');
+    await expect.poll(() => card(page, 'Alice').getByTestId('card-summary').innerText(), { timeout: 180_000 }).toMatch(/AUTO-OK/);
+    expect(await card(page, 'Alice').locator('[data-attention-kind="approval"]').count()).toBe(0);
+
+    // Switch the live session to "ask every time" (no restart), then a write outside the worktree must wait for the user.
+    await invoke(page, 'task:setPermissionMode', { taskId: snap.tasks.find((x) => x.alias === 'Alice')!.taskId, mode: 'ask' });
     // Native approval: ask Claude to write outside its worktree; deny from the card.
     const outside = join(root, '..', `amw-outside-${Date.now()}.txt`);
     await card(page, 'Alice').locator('textarea').fill(`Use your Bash tool to run exactly: touch ${outside} . If it is denied, reply DENIED and do not retry.`);

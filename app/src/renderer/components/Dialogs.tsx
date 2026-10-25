@@ -118,7 +118,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
             {cap.available && cap.auth?.loggedIn === false
               ? t('{name} is installed but not signed in. Open Settings for how to sign in.', { name: PROVIDER_LABEL[cap.provider] })
               : cap.available
-                ? t('Uses your existing {name} login. Permissions stay with the agent; nothing is auto-approved.', { name: PROVIDER_LABEL[cap.provider] })
+                ? t('Uses your existing {name} login. Permissions follow the mode chosen in Settings.', { name: PROVIDER_LABEL[cap.provider] })
                 : t('{name} CLI not found on PATH.', { name: PROVIDER_LABEL[cap.provider] })}
           </div>
         ) : null}

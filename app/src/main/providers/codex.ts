@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
-import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
+import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
@@ -141,6 +141,12 @@ function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: s
   return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history }];
 }
 
+/** auto: Codex's auto_review approves or denies escalations; otherwise they come to the user. */
+function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsReviewer: string } {
+  if (mode === 'ask') return { approvalPolicy: 'untrusted', approvalsReviewer: 'user' };
+  return { approvalPolicy: 'on-request', approvalsReviewer: mode === 'auto' ? 'auto_review' : 'user' };
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly provider = 'codex' as const;
 
@@ -221,6 +227,7 @@ class CodexSession implements ProviderSession {
   private turnId?: string;
   private working = false;
   private interruptRequested = false;
+  private modeChanged = false;
   private lastAgentText = '';
   /** Our string request id -> the server's original JSON-RPC id and request kind. */
   private requests = new Map<string, { rpcId: string | number; method: string; questionIds?: string[] }>();
@@ -248,8 +255,8 @@ class CodexSession implements ProviderSession {
     };
     await server.initialize();
     const resumeId = this.args.resumeNativeSessionId;
-    // Explicit, conservative policy: ask before leaving the sandbox; never bypass.
-    const policy = { approvalPolicy: 'on-request', sandbox: 'workspace-write' };
+    // Always sandboxed to the workspace; never bypass. The mode decides who reviews escalations.
+    const policy = { ...codexPolicy(this.args.permissionMode ?? 'auto'), sandbox: 'workspace-write' };
     const instructions = this.args.developerInstructions
       ? { developerInstructions: this.args.developerInstructions }
       : {};
@@ -282,13 +289,21 @@ class CodexSession implements ProviderSession {
         await this.server.rpc('turn/start', {
           threadId: this.threadId,
           input: [{ type: 'text', text, text_elements: [] }],
+          // Applies to this turn and later ones (a mode change takes effect here).
+          ...(this.modeChanged ? codexPolicy(this.args.permissionMode ?? 'auto') : {}),
         }),
       );
       this.turnId = str(rec(result.turn).id) || this.turnId;
+      this.modeChanged = false;
     } catch (error) {
       this.working = false;
       throw error;
     }
+  }
+
+  async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.args.permissionMode = mode;
+    this.modeChanged = true;
   }
 
   async respond(requestId: string, response: ApprovalResponse): Promise<void> {
@@ -393,6 +408,12 @@ class CodexSession implements ProviderSession {
       case 'turn/started':
         this.turnId = str(rec(p.turn).id) || this.turnId;
         return;
+      case 'guardianWarning': {
+        // Codex auto-review decided an escalation itself; keep that visible in the transcript.
+        const message = str(p.message);
+        if (message) this.emit({ type: 'transcriptItem', itemId: `review-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, role: 'system', text: message.slice(0, 300) });
+        return;
+      }
       case 'item/started':
       case 'item/completed': {
         const item = rec(p.item);

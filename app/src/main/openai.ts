@@ -7,8 +7,17 @@ import type { LlmRouteAnswer, RouteContext } from './router';
 // compact task metadata (names, titles, one-line summaries) are sent for routing,
 // never transcripts or file contents.
 
+// Defaults; the user can pick others in Settings (env vars override for tests).
 export const STT_MODEL = process.env.AMW_STT_MODEL ?? 'gpt-4o-transcribe';
-export const ROUTER_MODEL = process.env.AMW_ROUTER_MODEL ?? 'gpt-4.1-mini';
+export const ROUTER_MODEL = process.env.AMW_ROUTER_MODEL ?? 'gpt-5.4-mini';
+
+/** Reasoning models reject temperature; give them the least reasoning they allow (routing must be quick). */
+export function chatParams(model: string): Record<string, unknown> {
+  if (/^gpt-5\.\d/.test(model)) return { reasoning_effort: 'none' };
+  if (/^gpt-5(-|$)/.test(model)) return { reasoning_effort: 'minimal' };
+  if (/^o\d/.test(model)) return { reasoning_effort: 'low' };
+  return { temperature: 0 };
+}
 
 /** OPENAI_API_KEY, else AMW_OPENAI_KEY_FILE, else an `openai.key` file in this folder or a parent. */
 export function loadOpenAiKey(startDir: string): string | undefined {
@@ -31,13 +40,32 @@ export function loadOpenAiKey(startDir: string): string | undefined {
 }
 
 export class OpenAiClient {
+  /** Chosen in Settings; the workspace keeps these in sync. */
+  sttModel = STT_MODEL;
+  routerModel = ROUTER_MODEL;
+  private modelList?: Promise<string[]>;
+
   constructor(private key: string) {}
+
+  /** Model ids this key can use (cached for the session). */
+  listModels(): Promise<string[]> {
+    this.modelList ??= fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${this.key}` }, signal: AbortSignal.timeout(15_000) })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Model list failed (${res.status})`);
+        return ((await res.json()) as { data?: Array<{ id: string }> }).data?.map((m) => m.id).sort() ?? [];
+      })
+      .catch((error: unknown) => {
+        this.modelList = undefined;
+        throw error;
+      });
+    return this.modelList;
+  }
 
   async transcribe(audio: Uint8Array, mimeType: string, prompt?: string): Promise<string> {
     const ext = mimeType.includes('mpeg') ? 'mp3' : mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : mimeType.includes('wav') ? 'wav' : 'webm';
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType || 'audio/webm' }), `utterance.${ext}`);
-    form.append('model', STT_MODEL);
+    form.append('model', this.sttModel);
     if (prompt) form.append('prompt', prompt.slice(0, 800));
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -55,8 +83,8 @@ export class OpenAiClient {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: ROUTER_MODEL,
-        temperature: 0,
+        model: this.routerModel,
+        ...chatParams(this.routerModel),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },

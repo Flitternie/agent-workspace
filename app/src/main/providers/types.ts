@@ -7,6 +7,7 @@ import type {
   AttentionOption,
   AttentionQuestion,
   NativeSessionInfo,
+  PermissionMode,
   ProviderCapabilities,
   TranscriptRole,
 } from '../../shared/types';
@@ -74,6 +75,7 @@ export interface StartArgs {
   developerInstructions?: string;
   /** Mock only. */
   mockScript?: string;
+  permissionMode?: PermissionMode;
   title: string;
 }
 
@@ -94,6 +96,8 @@ export interface ProviderSession {
   /** Answers a native approval / question by its provider request id. */
   respond(requestId: string, response: ApprovalResponse): Promise<void>;
   interrupt(): Promise<void>;
+  /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
+  setPermissionMode?(mode: PermissionMode): Promise<void>;
   close(): Promise<void>;
 }
 

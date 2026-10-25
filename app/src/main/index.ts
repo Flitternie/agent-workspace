@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
-import type { Settings, TranscriptItem } from '../shared/types';
+import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
@@ -70,6 +70,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
+  'task:setPermissionMode': (i: { taskId: string; mode: PermissionMode }) => workspace.setPermissionMode(i.taskId, i.mode),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
@@ -99,6 +100,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
   'capabilities:refresh': () => workspace.refreshCapabilities(),
+  'models:list': async () => (openai ? openai.listModels() : []),
   'demo:seed': () => {
     if (!demoMode) throw new Error('Demo agents are only available in the demo entry (npm run demo).');
     return workspace.seedDemo(ensureDemoRepo());

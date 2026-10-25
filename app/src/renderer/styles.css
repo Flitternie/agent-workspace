@@ -444,7 +444,7 @@ pre code {
   flex: none;
   display: flex;
   align-items: center;
-  padding-left: 72px; /* macOS traffic lights */
+  padding-left: 84px; /* clear of the macOS traffic lights */
 }
 .brand {
   display: inline-flex;
@@ -2381,4 +2381,61 @@ details[open] > summary .tool-more {
 }
 .settings-section .check input {
   margin-top: 3px;
+}
+
+/* Permission mode */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+}
+.choice.on {
+  border-color: var(--ink);
+  background: var(--panel-2);
+}
+.choice input {
+  margin-top: 3px;
+}
+.choice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.perm-select {
+  height: 30px;
+  width: auto;
+  font-size: 12.5px;
+}
+
+/* Model pickers */
+.model-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model-pick {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.model-pick > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.model-pick select {
+  width: 100%;
+  min-width: 0;
 }

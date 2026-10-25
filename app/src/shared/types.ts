@@ -55,6 +55,8 @@ export interface Task {
   injectedMemoryIds?: string[];
   /** Mock-provider script name; ignored by native providers. */
   mockScript?: string;
+  /** Overrides settings.permissionMode for this agent. */
+  permissionMode?: PermissionMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -196,11 +198,26 @@ export interface Settings {
   alwaysConfirmVoice: boolean;
   /** Open the mic on launch, like joining a call. */
   autoListen: boolean;
+  /** Default permission mode for new agents. */
+  permissionMode?: PermissionMode;
+  /** Speech-to-text model (OpenAI id). */
+  sttModel?: string;
+  /** Model that decides which agent a spoken message is for (and names roles). */
+  routerModel?: string;
   /** UI language; set from the system locale on first launch. */
   language?: Language;
 }
 
 export type Language = 'en' | 'zh';
+
+/**
+ * How much an agent may do without asking. Never a bypass:
+ * - auto: the provider's own reviewer decides (Claude Code auto mode, Codex auto_review);
+ *   only what it will not approve comes to the user.
+ * - edits: file edits in the workspace are fine; commands and anything else ask.
+ * - ask: every action that changes something asks.
+ */
+export type PermissionMode = 'auto' | 'edits' | 'ask';
 
 export interface WorkspaceSnapshot {
   /** Demo entry: mock agents are offered and seeded. */

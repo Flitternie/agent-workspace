@@ -148,7 +148,7 @@ export function App() {
                     })}
                     <div className="setup-row">
                       <span>{t('Voice')}</span>
-                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} method={snapshot.voice.sttModel} missing="Not configured" />
+                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
                     </div>
                     <button className="link small" onClick={() => setDialog('settings')}>
                       {t('Settings, language and sign-in help')}

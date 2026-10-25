@@ -34,6 +34,7 @@ interface Outputs {
   'task:resume': void;
   'task:stop': void;
   'task:rename': void;
+  'task:setPermissionMode': void;
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
   'sessions:discoverAll': NativeSessionInfo[];
@@ -50,6 +51,7 @@ interface Outputs {
   'memory:promote': MemoryRecord;
   'settings:update': void;
   'capabilities:refresh': void;
+  'models:list': string[];
   'demo:seed': void;
 }
 

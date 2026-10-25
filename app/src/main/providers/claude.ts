@@ -6,7 +6,7 @@ import type {
   Query,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AttentionQuestion, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
+import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
@@ -42,6 +42,8 @@ function toolResultText(content: unknown): string {
   if (Array.isArray(content)) return content.map((b) => str(rec(b).text)).filter(Boolean).join('\n');
   return '';
 }
+
+const CLAUDE_MODE: Record<PermissionMode, 'auto' | 'acceptEdits' | 'default'> = { auto: 'auto', edits: 'acceptEdits', ask: 'default' };
 
 export class ClaudeAdapter implements ProviderAdapter {
   readonly provider = 'claude' as const;
@@ -170,8 +172,9 @@ class ClaudeSession implements ProviderSession {
         // Load the user's own settings, CLAUDE.md and permission rules as the CLI would.
         settingSources: ['user', 'project', 'local'],
         includePartialMessages: true,
-        // Never bypass: 'default' prompts for edits and commands via canUseTool.
-        permissionMode: 'default',
+        // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
+        // will not approve, and everything in 'default', reaches canUseTool → the tile.
+        permissionMode: CLAUDE_MODE[this.args.permissionMode ?? 'auto'],
         canUseTool: this.canUseTool,
         stderr: () => {
           /* diagnostics may contain private tool arguments; never forwarded */
@@ -227,6 +230,11 @@ class ClaudeSession implements ProviderSession {
     } else {
       p.finish({ behavior: 'deny', message: 'User denied this request in Agent Meeting Workspace.' });
     }
+  }
+
+  async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.args.permissionMode = mode;
+    await this.query?.setPermissionMode(CLAUDE_MODE[mode]);
   }
 
   async interrupt(): Promise<void> {

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { Language, ProviderCapabilities, WorkspaceSnapshot } from '../../shared/types';
+import { useEffect, useState } from 'react';
+import type { Language, PermissionMode, ProviderCapabilities, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
@@ -36,6 +36,113 @@ export function ReadinessBadge({ state, method, missing = 'Not installed' }: { s
       {state === 'ready' ? <Icon name="check" size={12} /> : state === 'checking' ? null : <Icon name="alert" size={12} />}
       {text}
     </span>
+  );
+}
+
+export const PERMISSION_MODES: Array<{ id: PermissionMode; label: string; detail: string }> = [
+  {
+    id: 'auto',
+    label: 'Decide automatically',
+    detail: 'Like auto mode in Claude Code: the agent’s own reviewer approves routine actions and only asks you about risky ones (Codex: auto-review of sandbox escalations).',
+  },
+  { id: 'edits', label: 'Allow file edits', detail: 'Edits inside the workspace go ahead; commands and anything else ask you first.' },
+  { id: 'ask', label: 'Ask every time', detail: 'Every action that changes something waits for your approval.' },
+];
+
+export function PermissionChoice({ value, onChange }: { value: PermissionMode; onChange: (m: PermissionMode) => void }) {
+  return (
+    <div className="choice-list" role="radiogroup" aria-label={t('Permissions')}>
+      {PERMISSION_MODES.map((m) => (
+        <label key={m.id} className={`choice${value === m.id ? ' on' : ''}`} data-testid={`perm-${m.id}`}>
+          <input type="radio" name="perm" checked={value === m.id} onChange={() => onChange(m.id)} />
+          <span>
+            <strong>{t(m.label)}</strong>
+            <span className="muted small">{t(m.detail)}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// Two separate models: one turns speech into text, the other decides which agent a
+// sentence is for (and names agent roles). Nothing rewrites what you said.
+const STT_CHOICES: Array<{ id: string; note: string }> = [
+  { id: 'gpt-4o-transcribe', note: 'Most accurate; best with mixed Chinese and English' },
+  { id: 'gpt-4o-mini-transcribe', note: 'Faster and cheaper, slightly less accurate' },
+  { id: 'whisper-1', note: 'Older Whisper model' },
+];
+const ROUTER_CHOICES: Array<{ id: string; note: string }> = [
+  { id: 'gpt-5.4-mini', note: 'Recommended: accurate, about 1 s' },
+  { id: 'gpt-5.4-nano', note: 'Fastest, about 0.8 s; occasionally misroutes' },
+  { id: 'gpt-5.5', note: 'Most capable, slower' },
+  { id: 'gpt-4.1-mini', note: 'Previous default' },
+];
+const OTHER_STT = /^(gpt-[\w.-]*transcribe|whisper-\d)$/;
+const OTHER_ROUTER = /^(gpt-(4\.1|4o|5)[\w.-]*|o\d(-mini)?)$/;
+// gpt-4.1-nano is still listed by the API but deprecated for chat.
+const NOT_ROUTER = /audio|realtime|search|transcribe|tts|image|codex|pro|chat-latest|diarize|\d{4}-\d\d-\d\d|^gpt-4\.1-nano$/;
+
+function ModelSelect({ label, hint, value, choices, other, testId, onChange }: { label: string; hint: string; value: string; choices: Array<{ id: string; note: string }>; other: string[]; testId: string; onChange: (id: string) => void }) {
+  const known = new Set(choices.map((c) => c.id));
+  return (
+    <label className="model-pick">
+      <span>
+        <strong>{label}</strong>
+        <span className="muted small">{hint}</span>
+      </span>
+      <select className="input select" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId}>
+        {choices.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.id} — {t(c.note)}
+          </option>
+        ))}
+        {other.filter((id) => !known.has(id)).length ? (
+          <optgroup label={t('Other models on your key')}>
+            {other
+              .filter((id) => !known.has(id))
+              .map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+          </optgroup>
+        ) : null}
+      </select>
+    </label>
+  );
+}
+
+function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onChange: (p: { sttModel?: string; routerModel?: string }) => void }) {
+  const [available, setAvailable] = useState<string[] | null>(null);
+  useEffect(() => {
+    call('models:list', {})
+      .then(setAvailable)
+      .catch(() => setAvailable(null));
+  }, []);
+  // Only offer what this key can use, once we know.
+  const usable = (list: Array<{ id: string; note: string }>) => (available ? list.filter((c) => available.includes(c.id)) : list);
+  return (
+    <div className="model-picks">
+      <ModelSelect
+        label={t('Speech recognition model')}
+        hint={t('Turns what you say into text.')}
+        value={snapshot.voice.sttModel ?? ''}
+        choices={usable(STT_CHOICES)}
+        other={(available ?? []).filter((id) => OTHER_STT.test(id) && !/\d{4}-\d\d-\d\d|diarize/.test(id))}
+        testId="stt-model"
+        onChange={(id) => onChange({ sttModel: id })}
+      />
+      <ModelSelect
+        label={t('Routing model')}
+        hint={t('Decides which agent a sentence is for when you do not name one, and names agent roles. It does not rewrite what you said.')}
+        value={snapshot.voice.routerModel ?? ''}
+        choices={usable(ROUTER_CHOICES)}
+        other={(available ?? []).filter((id) => OTHER_ROUTER.test(id) && !NOT_ROUTER.test(id))}
+        testId="router-model"
+        onChange={(id) => onChange({ routerModel: id })}
+      />
+    </div>
   );
 }
 
@@ -95,9 +202,12 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
             </div>
           );
         })}
-        <p className="muted small">
-          {t('Permissions stay with each agent: it asks before running commands or editing files, and you approve on its tile. Nothing is auto-approved.')}
-        </p>
+      </section>
+
+      <section className="settings-section">
+        <h3>{t('Permissions')}</h3>
+        <p className="muted small">{t('Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.')}</p>
+        <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
       </section>
 
       <section className="settings-section">
@@ -105,10 +215,11 @@ export function SettingsDialog({ snapshot, onClose }: { snapshot: WorkspaceSnaps
         <div className="settings-row">
           <div className="settings-row-main">
             <strong>{t('Speech recognition')}</strong>
-            <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} method={snapshot.voice.sttModel} missing="Not configured" />
+            <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
           </div>
           {!snapshot.voice.sttAvailable ? <div className="small">{t('No OpenAI key found. Put it in openai.key next to the app or set OPENAI_API_KEY, then restart. Typing still works.')}</div> : null}
         </div>
+        {snapshot.voice.sttAvailable ? <ModelPickers snapshot={snapshot} onChange={update} /> : null}
         <label className="check">
           <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
           <span>

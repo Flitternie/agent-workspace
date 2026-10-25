@@ -26,6 +26,7 @@ export const ipcSchemas = {
   'task:resume': z.object({ taskId: id }),
   'task:stop': z.object({ taskId: id }),
   'task:rename': z.object({ taskId: id, name: z.string().min(1).max(100) }),
+  'task:setPermissionMode': z.object({ taskId: id, mode: z.enum(['auto', 'edits', 'ask']) }),
   'task:remove': z.object({ taskId: id }),
   'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
   'sessions:discoverAll': z.object({}),
@@ -74,8 +75,9 @@ export const ipcSchemas = {
   }),
   'memory:delete': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
-  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional() }),
+  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional() }),
   'capabilities:refresh': z.object({}),
+  'models:list': z.object({}),
   'demo:seed': z.object({}),
 } as const;
 

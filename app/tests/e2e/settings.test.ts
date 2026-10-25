@@ -44,6 +44,7 @@ describe('real entry: first run, settings, language', () => {
     await expect.poll(() => page.getByTestId('provider-claude').count()).toBe(1);
     await page.getByTestId('lang-zh').click();
     await expect.poll(() => page.getByRole('dialog').innerText()).toContain('Agent 连接');
+    await page.getByTestId('perm-auto').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(shots, 'settings-zh.png') });
     await page.keyboard.press('Escape');
     await expect.poll(() => page.locator('.stage-head h1').innerText()).toBe('总览');

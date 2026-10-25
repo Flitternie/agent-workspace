@@ -10,6 +10,7 @@ import type {
   MemoryRecord,
   MemoryScope,
   NativeSessionInfo,
+  PermissionMode,
   Project,
   ProviderCapabilities,
   RouteDecision,
@@ -75,7 +76,16 @@ export class Workspace {
     this.store = new JsonStore(opts.dataDir);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
+    this.applyModels();
     this.recoverAfterRestart();
+  }
+
+  private applyModels(): void {
+    const ai = this.opts.openai;
+    const s = this.store.data.settings;
+    if (!ai) return;
+    if (!process.env.AMW_STT_MODEL) ai.sttModel = s.sttModel || STT_MODEL;
+    if (!process.env.AMW_ROUTER_MODEL) ai.routerModel = s.routerModel || ROUTER_MODEL;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -151,8 +161,8 @@ export class Workspace {
       voice: {
         sttAvailable: !!this.opts.openai,
         routerLlmAvailable: !!this.opts.openai,
-        sttModel: this.opts.openai ? STT_MODEL : undefined,
-        routerModel: this.opts.openai ? ROUTER_MODEL : undefined,
+        sttModel: this.opts.openai?.sttModel,
+        routerModel: this.opts.openai?.routerModel,
         // Meeting-style: the mic is open from launch unless disabled (tests, kiosk use).
         autoListen: !!this.opts.openai && process.env.AMW_NO_AUTOLISTEN !== '1' && d.settings.autoListen,
       },
@@ -308,6 +318,19 @@ export class Workspace {
       .catch((error) => this.log('role suggestion failed', error));
   }
 
+  permissionModeOf(task: Task): PermissionMode {
+    return task.permissionMode ?? this.store.data.settings.permissionMode ?? 'auto';
+  }
+
+  /** Changes one agent's permission mode; a live session switches without restarting. */
+  async setPermissionMode(taskId: string, mode: PermissionMode): Promise<void> {
+    const t = this.task(taskId);
+    t.permissionMode = mode;
+    t.updatedAt = now();
+    this.changed();
+    await this.live.get(taskId)?.session.setPermissionMode?.(mode);
+  }
+
   rename(taskId: string, name: string): void {
     const t = this.task(taskId);
     t.name = name.trim() || t.alias;
@@ -381,6 +404,7 @@ export class Workspace {
         resumeNativeSessionId: resumeId,
         developerInstructions: instructionsFor(task, injected),
         mockScript: task.mockScript,
+        permissionMode: this.permissionModeOf(task),
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
@@ -929,6 +953,7 @@ export class Workspace {
 
   updateSettings(patch: Partial<Settings>): void {
     Object.assign(this.store.data.settings, patch);
+    this.applyModels();
     this.changed();
   }
 
