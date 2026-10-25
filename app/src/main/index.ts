@@ -18,7 +18,10 @@ const appRoot = app.getAppPath();
 // `npm run demo` (AMW_MODE=demo) is a separate entry with mock agents and its own
 // data dir, so the real workspace never fills up with demo tasks.
 const demoMode = process.env.AMW_MODE === 'demo';
-const dataDir = process.env.AMW_DATA_DIR ?? join(appRoot, demoMode ? '.data-demo' : '.data');
+// Packaged builds live in a read-only bundle: their data goes to the OS app-data folder
+// (macOS: ~/Library/Application Support/Agent Workspace). From source it stays in app/.
+const userBase = app.isPackaged ? join(app.getPath('appData'), 'Agent Workspace') : appRoot;
+const dataDir = process.env.AMW_DATA_DIR ?? join(userBase, app.isPackaged ? (demoMode ? 'Demo' : 'Workspace') : demoMode ? '.data-demo' : '.data');
 mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', join(dataDir, 'electron'));
 app.setName('Agent Workspace');
@@ -32,7 +35,7 @@ const keyStore = new KeyStore(dataDir);
 const key = loadOpenAiKey(appRoot);
 // On-device speech models are shared by the real and demo entries and kept inside the app folder.
 let notifyModels = () => {};
-const localStt = new LocalStt(process.env.AMW_MODELS_DIR ?? join(appRoot, '.models'), () => notifyModels());
+const localStt = new LocalStt(process.env.AMW_MODELS_DIR ?? join(userBase, app.isPackaged ? 'Models' : '.models'), () => notifyModels());
 const openai = key ? new OpenAiClient(key) : undefined;
 const workspace = new Workspace({
   dataDir,
@@ -219,6 +222,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // From source the Dock would show Electron's icon; packaged builds carry their own.
+  if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(appRoot, 'build', 'icon.png'));
   useBestKey(); // safeStorage can decrypt the saved key only after 'ready'
   // Microphone only (no camera, no screen), and only for our own window.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {

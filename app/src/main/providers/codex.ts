@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
-import { childEnv, findExecutable, run } from '../util/exec';
+import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { z } from 'zod';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
@@ -50,7 +50,7 @@ class AppServer {
   static spawn(cwd: string): AppServer {
     const exe = findExecutable('codex');
     if (!exe) throw new Error('Codex CLI not found on PATH.');
-    const proc = spawn(exe, ['app-server'], { cwd, env: childEnv(), stdio: 'pipe', detached: true });
+    const proc = spawn(needsShell(exe) ? `"${exe}"` : exe, ['app-server'], { cwd, env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32', shell: needsShell(exe) });
     return new AppServer(proc);
   }
 

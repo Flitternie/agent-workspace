@@ -1,8 +1,8 @@
 {
   "name": "agent-workspace",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Attention-centric meeting-style workspace for parallel coding agents (MVP)",
+  "description": "Run Claude Code and Codex agents in parallel from one meeting-style workspace, with a main agent and always-on voice.",
   "main": "out/main/index.cjs",
   "license": "MIT",
   "scripts": {
@@ -18,7 +18,9 @@
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "smoke:providers": "node scripts/build-main.mjs && node out/smoke/providers.cjs",
     "smoke:voice": "node scripts/build-main.mjs && node out/smoke/voice.cjs",
-    "smoke:content": "node scripts/build-main.mjs && node out/smoke/content.cjs"
+    "smoke:content": "node scripts/build-main.mjs && node out/smoke/content.cjs",
+    "dist:mac": "bash scripts/dist.sh --mac",
+    "dist:win": "bash scripts/dist.sh --win"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.274",
@@ -37,6 +39,7 @@
     "@types/react-dom": "19.2.7",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "44.9.3",
+    "electron-builder": "26.17.0",
     "esbuild": "0.27.7",
     "playwright-core": "1.58.2",
     "react": "19.2.9",
@@ -44,5 +47,97 @@
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "4.1.12"
+  },
+  "author": {
+    "name": "Flitternie",
+    "email": "flitternie@gmail.com"
+  },
+  "homepage": "https://github.com/Flitternie/agent-workspace",
+  "build": {
+    "appId": "com.flitternie.agentworkspace",
+    "productName": "Agent Workspace",
+    "copyright": "\u00a9 2026 Flitternie",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/main/**",
+      "out/preload/**",
+      "out/renderer/**",
+      "package.json",
+      "!out/smoke/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
+    "asarUnpack": [
+      "node_modules/sherpa-onnx-*/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Agent Workspace listens so you can talk to your coding agents. Only speech is transcribed.",
+        "LSApplicationCategoryType": "public.app-category.developer-tools"
+      }
+    },
+    "dmg": {
+      "title": "Agent Workspace ${version}",
+      "background": "build/background.tiff",
+      "icon": "build/icon.icns",
+      "iconSize": 112,
+      "window": {
+        "width": 660,
+        "height": 420
+      },
+      "contents": [
+        {
+          "x": 170,
+          "y": 210,
+          "type": "file"
+        },
+        {
+          "x": 490,
+          "y": 210,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Agent Workspace"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Flitternie",
+        "repo": "agent-workspace",
+        "releaseType": "draft"
+      }
+    ]
   }
 }

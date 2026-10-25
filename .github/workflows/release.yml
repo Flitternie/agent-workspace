@@ -1,0 +1,60 @@
+# Builds installers on GitHub's runners.
+# - Push a tag like v0.5.0 (matching app/package.json "version"): the macOS DMG and the
+#   Windows installer are attached to a draft release; check it, then publish it.
+# - Run it by hand (Actions → Release → Run workflow): builds only; download the files
+#   from the run's artifacts.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest # Apple Silicon
+            target: --mac
+          - os: windows-latest
+            target: --win
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Typecheck and unit tests
+        if: runner.os == 'macOS'
+        run: npm run typecheck && npm test
+
+      - name: Build installer
+        run: bash scripts/dist.sh ${{ matrix.target }} --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-workspace-${{ runner.os }}
+          path: |
+            app/release/*.dmg
+            app/release/*.exe
+          if-no-files-found: error

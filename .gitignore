@@ -30,3 +30,15 @@ agent_workspace_spec/
 AGENT_WORKSPACE_FULL_SPEC.md
 SPIKE_REPORT.md
 IMPLEMENTATION_LOG.md
+
+# Packaging output
+app/release/
+
+# Design work stays local: only the finished assets the build uses
+# (app/build/icon.icns, icon.png, background.tiff) are committed.
+app/build/*
+!app/build/icon.icns
+!app/build/icon.png
+!app/build/background.tiff
+app/scripts/render-assets.sh
+app/scripts/assets/
