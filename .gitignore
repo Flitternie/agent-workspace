@@ -28,6 +28,5 @@ coverage/
 # Developer-only documents (specs, research notes, build logs) stay local
 agent_workspace_spec/
 AGENT_WORKSPACE_FULL_SPEC.md
-AGENT_MEETING_WORKSPACE_FULL_SPEC.md
 SPIKE_REPORT.md
 IMPLEMENTATION_LOG.md
