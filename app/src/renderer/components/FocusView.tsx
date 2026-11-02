@@ -122,7 +122,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               </div>
             ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
-            <Transcript items={transcript} />
+            <Transcript items={transcript} main={isMainAgent(task)} />
             {task.plan ? (
               <div className="pinned-plan">
                 <PlanChecklist plan={task.plan} />
@@ -196,7 +196,7 @@ function TaskName({ task }: { task: Task }) {
   );
 }
 
-function Transcript({ items }: { items: TranscriptItem[] }) {
+function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {
@@ -215,8 +215,8 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
     >
       <div className="transcript-inner">
         {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
-        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch')).map((entry) => {
-          if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} />;
+        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch'), main).map((entry) => {
+          if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} main={main} />;
           const item = entry;
           if (item.role === 'tool') return <ToolCallRow key={item.id} item={item} />;
           if (item.role === 'thought')

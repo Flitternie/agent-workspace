@@ -221,6 +221,10 @@ export interface Settings {
   routerModel?: string;
   /** Silence after speech before a spoken message is sent (pauses shorter than this continue it). */
   voicePauseMs?: number;
+  /** How the microphone opens; unset = open (always on until muted). */
+  micMode?: MicMode;
+  /** Keys for the microphone, e.g. "Alt+Space"; unset = the platform default. */
+  micShortcut?: string;
   /** UI language; set from the system locale on first launch. */
   language?: Language;
   /** SSH aliases (from ~/.ssh/config) whose agents and sessions the app uses. */
@@ -242,6 +246,9 @@ export interface RemoteHostStatus {
 }
 
 export type Language = 'en' | 'zh';
+
+/** open: always on until muted · toggle: press to start, press to send · hold: talk while held · both: tap or hold. */
+export type MicMode = 'open' | 'toggle' | 'hold' | 'both';
 
 /** A downloadable on-device speech model (Settings › Voice). */
 export interface LocalModelState {

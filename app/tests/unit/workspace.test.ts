@@ -255,7 +255,7 @@ describe('main agent tools', () => {
     const { workspaceTools } = await import('../../src/main/main-agent');
     const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
 
-    const list = await tools.list_agents.run({});
+    const list = await tools.list_workspace_agents.run({});
     expect(list).toContain('Alice (role: backend)');
     expect(list).toContain('Bob (role: frontend)');
     expect(ws.findAgent('alice')?.taskId).toBe(A.taskId);
@@ -270,6 +270,42 @@ describe('main agent tools', () => {
     expect(await tools.read_agent.run({ agent: 'Alice', limit: 5 })).toContain('[user] Migrate API.');
     await expect(tools.send_to_agent.run({ agent: 'Zed', message: 'hi' })).rejects.toThrow(/No agent named "Zed"/);
     expect(await tools.create_agent.run({ project: 'nope', title: 'x', instruction: 'y' })).toMatch(/Unknown project/);
+  });
+
+  it('give a quick look at a project and at what an agent changed, without the files themselves', async () => {
+    const ws = open();
+    const root = repo();
+    writeFileSync(join(root, 'README.md'), '# Shop\nOrders and payments service.\n');
+    const project = await ws.addProject(root, 'shop');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'Docs', isolate: true });
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+
+    const overview = await tools.project_overview.run({ project: 'shop' });
+    expect(overview).toMatch(/branch \S+; 1 uncommitted file/);
+    expect(overview).toContain('README.md');
+    expect(overview).toContain('Orders and payments service.');
+    expect(overview).toMatch(/recent commits:\n\w+ init/);
+
+    expect(await tools.agent_changes.run({ agent: 'Alice' })).toMatch(/has not changed any files/);
+    writeFileSync(join(A.cwd, 'NOTES.md'), 'new\n');
+    writeFileSync(join(A.cwd, 'README.md'), 'changed\n');
+    const changes = await tools.agent_changes.run({ agent: 'Alice' });
+    expect(changes).toContain(`branch ${A.worktree!.branch}`);
+    expect(changes).toMatch(/README\.md \| +\d+ [+-]+/);
+    expect(changes).toContain('new files: NOTES.md');
+  });
+
+  it('stop a loop: the same call again and again is refused within one user message', async () => {
+    const ws = open();
+    await ws.addProject(repo(), 'shop');
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    for (let i = 0; i < 3; i++) expect(await tools.list_projects.run({})).toContain('shop');
+    expect(await tools.list_projects.run({})).toMatch(/^Not run: you already have this/);
+    // A new message from the user starts over.
+    (ws as unknown as { mainTurns: number }).mainTurns++;
+    expect(await tools.list_projects.run({})).toContain('shop');
   });
 });
 

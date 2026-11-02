@@ -231,13 +231,14 @@ app.whenReady().then(() => {
   // From source the Dock would show Electron's icon; packaged builds carry their own.
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(appRoot, 'build', 'icon.png'));
   useBestKey(); // safeStorage can decrypt the saved key only after 'ready'
-  // Microphone only (no camera, no screen), and only for our own window.
+  // Microphone only (no camera, no screen) and writing to the clipboard (Copy buttons;
+  // never reading it), and only for our own window.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
     const media = details as { mediaTypes?: string[] };
     const audioOnly = permission === 'media' && (media.mediaTypes ?? []).every((t) => t === 'audio');
-    callback(audioOnly && wc === win?.webContents);
+    callback((audioOnly || permission === 'clipboard-sanitized-write') && wc === win?.webContents);
   });
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'clipboard-sanitized-write');
   if (!workspace.snapshot().settings.language) workspace.updateSettings({ language: app.getLocale().startsWith('zh') ? 'zh' : 'en' });
   registerIpc();
   wireEvents();

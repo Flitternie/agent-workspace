@@ -218,17 +218,21 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
 
 const QUIET_KINDS: ToolKind[] = ['read', 'search', 'fetch', 'think'];
 
-/** Folds runs of quiet calls (reads, searches) into one line, like "Read 3 files · searched 2". */
-export function groupTranscript(items: TranscriptItem[]): Array<TranscriptItem | TranscriptItem[]> {
+/**
+ * Folds runs of quiet calls (reads, searches) into one line, like "Read 3 files · searched 2".
+ * `allTools` (the main agent): every run of tool calls becomes one line, so its conversation
+ * reads as what was said, not how it looked things up.
+ */
+export function groupTranscript(items: TranscriptItem[], allTools = false): Array<TranscriptItem | TranscriptItem[]> {
   const out: Array<TranscriptItem | TranscriptItem[]> = [];
   let run: TranscriptItem[] = [];
   const flush = () => {
-    if (run.length >= 2) out.push(run);
+    if (run.length >= (allTools ? 1 : 2)) out.push(run);
     else out.push(...run);
     run = [];
   };
   for (const it of items) {
-    const quiet = it.role === 'tool' && QUIET_KINDS.includes(it.tool?.kind ?? 'other') && (it.toolStatus === 'completed' || it.toolStatus === undefined);
+    const quiet = it.role === 'tool' && (allTools || QUIET_KINDS.includes(it.tool?.kind ?? 'other')) && (it.toolStatus === 'completed' || it.toolStatus === undefined || (allTools && it.toolStatus !== 'awaiting_approval'));
     if (quiet) run.push(it);
     else {
       flush();
@@ -239,19 +243,45 @@ export function groupTranscript(items: TranscriptItem[]): Array<TranscriptItem |
   return out;
 }
 
-export function ToolGroup({ items }: { items: TranscriptItem[] }) {
+/** The main agent's workspace tools, as one-line actions. */
+const WORKSPACE_ACTION: Record<string, string> = {
+  list_workspace_agents: 'checked the agents',
+  read_agent: 'read an agent’s conversation',
+  agent_changes: 'looked at an agent’s changes',
+  project_overview: 'looked at a project',
+  list_projects: 'listed the projects',
+  list_requests: 'checked what agents are waiting on',
+  send_to_agent: 'passed on a message',
+  create_agent: 'started an agent',
+  stop_agent: 'stopped an agent',
+  answer_request: 'answered a request',
+  save_memory: 'saved a note',
+};
+
+export function mainActions(items: TranscriptItem[]): string {
+  const counts = new Map<string, number>();
+  for (const i of items) {
+    const name = (i.tool?.title ?? '').split(' / ').pop() ?? '';
+    const action = WORKSPACE_ACTION[name] ?? i.tool?.title ?? 'Tool';
+    counts.set(action, (counts.get(action) ?? 0) + 1);
+  }
+  return [...counts].map(([a, n]) => (n > 1 ? `${t(a)} ×${n}` : t(a))).join(' · ');
+}
+
+export function ToolGroup({ items, main }: { items: TranscriptItem[]; main?: boolean }) {
   const n = (k: ToolKind) => items.filter((i) => i.tool?.kind === k).length;
-  const parts = [
+  const parts = main ? [mainActions(items)] : [
     n('read') && t(n('read') > 1 ? 'read {n} files' : 'read {n} file', { n: n('read') }),
     n('search') && t('searched {n}×', { n: n('search') }),
     n('fetch') && t('fetched {n}', { n: n('fetch') }),
     n('think') && t('updated plan'),
-  ].filter(Boolean) as string[];
-  const label = parts.join(' · ');
+  ];
+  const failed = items.some((i) => i.toolStatus === 'failed');
+  const label = (parts.filter(Boolean) as string[]).join(' · ');
   return (
     <details className="msg tool tool-group" data-testid="tool-group">
       <summary>
-        <span className="tool-status">✓</span>
+        <span className="tool-status">{items.some((i) => i.toolStatus === 'running') ? '…' : failed ? '!' : '✓'}</span>
         <Icon name="list" size={13} />
         <span className="tool-label">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
       </summary>

@@ -87,6 +87,11 @@
       "hardenedRuntime": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Agent Workspace listens so you can talk to your coding agents. Only speech is transcribed.",
+        "NSDocumentsFolderUsageDescription": "A coding agent you started in Agent Workspace is working with files in your Documents folder.",
+        "NSDesktopFolderUsageDescription": "A coding agent you started in Agent Workspace is working with files on your Desktop.",
+        "NSDownloadsFolderUsageDescription": "A coding agent you started in Agent Workspace is working with files in your Downloads folder.",
+        "NSRemovableVolumesUsageDescription": "A coding agent you started in Agent Workspace is working with files on an external drive.",
+        "NSNetworkVolumesUsageDescription": "A coding agent you started in Agent Workspace is working with files on a network drive.",
         "LSApplicationCategoryType": "public.app-category.developer-tools"
       }
     },

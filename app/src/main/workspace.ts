@@ -34,6 +34,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+import { run } from './util/exec';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -766,6 +767,7 @@ export class Workspace {
   /** Delivers text to exactly this task's native session. Never re-routed. */
   async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
+    if (task === this.store.data.mainAgent) this.mainTurns++;
     try {
       const live = await this.connect(taskId);
       const busy = live.turnActive;
@@ -1244,6 +1246,63 @@ export class Workspace {
   }
 
   // MainAgentHost: what the main agent's tools can do.
+  private mainTurns = 0;
+
+  mainTurn(): number {
+    return this.mainTurns;
+  }
+
+  /** Runs read-only git / ls commands in a folder here or on its SSH host; output clipped for the main agent. */
+  private async peek(host: string | undefined, dir: string, commands: string[][]): Promise<string[]> {
+    if (host) {
+      const sep = '__AMW_PEEK__';
+      const script = commands.map((c) => `${c.map(shq).join(' ')} 2>/dev/null; printf '\\n${sep}\\n'`).join('; ');
+      const r = await sshRun(host, `cd ${shq(dir)} && { ${script}; }`, 20_000);
+      if (r.code !== 0 && !r.stdout) throw new Error(sshError(host, r.stderr));
+      return r.stdout.split(`\n${sep}\n`).map((x) => x.trim());
+    }
+    return Promise.all(commands.map(async ([cmd, ...args]) => (await run(cmd, args, { cwd: dir, timeoutMs: 15_000 })).stdout.trim()));
+  }
+
+  async projectOverview(projectId: string): Promise<string> {
+    const p = this.store.data.projects.find((x) => x.projectId === projectId);
+    if (!p) return 'Unknown project.';
+    const [files, branch, status, log, readme] = await this.peek(p.host, p.rootPath, [
+      ['ls', '-1Ap'],
+      ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+      ['git', 'status', '--porcelain'],
+      ['git', 'log', '-5', '--format=%h %s (%cr)'],
+      ['sh', '-c', 'for f in README.md readme.md README.rst README.txt README; do [ -f "$f" ] && head -c 1500 "$f" && break; done'],
+    ]).catch((e: Error) => [`Could not read the folder: ${e.message}`]);
+    const top = files.split('\n').filter(Boolean);
+    return [
+      `${p.name} — ${p.host ? `${p.host}:` : ''}${p.rootPath}`,
+      branch ? `branch ${branch}; ${status ? status.split('\n').length : 0} uncommitted file(s)` : 'not a git repository',
+      `top level (${top.length}): ${top.slice(0, 60).join('  ')}${top.length > 60 ? '  …' : ''}`,
+      ...(log ? [`recent commits:\n${log}`] : []),
+      ...(readme ? [`README (start):\n${clip(readme, 1500)}`] : []),
+    ].join('\n');
+  }
+
+  async agentChanges(taskId: string): Promise<string> {
+    const t = this.task(taskId);
+    const dir = t.worktree?.path ?? t.cwd;
+    const base = t.worktree?.baseRef ?? 'HEAD';
+    const [stat, status, log] = await this.peek(t.host, dir, [
+      ['git', 'diff', '--stat=100', base],
+      ['git', 'status', '--short'],
+      ['git', 'log', '--oneline', '-20', `${base}..HEAD`],
+    ]).catch((e: Error) => [`Could not read ${t.alias}'s folder: ${e.message}`]);
+    const untracked = status?.split('\n').filter((l) => l.startsWith('??')).map((l) => l.slice(3)) ?? [];
+    if (!stat && !untracked.length && !log) return `${t.alias} has not changed any files${t.worktree ? ` on ${t.worktree.branch}` : ''}.`;
+    return [
+      `${t.alias} in ${dir}${t.worktree ? ` (branch ${t.worktree.branch})` : ' (shared folder: changes may include others\u2019)'}`,
+      ...(stat ? [clip(stat, 2500)] : []),
+      ...(untracked.length ? [`new files: ${untracked.slice(0, 30).join(', ')}`] : []),
+      ...(log ? [`commits:\n${log}`] : []),
+    ].join('\n');
+  }
+
   listAgents() {
     const d = this.store.data;
     return d.tasks.map((t) => ({
@@ -1255,7 +1314,7 @@ export class Workspace {
   }
 
   listProjects() {
-    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name, rootPath: p.host ? `${p.host}:${p.rootPath} (over SSH, Codex only)` : p.rootPath }));
+    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name, rootPath: p.host ? `${p.host}:${p.rootPath} (over SSH)` : p.rootPath }));
   }
 
   findAgent(name: string): Task | undefined {

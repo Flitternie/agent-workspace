@@ -12,6 +12,7 @@ import type {
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
+import { privateFolders } from '../private-folders';
 import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteSessionStore, remoteSpawn, scanRemoteSessions } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
@@ -51,7 +52,8 @@ function toolResultText(content: unknown): string {
 
 /**
  * Main agent: the workspace tools as an in-process MCP server (they run in this
- * app), pre-approved; tools that change files or run commands are removed.
+ * app), pre-approved, and nothing else — no built-in tools (files, shell, web,
+ * sub-agents) and none of the user's own MCP servers. It coordinates; agents do the work.
  */
 function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: WorkspaceTool[]) {
   const server = sdk.createSdkMcpServer({
@@ -68,9 +70,11 @@ function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: Works
     ),
   });
   return {
+    tools: [],
     mcpServers: { workspace: server },
-    allowedTools: [...tools.map((t) => `mcp__workspace__${t.name}`), 'Read', 'Grep', 'Glob'],
-    disallowedTools: ['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Agent', 'Task', 'KillShell', 'BashOutput'],
+    strictMcpConfig: true,
+    allowedTools: tools.map((t) => `mcp__workspace__${t.name}`),
+    disallowedTools: ['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Agent', 'Task', 'KillShell', 'BashOutput', 'Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Skill'],
   };
 }
 
@@ -278,6 +282,7 @@ class ClaudeSession implements ProviderSession {
     }
     this.sessionId = resumeId ?? randomUUID();
     const env = childEnv();
+    const privateDeny = host ? [] : privateFolders(this.args.cwd);
     this.query = sdk.query({
       prompt: this.prompts(),
       options: {
@@ -293,6 +298,8 @@ class ClaudeSession implements ProviderSession {
         },
         // Load the user's own settings, CLAUDE.md and permission rules as the CLI would.
         settingSources: ['user', 'project', 'local'],
+        // Plus: no reading the private folders (Read rules also keep Grep and Glob out of them).
+        ...(privateDeny.length ? { settings: { permissions: { deny: privateDeny.map((dir) => `Read(/${dir}/**)`) } } } : {}),
         includePartialMessages: true,
         // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
         // will not approve, and everything in 'default', reaches canUseTool → the tile.
