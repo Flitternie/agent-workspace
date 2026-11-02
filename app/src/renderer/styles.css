@@ -1281,13 +1281,27 @@ pre code {
   flex: none;
   max-height: 45%;
   overflow: auto;
-  padding: 12px 24px 0;
+  padding: 8px 24px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
   max-width: 908px;
   margin: 0 auto;
+}
+/* In the agent's own conversation: its message is right above, so only the label and actions. */
+.attention.slim {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 6px 8px 6px 12px;
+}
+.attention.slim .attention-time {
+  display: none;
+}
+.attention.slim .attention-actions {
+  margin: 0;
 }
 .transcript {
   flex: 1;

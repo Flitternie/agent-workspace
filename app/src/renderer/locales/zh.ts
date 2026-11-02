@@ -409,6 +409,7 @@ export const zh: Record<string, string> = {
   'Send answer': '提交',
   Decline: '不回答',
   'Reply to {alias}': '回复{alias}',
+  'Reply in the box below': '在下方输入框回复',
   Dismiss: '忽略',
 
   // Approval options (labels set by the adapters)

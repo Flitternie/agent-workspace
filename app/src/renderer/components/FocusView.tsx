@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
@@ -114,15 +114,16 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
 
         <div className="focus-body">
           <div className="focus-thread">
+            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
+            <Transcript items={transcript} main={isMainAgent(task)} />
+            {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length ? (
               <div className="focus-attention" data-testid="focus-attention">
                 {items.map((i) => (
-                  <AttentionView key={i.id} item={i} task={task} now={now} />
+                  <AttentionView key={i.id} item={i} task={task} now={now} compact shown={i.kind !== 'approval' && saidLast(transcript, i)} />
                 ))}
               </div>
             ) : null}
-            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
-            <Transcript items={transcript} main={isMainAgent(task)} />
             {task.plan ? (
               <div className="pinned-plan">
                 <PlanChecklist plan={task.plan} />
@@ -166,6 +167,13 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
       {limit && open.length > limit ? <div className="muted small">{t('+{n} more', { n: open.length - limit })}</div> : null}
     </div>
   );
+}
+
+/** Whether the agent's latest message already says what this request says. */
+function saidLast(transcript: TranscriptItem[], a: AttentionItem): boolean {
+  const said = transcript.findLast((i) => i.role === 'assistant')?.text.replace(/\s+/g, ' ') ?? '';
+  const asked = (a.details || a.headline).replace(/\s+/g, ' ').trim();
+  return !!asked && said.includes(asked);
 }
 
 function TaskName({ task }: { task: Task }) {

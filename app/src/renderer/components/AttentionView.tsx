@@ -17,11 +17,14 @@ export function AttentionView({
   task,
   compact,
   onReply,
+  shown,
   now,
 }: {
   item: AttentionItem;
   task: Task;
   compact?: boolean;
+  /** The agent's message with this request is already on screen (its own conversation): don't repeat it. */
+  shown?: boolean;
   onReply?: () => void;
   now: number;
 }) {
@@ -48,7 +51,7 @@ export function AttentionView({
   const label = item.kind === 'approval' ? t('{name} asks permission', { name: PROVIDER_LABEL[task.provider] }) : t(KIND_LABEL[item.kind]);
   return (
     <div
-      className={`attention kind-${item.kind} state-${item.state}${item.highRisk ? ' high-risk' : ''}`}
+      className={`attention kind-${item.kind} state-${item.state}${item.highRisk ? ' high-risk' : ''}${shown ? ' slim' : ''}`}
       data-testid="attention-item"
       data-attention-kind={item.kind}
     >
@@ -60,14 +63,14 @@ export function AttentionView({
         </span>
         <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${t(item.state)} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
       </div>
-      <div className="attention-headline">{item.headline}</div>
+      {shown ? null : <div className="attention-headline">{item.headline}</div>}
       {item.preview?.length ? <ToolContentView content={item.preview} compact={compact && !expanded} /> : null}
-      {details ? (
+      {details && !shown ? (
         <div className={`attention-details${compact && !expanded ? ' clamp' : ''}`}>
           {item.kind === 'approval' ? <pre>{details}</pre> : <Markdown text={details} />}
         </div>
       ) : null}
-      {(details || item.preview?.length) && compact ? (
+      {((details && !shown) || item.preview?.length) && compact ? (
         <button className="link small" onClick={() => setExpanded(!expanded)}>
           {expanded ? t('Show less') : t('Show more')}
         </button>
@@ -166,6 +169,7 @@ export function AttentionView({
               {t('Reply to {alias}', { alias: task.alias })}
             </button>
           ) : null}
+          {shown && item.kind === 'question' ? <span className="hint">{t('Reply in the box below')}</span> : null}
           <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => call('attention:dismiss', { attentionId: item.id }))}>
             {t('Dismiss')}
           </button>
