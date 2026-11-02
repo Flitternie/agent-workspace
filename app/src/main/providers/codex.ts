@@ -6,6 +6,7 @@ import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapa
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
 import { z } from 'zod';
+import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
@@ -176,6 +177,37 @@ function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsR
   return { approvalPolicy: 'on-request', approvalsReviewer: mode === 'auto' ? 'auto_review' : 'user' };
 }
 
+/** Codex features the main agent does without (thread-level config overrides). */
+const MAIN_AGENT_CONFIG = {
+  features: {
+    shell_tool: false,
+    unified_exec: false,
+    apps: false,
+    plugins: false,
+    browser_use: false,
+    in_app_browser: false,
+    computer_use: false,
+    image_generation: false,
+    view_image: false,
+    skill_search: false,
+    multi_agent: false,
+  },
+  web_search: 'disabled',
+  mcp_servers: {},
+};
+
+/**
+ * Write access to the workspace, as `sandbox: 'workspace-write'`. On this Mac it is a
+ * permissions profile on top of `:workspace` that also keeps the private folders unreadable
+ * (an explicit `sandbox` would override the profile).
+ */
+function workspaceSandbox(cwd: string, host?: string): Record<string, unknown> {
+  const deny = host ? [] : privateFolders(cwd);
+  if (!deny.length) return { sandbox: 'workspace-write' };
+  const filesystem = Object.fromEntries(deny.map((dir) => [dir, 'deny']));
+  return { config: { default_permissions: 'amw', permissions: { amw: { extends: ':workspace', filesystem } } } };
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly provider = 'codex' as const;
   readonly remote = true;
@@ -312,10 +344,12 @@ class CodexSession implements ProviderSession {
     const resumeId = this.args.resumeNativeSessionId;
     // Always sandboxed to the workspace; never bypass. The mode decides who reviews escalations.
     const tools = this.args.tools ?? [];
-    // Main agent: read-only sandbox, never asks, plus the workspace tools (answered via item/tool/call).
+    // Main agent: the workspace tools (answered via item/tool/call) and as few of Codex's own
+    // as it allows: no shell, web, plugins, apps or browser; read-only sandbox, never asks.
+    // (Its built-in sub-agents cannot be turned off; the instructions forbid them.)
     const policy = tools.length
-      ? { approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) }
-      : { ...codexPolicy(this.args.permissionMode ?? 'auto'), sandbox: 'workspace-write' };
+      ? { approvalPolicy: 'never', sandbox: 'read-only', config: MAIN_AGENT_CONFIG, dynamicTools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) }
+      : { ...codexPolicy(this.args.permissionMode ?? 'auto'), ...workspaceSandbox(this.args.cwd, this.args.host) };
     const instructions = this.args.developerInstructions
       ? { developerInstructions: this.args.developerInstructions }
       : {};

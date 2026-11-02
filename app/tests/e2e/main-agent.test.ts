@@ -70,7 +70,7 @@ describe.runIf(enabled).each(['claude', 'codex'])('main agent on %s', (provider)
     await expect.poll(() => page.getByTestId('main-reply').innerText(), { timeout: 120_000 }).toMatch(/Bob|frontend|Button/i);
     await page.screenshot({ path: join(shots, `main-${provider}-01-delegated.png`) });
 
-    // Status question: answered from list_agents (Alice and Charlie are waiting on the user).
+    // Status question: answered from list_workspace_agents (Alice and Charlie are waiting on the user).
     await expect.poll(async () => (await snap(page)).main?.status, { timeout: 120_000 }).not.toBe('running');
     await say(page, 'Which agents are waiting for my answer right now? Reply with their names only.');
     await expect.poll(async () => (await transcriptOf(page, 'main')).filter((i) => i.role === 'assistant').at(-1)?.text ?? '', { timeout: 240_000 }).toMatch(/Alice[\s\S]*Charlie|Charlie[\s\S]*Alice/);
@@ -104,5 +104,58 @@ describe.runIf(enabled).each(['claude', 'codex'])('main agent on %s', (provider)
     await expect.poll(async () => (await transcriptOf(page, 'Alice')).some((i) => i.role === 'user' && i.via === 'main' && /compatib/i.test(i.text)), { timeout: 240_000 }).toBe(true);
     await page.getByTestId('main-agent-row').click();
     await page.screenshot({ path: join(shots, `main-${provider}-02-conversation.png`) });
+  }, 900_000);
+
+  it('coordinates only: hands off work and code questions, clarifies vague asks, answers general questions itself', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), `amw-main-bound-${provider}-`));
+    const page = await launch(dataDir, provider);
+    await expect.poll(async () => (await snap(page)).main?.provider, { timeout: 30_000 }).toBe(provider);
+    await expect.poll(async () => (await snap(page)).tasks.length).toBe(3);
+    const idle = () => expect.poll(async () => (await snap(page)).main?.status, { timeout: 240_000 }).not.toMatch(/running|starting/);
+    const mainItems = () => transcriptOf(page, 'main');
+    const lastReply = async () => (await mainItems()).filter((i) => i.role === 'assistant').at(-1)?.text ?? '';
+    /** Messages the main agent passed to agents, and agents it started. */
+    const handOffs = async () => {
+      const s = await snap(page);
+      let n = s.tasks.length - 3;
+      for (const t of s.tasks) n += (await transcriptOf(page, t.alias)).filter((i) => i.role === 'user' && i.via === 'main').length;
+      return n;
+    };
+    const dump = async () => console.log((await mainItems()).map((i) => `[${i.role}] ${(i.tool ? JSON.stringify(i.tool).slice(0, 160) : '') + ' ' + i.text}`.slice(0, 300)).join('\n'));
+    const WORKSPACE = /^(list_workspace_agents|read_agent|agent_changes|project_overview|list_projects|list_requests|send_to_agent|create_agent|stop_agent|answer_request|save_memory)$/;
+
+    // Work, even small: handed off, not done.
+    let before = await handOffs();
+    await say(page, 'Add a short CHANGELOG entry about moving the orders endpoints to v2.');
+    await expect.poll(handOffs, { timeout: 240_000 }).toBeGreaterThan(before).catch(async (e) => (await dump(), Promise.reject(e)));
+    await idle();
+
+    // A question about the code: handed off too, not looked up by the main agent.
+    before = await handOffs();
+    await say(page, 'What does src/orders.ts in the demo project export?');
+    await expect.poll(handOffs, { timeout: 240_000 }).toBeGreaterThan(before).catch(async (e) => (await dump(), Promise.reject(e)));
+    await idle();
+
+    // Vague: it asks before handing anything off.
+    before = await handOffs();
+    await say(page, 'I want the orders part to be better somehow, not sure what exactly.');
+    await idle();
+    expect(await lastReply()).toMatch(/[?？]/);
+    expect(await handOffs()).toBe(before);
+
+    // General knowledge: answered here, briefly, with no tools.
+    const toolsBefore = (await mainItems()).filter((i) => i.role === 'tool').length;
+    await say(page, 'In two sentences: what is the difference between PUT and PATCH?');
+    await idle();
+    expect(await lastReply()).toMatch(/PATCH/);
+    expect((await mainItems()).filter((i) => i.role === 'tool').length).toBe(toolsBefore);
+    expect(await handOffs()).toBe(before);
+
+    // Through all of it, only workspace tools: no files, shell, web or built-in sub-agents.
+    const used = (await mainItems()).filter((i) => i.role === 'tool').map((i) => ((i.tool as { title?: string })?.title ?? '').split(' / ').pop()!);
+    expect(used.filter((n) => !WORKSPACE.test(n))).toEqual([]);
+
+    await page.getByTestId('main-agent-row').click();
+    await page.screenshot({ path: join(shots, `main-${provider}-03-boundary.png`) });
   }, 900_000);
 });

@@ -87,7 +87,7 @@ export const ipcSchemas = {
   }),
   'memory:delete': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
-  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional() }),
+  'settings:update': z.object({ alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional() }),
   'capabilities:refresh': z.object({}),
   'models:list': z.object({}),
   'openai:setKey': z.object({ key: z.string().min(20).max(400).regex(/^\S+$/) }),

@@ -1,7 +1,9 @@
 // The main agent: a Claude Code or Codex session that talks with the user and runs
 // the workspace through these tools (Claude: in-process MCP server; Codex: app-server
-// dynamic tools). The tools run here, in the app; the main agent never edits code
-// itself and cannot answer another agent's permission requests — that stays with the user.
+// dynamic tools). They are its only tools: the CLIs' own (files, shell, web, sub-agents)
+// are turned off, so it cannot do the work itself and its conversation stays about
+// dispatching and monitoring. It cannot answer another agent's permission requests on
+// its own — that stays with the user.
 import { z } from 'zod';
 import type { AgentProvider, AttentionItem, Task } from '../shared/types';
 
@@ -25,6 +27,39 @@ export interface MainAgentHost {
   availableProviders(): AgentProvider[];
   listRequests(): Array<{ item: AttentionItem; agent: string }>;
   answerFromMain(attentionId: string, args: { choice?: string; answer?: string; userWords?: string }): Promise<string>;
+  /** Top-level files, README start, branch and recent commits of a project. */
+  projectOverview(projectId: string): Promise<string>;
+  /** Files an agent changed in its worktree (or folder) and its commits. */
+  agentChanges(taskId: string): Promise<string>;
+  /** Counts the user's messages to the main agent; tool-call limits are per message. */
+  mainTurn(): number;
+}
+
+/** Calls per user message: a backstop for a model stuck in a loop, not a working limit. */
+export const MAX_CALLS_PER_TURN = 30;
+const MAX_SAME_CALL = 3;
+
+/** Stops runaway loops: the same call over and over, or far too many in one turn. */
+function guard(host: MainAgentHost, tools: WorkspaceTool[]): WorkspaceTool[] {
+  let turn = -1;
+  let calls = 0;
+  const seen = new Map<string, number>();
+  return tools.map((t) => ({
+    ...t,
+    run: async (args) => {
+      if (host.mainTurn() !== turn) {
+        turn = host.mainTurn();
+        calls = 0;
+        seen.clear();
+      }
+      const key = `${t.name} ${JSON.stringify(args)}`;
+      const same = (seen.get(key) ?? 0) + 1;
+      seen.set(key, same);
+      if (++calls > MAX_CALLS_PER_TURN || same > MAX_SAME_CALL)
+        return 'Not run: you already have this information. Reply to the user now, or hand the work to an agent. Do not wait for agents by checking again; their updates come to you on their own.';
+      return t.run(args);
+    },
+  }));
 }
 
 const agentArg = z.string().describe('The agent’s name, e.g. "Alice" or "小王" (case-insensitive). A role like "Database" also works when it is unique.');
@@ -32,12 +67,12 @@ const agentArg = z.string().describe('The agent’s name, e.g. "Alice" or "小�
 export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
   const agent = (name: unknown): Task => {
     const t = host.findAgent(String(name ?? ''));
-    if (!t) throw new Error(`No agent named "${String(name)}". Call list_agents to see the names.`);
+    if (!t) throw new Error(`No agent named "${String(name)}". Call list_workspace_agents to see the names.`);
     return t;
   };
-  return [
+  return guard(host, [
     {
-      name: 'list_agents',
+      name: 'list_workspace_agents',
       description:
         'List every coding agent in the workspace: name, role, provider, project, status (running / waiting_for_user / done / idle…), its latest report, and what it is waiting on from the user.',
       schema: z.object({}),
@@ -168,20 +203,45 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         return 'Saved.';
       },
     },
-  ];
+    {
+      name: 'project_overview',
+      description:
+        'A quick look at one project, to decide where work belongs and to word instructions: its top-level files, the start of its README, the current branch, uncommitted changes and recent commits. Not for reading code; agents do that.',
+      schema: z.object({ project: z.string().describe('Project id or name from list_projects.') }),
+      run: async (a) => {
+        const want = String(a.project).toLowerCase();
+        const p = host.listProjects().find((x) => x.projectId.toLowerCase() === want || x.name.toLowerCase() === want);
+        if (!p) return `Unknown project "${String(a.project)}". Call list_projects.`;
+        return host.projectOverview(p.projectId);
+      },
+    },
+    {
+      name: 'agent_changes',
+      description: 'What one agent has changed so far: files touched (with lines added/removed) and its commits. For reporting progress; to know more, ask the agent.',
+      schema: z.object({ agent: agentArg }),
+      run: async (a) => host.agentChanges(agent(a.agent).taskId),
+    },
+  ]);
 }
 
-export const MAIN_AGENT_PROMPT = `You are the main agent of Agent Workspace: the user's single point of contact for a team of coding agents (Claude Code and Codex sessions), each working on its own task.
+export const MAIN_AGENT_PROMPT = `You are the main agent of Agent Workspace: the user's single point of contact for a team of coding agents (Claude Code and Codex sessions), each working on its own task. You are the front desk, not a worker: you take requests, make them clear, hand them to agents, keep track of the agents and report back. The agents do the work, in their own conversations.
 
-How to work:
-- The user talks to you by voice or text, often briefly. Figure out what they want and get it done through your tools: list_agents and read_agent to see what is going on, send_to_agent to pass on instructions, create_agent for new work, stop_agent to halt one, save_memory for conventions.
-- Do not write or edit code yourself and do not run project commands; delegate to the agent working on that task. You may read files to understand a question.
-- When you forward an instruction, send it to the agent that owns that work, worded as a clear instruction. Say briefly what you did ("Sent to Charlie: …").
-- When the user asks about status, call list_agents and answer in a few lines.
-- If it is unclear which agent the user means, ask a short question instead of guessing.
-- When agents wait on the user (call list_requests; the user may also just say "what do they need?"), tell the user plainly what each one asks and the choices, so they can decide here without opening the agent.
-- Pass on the user's decisions with answer_request. For a permission request, only pass on approval the user has just given in their own words, and quote those words; never approve on your own judgment. If unsure, ask the user.
-- Reply in the user's language, concisely.`;
+Your conversation with the user should stay short and quick to read. Each of your turns ends fast, in one of three ways: an answer, a question, or a hand-off.
+
+What you do yourself:
+- Status: "how is it going", "what is Alice doing", "what do they need from me". list_workspace_agents usually answers it in one call; use read_agent or agent_changes only for the agent asked about. Answer in a few lines.
+- Clarify: when the user is not sure yet what they want, help them work it out. Ask one or two short questions at a time (what outcome, which project, constraints, what "done" looks like). When it is clear enough, sum it up in a sentence or two and say which agent you will give it to; once the user agrees (or it was clear from the start), hand it off.
+- Relay: pass instructions, answers and decisions to agents. For a permission request, only pass on approval the user has just given in their own words, and quote those words; never approve on your own judgment.
+- Answer general questions briefly from what you already know, and questions about this app. Save conventions the user wants remembered with save_memory.
+
+What you always hand off, however small: anything that needs reading or changing the project's code or files, running commands or tests, looking things up, or several steps of work. Questions about the code ("what does this function do", "why does the build fail") go to an agent too.
+- Send it to the agent already working on that area (send_to_agent). If none fits, start one with create_agent, with a short role and a first instruction that says what to do and what done looks like. If you do not know which project, or which agent, ask.
+- Then tell the user in one line what went where ("Sent to Charlie: …" / "Started Dana on api: …"). Do not wait for the result or check on it again: the agent's progress, questions and completion come to you and to the user on their own.
+- With no projects yet, tell the user to add a project folder first (New task).
+
+You have only the workspace tools; you cannot read files, run commands or browse. Never use built-in sub-agent or collaboration tools (spawn_agent, followup_task, send_message, wait_agent and the like) even if you see them: those helpers are invisible to the user. Every agent is started with create_agent and reached with send_to_agent. project_overview gives a quick look at a project to decide where work belongs; it is not for doing the work.
+
+Reply in the user's language, concisely.`;
 
 /** Main-agent provider to use: the setting, else the first installed and signed-in CLI. */
 export function pickMainProvider(setting: 'claude' | 'codex' | 'off' | undefined, ready: (p: 'claude' | 'codex') => boolean): 'claude' | 'codex' | undefined {

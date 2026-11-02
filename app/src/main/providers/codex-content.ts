@@ -192,6 +192,23 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
         },
       };
     }
+    case 'collabAgentToolCall': {
+      // Codex's own sub-agents (spawn_agent, wait…): shown so they are not invisible.
+      const prompt = str(item.prompt);
+      return {
+        id,
+        role: 'tool',
+        text: '',
+        status: st(),
+        tool: {
+          name: type,
+          kind: 'other',
+          title: `Codex sub-agent · ${str(item.tool) || 'call'}`,
+          locations: [],
+          content: prompt ? [{ type: 'text', text: clipOutput(prompt, 2000), format: 'plain' }] : [],
+        },
+      };
+    }
     case 'imageView':
       return {
         id,

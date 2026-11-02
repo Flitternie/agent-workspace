@@ -1,5 +1,6 @@
 /**
- * Always-on microphone with on-device voice activity detection (meeting-style).
+ * Microphone with on-device voice activity detection: always on (meeting-style),
+ * or open only while push to talk is pressed.
  *
  * Audio is analysed locally frame by frame; only segments that contain speech
  * are encoded (16-bit mono WAV) and handed to `onUtterance`. Silence and
@@ -65,7 +66,9 @@ export class ContinuousListener {
     this.reset();
   }
 
-  stop(): void {
+  /** `flush`: speech still in progress is finished as an utterance (push to talk released mid-word). */
+  stop(flush = false): void {
+    if (flush && this.segment) this.finish(this.segment, 0);
     this.node?.disconnect();
     this.source?.disconnect();
     if (this.node) this.node.onaudioprocess = null;
@@ -121,21 +124,25 @@ export class ContinuousListener {
     } else this.silentFrames++;
 
     const total = this.segment.length * frameMs;
-    if (this.silentFrames * frameMs >= END_SILENCE_MS || total >= MAX_UTTERANCE_MS) {
-      const voicedMs = this.voicedFrames * frameMs;
-      // Keep ~250 ms of the trailing pause; drop the rest.
-      const keep = this.segment.length - Math.max(0, this.silentFrames - Math.ceil(250 / frameMs));
-      const frames = this.segment.slice(0, keep);
-      this.segment = null;
-      this.loudRun = 0;
-      this.silentFrames = 0;
-      this.voicedFrames = 0;
-      if (voicedMs < MIN_VOICED_MS) {
-        this.h.onDiscard?.();
-        return;
-      }
-      this.h.onUtterance(encodeWav(frames, rate), frames.length * frameMs);
+    if (this.silentFrames * frameMs >= END_SILENCE_MS || total >= MAX_UTTERANCE_MS) this.finish(this.segment, frameMs);
+  }
+
+  private finish(segment: Float32Array[], frameMs: number): void {
+    const rate = this.ctx?.sampleRate ?? 16_000;
+    frameMs ||= ((segment[0]?.length ?? FRAME) / rate) * 1000;
+    const voicedMs = this.voicedFrames * frameMs;
+    // Keep ~250 ms of the trailing pause; drop the rest.
+    const keep = segment.length - Math.max(0, this.silentFrames - Math.ceil(250 / frameMs));
+    const frames = segment.slice(0, keep);
+    this.segment = null;
+    this.loudRun = 0;
+    this.silentFrames = 0;
+    this.voicedFrames = 0;
+    if (voicedMs < MIN_VOICED_MS) {
+      this.h.onDiscard?.();
+      return;
     }
+    this.h.onUtterance(encodeWav(frames, rate), frames.length * frameMs);
   }
 }
 

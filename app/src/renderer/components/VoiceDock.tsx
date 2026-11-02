@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { AgentProvider, RouteDecision, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { Markdown } from './Markdown';
+import { groupTranscript, mainActions } from './Content';
 import { WaitingOnYou } from './FocusView';
 import { call, errorText } from '../api';
 import { timeAgo, useTick } from '../state';
 import { holdMs, joinSpeech, stopIntent } from '../voice/compose';
 import { ContinuousListener, isLikelyNoise } from '../voice/listener';
+import { defaultShortcut, matches, PressGesture, recording, released, shortcutLabel, type PressAction } from '../voice/shortcut';
 import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, systemText } from './bits';
 import { t as tr } from '../i18n';
 
@@ -43,6 +45,8 @@ interface Draft {
   stopChecked?: boolean;
   /** The agent halted by that stop word; the rest of the message goes to it. */
   stoppedTaskId?: string;
+  /** The mic was closed (muted, or push to talk let go): send as soon as it is transcribed. */
+  closed?: boolean;
 }
 
 const DEFAULT_PAUSE_MS = 2500;
@@ -50,8 +54,9 @@ const DEFAULT_PAUSE_MS = 2500;
 let nextId = 1;
 
 /**
- * Meeting-style control bar. The microphone is open from launch (like joining a
- * call) until the user mutes it. Each spoken utterance is transcribed, routed and
+ * Meeting-style control bar. By default the microphone is open from launch (like
+ * joining a call) until the user mutes it; with push to talk (Settings › Voice) it
+ * opens only while the shortcut is held, or between two presses. Each spoken utterance is transcribed, routed and
  * listed as a live caption; routing uses the focused task as context only and
  * never changes what the user is looking at.
  */
@@ -89,6 +94,17 @@ export function VoiceDock({
   // The main agent counts as an agent here (names, captions), though it is not one of `tasks`.
   const taskById = (id?: string) => tasks.find((t) => t.taskId === id) ?? (snapshot.main?.taskId === id ? snapshot.main : undefined);
   const stt = snapshot.voice.sttAvailable;
+  const mode = snapshot.settings.micMode ?? 'open';
+  // The listener keeps the callbacks it was made with, so they read the mode from here.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const shortcut = snapshot.settings.micShortcut ?? defaultShortcut();
+  const keys = shortcutLabel(shortcut);
+  /** The mic is on or turning on (it can be let go before it is ready). */
+  const wantMic = useRef(false);
+  /** Push to talk is being held right now (for the label). */
+  const [holding, setHolding] = useState(false);
+  const [hint, setHint] = useState('');
 
   const patch = useCallback((id: number, p: Partial<Entry>) => setEntries((list) => list.map((e) => (e.id === id ? { ...e, ...p } : e))), []);
 
@@ -251,6 +267,16 @@ export function VoiceDock({
       setEntries((list) => list.filter((x) => x.id !== d.id));
       return;
     }
+    // Muted, or push to talk let go: that was the whole message.
+    if (d.closed) {
+      commitDraft();
+      return;
+    }
+    // Push to talk: everything said until the mic closes is one message.
+    if (modeRef.current !== 'open' && wantMic.current) {
+      patch(d.id, { text: said, phase: 'listening', holdUntil: undefined });
+      return;
+    }
     const head = said.trim().toLowerCase();
     const addressed = snapRef.current.tasks.some((t) => head.startsWith(t.alias.toLowerCase()) || head.startsWith(displayName(t).toLowerCase()));
     const wait = holdMs(said, snapRef.current.settings.voicePauseMs ?? DEFAULT_PAUSE_MS, addressed);
@@ -306,10 +332,13 @@ export function VoiceDock({
 
   const startMic = useCallback(async () => {
     if (!stt) return;
+    wantMic.current = true;
     setMic('starting');
     try {
       const granted = await call('voice:ensureMic', {});
+      if (!wantMic.current) return;
       if (!granted) {
+        wantMic.current = false;
         setMic('denied');
         return;
       }
@@ -326,45 +355,88 @@ export function VoiceDock({
         });
       listener.current = l;
       await l.start();
+      // Let go while the microphone was still opening.
+      if (!wantMic.current) {
+        l.stop();
+        return;
+      }
       setMic('listening');
     } catch {
+      wantMic.current = false;
       setMic('denied');
     }
   }, [onSpeechStart, onSilence, onUtterance, stt]);
 
+  /** Muting, or letting go of push to talk, means "I'm done talking": what was said is sent once transcribed. */
   const stopMic = useCallback(() => {
-    listener.current?.stop();
+    wantMic.current = false;
+    // Speech still in progress is kept, not cut off.
+    listener.current?.stop(true);
     speaking.current = false;
-    // Muting means "I'm done talking": send what was said once it is transcribed.
-    scheduleCommit();
-    if (draft.current && !draft.current.parts.some((p) => p === null)) commitDraft();
     setMic('off');
     setLevel(0);
-  }, [commitDraft, scheduleCommit]);
+    if (draft.current) {
+      draft.current.closed = true;
+      scheduleCommit();
+    }
+  }, [scheduleCommit]);
 
   const live = mic === 'listening' || mic === 'speaking';
-  const toggleMic = useCallback(() => (live || mic === 'starting' ? stopMic() : void startMic()), [live, mic, startMic, stopMic]);
+  const toggleMic = useCallback(() => (wantMic.current ? stopMic() : void startMic()), [startMic, stopMic]);
 
-  // Join the "meeting" with the mic open, like a call.
+  // Join the "meeting" with the mic open, like a call (not with push to talk).
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || !snapshot.voice.autoListen) return;
+    if (autoStarted.current || !snapshot.voice.autoListen || mode !== 'open') return;
     autoStarted.current = true;
     void startMic();
-  }, [snapshot.voice.autoListen, startMic]);
+  }, [mode, snapshot.voice.autoListen, startMic]);
   useEffect(() => () => listener.current?.stop(), []);
 
-  // ⌘⇧A toggles mute (as in Zoom).
+  // The microphone shortcut: mute / unmute, or push to talk (see voice/shortcut.ts).
+  const gesture = useRef(new PressGesture());
+  const flash = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        toggleMic();
+    const act = (a: PressAction) => {
+      if (a === 'start') void startMic();
+      else if (a === 'stop') stopMic();
+      else if (a === 'cancel') {
+        stopMic();
+        clearTimeout(flash.current);
+        setHint(tr('Hold {keys} while you talk', { keys: shortcutLabel(shortcut) }));
+        flash.current = setTimeout(() => setHint(''), 2500);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [toggleMic]);
+    const up = () => {
+      setHolding(false);
+      act(gesture.current.up(mode));
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (recording.active || !stt || !matches(shortcut, e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      const a = gesture.current.down(mode, wantMic.current);
+      setHolding(a === 'start' && (mode === 'hold' || mode === 'both'));
+      act(a);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (!gesture.current.pressed || !released(shortcut, e)) return;
+      e.preventDefault();
+      up();
+    };
+    // Keys let go in another app never reach us.
+    const onBlur = () => gesture.current.pressed && up();
+    window.addEventListener('keydown', onDown, true);
+    window.addEventListener('keyup', onUp, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown, true);
+      window.removeEventListener('keyup', onUp, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [mode, shortcut, startMic, stopMic, stt]);
+  useEffect(() => () => gesture.current.reset(), [mode, shortcut]);
 
   const submitTyped = (interrupt = false) => {
     const u = text.trim();
@@ -415,18 +487,34 @@ export function VoiceDock({
     </div>
   );
 
-  const micLabel =
-    mic === 'speaking'
+  const micLabel = hint
+    ? hint
+    : mic === 'speaking'
       ? tr('Hearing you…')
       : mic === 'listening'
-        ? tr('Listening — just say “Alice, …”')
+        ? mode === 'open'
+          ? tr('Listening — just say “Alice, …”')
+          : holding
+            ? tr('Listening — let go to send')
+            : tr('Listening — press {keys} again to send', { keys })
         : mic === 'starting'
           ? tr('Turning on the microphone…')
           : mic === 'denied'
             ? tr('Microphone blocked — allow it in System Settings › Privacy › Microphone')
-            : stt
-              ? tr('Muted')
-              : tr('Voice off — choose a speech model in Settings; typing still works');
+            : !stt
+              ? tr('Voice off — choose a speech model in Settings; typing still works')
+              : mode === 'hold'
+                ? tr('Hold {keys} to talk', { keys })
+                : mode === 'toggle'
+                  ? tr('Press {keys} to talk', { keys })
+                  : mode === 'both'
+                    ? tr('Press or hold {keys} to talk', { keys })
+                    : tr('Muted');
+  const micTitle = !stt
+    ? tr('Speech-to-text is not configured')
+    : mode === 'open'
+      ? `${live ? tr('Mute') : tr('Unmute')} (${keys})`
+      : `${live ? tr('Send') : tr('Talk')} (${keys})`;
 
   return (
     <div className="dock" data-testid="voice-dock">
@@ -447,13 +535,15 @@ export function VoiceDock({
               </button>
             </span>
           </div>
-          {mainTranscript
-            .filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'Read' && i.tool?.name !== 'ToolSearch'))
+          {groupTranscript(
+            mainTranscript.filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'ToolSearch')),
+            true,
+          )
             .slice(-6)
             .map((i) =>
-              i.role === 'tool' ? (
-                <div key={i.id} className="main-step">
-                  <Icon name="tool" size={11} /> {i.tool?.title ?? i.toolLabel}
+              Array.isArray(i) ? (
+                <div key={i[0].id} className="main-step">
+                  <Icon name="tool" size={11} /> {mainActions(i)}
                 </div>
               ) : (
                 <div key={i.id} className={`main-msg ${i.role}`}>
@@ -557,8 +647,8 @@ export function VoiceDock({
           disabled={!stt}
           onClick={toggleMic}
           aria-pressed={live}
-          aria-label={live ? tr('Mute microphone') : tr('Unmute microphone')}
-          title={stt ? `${live ? tr('Mute') : tr('Unmute')} (⌘⇧A)` : tr('Speech-to-text is not configured')}
+          aria-label={mode !== 'open' ? (live ? tr('Send') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
+          title={micTitle}
           data-testid="mic-button"
           style={{ ['--level' as string]: live ? level.toFixed(2) : '0' }}
         >

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
@@ -114,15 +114,16 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
 
         <div className="focus-body">
           <div className="focus-thread">
+            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
+            <Transcript items={transcript} main={isMainAgent(task)} />
+            {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length ? (
               <div className="focus-attention" data-testid="focus-attention">
                 {items.map((i) => (
-                  <AttentionView key={i.id} item={i} task={task} now={now} />
+                  <AttentionView key={i.id} item={i} task={task} now={now} compact shown={i.kind !== 'approval' && saidLast(transcript, i)} />
                 ))}
               </div>
             ) : null}
-            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
-            <Transcript items={transcript} />
             {task.plan ? (
               <div className="pinned-plan">
                 <PlanChecklist plan={task.plan} />
@@ -168,6 +169,13 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
   );
 }
 
+/** Whether the agent's latest message already says what this request says. */
+function saidLast(transcript: TranscriptItem[], a: AttentionItem): boolean {
+  const said = transcript.findLast((i) => i.role === 'assistant')?.text.replace(/\s+/g, ' ') ?? '';
+  const asked = (a.details || a.headline).replace(/\s+/g, ' ').trim();
+  return !!asked && said.includes(asked);
+}
+
 function TaskName({ task }: { task: Task }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(task.name);
@@ -196,7 +204,7 @@ function TaskName({ task }: { task: Task }) {
   );
 }
 
-function Transcript({ items }: { items: TranscriptItem[] }) {
+function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {
@@ -215,8 +223,8 @@ function Transcript({ items }: { items: TranscriptItem[] }) {
     >
       <div className="transcript-inner">
         {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
-        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch')).map((entry) => {
-          if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} />;
+        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch'), main).map((entry) => {
+          if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} main={main} />;
           const item = entry;
           if (item.role === 'tool') return <ToolCallRow key={item.id} item={item} />;
           if (item.role === 'thought')

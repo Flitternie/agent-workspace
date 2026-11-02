@@ -1,6 +1,7 @@
 import type { WorkspaceSnapshot } from '../../shared/types';
 import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, STATUS_LABEL } from './bits';
 import { t as tr } from '../i18n';
+import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 
 /**
  * Always-visible participant list. In Focus it doubles as the rail that keeps
@@ -25,6 +26,7 @@ export function Sidebar({
   onSettings: () => void;
   settingsOpen?: boolean;
 }) {
+  const micMode = snapshot.settings.micMode ?? 'open';
   const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion');
   const needYou = new Set(open.map((a) => a.taskId)).size;
   return (
@@ -119,7 +121,8 @@ export function Sidebar({
         </button>
         <div className="tips">
           <div>
-            <Kbd>⌘⇧A</Kbd> {tr('mute / unmute')}
+            <Kbd>{shortcutLabel(snapshot.settings.micShortcut ?? defaultShortcut())}</Kbd>{' '}
+            {tr(micMode === 'open' ? 'mute / unmute' : micMode === 'hold' ? 'hold to talk' : 'talk / send')}
           </div>
           <div>
             <Kbd>⌘1–9</Kbd> {tr('focus agent')} · <Kbd>Esc</Kbd> {tr('overview')}

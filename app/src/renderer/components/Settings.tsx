@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { Language, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
+import type { Language, MicMode, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
-import { Icon, PROVIDER_LABEL, shortVersion } from './bits';
+import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } from '../voice/shortcut';
+import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
 
 const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
@@ -509,6 +510,64 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   );
 }
 
+const MIC_MODES: Array<{ id: MicMode; label: string; detail: string }> = [
+  { id: 'open', label: 'Always on', detail: 'The microphone stays on, like a call; a short pause sends what you said. The shortcut mutes and unmutes.' },
+  { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to start talking and press it again to send. The microphone is off the rest of the time.' },
+  { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; letting go sends. The microphone is off the rest of the time.' },
+  { id: 'both', label: 'Tap or hold', detail: 'Tap the shortcut to start and tap again to send, or hold it while you talk and let go to send.' },
+];
+
+/** Shows the microphone shortcut; click it and press new keys to change it. */
+function ShortcutField({ value, onChange }: { value: string; onChange: (shortcut: string) => void }) {
+  const [capturing, setCapturing] = useState(false);
+  const [held, setHeld] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const stop = () => {
+    recording.active = false;
+    setCapturing(false);
+    setHeld([]);
+  };
+  useEffect(() => () => void (recording.active = false), []);
+  const modifiers = (e: React.KeyboardEvent) => shortcutKeys(`${MODIFIERS.filter((m) => ({ Meta: e.metaKey, Control: e.ctrlKey, Alt: e.altKey, Shift: e.shiftKey })[m]).join('+')}+`).filter(Boolean);
+  return (
+    <span className="shortcut-field">
+      {error ? <span className="error-text small">{t(error)}</span> : capturing ? <span className="muted small">{t('Esc to cancel')}</span> : null}
+      {!capturing && value !== defaultShortcut() ? (
+        <button className="link small" onClick={() => onChange(defaultShortcut())}>
+          {t('Reset')}
+        </button>
+      ) : null}
+      <button
+        className={`shortcut-btn${capturing ? ' capturing' : ''}`}
+        data-testid="mic-shortcut"
+        title={t('Click, then press the new keys')}
+        onClick={() => {
+          recording.active = true;
+          setCapturing(true);
+          setError('');
+        }}
+        onBlur={stop}
+        onKeyDown={(e) => {
+          if (!capturing) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.repeat) return;
+          if (e.key === 'Escape') return stop();
+          if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return setHeld(modifiers(e));
+          const r = shortcutFrom(e.nativeEvent);
+          if (!r.shortcut) return setError(r.error ?? '');
+          setError('');
+          onChange(r.shortcut);
+          stop();
+        }}
+        onKeyUp={(e) => capturing && setHeld(modifiers(e))}
+      >
+        {capturing ? (held.length ? held.map((k) => <Kbd key={k}>{k}</Kbd>) : t('Press keys…')) : shortcutKeys(value).map((k) => <Kbd key={k}>{k}</Kbd>)}
+      </button>
+    </span>
+  );
+}
+
 const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
@@ -516,7 +575,7 @@ const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
-  { id: 'voice', title: 'Voice', keywords: ['Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
+  { id: 'voice', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'data', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
 ];
 
@@ -546,6 +605,7 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const s = snapshot.settings;
+  const micMode = s.micMode ?? 'open';
   const update = (patch: Parameters<typeof call<'settings:update'>>[1]) => void call('settings:update', patch).catch((e) => setError(errorText(e)));
   const recheck = async () => {
     setChecking(true);
@@ -679,14 +739,35 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
           </div>
           {!snapshot.voice.sttAvailable ? <div className="small">{t('Pick a model below: download one to run on this Mac, or add an OpenAI key. Typing works either way.')}</div> : null}
         </div>
-        <ModelPickers snapshot={snapshot} onChange={update} />
-        <label className="check">
-          <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
+        <div className="settings-field">
+          <strong>{t('Microphone')}</strong>
+          <div className="segmented" role="radiogroup" aria-label={t('Microphone')}>
+            {MIC_MODES.map((m) => (
+              <button key={m.id} role="radio" aria-checked={micMode === m.id} className={micMode === m.id ? 'on' : ''} onClick={() => update({ micMode: m.id })} data-testid={`mic-mode-${m.id}`}>
+                {t(m.label)}
+              </button>
+            ))}
+          </div>
+          <div className="muted small">{t(MIC_MODES.find((m) => m.id === micMode)!.detail)}</div>
+        </div>
+        <div className="settings-inline">
           <span>
-            {t('Open the microphone when the app starts')}
-            <span className="muted small"> — {t('like joining a call; macOS asks for microphone access the first time')}</span>
+            {t('Shortcut')}
+            <span className="muted small"> — {t('works while this app is in front')}</span>
           </span>
-        </label>
+          <ShortcutField value={s.micShortcut ?? defaultShortcut()} onChange={(micShortcut) => update({ micShortcut })} />
+        </div>
+        <ModelPickers snapshot={snapshot} onChange={update} />
+        {micMode === 'open' ? (
+          <label className="check">
+            <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
+            <span>
+              {t('Open the microphone when the app starts')}
+              <span className="muted small"> — {t('like joining a call; macOS asks for microphone access the first time')}</span>
+            </span>
+          </label>
+        ) : null}
+        {micMode === 'open' ? (
         <div className="settings-inline">
           <span>
             {t('Send after a pause of')}
@@ -703,6 +784,7 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             })}
           </div>
         </div>
+        ) : null}
         <label className="check">
           <input type="checkbox" checked={s.alwaysConfirmVoice} onChange={(e) => update({ alwaysConfirmVoice: e.target.checked })} />
           <span>
