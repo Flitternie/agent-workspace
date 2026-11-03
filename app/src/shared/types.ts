@@ -4,7 +4,7 @@ import type { PermissionKind, PlanInfo, ToolCallInfo, ToolContent } from './cont
 
 export type { DiffHunk, FileDiff, PermissionKind, PlanEntry, PlanInfo, ToolCallInfo, ToolContent, ToolKind } from './content';
 
-export type AgentProvider = 'claude' | 'codex' | 'mock';
+export type AgentProvider = 'claude' | 'codex' | 'opencode' | 'mock';
 export type AgentStatus =
   | 'idle'
   | 'starting'
@@ -193,7 +193,7 @@ export type RouteDecision =
       kind: 'create';
       proposedTitle: string;
       projectId?: string;
-      provider?: 'claude' | 'codex';
+      provider?: 'claude' | 'codex' | 'opencode';
       reason: string;
     }
   | { kind: 'coordinator'; reason: string }
@@ -267,9 +267,9 @@ export interface LocalModelState {
 }
 
 /**
- * How much an agent may do without asking. Never a bypass:
- * - auto: the provider's own reviewer decides (Claude Code auto mode, Codex auto_review);
- *   only what it will not approve comes to the user.
+ * How much an agent may do without asking. Deny rules remain enforced:
+ * - auto: Claude Code/Codex use their own reviewer; OpenCode uses native auto
+ *   approval (all non-denied permission requests, without risk review).
  * - edits: file edits in the workspace are fine; commands and anything else ask.
  * - ask: every action that changes something asks.
  */

@@ -8,6 +8,7 @@ import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
+import { OpenCodeAdapter } from './providers/opencode';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
@@ -42,6 +43,7 @@ const workspace = new Workspace({
   adapters: {
     claude: new ClaudeAdapter(),
     codex: new CodexAdapter(),
+    opencode: new OpenCodeAdapter(),
     mock: new MockAdapter(join(dataDir, 'mock-sessions')),
   },
   openai,

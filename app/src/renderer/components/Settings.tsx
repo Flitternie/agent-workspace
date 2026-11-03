@@ -10,7 +10,7 @@ const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'zh', label: '中文' },
 ];
 
-const SIGN_IN: Record<string, string> = { claude: 'claude  →  /login', codex: 'codex login' };
+const SIGN_IN: Record<string, string> = { claude: 'claude  →  /login', codex: 'codex login', opencode: 'opencode auth login' };
 
 type Readiness = 'ready' | 'signed_out' | 'missing' | 'checking';
 
@@ -43,7 +43,7 @@ export const PERMISSION_MODES: Array<{ id: PermissionMode; label: string; detail
   {
     id: 'auto',
     label: 'Decide automatically',
-    detail: 'Like auto mode in Claude Code: the agent’s own reviewer approves routine actions and only asks you about risky ones (Codex: auto-review of sandbox escalations).',
+    detail: 'Claude Code and Codex review actions automatically. OpenCode approves permission requests unless a deny rule blocks them; it does not perform risk review.',
   },
   { id: 'edits', label: 'Allow file edits', detail: 'Edits inside the workspace go ahead; commands and anything else ask you first.' },
   { id: 'ask', label: 'Ask every time', detail: 'Every action that changes something waits for your approval.' },
@@ -666,10 +666,10 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
       >
         <p className="muted small">
           {t(
-            'Agents run through the Claude Code and Codex already installed on this Mac and use the account you are signed in with there. No extra authorization or API key is needed, and this app never reads or stores those credentials.',
+            'Agents use your installed Claude Code, Codex or OpenCode CLI and its configured login or model. This app never reads or stores those credentials.',
           )}
         </p>
-        {(['claude', 'codex'] as const).map((p) => {
+        {(['claude', 'codex', 'opencode'] as const).map((p) => {
           const c = snapshot.capabilities.find((x) => x.provider === p);
           const state = readiness(c);
           return (
@@ -685,6 +685,7 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
                 </div>
               ) : null}
               {state === 'missing' ? <div className="small">{t('Install the {name} CLI so it is on your PATH, then click Recheck.', { name: PROVIDER_LABEL[p] })}</div> : null}
+              {p === 'opencode' ? <div className="small muted">{t('OpenCode uses its configured model. Set it up in opencode or opencode auth login. Automatic mode approves permission requests, including commands, unless denied. Questions still need your answer.')}</div> : null}
             </div>
           );
         })}
@@ -723,7 +724,7 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
       </Section>
 
       <Section id="permissions" query={query}>
-        <p className="muted small">{t('Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.')}</p>
+        <p className="muted small">{t('Default for new agents. Change an existing agent’s mode on its own page. Deny rules still apply.')}</p>
         <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
       </Section>
 

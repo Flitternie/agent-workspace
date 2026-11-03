@@ -816,7 +816,7 @@ function RoutePreview({
           </div>
           <div className="route-actions">
             <select className="input select" value={newProvider} onChange={(e) => setNewProvider(e.target.value as AgentProvider)}>
-              {(snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const)).map((p) => (
+              {(snapshot.demo ? (['claude', 'codex', 'opencode', 'mock'] as const) : (['claude', 'codex', 'opencode'] as const)).map((p) => (
                 <option key={p} value={p} disabled={!snapshot.capabilities.find((c) => c.provider === p)?.available}>
                   {PROVIDER_LABEL[p]}
                 </option>

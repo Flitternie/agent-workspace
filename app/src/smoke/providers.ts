@@ -1,12 +1,13 @@
 // Real-CLI smoke test for native adapters. Uses the user's installed Claude Code /
-// Codex and their existing login; makes a few tiny model calls in a throwaway repo.
-//   node out/smoke/providers.cjs [claude|codex|all]
+// Codex / OpenCode and their existing login; makes tiny model calls in a throwaway repo.
+//   node out/smoke/providers.cjs [claude|codex|opencode|all]
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClaudeAdapter } from '../main/providers/claude';
 import { CodexAdapter } from '../main/providers/codex';
+import { OpenCodeAdapter } from '../main/providers/opencode';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from '../main/providers/types';
 
 const which = process.argv[2] ?? 'all';
@@ -65,6 +66,7 @@ async function scenario(adapter: ProviderAdapter): Promise<void> {
   console.log('   final:', t1.finalText);
 
   console.log('2) approval request is surfaced and a denial is honoured');
+  if (adapter.provider === 'opencode') await session.setPermissionMode?.('edits');
   // Network + a write outside the workspace root need approval under both providers' default policies.
   const outside = join(cwd, '..', `outside-${Date.now()}.html`);
   await session.send(
@@ -73,7 +75,7 @@ async function scenario(adapter: ProviderAdapter): Promise<void> {
   const ask = await Promise.race([rec.wait('approvalRequested'), rec.wait('turnCompleted').then(() => null)]);
   if (ask) {
     console.log('   approval:', ask.headline, ask.options.map((o) => o.id));
-    await session.respond(ask.requestId, { decision: ask.options.find((o) => /deny|decline/.test(o.id))?.id ?? 'deny' });
+    await session.respond(ask.requestId, { decision: ask.options.find((o) => o.kind === 'reject_once')?.id ?? 'deny' });
     const t2 = await rec.wait('turnCompleted');
     console.log('   after deny final:', t2.finalText?.slice(0, 200));
   } else {
@@ -94,8 +96,10 @@ async function scenario(adapter: ProviderAdapter): Promise<void> {
   const t3 = await rec2.wait('turnCompleted');
   console.log('   final:', t3.finalText, /PINEAPPLE-42/.test(t3.finalText ?? '') ? 'RESUME OK' : 'RESUME FAILED');
 
-  const found = await adapter.discoverSessions({ cwd });
-  console.log('4) discovered sessions for cwd:', found.length, found.some((s) => s.nativeSessionId === id) ? '(includes ours)' : '(ours missing)');
+  if ((await adapter.capabilities()).importHistory) {
+    const found = await adapter.discoverSessions({ cwd });
+    console.log('4) discovered sessions for cwd:', found.length, found.some((s) => s.nativeSessionId === id) ? '(includes ours)' : '(ours missing)');
+  }
   await session.close();
 }
 
@@ -103,6 +107,7 @@ async function scenario(adapter: ProviderAdapter): Promise<void> {
   const adapters: ProviderAdapter[] = [];
   if (which === 'claude' || which === 'all') adapters.push(new ClaudeAdapter());
   if (which === 'codex' || which === 'all') adapters.push(new CodexAdapter());
+  if (which === 'opencode' || which === 'all') adapters.push(new OpenCodeAdapter());
   for (const a of adapters) {
     try {
       await scenario(a);

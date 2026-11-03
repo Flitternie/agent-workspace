@@ -63,7 +63,7 @@ export type ProviderEvent =
       toolCallId?: string;
     }
   /** The provider itself resolved / withdrew a request (e.g. turn ended). */
-  | { type: 'requestResolved'; requestId: string; reason: string }
+  | { type: 'requestResolved'; requestId: string; reason: string; answered?: boolean }
   | { type: 'progress'; text: string }
   | { type: 'sessionFailed'; error: string }
   | { type: 'sessionDisconnected'; reason: string };

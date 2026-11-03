@@ -257,6 +257,8 @@ export class Workspace {
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
+    if (this.throttle) clearTimeout(this.throttle);
+    this.throttle = undefined;
     this.store.flush();
   }
 
@@ -773,16 +775,20 @@ export class Workspace {
       const busy = live.turnActive;
       const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
+      const previousReports = this.store.data.attention.filter((a) => a.taskId === taskId && a.state === 'open' && !a.providerRequestId && a.kind !== 'error');
       const delivery = await live.session.send(text, opts);
-      if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
+      const actualDelivery = delivery === 'turn' ? undefined : delivery;
+      if (item.delivery !== actualDelivery) this.upsertTranscript(taskId, { ...item, delivery: actualDelivery });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision).
-      for (const a of this.store.data.attention)
-        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && a.kind !== 'error')
+      for (const a of previousReports)
+        if (a.state === 'open')
           this.closeAttention(a, 'resolved', `Replied: ${clip(text, 80)}`);
-      live.turnActive = true;
-      if (!this.hasOpenNative(taskId)) task.status = 'running';
-      // Steering adds to the work in progress; the summary keeps describing it.
-      if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
+      // Provider events own turn state: a fast SSE turn can already have completed
+      // (or asked a question) before its prompt acknowledgement reaches us.
+      if (live.turnActive && !this.hasOpenNative(taskId)) {
+        task.status = 'running';
+        if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
+      }
       task.updatedAt = now();
       this.changed();
       return { ok: true, taskId, delivery };
@@ -883,8 +889,11 @@ export class Workspace {
         break;
       case 'requestResolved': {
         const a = this.findOpenByRequest(taskId, event.requestId);
-        if (a) this.closeAttention(a, 'expired', `Withdrawn by the provider (${event.reason}).`);
-        if (!this.hasOpenNative(taskId) && live.turnActive) task.status = 'running';
+        if (a) this.closeAttention(a, event.answered ? 'resolved' : 'expired', `${event.answered ? 'Answered' : 'Withdrawn'} by the provider (${event.reason}).`);
+        if (!this.hasOpenNative(taskId) && live.turnActive) {
+          task.status = 'running';
+          if (a && event.answered) task.summary = 'Working…';
+        }
         break;
       }
       case 'turnCompleted': {
@@ -1409,7 +1418,7 @@ export class Workspace {
   }
 
   availableProviders(): AgentProvider[] {
-    return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
+    return (['claude', 'codex', 'opencode'] as const).filter((p) => this.providerReady(p));
   }
 
   // ---------------------------------------------------------------- demo

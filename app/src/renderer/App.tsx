@@ -160,7 +160,7 @@ export function App() {
                   <h2>{t('Your agents meet here')}</h2>
                   <p>{t('Each coding agent joins as a tile that reports what it did and what it needs from you. Requests stay on the tile until you answer, however long you talk to another agent.')}</p>
                   <div className="setup-check" data-testid="setup-check">
-                    {(['claude', 'codex'] as const).map((p) => {
+                    {(['claude', 'codex', 'opencode'] as const).map((p) => {
                       const c = snapshot.capabilities.find((x) => x.provider === p);
                       return (
                         <div key={p} className="setup-row">

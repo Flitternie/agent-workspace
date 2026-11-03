@@ -38,10 +38,12 @@ describe('real entry: first run, settings, language', () => {
 
     await page.getByTestId('new-task').click();
     expect(await page.getByRole('dialog').innerText()).not.toContain('Mock');
+    expect(await page.getByRole('radio', { name: /OpenCode/ }).count()).toBe(1);
     await page.keyboard.press('Escape');
 
     await page.getByTestId('open-settings').click();
     await expect.poll(() => page.getByTestId('provider-claude').count()).toBe(1);
+    expect(await page.getByTestId('provider-opencode').count()).toBe(1);
     await page.getByTestId('lang-zh').click();
     await expect.poll(() => page.getByTestId('settings-page').innerText()).toContain('Agent 连接');
     // Settings is a page with search, not a dialog.

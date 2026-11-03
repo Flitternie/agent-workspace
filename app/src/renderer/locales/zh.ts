@@ -1,6 +1,7 @@
 // Simplified Chinese UI strings, keyed by the English text used at the call site.
 // Provider names (Claude Code, Codex), agent names and agent output stay as-is.
 export const zh: Record<string, string> = {
+  'OpenCode uses its configured model. Set it up in opencode or opencode auth login. Automatic mode approves permission requests, including commands, unless denied. Questions still need your answer.': 'OpenCode 使用其已配置的模型。请在 opencode 或 opencode auth login 中完成设置。自动模式批准包括命令执行在内的权限请求，但仍遵守禁止规则。提问仍需你回答。',
   // Time
   'just now': '刚刚',
   '{n}m ago': '{n} 分钟前',
@@ -44,8 +45,8 @@ export const zh: Record<string, string> = {
   Language: '语言',
   'Coding agents': 'Agent 连接',
   Recheck: '重新检测',
-  'Agents run through the Claude Code and Codex already installed on this Mac and use the account you are signed in with there. No extra authorization or API key is needed, and this app never reads or stores those credentials.':
-    '直接调用本机已安装的 Claude Code 和 Codex，沿用它们当前登录的账号。无需额外授权或 API Key，本应用不会读取或保存你的凭据。',
+  'Agents use your installed Claude Code, Codex or OpenCode CLI and its configured login or model. This app never reads or stores those credentials.':
+    'Agent 使用已安装的 Claude Code、Codex 或 OpenCode CLI 及其登录信息或模型配置。本应用不会读取或保存这些凭据。',
   'Sign in once in a terminal, then click Recheck:': '在终端登录后点“重新检测”：',
   'Install the {name} CLI so it is on your PATH, then click Recheck.': '请先安装 {name} CLI（确保在 PATH 中），再点“重新检测”。',
   Permissions: '权限',
@@ -131,10 +132,10 @@ export const zh: Record<string, string> = {
   'Fastest, about 0.8 s; occasionally misroutes': '最快，约 0.8 秒，偶尔分错',
   'Most capable, slower': '能力最强，较慢',
   'Previous default': '之前的默认',
-  'Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.': '新 Agent 的默认设置，每个 Agent 也可以在自己的页面单独切换。任何模式都不会跳过权限检查。',
+  'Default for new agents. Change an existing agent’s mode on its own page. Deny rules still apply.': '新 Agent 的默认设置。已有 Agent 可在自己的页面切换模式。禁止规则仍然有效。',
   'Decide automatically': '自动判断',
-  'Like auto mode in Claude Code: the agent’s own reviewer approves routine actions and only asks you about risky ones (Codex: auto-review of sandbox escalations).':
-    '和 Claude Code 的 Auto 模式一样：常规操作由它自己的审查自动放行，只有有风险的才来问你（Codex 用自动审查处理越出沙箱的请求）。',
+  'Claude Code and Codex review actions automatically. OpenCode approves permission requests unless a deny rule blocks them; it does not perform risk review.':
+    'Claude Code 和 Codex 自动审核操作。OpenCode 自动批准权限请求，但仍遵守禁止规则；它不进行风险审核。',
   'Allow file edits': '允许改文件',
   'Edits inside the workspace go ahead; commands and anything else ask you first.': '工作区内改文件直接进行，执行命令等其他操作先问你。',
   'Ask every time': '每次都问',
