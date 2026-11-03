@@ -30,6 +30,7 @@ export const ipcSchemas = {
   }),
   'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),
   'task:interrupt': z.object({ taskId: id }),
+  'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
   'task:stop': z.object({ taskId: id }),
   'task:rename': z.object({ taskId: id, name: z.string().min(1).max(100) }),

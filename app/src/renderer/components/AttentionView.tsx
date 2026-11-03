@@ -5,6 +5,7 @@ import { timeAgo } from '../state';
 import { Icon, KIND_LABEL, PROVIDER_LABEL } from './bits';
 import { Markdown } from './Markdown';
 import { ToolContentView } from './Content';
+import { SwitchModelHint } from './Retry';
 import { t } from '../i18n';
 
 /**
@@ -76,6 +77,7 @@ export function AttentionView({
         </button>
       ) : null}
       {!openState && item.resolution ? <div className="attention-resolution">{item.resolution}</div> : null}
+      {openState && item.transient ? <SwitchModelHint provider={task.provider} /> : null}
 
       {openState && native && item.kind === 'approval' ? (
         <div className="attention-actions">
@@ -164,6 +166,11 @@ export function AttentionView({
 
       {openState && !native ? (
         <div className="attention-actions">
+          {item.retryable ? (
+            <button className="btn btn-primary" disabled={busy} data-testid="retry-turn" onClick={() => act(() => call('task:retry', { taskId: task.taskId }))}>
+              <Icon name="history" size={12} /> {t('Retry')}
+            </button>
+          ) : null}
           {onReply && item.kind !== 'error' ? (
             <button className="btn btn-primary" onClick={onReply}>
               {t('Reply to {alias}', { alias: task.alias })}

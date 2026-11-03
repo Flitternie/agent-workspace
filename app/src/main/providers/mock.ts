@@ -16,6 +16,7 @@ import type { Delivery, ApprovalResponse, ProviderAdapter, ProviderEvent, Provid
  *   approval:<command>   first turn requests approval to run <command>
  *   choice:<question>    first turn raises a structured question with options
  *   work                 first turn reports progress and finishes
+ *   capacity:<n>         the first <n> turns fail with "model at capacity", then it works
  */
 interface MockHistory {
   id: string;
@@ -68,6 +69,7 @@ class MockSession implements ProviderSession {
   /** Messages that arrived mid-turn (steering). */
   private steered: string[] = [];
   private timers = new Set<ReturnType<typeof setTimeout>>();
+  private capacityFailures = 0;
 
   constructor(
     private dir: string,
@@ -124,6 +126,14 @@ class MockSession implements ProviderSession {
     const script = this.args.mockScript ?? 'work';
     const first = userTurns === 0;
     this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${this.args.title}”的上下文…` : `Reading ${this.args.title} context…` }), 0.3);
+    if (this.capacityFailures < Number(/^capacity:(\d+)$/.exec(script)?.[1] ?? 0)) {
+      this.capacityFailures++;
+      this.later(() => {
+        this.busy = false;
+        this.emit({ type: 'turnCompleted', status: 'failed', error: 'Selected model is at capacity. Please try a different model.', transient: 'capacity' });
+      }, 0.5);
+      return;
+    }
     if (first && script.startsWith('approval:')) {
       const command = script.slice('approval:'.length);
       this.later(() => {

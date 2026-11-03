@@ -6,6 +6,7 @@ import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
 import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
 import { Markdown } from './Markdown';
+import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -117,8 +118,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <Transcript items={transcript} main={isMainAgent(task)} />
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
-            {items.length ? (
+            {items.length || task.retry ? (
               <div className="focus-attention" data-testid="focus-attention">
+                {task.retry ? <RetryNotice retry={task.retry} /> : null}
                 {items.map((i) => (
                   <AttentionView key={i.id} item={i} task={task} now={now} compact shown={i.kind !== 'approval' && saidLast(transcript, i)} />
                 ))}

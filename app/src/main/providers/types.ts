@@ -9,7 +9,9 @@ import type {
   NativeSessionInfo,
   PermissionMode,
   ProviderCapabilities,
+  RetryKind,
   TranscriptRole,
+  TransientKind,
 } from '../../shared/types';
 import type { WorkspaceTool } from '../main-agent';
 
@@ -44,7 +46,13 @@ export type ProviderEvent =
       /** Final assistant message of the turn, if any. */
       finalText?: string;
       error?: string;
+      /** Failed because the model was busy (at capacity, overloaded, rate limited): the turn can run again soon. */
+      transient?: TransientKind;
+      /** The provider already retried the failing request with backoff in this turn (see `retrying`). */
+      retried?: boolean;
     }
+  /** The provider waits to retry a failed model request within the turn. */
+  | { type: 'retrying'; kind: RetryKind; attempt: number; maxAttempts: number; delayMs: number; error?: string }
   | {
       type: 'approvalRequested';
       requestId: string;

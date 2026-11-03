@@ -1,6 +1,7 @@
 // User turns in a saved Claude Code / Codex session carry harness markup next to
 // what the person typed: reminders, slash-command wrappers, Codex's environment
-// and AGENTS.md preamble. Show what the person said; drop the plumbing.
+// and AGENTS.md preamble, this app's automatic retries. Show what the person said;
+// drop the plumbing.
 
 const DROP = [
   /<system-reminder>[\s\S]*?<\/system-reminder>/g,
@@ -10,6 +11,7 @@ const DROP = [
   /<user_instructions>[\s\S]*?<\/user_instructions>/g,
   /<ide_[a-z_]+>[\s\S]*?<\/ide_[a-z_]+>/g,
   /<task-notification>[\s\S]*?<\/task-notification>/g,
+  /<agent-workspace-retry>[\s\S]*?<\/agent-workspace-retry>/g,
 ];
 
 /** Returns the visible text of a user turn, or '' when it is only harness context. */

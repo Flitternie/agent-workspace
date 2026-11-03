@@ -938,6 +938,31 @@ pre code {
 .attention-actions .hint {
   margin-left: 4px;
 }
+/* Waiting to retry a failed model request: routine, so neutral (it needs nothing from the user). */
+.retry-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.report-text .retry-notice {
+  padding: 0;
+  border: 0;
+  background: none;
+  white-space: normal;
+}
+.retry-hint {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.retry-hint p {
+  margin: 0;
+}
 .attention-questions,
 .question {
   display: flex;
