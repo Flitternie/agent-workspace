@@ -9,7 +9,8 @@ import type {
   Query,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
+import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import { transientKind } from '../retry';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
 import { privateFolders } from '../private-folders';
@@ -106,6 +107,12 @@ async function localEntrypoints(ids: string[]): Promise<Map<string, string>> {
 }
 
 const CLAUDE_MODE: Record<PermissionMode, 'auto' | 'acceptEdits' | 'default'> = { auto: 'auto', edits: 'acceptEdits', ask: 'default' };
+
+/** A failed turn's API error code and text → whether trying again soon can work (a plan's usage limit cannot). */
+export function claudeTransient(apiError: string | undefined, text: string | undefined): TransientKind | undefined {
+  if (apiError === 'overloaded') return 'capacity';
+  return transientKind(text);
+}
 
 /** From `claude auth status` (JSON). Only the login flag and method are kept (no email or org). */
 function authState(code: number, stdout: string): ProviderCapabilities['auth'] {
@@ -233,6 +240,9 @@ class ClaudeSession implements ProviderSession {
   /** A turn is running. Messages sent meanwhile are folded into it by Claude Code. */
   private active = false;
   private interruptRequested = false;
+  /** This turn's API error code (SDKAssistantMessageError, e.g. 'overloaded'), and whether the CLI retried it. */
+  private apiError?: string;
+  private retried = false;
   private permissions = new Map<
     string,
     { input: Record<string, unknown>; suggestions?: PermissionUpdate[]; question: boolean; finish: (r: PermissionResult) => void }
@@ -354,6 +364,8 @@ class ClaudeSession implements ProviderSession {
     if (this.active) return;
     this.active = true;
     this.interruptRequested = false;
+    this.apiError = undefined;
+    this.retried = false;
     this.emit({ type: 'turnStarted' });
   }
 
@@ -504,8 +516,23 @@ class ClaudeSession implements ProviderSession {
       }
       return;
     }
+    if (type === 'system' && m.subtype === 'api_retry') {
+      // Claude Code itself retries overloaded / rate-limited requests with backoff; show the wait.
+      if (history) return;
+      this.retried = true;
+      const code = str(m.error);
+      this.emit({
+        type: 'retrying',
+        kind: code === 'overloaded' ? 'capacity' : code === 'rate_limit' ? 'rate_limit' : (transientKind('', typeof m.error_status === 'number' ? m.error_status : undefined) ?? 'error'),
+        attempt: Number(m.attempt) || 1,
+        maxAttempts: Number(m.max_retries) || 1,
+        delayMs: Number(m.retry_delay_ms) || 0,
+      });
+      return;
+    }
     // Output after a result means a queued message started a new turn.
     if ((type === 'stream_event' || type === 'assistant') && !history) this.beginTurn();
+    if (type === 'assistant' && str(m.error) && !history) this.apiError = str(m.error);
     if (type === 'stream_event') {
       const event = rec(m.event);
       if (event.type === 'content_block_start' && rec(event.content_block).type === 'text') {
@@ -597,11 +624,14 @@ class ClaudeSession implements ProviderSession {
       const success = m.subtype === 'success' && m.is_error !== true;
       const status = this.interruptRequested ? 'interrupted' : success ? 'completed' : 'failed';
       this.interruptRequested = false;
+      // An API error ends as a 'success' result with is_error, its message in `result` ("API Error: 529 …").
+      const error = success ? undefined : (Array.isArray(m.errors) ? m.errors.map(str).join('\n') : '') || (m.is_error === true ? str(m.result) : '') || str(m.subtype);
       this.emit({
         type: 'turnCompleted',
         status,
         finalText: str(m.result) || this.lastAssistantText,
-        error: success ? undefined : (Array.isArray(m.errors) ? m.errors.map(str).join('\n') : '') || str(m.subtype),
+        error,
+        ...(status === 'failed' ? { transient: claudeTransient(this.apiError, error), retried: this.retried } : {}),
       });
       this.lastAssistantText = '';
     }

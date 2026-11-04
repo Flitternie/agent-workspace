@@ -20,6 +20,7 @@ import type {
   Task,
   ToolCallInfo,
   TranscriptItem,
+  TransientKind,
   WorkspaceSnapshot,
 } from '../shared/types';
 import { clipOutput } from '../shared/content';
@@ -29,6 +30,7 @@ import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
+import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
@@ -66,6 +68,8 @@ export interface WorkspaceOptions {
   localStt?: LocalStt;
   /** Folders whose sessions are the app's own (test scratch repos) and never offered for import. */
   hiddenSessionDirs?: string[];
+  /** Automatic retries of turns that failed because the model was busy (tests use short waits). */
+  retry?: Partial<RetryPolicy>;
 }
 
 /**
@@ -84,11 +88,15 @@ export class Workspace {
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
   private worktrees: WorktreeService;
   private log: (...args: unknown[]) => void;
+  private retryPolicy: RetryPolicy;
+  /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
+  private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
 
   constructor(private opts: WorkspaceOptions) {
     this.store = new JsonStore(opts.dataDir);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
+    this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
     this.applyModels();
     this.recoverAfterRestart();
   }
@@ -141,6 +149,7 @@ export class Workspace {
   private recoverAfterRestart(): void {
     const d = this.store.data;
     for (const t of [...d.tasks, ...(d.mainAgent ? [d.mainAgent] : [])]) {
+      this.handBackRetry(t);
       if (['running', 'starting'].includes(t.status) || (t.status === 'waiting_for_user' && this.hasOpenNative(t.taskId))) {
         t.status = 'disconnected';
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
@@ -254,6 +263,8 @@ export class Workspace {
 
   async shutdown(): Promise<void> {
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
+    for (const r of this.retries.values()) clearTimeout(r.timer);
+    this.retries.clear();
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
@@ -639,6 +650,7 @@ export class Workspace {
   }
 
   async stop(taskId: string): Promise<void> {
+    this.cancelRetry(taskId);
     const l = this.live.get(taskId);
     if (!l) return;
     this.live.delete(taskId);
@@ -655,7 +667,33 @@ export class Workspace {
   async interrupt(taskId: string): Promise<void> {
     const l = this.live.get(taskId);
     if (!l) throw new Error('This task is not connected.');
+    if (this.cancelRetry(taskId)) {
+      // Nothing runs between tries; stopping means not trying again.
+      const task = this.task(taskId);
+      task.status = 'idle';
+      task.summary = 'Interrupted. Waiting for your next instruction.';
+      this.appendSystem(taskId, 'Automatic retry cancelled.');
+      this.changed();
+      return;
+    }
     await l.session.interrupt();
+  }
+
+  /**
+   * Runs a failed turn again (the Retry button). The agent carries on from its own
+   * history, so the instruction is not sent twice, and gets fresh automatic retries.
+   */
+  async retry(taskId: string): Promise<void> {
+    const task = this.task(taskId);
+    this.cancelRetry(taskId);
+    const live = await this.connect(taskId);
+    if (live.turnActive) return;
+    this.appendSystem(taskId, 'Retrying the failed turn.');
+    await live.session.send(CONTINUE_PROMPT);
+    for (const a of this.store.data.attention) if (a.taskId === taskId && a.state === 'open' && a.retryable) this.closeAttention(a, 'resolved', 'Retried.');
+    task.lastError = undefined;
+    task.summary = 'Retrying the failed turn…';
+    this.changed();
   }
 
   async discoverSessions(projectId: string, provider: 'claude' | 'codex'): Promise<NativeSessionInfo[]> {
@@ -768,6 +806,8 @@ export class Workspace {
   async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) this.mainTurns++;
+    // A new message carries on from a failed turn by itself; no retry on top of it.
+    this.cancelRetry(taskId);
     try {
       const live = await this.connect(taskId);
       const busy = live.turnActive;
@@ -775,9 +815,10 @@ export class Workspace {
       this.upsertTranscript(taskId, item);
       const delivery = await live.session.send(text, opts);
       if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
-      // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision).
+      // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
+      // and takes the place of retrying a failed turn.
       for (const a of this.store.data.attention)
-        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && a.kind !== 'error')
+        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
           this.closeAttention(a, 'resolved', `Replied: ${clip(text, 80)}`);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
@@ -805,6 +846,8 @@ export class Workspace {
       return;
     }
     task.updatedAt = now();
+    // The provider's own retry is over once anything else happens.
+    if (task.retry?.by === 'provider' && event.type !== 'retrying') task.retry = undefined;
     switch (event.type) {
       case 'sessionStarted': {
         const rec = this.store.data.sessions.find((s) => s.localId === sessionLocalId);
@@ -846,6 +889,10 @@ export class Workspace {
       case 'progress':
         task.summary = clip(event.text, 200);
         return this.changedThrottled();
+      case 'retrying':
+        task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
+        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;
+        break;
       case 'approvalRequested':
         if (!this.findOpenByRequest(taskId, event.requestId)) {
           this.addAttention({
@@ -895,16 +942,17 @@ export class Workspace {
             it.streaming = false;
             for (const cb of this.transcriptListeners) cb(taskId, { ...it });
           }
+        if (event.status === 'failed') {
+          // The model was busy: try the same turn again after a wait, unless the provider already did.
+          const tried = this.retries.get(taskId)?.attempt ?? 1;
+          if (event.transient && !event.retried && tried < this.retryPolicy.attempts) this.scheduleRetry(task, live.localId, event.transient, event.error, tried + 1);
+          else this.turnFailed(task, event.error, event.transient, tried);
+          break;
+        }
+        this.retries.delete(taskId);
         if (event.status === 'interrupted') {
           task.status = 'idle';
           task.summary = 'Interrupted. Waiting for your next instruction.';
-          break;
-        }
-        if (event.status === 'failed') {
-          task.status = 'failed';
-          task.lastError = event.error;
-          task.summary = `Turn failed: ${clip(event.error ?? 'unknown error', 160)}`;
-          this.addAttention({ taskId, kind: 'error', headline: task.summary, details: event.error ?? '' });
           break;
         }
         const text = event.finalText?.trim() ?? '';
@@ -930,6 +978,7 @@ export class Workspace {
       case 'sessionFailed':
       case 'sessionDisconnected': {
         this.live.delete(taskId);
+        this.handBackRetry(task);
         const reason = event.type === 'sessionFailed' ? event.error : event.reason;
         task.status = event.type === 'sessionFailed' ? 'failed' : 'disconnected';
         task.lastError = reason;
@@ -949,6 +998,74 @@ export class Workspace {
       this.throttle = undefined;
       this.changed();
     }, 120);
+  }
+
+  // ---------------------------------------------------------------- retries
+
+  /** Runs a turn that failed because the model was busy again after a backoff wait. */
+  private scheduleRetry(task: Task, sessionLocalId: string, kind: TransientKind, error: string | undefined, attempt: number): void {
+    const { attempts } = this.retryPolicy;
+    const delay = retryDelayMs(attempt - 1, this.retryPolicy);
+    const timer = setTimeout(() => void this.runRetry(task.taskId, sessionLocalId, attempt), delay);
+    this.retries.set(task.taskId, { attempt, timer });
+    // Still at work on the instruction: Interrupt (or Stop, or a new message) cancels the wait.
+    task.status = 'running';
+    task.retry = { kind, attempt, maxAttempts: attempts, at: new Date(Date.now() + delay).toISOString(), by: 'app', error };
+    task.summary = `${RETRY_LABEL[kind]}, retrying (attempt ${attempt}/${attempts})`;
+    this.appendSystem(task.taskId, `${RETRY_LABEL[kind]}: ${clip(error ?? 'unknown error', 200)} Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt}/${attempts}).`);
+  }
+
+  private async runRetry(taskId: string, sessionLocalId: string, attempt: number): Promise<void> {
+    const state = this.retries.get(taskId);
+    const task = this.findTask(taskId);
+    const live = this.live.get(taskId);
+    if (!state || state.attempt !== attempt || !state.timer || !task) return;
+    if (live?.localId !== sessionLocalId) {
+      // The session it was for is gone: keep it one click away rather than "retrying now" forever.
+      this.handBackRetry(task);
+      this.changed();
+      return;
+    }
+    state.timer = undefined;
+    task.retry = undefined;
+    try {
+      // turnStarted marks the turn active.
+      await live.session.send(RETRY_PROMPT);
+    } catch (error) {
+      this.turnFailed(task, (error as Error).message, undefined, attempt - 1);
+    }
+    this.changed();
+  }
+
+  /** A waiting retry that can no longer run by itself (session gone, app restarted) stays one click away. */
+  private handBackRetry(task: Task): void {
+    const waiting = task.retry?.by === 'app' ? task.retry : undefined;
+    this.cancelRetry(task.taskId);
+    task.retry = undefined;
+    if (waiting) this.turnFailed(task, waiting.error, waiting.kind === 'error' ? undefined : waiting.kind, waiting.attempt - 1);
+  }
+
+  /** Forgets the tries of the last instruction and drops a waiting retry; returns whether one was waiting. */
+  private cancelRetry(taskId: string): boolean {
+    const state = this.retries.get(taskId);
+    this.retries.delete(taskId);
+    if (!state?.timer) return false;
+    clearTimeout(state.timer);
+    const task = this.findTask(taskId);
+    if (task) task.retry = undefined;
+    return true;
+  }
+
+  /** A turn failed for good: say so, and keep running it again one click away. */
+  private turnFailed(task: Task, error: string | undefined, transient: TransientKind | undefined, attempts: number): void {
+    this.retries.delete(task.taskId);
+    task.retry = undefined;
+    task.status = 'failed';
+    task.lastError = error;
+    const why = clip(error ?? 'unknown error', 160);
+    task.summary = attempts > 1 ? `Turn failed after ${attempts} attempts: ${why}` : `Turn failed: ${why}`;
+    // The full message only when the headline had to shorten it.
+    this.addAttention({ taskId: task.taskId, kind: 'error', headline: task.summary, details: error && why !== error.replace(/\s+/g, ' ').trim() ? error : '', retryable: true, transient });
   }
 
   // ---------------------------------------------------------------- attention

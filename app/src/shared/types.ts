@@ -61,8 +61,27 @@ export interface Task {
   mockScript?: string;
   /** Overrides settings.permissionMode for this agent. */
   permissionMode?: PermissionMode;
+  /** A failed model request that will be tried again by itself (model at capacity, rate limited…). */
+  retry?: RetryState;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Why a model request is retried: the model is at capacity / overloaded, the account is rate limited, or another error the provider retries. */
+export type RetryKind = 'capacity' | 'rate_limit' | 'error';
+/** A failure that passes on its own, so trying again soon can work. */
+export type TransientKind = Exclude<RetryKind, 'error'>;
+
+export interface RetryState {
+  kind: RetryKind;
+  /** The coming try out of `maxAttempts`. */
+  attempt: number;
+  maxAttempts: number;
+  /** When it starts (ISO). */
+  at: string;
+  /** app: the workspace runs the failed turn again; provider: the CLI retries within its turn. */
+  by: 'app' | 'provider';
+  error?: string;
 }
 
 export interface SessionRecord {
@@ -115,6 +134,10 @@ export interface AttentionItem {
   preview?: ToolContent[];
   /** Provider asked that this not be approvable by a stray keystroke. */
   highRisk?: boolean;
+  /** A failed turn the user can run again with one click. */
+  retryable?: boolean;
+  /** It failed because the model was busy (at capacity, overloaded, rate limited). */
+  transient?: TransientKind;
   createdAt: string;
   resolvedAt?: string;
   resolution?: string;

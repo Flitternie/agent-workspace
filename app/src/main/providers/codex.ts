@@ -2,7 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
-import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities } from '../../shared/types';
+import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
 import { z } from 'zod';
@@ -160,6 +161,21 @@ function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: s
 function loginState(code: number, text: string): ProviderCapabilities['auth'] {
   const using = /Logged in using ([^-\n]+)/i.exec(text)?.[1]?.trim();
   return { loggedIn: code === 0 && !/not logged in/i.test(text), method: using };
+}
+
+/**
+ * A failed turn's TurnError → whether trying again soon can work. "Selected model is at
+ * capacity" is `serverOverloaded`; `usageLimitExceeded` (the plan's limit) lasts for hours.
+ * Connection failures carry the upstream HTTP status; unknown codes fall back to the message.
+ */
+export function codexTransient(error: unknown): TransientKind | undefined {
+  const e = rec(error);
+  const info = e.codexErrorInfo;
+  if (info === 'serverOverloaded' || info === 'flexUnavailable' || info === 'policyCapacityUnavailable') return 'capacity';
+  if (info === 'rateLimitExceeded') return 'rate_limit';
+  if (typeof info === 'string' && info !== 'other') return undefined;
+  const status = Object.values(rec(info)).map((v) => rec(v).httpStatusCode).find((s) => typeof s === 'number') as number | undefined;
+  return transientKind(str(e.message), status);
 }
 
 /** Thread sources beyond the interactive default (see ThreadSourceKind). */
@@ -594,17 +610,20 @@ class CodexSession implements ProviderSession {
         this.turnId = undefined;
         for (const id of this.requests.keys()) this.emit({ type: 'requestResolved', requestId: id, reason: 'turn ended' });
         this.requests.clear();
+        const outcome = status === 'interrupted' || this.interruptRequested ? 'interrupted' : status === 'failed' ? 'failed' : 'completed';
         this.emit({
           type: 'turnCompleted',
-          status: status === 'interrupted' || this.interruptRequested ? 'interrupted' : status === 'failed' ? 'failed' : 'completed',
+          status: outcome,
           finalText: this.lastAgentText,
           error: str(rec(turn.error).message) || undefined,
+          // Codex does not retry these itself (it does retry dropped streams, see `error`).
+          transient: outcome === 'failed' ? codexTransient(turn.error) : undefined,
         });
         for (const resolve of this.idleWaiters.splice(0)) resolve();
         return;
       }
       case 'error':
-        this.emit({ type: 'progress', text: `Codex error: ${str(rec(p.error).message) || 'unknown error'}` });
+        this.emit({ type: 'progress', text: `${p.willRetry === true ? 'Codex is retrying' : 'Codex error'}: ${str(rec(p.error).message) || 'unknown error'}` });
         return;
       default:
         return;

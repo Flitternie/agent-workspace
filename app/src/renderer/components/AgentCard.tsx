@@ -6,6 +6,7 @@ import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
 import { Alias, displayName, Icon, ProviderTag, StatusDot } from './bits';
+import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 
 /** One participant tile in the meeting-style Overview. */
@@ -113,7 +114,7 @@ export function AgentCard({
           </div>
           <div className="report-text" data-testid="card-summary">
             {/* Placeholder summaries from the backend have translations; agent reports pass through unchanged. */}
-            {(task.summary && t(task.summary)) || <span className="muted">{t('No report yet.')}</span>}
+            {task.retry ? <RetryNotice retry={task.retry} /> : (task.summary && t(task.summary)) || <span className="muted">{t('No report yet.')}</span>}
           </div>
         </section>
 

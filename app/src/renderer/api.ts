@@ -37,6 +37,7 @@ interface Outputs {
   'task:create': Task;
   'task:send': DispatchResult;
   'task:interrupt': void;
+  'task:retry': void;
   'task:resume': void;
   'task:stop': void;
   'task:rename': void;

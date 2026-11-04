@@ -412,6 +412,20 @@ export const zh: Record<string, string> = {
   'Reply in the box below': '在下方输入框回复',
   Dismiss: '忽略',
 
+  // Retrying a failed model request
+  'Model at capacity': '模型繁忙',
+  'Rate limited': '请求过于频繁',
+  'Model request failed': '模型请求失败',
+  '{reason}, retrying in {s}s (attempt {n}/{max})': '{reason}，{s} 秒后重试（第 {n}/{max} 次）',
+  '{reason}, retrying now (attempt {n}/{max})': '{reason}，正在重试（第 {n}/{max} 次）',
+  Retry: '重试',
+  'Retrying the failed turn…': '正在重试失败的这一轮…',
+  'The model is busy or rate limited. Retry in a moment, or switch to a different Codex model: set `model` in ~/.codex/config.toml, then click Stop and Resume session.':
+    '模型繁忙或请求过于频繁。稍后重试，或换一个 Codex 模型：在 ~/.codex/config.toml 里设置 `model`，然后点“停止”再点“继续会话”。',
+  'The model is busy or rate limited. Retry in a moment, or switch to a different Claude model: set `model` in ~/.claude/settings.json, then click Stop and Resume session.':
+    '模型繁忙或请求过于频繁。稍后重试，或换一个 Claude 模型：在 ~/.claude/settings.json 里设置 `model`，然后点“停止”再点“继续会话”。',
+  'The model is busy or rate limited. Retry in a moment.': '模型繁忙或请求过于频繁，请稍后重试。',
+
   // Approval options (labels set by the adapters)
   'Allow once': '允许一次',
   'Always allow (Claude rule)': '始终允许',

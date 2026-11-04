@@ -34,7 +34,7 @@ Both also work from the repo root.
 
 | Command | What |
 |---|---|
-| `npm test` | Unit tests: router matrix, attention lifecycle, stale events, approvals, restart, memory scoping, worktrees, content mapping, i18n coverage, voice composition, local STT post-processing |
+| `npm test` | Unit tests: router matrix, attention lifecycle, stale events, approvals, restart, memory scoping, worktrees, content mapping, i18n coverage, voice composition, local STT post-processing, automatic retries (backoff, cancellation, no repeated instruction) |
 | `npm run test:e2e` | Drives the built app with mock agents (demo script, settings, selection); screenshots in `test-results/` |
 | `AMW_E2E_SSH_HOST=<alias> npm run test:e2e -- ssh-remote` | Opt-in: Claude Code and Codex on that SSH host (scratch repo there, run, restart + resume, import remote sessions, no leftover processes) |
 | `AMW_E2E_SSH_HOST=<alias> npm run test:e2e -- ssh-robust` | Opt-in: on that host, native approval (deny), steer and interrupt, the SSH connection dropping mid-session (next message resumes), and the app killed mid-turn (nothing left running) |
@@ -57,6 +57,7 @@ src/main/                 Electron main = local backend
     user-text.ts          strips harness markup from saved user turns
   stt/local.ts            on-device speech models (sherpa-onnx): catalogue, download, transcribe
   openai.ts               cloud STT + routing model (key stays in main)
+  retry.ts                model at capacity / rate limited: which errors to retry, backoff, the retry prompt
   role.ts, attention.ts, memory.ts, store.ts, worktree.ts
 src/shared/               types, zod-validated IPC schemas, ACP-shaped content model
 src/preload/              narrow contextBridge (named channels only)
