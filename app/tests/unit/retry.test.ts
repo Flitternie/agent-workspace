@@ -7,7 +7,7 @@ import { claudeTransient } from '../../src/main/providers/claude';
 import { codexTransient } from '../../src/main/providers/codex';
 import { MockAdapter } from '../../src/main/providers/mock';
 import { cleanUserText } from '../../src/main/providers/user-text';
-import { DEFAULT_RETRY, RETRY_PROMPT, retryDelayMs, transientKind, type RetryPolicy } from '../../src/main/retry';
+import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_PROMPT, retryDelayMs, transientKind, type RetryPolicy } from '../../src/main/retry';
 import { Workspace } from '../../src/main/workspace';
 
 const CAPACITY = 'Selected model is at capacity. Please try a different model.';
@@ -38,6 +38,8 @@ describe('transient errors', () => {
     expect(transientKind('503 Service Unavailable')).toBe('capacity');
     expect(transientKind('', 503)).toBe('capacity');
     expect(transientKind('429 Too Many Requests')).toBe('rate_limit');
+    expect(transientKind('Rate limit reached for requests', 429)).toBe('rate_limit');
+    expect(transientKind('Rate limit reached for gpt-5 in organization org-x on tokens per min (TPM): Limit 30000, Used 30000, Requested 900. Please try again in 1.8s.')).toBe('rate_limit');
     expect(transientKind('', 429)).toBe('rate_limit');
     expect(transientKind("You've hit your usage limit. Upgrade to Pro or try again later.")).toBeUndefined();
     expect(transientKind('Claude AI usage limit reached|1767225600')).toBeUndefined();
@@ -70,6 +72,7 @@ describe('transient errors', () => {
 
   it('hides the retry prompt when a saved conversation is shown', () => {
     expect(cleanUserText(RETRY_PROMPT)).toBe('');
+    expect(cleanUserText(CONTINUE_PROMPT)).toBe('');
     expect(cleanUserText(`${RETRY_PROMPT}\nand also this`)).toBe('and also this');
   });
 });
@@ -156,7 +159,8 @@ describe('automatic retry of a turn the model was too busy for', () => {
     await ws.retry(t.taskId);
     await until(finished);
     expect(errors()[0]).toMatchObject({ state: 'resolved', resolution: 'Retried.' });
-    expect(received()).toEqual(['Migrate the API.', RETRY_PROMPT, RETRY_PROMPT, RETRY_PROMPT]);
+    // The Retry button sends the neutral prompt; automatic retries say the model was busy.
+    expect(received()).toEqual(['Migrate the API.', RETRY_PROMPT, RETRY_PROMPT, CONTINUE_PROMPT]);
     expect(userItems()).toHaveLength(1);
   });
 
@@ -205,7 +209,7 @@ describe('automatic retry of a turn the model was too busy for', () => {
     await ws.retry(t.taskId);
     // Its own failure is attempt 1 of a new round, so one more automatic retry follows and succeeds.
     await until(finished);
-    expect(received()).toEqual(['Migrate the API.', RETRY_PROMPT, RETRY_PROMPT, RETRY_PROMPT]);
+    expect(received()).toEqual(['Migrate the API.', RETRY_PROMPT, CONTINUE_PROMPT, RETRY_PROMPT]);
     expect(errors().filter((a) => a.state === 'open')).toEqual([]);
   });
 
@@ -222,7 +226,19 @@ describe('automatic retry of a turn the model was too busy for', () => {
     // Retry resumes the same native session and carries on (the resumed mock counts its capacity failure again).
     await ws.retry(t.taskId);
     await until(finished);
-    expect(received()).toEqual(['Migrate the API.', RETRY_PROMPT, RETRY_PROMPT]);
+    expect(received()).toEqual(['Migrate the API.', CONTINUE_PROMPT, RETRY_PROMPT]);
+  });
+
+  it('a retry whose session is gone becomes the Retry button instead of staying on "retrying now"', async () => {
+    const ws = open({ baseMs: 100, maxMs: 100 });
+    const { t, task, errors, received } = await start(ws, 'capacity:5');
+    await until(() => !!task().retry);
+    // Drop the live session behind the workspace's back (Stop and disconnect would cancel the retry first).
+    (ws as unknown as { live: Map<string, unknown> }).live.delete(t.taskId);
+    await until(() => task().status === 'failed');
+    expect(task().retry).toBeUndefined();
+    expect(errors()).toEqual([expect.objectContaining({ state: 'open', retryable: true, transient: 'capacity' })]);
+    expect(received()).toEqual(['Migrate the API.']);
   });
 
   it('keeps a waiting retry one click away across an app restart', async () => {

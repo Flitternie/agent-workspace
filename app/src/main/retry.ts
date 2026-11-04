@@ -27,7 +27,8 @@ export function retryDelayMs(retry: number, policy: RetryPolicy = DEFAULT_RETRY,
   return Math.round(step / 2 + random() * (step / 2));
 }
 
-const ACCOUNT_LIMIT = /usage limit|limit reached|hit your limit|quota|billing|credits?\b|upgrade (your|to)/i;
+// Not "limit reached": OpenAI's ordinary 429 says "Rate limit reached for …".
+const ACCOUNT_LIMIT = /usage limit|hit your limit|quota|billing|credits?\b|upgrade (your|to)/i;
 const RATE_LIMIT = /rate[ _-]?limit|too many requests|\b429\b/i;
 const CAPACITY = /at capacity|overload|slow[ _]down|service unavailable|temporarily unavailable|\b(502|503|504|529)\b/i;
 const BUSY_STATUS = [502, 503, 504, 529];
@@ -47,5 +48,9 @@ export const RETRY_LABEL: Record<RetryKind, string> = { capacity: 'Model at capa
  * so this only asks it to carry on (like typing "continue") and never repeats the
  * instruction. The tag hides it when a saved conversation is shown (user-text.ts).
  */
-export const RETRY_PROMPT =
-  '<agent-workspace-retry>Your previous turn stopped because the model was temporarily unavailable. Continue from where you left off, without redoing work that is already done.</agent-workspace-retry>';
+const retryPrompt = (why: string) => `<agent-workspace-retry>${why} Continue from where you left off, without redoing work that is already done.</agent-workspace-retry>`;
+
+/** Automatic retries, which only follow a busy model. */
+export const RETRY_PROMPT = retryPrompt('Your previous turn stopped because the model was temporarily unavailable.');
+/** The Retry button, which any failed turn offers. */
+export const CONTINUE_PROMPT = retryPrompt('Your previous turn failed.');

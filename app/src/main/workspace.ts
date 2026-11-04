@@ -30,7 +30,7 @@ import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
-import { DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
+import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
@@ -689,7 +689,7 @@ export class Workspace {
     const live = await this.connect(taskId);
     if (live.turnActive) return;
     this.appendSystem(taskId, 'Retrying the failed turn.');
-    await live.session.send(RETRY_PROMPT);
+    await live.session.send(CONTINUE_PROMPT);
     for (const a of this.store.data.attention) if (a.taskId === taskId && a.state === 'open' && a.retryable) this.closeAttention(a, 'resolved', 'Retried.');
     task.lastError = undefined;
     task.summary = 'Retrying the failed turn…';
@@ -1019,7 +1019,13 @@ export class Workspace {
     const state = this.retries.get(taskId);
     const task = this.findTask(taskId);
     const live = this.live.get(taskId);
-    if (!state || state.attempt !== attempt || !state.timer || !task || live?.localId !== sessionLocalId) return;
+    if (!state || state.attempt !== attempt || !state.timer || !task) return;
+    if (live?.localId !== sessionLocalId) {
+      // The session it was for is gone: keep it one click away rather than "retrying now" forever.
+      this.handBackRetry(task);
+      this.changed();
+      return;
+    }
     state.timer = undefined;
     task.retry = undefined;
     try {
