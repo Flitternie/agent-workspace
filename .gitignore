@@ -17,6 +17,7 @@ research/
 
 # Dependencies, builds and app-owned runtime data
 node_modules/
+/out/
 app/out/
 app/.cache/
 app/.data/

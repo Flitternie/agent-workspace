@@ -21,7 +21,7 @@ export const ipcSchemas = {
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({
     projectId: id,
-    provider: z.enum(['claude', 'codex', 'mock']),
+    provider: z.enum(['claude', 'codex', 'opencode', 'mock']),
     title: z.string().min(1).max(500),
     name: z.string().max(100).optional(),
     instruction: text.optional(),
@@ -65,7 +65,7 @@ export const ipcSchemas = {
       z.object({
         kind: z.literal('create'),
         projectId: id,
-        provider: z.enum(['claude', 'codex', 'mock']),
+        provider: z.enum(['claude', 'codex', 'opencode', 'mock']),
         title: z.string().min(1).max(500),
       }),
     ]),

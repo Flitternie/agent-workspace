@@ -28,6 +28,9 @@ const ctx = (utterance: string, focusedTaskId: string | null = null, ts = tasks)
 });
 
 describe('router decision matrix', () => {
+  it('selects OpenCode for a new agent requested by name', () => {
+    expect(decideDeterministic(ctx('Create a new agent using opencode for shop'))).toMatchObject({ kind: 'create', provider: 'opencode' });
+  });
   it('explicit alias wins over focus', () => {
     const d = decideDeterministic(ctx('Agent A, add a regression test', 't-B'));
     expect(d).toMatchObject({ kind: 'existing', taskId: 't-A', confidence: 'high' });

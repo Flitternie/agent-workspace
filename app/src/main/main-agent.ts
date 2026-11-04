@@ -124,7 +124,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         project: z.string().describe('Project id or name from list_projects.'),
         title: z.string().min(1).describe('Short task title.'),
         instruction: z.string().min(1).describe('The first instruction for the new agent.'),
-        provider: z.enum(['claude', 'codex']).optional().describe('Defaults to the first available.'),
+        provider: z.enum(['claude', 'codex', 'opencode']).optional().describe('Defaults to the first available.'),
         role: z.string().optional().describe('Optional one-word role, e.g. "Database".'),
       }),
       run: async (a) => {

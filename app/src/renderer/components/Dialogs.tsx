@@ -105,7 +105,7 @@ export function ProjectPicker({ snapshot, value, onChange }: { snapshot: Workspa
 }
 
 export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void }) {
-  const providers = snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const);
+  const providers = snapshot.demo ? (['claude', 'codex', 'opencode', 'mock'] as const) : (['claude', 'codex', 'opencode'] as const);
   const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
   const [projectId, setProjectId] = useState(snapshot.projects[0]?.projectId ?? '');
   const [provider, setProvider] = useState<AgentProvider>(firstAvailable);

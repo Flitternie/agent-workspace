@@ -9,6 +9,7 @@ function extraPathDirs(): string[] {
   return [
     join(home, '.local', 'bin'),
     join(home, '.claude', 'local'),
+    join(home, '.opencode', 'bin'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
     join(home, '.bun', 'bin'),

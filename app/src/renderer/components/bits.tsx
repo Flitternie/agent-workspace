@@ -31,7 +31,7 @@ export function StatusDot({ status, connected, label = true }: { status: AgentSt
   );
 }
 
-export const PROVIDER_LABEL: Record<AgentProvider, string> = { claude: 'Claude Code', codex: 'Codex', mock: 'Mock' };
+export const PROVIDER_LABEL: Record<AgentProvider, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', mock: 'Mock' };
 
 /** "2.1.310 (Claude Code)" / "codex-cli 0.162.1" → the version number. */
 export function shortVersion(v: string): string {
