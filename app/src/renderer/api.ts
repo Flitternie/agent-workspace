@@ -2,6 +2,7 @@ import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type {
   AttentionItem,
   DispatchResult,
+  ForkPoint,
   MemoryRecord,
   NativeSessionInfo,
   Project,
@@ -37,6 +38,8 @@ interface Outputs {
   'task:create': Task;
   'task:send': DispatchResult;
   'task:interrupt': void;
+  'task:forkPoints': ForkPoint[];
+  'task:fork': Task;
   'task:retry': void;
   'task:resume': void;
   'task:stop': void;

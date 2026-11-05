@@ -14,8 +14,9 @@ export async function gitRoot(path: string): Promise<string | null> {
 export class WorktreeService {
   constructor(private baseDir: string) {}
 
-  async create(repoRoot: string, projectId: string, slug: string): Promise<WorktreeInfo> {
-    const head = await run('git', ['-C', repoRoot, 'rev-parse', '--verify', 'HEAD']);
+  /** `from`: the commit the new branch starts at (default: the project folder's HEAD). */
+  async create(repoRoot: string, projectId: string, slug: string, from = 'HEAD'): Promise<WorktreeInfo> {
+    const head = await run('git', ['-C', repoRoot, 'rev-parse', '--verify', '--end-of-options', `${from}^{commit}`]);
     if (head.code !== 0) throw new Error('The repository has no commits yet, so a worktree cannot be created.');
     const baseRef = head.stdout.trim();
     const branch = `amw/${slug}`;

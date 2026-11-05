@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
+import type { ForkPoint, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import type { Delivery, ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 /**
@@ -58,6 +58,33 @@ export class MockAdapter implements ProviderAdapter {
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession {
     return new MockSession(this.dir, this.delayMs, args, onEvent);
   }
+
+  async forkPoints(nativeSessionId: string): Promise<ForkPoint[]> {
+    const { messages } = this.load(nativeSessionId);
+    return messages.flatMap((m, i) => (i > 0 && m.role === 'user' ? [{ upToMessageId: messages[i - 1].itemId, prompt: m.text }] : []));
+  }
+
+  async forkSession(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string> {
+    const source = this.load(nativeSessionId);
+    const end = opts.upToMessageId ? source.messages.findIndex((m) => m.itemId === opts.upToMessageId) : source.messages.length - 1;
+    if (end === -1) throw new Error(`Message ${opts.upToMessageId} is not in mock session ${nativeSessionId}.`);
+    const id = `mock-${randomUUID()}`;
+    // Fresh item ids, as Claude Code gives a fork fresh message UUIDs.
+    const messages = source.messages.slice(0, end + 1).map((m, i) => ({ ...m, itemId: `${id}:${i}` }));
+    const fork: MockHistory = { id, cwd: opts.cwd, title: opts.title ?? `${source.title} (fork)`, updatedAt: new Date().toISOString(), messages };
+    writeFileSync(sessionFile(this.dir, id), JSON.stringify(fork, null, 2));
+    return id;
+  }
+
+  private load(id: string): MockHistory {
+    const file = sessionFile(this.dir, id);
+    if (!existsSync(file)) throw new Error(`Mock session ${id} not found.`);
+    return JSON.parse(readFileSync(file, 'utf8')) as MockHistory;
+  }
+}
+
+function sessionFile(dir: string, id: string): string {
+  return join(dir, `${id.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
 }
 
 class MockSession implements ProviderSession {
@@ -380,7 +407,7 @@ class MockSession implements ProviderSession {
   }
 
   private file(id: string): string {
-    return join(this.dir, `${id.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
+    return sessionFile(this.dir, id);
   }
 
   private save(): void {

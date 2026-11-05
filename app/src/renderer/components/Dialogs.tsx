@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { AgentProvider, NativeSessionInfo, WorkspaceSnapshot } from '../../shared/types';
+import type { AgentProvider, ForkPoint, NativeSessionInfo, Task, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
@@ -403,4 +403,82 @@ const writeSource = (source: string) => writePref(SOURCE_KEY, source);
 function shortPath(p: string): string {
   const parts = p.split('/').filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p;
+}
+
+/** Fork an agent's conversation, as it is now or from just before one of the user's earlier prompts. */
+export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: WorkspaceSnapshot; task: Task; onClose: () => void; onForked: (taskId: string) => void }) {
+  const project = snapshot.projects.find((p) => p.projectId === task.projectId);
+  const [points, setPoints] = useState<ForkPoint[] | null>(null);
+  /** '' = the whole conversation as it is now. */
+  const [upTo, setUpTo] = useState('');
+  const [isolate, setIsolate] = useState(!!project?.isGitRepo);
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    call('task:forkPoints', { taskId: task.taskId })
+      .then((p) => setPoints([...p].reverse()))
+      .catch((e) => {
+        setPoints([]);
+        setError(errorText(e));
+      });
+  }, [task.taskId]);
+  const pick = (id: string) => {
+    const before = points?.find((p) => p.upToMessageId === upTo)?.prompt ?? '';
+    // Going back to a prompt offers it again, to edit and send; typed text is kept.
+    if (!instruction.trim() || instruction === before) setInstruction(points?.find((p) => p.upToMessageId === id)?.prompt ?? '');
+    setUpTo(id);
+  };
+  const fork = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo, instruction: instruction.trim() || undefined });
+      onForked(t.taskId);
+      onClose();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={t('Fork {name}', { name: task.alias })} onClose={onClose}>
+      <div className="muted small">{t('A new agent continues a copy of this conversation. {name} and its conversation stay as they are.', { name: task.alias })}</div>
+      <div className="field">
+        <label>{t('Fork from')}</label>
+        <div className="fork-points" data-testid="fork-points">
+          <label className={`radio${upTo === '' ? ' selected' : ''}`}>
+            <input type="radio" name="fork-point" checked={upTo === ''} onChange={() => pick('')} /> {t('Now (the whole conversation)')}
+          </label>
+          {points === null ? <div className="muted small">{t('Loading…')}</div> : null}
+          {points?.map((p) => (
+            <label key={p.upToMessageId} className={`radio${upTo === p.upToMessageId ? ' selected' : ''}`} title={p.prompt}>
+              <input type="radio" name="fork-point" checked={upTo === p.upToMessageId} onChange={() => pick(p.upToMessageId)} /> <span className="muted">{t('Before:')}</span>{' '}
+              <span className="truncate">{p.prompt}</span>
+            </label>
+          ))}
+        </div>
+        <div className="muted small">{t('Only the conversation goes back; files stay as they are now.')}</div>
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={isolate && !!project?.isGitRepo} disabled={!project?.isGitRepo} onChange={(e) => setIsolate(e.target.checked)} data-testid="fork-isolate" />
+        {t('Run in its own git worktree')}{' '}
+        {project?.isGitRepo ? t('(starts from {name}’s last commit; uncommitted changes are not copied)', { name: task.alias }) : t('(not a git repo — will share the folder)')}
+      </label>
+      <div className="field">
+        <label>{t('First instruction (optional)')}</label>
+        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the new agent do?')} data-testid="fork-instruction" />
+      </div>
+      {error ? <div className="error-text">{error}</div> : null}
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>
+          {t('Cancel')}
+        </button>
+        <button className="btn btn-primary" disabled={busy || points === null} onClick={() => void fork()} data-testid="fork-confirm">
+          {busy ? t('Forking…') : t('Fork')}
+        </button>
+      </div>
+    </Modal>
+  );
 }

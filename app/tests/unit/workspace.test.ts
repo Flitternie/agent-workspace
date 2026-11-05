@@ -236,6 +236,45 @@ describe('worktrees', () => {
     expect(existsSync(b.cwd)).toBe(false);
   });
 
+  it('a fork continues a copy of the conversation, now or from an earlier prompt, in its own worktree', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', name: 'backend', title: 'API', isolate: true, mockScript: 'work', instruction: 'First request.' });
+    const idle = (id: string) => () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === id)!.status);
+    await until(idle(a.taskId));
+    await ws.send(a.taskId, 'Second request.', 'text');
+    await until(idle(a.taskId));
+    const said = (id: string) => ws.transcript(id).filter((i) => i.role === 'user').map((i) => i.text);
+    const commit = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+    execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'work by A'], { cwd: a.cwd });
+    writeFileSync(join(a.cwd, 'draft.txt'), 'uncommitted');
+
+    const points = await ws.forkPoints(a.taskId);
+    expect(points.map((x) => x.prompt)).toEqual(['Second request.']);
+
+    // From before the second request, with that request sent again in other words.
+    const b = await ws.forkTask(a.taskId, { upToMessageId: points[0].upToMessageId, isolate: true, instruction: 'Second request, but smaller.' });
+    expect(b.forkedFrom).toEqual({ taskId: a.taskId, alias: a.alias });
+    expect(b.name).toBe('backend');
+    expect(b.cwd).not.toBe(a.cwd);
+    expect(commit(b.cwd)).toBe(commit(a.cwd));
+    expect(existsSync(join(b.cwd, 'draft.txt'))).toBe(false);
+    await until(idle(b.taskId));
+    expect(said(b.taskId)).toEqual(['First request.', 'Second request, but smaller.']);
+    expect(ws.snapshot().coordinator.at(-1)?.text).toMatch(/uncommitted changes were not copied/);
+
+    // The whole conversation; the original keeps its own.
+    const c = await ws.forkTask(a.taskId, { isolate: false });
+    expect(c.sharedCwdWarning).toMatch(/not isolated/);
+    await ws.send(c.taskId, 'Third request.', 'text');
+    await until(idle(c.taskId));
+    expect(said(c.taskId)).toEqual(['First request.', 'Second request.', 'Third request.']);
+    expect(said(a.taskId)).toEqual(['First request.', 'Second request.']);
+
+    const fresh = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'never started', isolate: false });
+    await expect(ws.forkTask(fresh.taskId, { isolate: false })).rejects.toThrow(/no saved conversation/);
+  });
+
   it('warns when tasks share a writable directory', async () => {
     const ws = open();
     const p = await ws.addProject(repo());

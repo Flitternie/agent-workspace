@@ -7,6 +7,7 @@ import type {
   AttentionItem,
   CoordinatorEntry,
   DispatchResult,
+  ForkPoint,
   MemoryRecord,
   MemoryScope,
   NativeSessionInfo,
@@ -797,6 +798,93 @@ export class Workspace {
     this.autoRole(task, task.title);
     this.changed();
     void this.previewHistory(task, args.provider, args.nativeSessionId);
+    return task;
+  }
+
+  // ---------------------------------------------------------------- forking
+
+  /** The task's saved conversation, if its provider can fork it here. */
+  private forkSource(taskId: string) {
+    const task = this.task(taskId);
+    if (task === this.store.data.mainAgent) throw new Error('The main agent cannot be forked.');
+    const adapter = this.opts.adapters[task.provider];
+    if (!adapter?.forkSession || !adapter.forkPoints) throw new Error(`${task.provider} conversations cannot be forked yet.`);
+    if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
+    const nativeSessionId = this.currentSession(task)?.nativeSessionId;
+    if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
+    return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkSession' | 'forkPoints'>>, nativeSessionId };
+  }
+
+  /** Where the task's conversation can be forked: before each of the user's earlier prompts, oldest first. */
+  async forkPoints(taskId: string): Promise<ForkPoint[]> {
+    const { task, adapter, nativeSessionId } = this.forkSource(taskId);
+    return adapter.forkPoints(nativeSessionId, task.cwd);
+  }
+
+  /**
+   * A new agent that continues a copy of this agent's conversation, from now or from just before
+   * an earlier prompt; the original agent and its conversation are untouched. With `isolate`, the
+   * copy works in its own worktree starting from the original's last commit (only the conversation
+   * is rewound, never files).
+   */
+  async forkTask(taskId: string, opts: { upToMessageId?: string; isolate: boolean; instruction?: string }): Promise<Task> {
+    const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
+    const project = this.project(src.projectId);
+    const d = this.store.data;
+    const title = clip(`${src.title} (fork)`, 120);
+    let cwd = src.cwd;
+    let worktree: Task['worktree'];
+    let uncommitted = false;
+    if (opts.isolate && project.isGitRepo) {
+      const head = await run('git', ['-C', src.cwd, 'rev-parse', '--verify', 'HEAD']);
+      if (head.code !== 0) throw new Error(`Could not read ${src.alias}'s last commit: ${head.stderr.trim()}`);
+      uncommitted = !!(await run('git', ['-C', src.cwd, 'status', '--porcelain'])).stdout.trim();
+      const id = randomUUID().slice(0, 8);
+      worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(`${src.name} fork`)}-${id}`, head.stdout.trim());
+      cwd = worktree.path;
+    }
+    let forkId: string;
+    try {
+      forkId = await adapter.forkSession(nativeSessionId, { cwd: src.cwd, upToMessageId: opts.upToMessageId, title });
+    } catch (error) {
+      if (worktree) await this.worktrees.removeIfClean(worktree);
+      throw error;
+    }
+    const alias = aliasFor(d.aliasCounter++, d.settings.language);
+    const newId = `t-${randomUUID().slice(0, 8)}`;
+    const record: SessionRecord = { localId: `s-${randomUUID().slice(0, 8)}`, taskId: newId, provider: src.provider, nativeSessionId: forkId, cwd, integrationMode: 'resumed', createdAt: now() };
+    const sharers = d.tasks.filter((t) => t.cwd === cwd && t.host === src.host);
+    for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
+    const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';
+    const task: Task = {
+      taskId: newId,
+      alias,
+      name: src.name === src.alias ? alias : src.name,
+      projectId: src.projectId,
+      title,
+      provider: src.provider,
+      status: 'disconnected',
+      summary: `Forked from ${src.alias}'s conversation ${point}. Send a message to continue.`,
+      cwd,
+      worktree,
+      sharedCwdWarning: sharers.length ? `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.` : undefined,
+      sessionLocalId: record.localId,
+      permissionMode: src.permissionMode,
+      forkedFrom: { taskId: src.taskId, alias: src.alias },
+      mockScript: src.mockScript,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    d.sessions.push(record);
+    d.tasks.push(task);
+    const notes = [
+      `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}, from ${src.alias}'s last commit)` : ''}.`,
+      ...(uncommitted ? [`${src.alias}'s uncommitted changes were not copied.`] : []),
+    ];
+    this.coordinatorSay(`Forked ${src.alias} as ${alias}. ${notes.join(' ')}`);
+    this.changed();
+    if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
+    if (opts.instruction?.trim()) await this.send(newId, opts.instruction.trim(), 'text');
     return task;
   }
 
