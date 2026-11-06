@@ -94,7 +94,18 @@ export function sshSpawn(host: string, command: string): ChildProcessWithoutNull
   return spawn('ssh', sshArgs(host, command), { env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32' });
 }
 
-export function sshRun(host: string, command: string, timeoutMs = 30_000): Promise<{ code: number; stdout: string; stderr: string }> {
+/**
+ * ssh failed on the shared connection rather than on the host: it refused one more session
+ * (sshd's MaxSessions), was still being set up by another call, or died (sleep, network
+ * change). ssh then falls back to a fresh login, which fails without a key (BatchMode).
+ */
+const MUX_FAILURE = /Session open refused by peer|administratively prohibited|disabling multiplexing|read from master failed|mux_client_|Control socket connect/i;
+
+export async function sshRun(host: string, command: string, timeoutMs = 30_000): Promise<{ code: number; stdout: string; stderr: string }> {
+  const r = await run('ssh', sshArgs(host, command), childEnv(), timeoutMs);
+  if (r.code !== 255 || !MUX_FAILURE.test(r.stderr)) return r;
+  // Retried once, never by closing the master: that would end every session on it.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
   return run('ssh', sshArgs(host, command), childEnv(), timeoutMs);
 }
 
@@ -197,5 +208,9 @@ export function sshError(host: string, stderr: string): string {
   const line = stderr.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
   if (/Permission denied/i.test(stderr)) return `SSH to ${host} needs a login or an unlocked key (${line}). Connect it in Settings › Remote machines.`;
   if (/Host key verification failed/i.test(stderr)) return `${host}'s host key is not trusted yet. Connect it in Settings › Remote machines.`;
+  // All sessions share one connection, and sshd allows 10 per connection (MaxSessions).
+  if (/Session open refused by peer|administratively prohibited/i.test(stderr))
+    return `${host} refused another SSH session: too many agents and checks are open on one connection (sshd's MaxSessions, 10 by default). Close an agent there, or raise MaxSessions in its sshd_config.`;
+  if (/Broken pipe|Connection reset|Connection closed|closed by remote host|Timeout, server .* not responding/i.test(stderr)) return `Lost the SSH connection to ${host} (${line}).`;
   return `SSH to ${host} failed${line ? `: ${line}` : '.'}`;
 }

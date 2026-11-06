@@ -145,13 +145,31 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
  * here (same buttons as on their cards), or by telling the main agent.
  */
 export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapshot: WorkspaceSnapshot; now: number; onOpen?: (taskId: string) => void; compact?: boolean; limit?: number }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId));
   if (!open.length) return null;
+  // With several waiting, one line each (expand one to answer) so the list stays short.
+  const rows = open.length > 2;
   return (
     <div className={`waiting${compact ? ' compact' : ''}`} data-testid="waiting-on-you">
       <div className="section-label">{t('Waiting on you · {n}', { n: open.length })}</div>
       {open.slice(0, limit ?? open.length).map((a) => {
         const worker = snapshot.tasks.find((x) => x.taskId === a.taskId)!;
+        if (rows && expanded !== a.id)
+          return (
+            <div key={a.id} className={`waiting-row kind-${a.kind}`} data-testid="waiting-row">
+              <button className="waiting-row-main" onClick={() => setExpanded(a.id)} title={t('Show the request')}>
+                <Alias alias={worker.alias} size="sm" />
+                <span className="waiting-row-name">{displayName(worker)}</span>
+                <span className="waiting-row-text">{a.headline}</span>
+              </button>
+              {onOpen ? (
+                <button className="link small" onClick={() => onOpen(worker.taskId)}>
+                  {t('Open')}
+                </button>
+              ) : null}
+            </div>
+          );
         return (
           <div key={a.id} className="waiting-item">
             <div className="waiting-from">
@@ -159,6 +177,11 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
               {onOpen ? (
                 <button className="link small" onClick={() => onOpen(worker.taskId)}>
                   {t('Open')}
+                </button>
+              ) : null}
+              {rows ? (
+                <button className="link small" onClick={() => setExpanded(null)}>
+                  {t('Show less')}
                 </button>
               ) : null}
             </div>
@@ -225,8 +248,9 @@ function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }
     >
       <div className="transcript-inner">
         {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
-        {groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch'), main).map((entry) => {
+        {groupNotices(groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch'), main), main).map((entry) => {
           if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} main={main} />;
+          if ('notices' in entry) return <NoticeGroup key={entry.notices[0].id} notices={entry.notices} />;
           const item = entry;
           if (item.role === 'tool') return <ToolCallRow key={item.id} item={item} />;
           if (item.role === 'thought')
@@ -262,6 +286,53 @@ function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }
         })}
       </div>
     </div>
+  );
+}
+
+/** A worker's "waiting on you" / "request is settled" note in the main agent's conversation. */
+const NOTICE_RE = /^(.+?)(?: is waiting on you \((?:permission|question)\): |'s request is settled: )/;
+
+/**
+ * In the main agent's conversation, consecutive worker notes fold into one line: with
+ * many agents waiting they would otherwise fill the conversation, repeating the list above.
+ */
+function groupNotices(entries: Array<TranscriptItem | TranscriptItem[]>, main?: boolean): Array<TranscriptItem | TranscriptItem[] | { notices: TranscriptItem[] }> {
+  if (!main) return entries;
+  const out: Array<TranscriptItem | TranscriptItem[] | { notices: TranscriptItem[] }> = [];
+  let run: TranscriptItem[] = [];
+  const flush = () => {
+    if (run.length >= 2) out.push({ notices: run });
+    else out.push(...run);
+    run = [];
+  };
+  for (const e of entries) {
+    if (!Array.isArray(e) && e.role === 'system' && NOTICE_RE.test(e.text)) run.push(e);
+    else {
+      flush();
+      out.push(e);
+    }
+  }
+  flush();
+  return out;
+}
+
+function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
+  const waiting = notices.filter((n) => / is waiting on you \(/.test(n.text)).length;
+  const settled = notices.length - waiting;
+  const names = [...new Set(notices.map((n) => NOTICE_RE.exec(n.text)?.[1] ?? ''))].filter(Boolean);
+  const parts = [waiting ? t('{n} requests from agents', { n: waiting }) : '', settled ? t('{n} settled', { n: settled }) : ''].filter(Boolean).join(' · ');
+  return (
+    <details className="msg notices" data-testid="notice-group">
+      <summary className="msg-system">
+        {parts} — {names.slice(0, 4).join(', ')}
+        {names.length > 4 ? ` +${names.length - 4}` : ''}
+      </summary>
+      {notices.map((n) => (
+        <div key={n.id} className="msg-system">
+          {systemText(n.text)}
+        </div>
+      ))}
+    </details>
   );
 }
 
