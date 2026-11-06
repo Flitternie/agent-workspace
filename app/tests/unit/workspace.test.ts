@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -246,8 +246,18 @@ describe('worktrees', () => {
     await until(idle(a.taskId));
     const said = (id: string) => ws.transcript(id).filter((i) => i.role === 'user').map((i) => i.text);
     const commit = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
-    execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'work by A'], { cwd: a.cwd });
-    writeFileSync(join(a.cwd, 'draft.txt'), 'uncommitted');
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+    writeFileSync(join(a.cwd, 'old.txt'), 'to be deleted');
+    git(a.cwd, 'add', 'old.txt');
+    git(a.cwd, 'commit', '-qm', 'work by A');
+    // A's uncommitted work: an edit, a deletion, a staged new file and an untracked one in a new folder.
+    writeFileSync(join(a.cwd, 'README.md'), '# test\nedited by A\n');
+    git(a.cwd, 'rm', '-q', 'old.txt');
+    writeFileSync(join(a.cwd, 'staged.txt'), 'staged');
+    git(a.cwd, 'add', 'staged.txt');
+    mkdirSync(join(a.cwd, 'notes'));
+    writeFileSync(join(a.cwd, 'notes', 'draft.txt'), 'uncommitted');
+    const aStatus = git(a.cwd, 'status', '--porcelain', '-uall');
 
     const points = await ws.forkPoints(a.taskId);
     expect(points.map((x) => x.prompt)).toEqual(['Second request.']);
@@ -259,10 +269,15 @@ describe('worktrees', () => {
     expect(b.name).toBe('backend fork');
     expect(b.cwd).not.toBe(a.cwd);
     expect(commit(b.cwd)).toBe(commit(a.cwd));
-    expect(existsSync(join(b.cwd, 'draft.txt'))).toBe(false);
+    // Its files match what its conversation remembers: A's uncommitted work came along, and A is untouched.
+    expect(readFileSync(join(b.cwd, 'README.md'), 'utf8')).toBe('# test\nedited by A\n');
+    expect(existsSync(join(b.cwd, 'old.txt'))).toBe(false);
+    expect(readFileSync(join(b.cwd, 'staged.txt'), 'utf8')).toBe('staged');
+    expect(readFileSync(join(b.cwd, 'notes', 'draft.txt'), 'utf8')).toBe('uncommitted');
+    expect(git(a.cwd, 'status', '--porcelain', '-uall')).toBe(aStatus);
+    expect(ws.snapshot().coordinator.some((m) => /uncommitted changes were copied too \(4 files\)/.test(m.text))).toBe(true);
     await until(idle(b.taskId));
     expect(said(b.taskId)).toEqual(['First request.', 'Second request, but smaller.']);
-    expect(ws.snapshot().coordinator.at(-1)?.text).toMatch(/uncommitted changes were not copied/);
 
     // The whole conversation; the original keeps its own.
     const c = await ws.forkTask(a.taskId, { isolate: false });
@@ -279,6 +294,8 @@ describe('worktrees', () => {
     // A clean fork's branch is deleted with its worktree, though it started ahead of the project's HEAD.
     const branches = () => execFileSync('git', ['branch', '--list', b.worktree!.branch], { cwd: p.rootPath, encoding: 'utf8' }).trim();
     expect(branches()).not.toBe('');
+    git(b.cwd, 'reset', '-q', '--hard');
+    git(b.cwd, 'clean', '-qfd');
     expect(await ws.remove(b.taskId)).toMatch(/clean worktree was deleted/);
     expect(branches()).toBe('');
   });
@@ -340,6 +357,44 @@ describe('main agent tools', () => {
     expect(await tools.read_agent.run({ agent: 'Alice', limit: 5 })).toContain('[user] Migrate API.');
     await expect(tools.send_to_agent.run({ agent: 'Zed', message: 'hi' })).rejects.toThrow(/No agent named "Zed"/);
     expect(await tools.create_agent.run({ project: 'nope', title: 'x', instruction: 'y' })).toMatch(/Unknown project/);
+  });
+
+  it('branch off an agent with its context, never with more permissions than the default', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', name: 'backend', title: 'Bug', isolate: true, mockScript: 'work', instruction: 'Investigate the bug.' });
+    const idle = (id: string) => () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === id)!.status);
+    await until(idle(A.taskId));
+    await ws.send(A.taskId, 'Try the cache fix.', 'text');
+    await until(idle(A.taskId));
+    writeFileSync(join(A.cwd, 'findings.md'), 'the bug is in the cache');
+    // The user gave Alice more than the workspace default; a fork the main agent makes does not inherit that.
+    ws.updateSettings({ permissionMode: 'edits' });
+    await ws.setPermissionMode(A.taskId, 'auto');
+    const { workspaceTools, MAX_FORKS_PER_TURN } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+
+    const r = await tools.fork_agent.run({ agent: 'Alice', instruction: 'Try the index fix instead.', before_prompt: 'try the CACHE', role: 'Approach B' });
+    expect(r).toMatch(/^Forked Alice as \S+ in its own worktree \(amw\/.+\); it is working on its instruction\.$/);
+    const B = ws.snapshot().tasks.find((t) => t.forkedFrom?.taskId === A.taskId)!;
+    expect(B.name).toBe('Approach B');
+    expect(B.cwd).not.toBe(A.cwd);
+    expect(readFileSync(join(B.cwd, 'findings.md'), 'utf8')).toBe('the bug is in the cache');
+    expect(ws.permissionModeOf(B)).toBe('edits');
+    await until(idle(B.taskId));
+    const said = ws.transcript(B.taskId).filter((i) => i.role === 'user');
+    expect(said.map((i) => i.text)).toEqual(['Investigate the bug.', 'Try the index fix instead.']);
+    expect(said.at(-1)?.via).toBe('main');
+
+    // A stricter mode the user chose is kept.
+    await ws.setPermissionMode(A.taskId, 'ask');
+    await tools.fork_agent.run({ agent: 'Alice', instruction: 'Write a failing test first.' });
+    expect(ws.permissionModeOf(ws.snapshot().tasks.at(-1)!)).toBe('ask');
+
+    await expect(tools.fork_agent.run({ agent: 'Alice', instruction: 'x', before_prompt: 'nope' })).rejects.toThrow(/None of Alice's earlier prompts start with "nope". Its earlier prompts: "Try the cache fix."/);
+    for (let i = 2; i < MAX_FORKS_PER_TURN; i++) await tools.fork_agent.run({ agent: 'Alice', instruction: `Branch ${i}.` });
+    expect(await tools.fork_agent.run({ agent: 'Alice', instruction: 'One too many.' })).toMatch(/^Not forked: at most 3 forks/);
+    expect(ws.snapshot().tasks.filter((t) => t.forkedFrom).length).toBe(MAX_FORKS_PER_TURN);
   });
 
   it('give a quick look at a project and at what an agent changed, without the files themselves', async () => {

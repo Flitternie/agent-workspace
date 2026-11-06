@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { WorktreeInfo } from '../shared/types';
 import { run } from './util/exec';
@@ -25,6 +25,34 @@ export class WorktreeService {
     const r = await run('git', ['-C', repoRoot, 'worktree', 'add', '-b', branch, path, baseRef]);
     if (r.code !== 0) throw new Error(`git worktree add failed: ${r.stderr.trim() || r.stdout.trim()}`);
     return { path, branch, baseRef, parentRepo: repoRoot };
+  }
+
+  /**
+   * Copies `from`'s uncommitted work (tracked changes and untracked, non-ignored files) into the
+   * worktree at `to`, which must start at the same commit. `from` is left exactly as it is.
+   */
+  async copyChanges(from: string, to: string): Promise<{ files: number; error?: string }> {
+    // A stash commit of the tracked changes, made without touching `from`'s files or index.
+    // Worktrees of one repository share their objects, so `to` can apply it directly.
+    const stash = await run('git', ['-C', from, 'stash', 'create']);
+    if (stash.code !== 0) return { files: 0, error: stash.stderr.trim() || 'git stash create failed' };
+    if (stash.stdout.trim()) {
+      const applied = await run('git', ['-C', to, 'stash', 'apply', '--quiet', stash.stdout.trim()]);
+      if (applied.code !== 0) return { files: 0, error: applied.stderr.trim() || 'git stash apply failed' };
+    }
+    const untracked = await run('git', ['-C', from, 'ls-files', '--others', '--exclude-standard', '-z']);
+    if (untracked.code !== 0) return { files: 0, error: untracked.stderr.trim() };
+    // Entries ending in "/" are nested repositories, which are not copied.
+    for (const file of untracked.stdout.split('\0').filter((f) => f && !f.endsWith('/'))) {
+      try {
+        mkdirSync(dirname(join(to, file)), { recursive: true });
+        cpSync(join(from, file), join(to, file), { verbatimSymlinks: true });
+      } catch (error) {
+        return { files: 0, error: `could not copy ${file}: ${(error as Error).message}` };
+      }
+    }
+    const status = await run('git', ['-C', to, 'status', '--porcelain', '-uall']);
+    return { files: status.stdout.split('\n').filter(Boolean).length };
   }
 
   /** Why the worktree must be kept, or null when it is safe to remove. */

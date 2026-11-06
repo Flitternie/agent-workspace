@@ -464,7 +464,7 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
       <label className="check">
         <input type="checkbox" checked={isolate && !!project?.isGitRepo} disabled={!project?.isGitRepo} onChange={(e) => setIsolate(e.target.checked)} data-testid="fork-isolate" />
         {t('Run in its own git worktree')}{' '}
-        {project?.isGitRepo ? t('(starts from {name}’s last commit; uncommitted changes are not copied)', { name: task.alias }) : t('(not a git repo — will share the folder)')}
+        {project?.isGitRepo ? t('(with {name}’s files as they are now, uncommitted changes included)', { name: task.alias }) : t('(not a git repo — will share the folder)')}
       </label>
       <div className="field">
         <label>{t('First instruction (optional)')}</label>

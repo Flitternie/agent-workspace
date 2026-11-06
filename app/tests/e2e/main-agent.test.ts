@@ -122,7 +122,7 @@ describe.runIf(enabled).each(['claude', 'codex'])('main agent on %s', (provider)
       return n;
     };
     const dump = async () => console.log((await mainItems()).map((i) => `[${i.role}] ${(i.tool ? JSON.stringify(i.tool).slice(0, 160) : '') + ' ' + i.text}`.slice(0, 300)).join('\n'));
-    const WORKSPACE = /^(list_workspace_agents|read_agent|agent_changes|project_overview|list_projects|list_requests|send_to_agent|create_agent|stop_agent|answer_request|save_memory)$/;
+    const WORKSPACE = /^(list_workspace_agents|read_agent|agent_changes|project_overview|list_projects|list_requests|send_to_agent|create_agent|fork_agent|stop_agent|answer_request|save_memory)$/;
 
     // Work, even small: handed off, not done.
     let before = await handOffs();
