@@ -120,6 +120,9 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').getAttribute('data-route-kind')).toBe('coordinator');
     await page.getByTestId('route-send').click();
     await expect.poll(() => page.getByTestId('coordinator-log').innerText()).toContain('Saved to project');
+    // The panel is closed by default.
+    await expect.poll(() => page.getByTestId('memory-panel').count()).toBe(0);
+    await page.getByRole('button', { name: 'Memory' }).click();
     await expect.poll(() => page.getByTestId('memory-panel').innerText()).toContain('总是先跑集成测试');
     await shot(page, '05-focus-B-memory');
 

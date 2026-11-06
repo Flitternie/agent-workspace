@@ -489,4 +489,15 @@ export const zh: Record<string, string> = {
   'stopped an agent': '停止了 Agent',
   'answered a request': '回复了请求',
   'saved a note': '记下了约定',
+
+  // File preview
+  Preview: '预览',
+  'Preview {name}': '预览 {name}',
+  'Open in default app': '用默认应用打开',
+  'File preview': '文件预览',
+  Refresh: '刷新',
+  'Close preview': '关闭预览',
+  'Allow scripts': '允许脚本',
+  'Runs the page’s own scripts, still isolated from the app and the network.': '运行页面自带的脚本，仍与应用和网络隔离。',
+  'Not an image': '不是图片',
 };

@@ -337,7 +337,7 @@ describe('main agent tools', () => {
     expect(msg?.via).toBe('main');
     expect(ws.transcript(A.taskId).some((i) => i.text === 'Use the shared Button component.')).toBe(false);
 
-    expect(await tools.read_agent.run({ agent: 'Alice', limit: 5 })).toContain('[user] Migrate API.');
+    expect(await tools.read_agent.run({ agent: 'Alice', limit: 6 })).toContain('[user] Migrate API.');
     await expect(tools.send_to_agent.run({ agent: 'Zed', message: 'hi' })).rejects.toThrow(/No agent named "Zed"/);
     expect(await tools.create_agent.run({ project: 'nope', title: 'x', instruction: 'y' })).toMatch(/Unknown project/);
   });

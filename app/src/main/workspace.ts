@@ -7,6 +7,7 @@ import type {
   AttentionItem,
   CoordinatorEntry,
   DispatchResult,
+  FilePreview,
   ForkPoint,
   MemoryRecord,
   MemoryScope,
@@ -37,6 +38,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -1637,6 +1639,26 @@ export class Workspace {
 
   availableProviders(): AgentProvider[] {
     return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
+  }
+
+  // ---------------------------------------------------------------- file preview
+
+  /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
+  private previewRoots(t: Task): string[] {
+    const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
+    return [t.cwd, t.worktree?.path, project?.rootPath].filter((r): r is string => !!r);
+  }
+
+  async previewFile(taskId: string, path: string): Promise<FilePreview> {
+    const t = this.task(taskId);
+    return t.host ? readRemote(t.host, t.cwd, path, this.previewRoots(t)) : readLocal(t.cwd, path, this.previewRoots(t));
+  }
+
+  /** The checked local path to hand to the default app (this Mac only). */
+  previewLocalPath(taskId: string, path: string): string {
+    const t = this.task(taskId);
+    if (t.host) throw new Error(`The file is on ${t.host}; it can only be previewed here.`);
+    return localPath(t.cwd, path, this.previewRoots(t));
   }
 
   // ---------------------------------------------------------------- demo
