@@ -368,6 +368,7 @@ export const zh: Record<string, string> = {
   '(starts from {name}’s last commit; uncommitted changes are not copied)': '（从 {name} 最新的 commit 开始，未提交的改动不会复制）',
   'What should the new agent do?': '新 Agent 要做什么？',
   'forked from {name}': '分叉自 {name}',
+  'Fork once this turn ends.': '等这一轮结束后再分叉。',
   'Start a new agent from a copy of this conversation, now or from an earlier prompt.': '用这段对话的副本开一个新 Agent，可以从现在或更早的某条消息开始。',
   '(not a git repo — will share the folder)': '（非 git 仓库，将直接在该目录工作）',
   '(isolates edits from other tasks; not a security sandbox)': '（与其他任务的改动互不干扰；不是安全沙箱）',

@@ -43,7 +43,9 @@ export class WorktreeService {
     if (reason) return { removed: false, reason };
     const r = await run('git', ['-C', info.parentRepo, 'worktree', 'remove', info.path]);
     if (r.code !== 0) return { removed: false, reason: r.stderr.trim() };
-    await run('git', ['-C', info.parentRepo, 'branch', '-d', info.branch]);
+    // keepReason found nothing past baseRef, so nothing is lost. `-d` would refuse a branch that isn't merged into the
+    // parent's HEAD, which a branch started from another agent's commit (a fork) usually isn't.
+    await run('git', ['-C', info.parentRepo, 'branch', '-D', info.branch]);
     return { removed: true };
   }
 }

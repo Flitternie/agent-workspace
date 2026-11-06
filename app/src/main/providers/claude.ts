@@ -224,8 +224,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     const points: ForkPoint[] = [];
     messages.forEach((m, i) => {
       if (i === 0 || m.type !== 'user' || m.parent_tool_use_id) return;
+      // Compact summaries ("This session is being continued…") come back flagged, not filtered.
+      const flags = m as { is_meta?: boolean; isCompactSummary?: boolean };
+      if (flags.is_meta || flags.isCompactSummary) return;
       const prompt = cleanUserText(promptText(rec(m.message).content));
-      if (prompt) points.push({ upToMessageId: messages[i - 1].uuid, prompt });
+      if (prompt && !INTERRUPTED.test(prompt)) points.push({ upToMessageId: messages[i - 1].uuid, prompt });
     });
     return points;
   }
@@ -246,6 +249,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     return new ClaudeSession(args, onEvent);
   }
 }
+
+/** Claude Code's marker after the user stops a turn ("[Request interrupted by user for tool use]"). */
+const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
 
 /** What the user typed in a saved user message; '' for tool results. */
 function promptText(content: unknown): string {

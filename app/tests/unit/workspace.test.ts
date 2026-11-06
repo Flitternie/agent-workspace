@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MockAdapter } from '../../src/main/providers/mock';
 import { Workspace } from '../../src/main/workspace';
 
@@ -255,7 +255,8 @@ describe('worktrees', () => {
     // From before the second request, with that request sent again in other words.
     const b = await ws.forkTask(a.taskId, { upToMessageId: points[0].upToMessageId, isolate: true, instruction: 'Second request, but smaller.' });
     expect(b.forkedFrom).toEqual({ taskId: a.taskId, alias: a.alias });
-    expect(b.name).toBe('backend');
+    // Its own voice handle, not a second "backend".
+    expect(b.name).toBe('backend fork');
     expect(b.cwd).not.toBe(a.cwd);
     expect(commit(b.cwd)).toBe(commit(a.cwd));
     expect(existsSync(join(b.cwd, 'draft.txt'))).toBe(false);
@@ -266,6 +267,7 @@ describe('worktrees', () => {
     // The whole conversation; the original keeps its own.
     const c = await ws.forkTask(a.taskId, { isolate: false });
     expect(c.sharedCwdWarning).toMatch(/not isolated/);
+    expect(c.name).toBe('backend fork 2');
     await ws.send(c.taskId, 'Third request.', 'text');
     await until(idle(c.taskId));
     expect(said(c.taskId)).toEqual(['First request.', 'Second request.', 'Third request.']);
@@ -273,6 +275,35 @@ describe('worktrees', () => {
 
     const fresh = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'never started', isolate: false });
     await expect(ws.forkTask(fresh.taskId, { isolate: false })).rejects.toThrow(/no saved conversation/);
+
+    // A clean fork's branch is deleted with its worktree, though it started ahead of the project's HEAD.
+    const branches = () => execFileSync('git', ['branch', '--list', b.worktree!.branch], { cwd: p.rootPath, encoding: 'utf8' }).trim();
+    expect(branches()).not.toBe('');
+    expect(await ws.remove(b.taskId)).toMatch(/clean worktree was deleted/);
+    expect(branches()).toBe('');
+  });
+
+  it('a fork waits for the current turn to end', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'ops', isolate: false, mockScript: 'approval:deploy', instruction: 'deploy' });
+    await until(() => ws.snapshot().attention.some((x) => x.taskId === a.taskId && x.kind === 'approval' && x.state === 'open'));
+    await expect(ws.forkTask(a.taskId, { isolate: false })).rejects.toThrow(/still working/);
+    expect(ws.snapshot().tasks.filter((t) => t.forkedFrom)).toEqual([]);
+    await ws.respondAttention(ws.snapshot().attention.find((x) => x.kind === 'approval')!.id, 'deny');
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status));
+    expect((await ws.forkTask(a.taskId, { isolate: false })).forkedFrom?.taskId).toBe(a.taskId);
+  });
+
+  it('a first instruction that cannot be delivered is kept on the fork to resend', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'API', isolate: false, mockScript: 'work', instruction: 'First request.' });
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status));
+    vi.spyOn(ws, 'send').mockImplementationOnce(async (taskId) => ({ ok: false, taskId, error: 'claude not found' }));
+    const b = await ws.forkTask(a.taskId, { isolate: false, instruction: 'Try the smaller change.' });
+    expect(ws.transcript(b.taskId).at(-1)?.text).toMatch(/not sent[\s\S]*Try the smaller change\./);
+    expect(ws.snapshot().coordinator.at(-1)?.text).toMatch(/not delivered: claude not found/);
   });
 
   it('warns when tasks share a writable directory', async () => {

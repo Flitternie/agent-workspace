@@ -99,7 +99,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               </button>
             )}
             {canFork ? (
-              <button className="btn" data-testid="fork-task" onClick={() => setForking(true)} title={t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')}>
+              <button
+                className="btn"
+                data-testid="fork-task"
+                disabled={task.status === 'running' || task.status === 'starting'}
+                onClick={() => setForking(true)}
+                title={
+                  task.status === 'running' || task.status === 'starting'
+                    ? t('Fork once this turn ends.')
+                    : t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')
+                }
+              >
                 <Icon name="branch" /> {t('Fork')}
               </button>
             ) : null}

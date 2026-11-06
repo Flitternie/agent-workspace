@@ -829,6 +829,9 @@ export class Workspace {
    */
   async forkTask(taskId: string, opts: { upToMessageId?: string; isolate: boolean; instruction?: string }): Promise<Task> {
     const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
+    // Mid-turn, the saved conversation can end on a tool call with no result yet.
+    if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
+      throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
     const project = this.project(src.projectId);
     const d = this.store.data;
     const title = clip(`${src.title} (fork)`, 120);
@@ -859,7 +862,8 @@ export class Workspace {
     const task: Task = {
       taskId: newId,
       alias,
-      name: src.name === src.alias ? alias : src.name,
+      // A custom name is a voice handle, so the fork gets its own.
+      name: src.name === src.alias ? alias : this.forkName(src.name),
       projectId: src.projectId,
       title,
       provider: src.provider,
@@ -884,8 +888,26 @@ export class Workspace {
     this.coordinatorSay(`Forked ${src.alias} as ${alias}. ${notes.join(' ')}`);
     this.changed();
     if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
-    if (opts.instruction?.trim()) await this.send(newId, opts.instruction.trim(), 'text');
+    const instruction = opts.instruction?.trim();
+    if (instruction) {
+      const r = await this.send(newId, instruction, 'text');
+      // The fork itself exists, so keep it (failing here would invite a duplicate); keep the instruction to resend.
+      if (!r.ok) {
+        this.appendSystem(newId, `The first instruction was not sent. Resend it when ${alias} is reachable:\n\n${instruction}`);
+        this.coordinatorSay(`${alias} was forked, but its first instruction was not delivered: ${r.error}`);
+        this.changed();
+      }
+    }
     return task;
+  }
+
+  /** "backend" -> "backend fork", then "backend fork 2", … — unique among the agents. */
+  private forkName(name: string): string {
+    const taken = new Set(this.store.data.tasks.map((t) => t.name.trim().toLowerCase()));
+    const base = `${name.trim()} fork`;
+    let candidate = base;
+    for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${base} ${n}`;
+    return candidate;
   }
 
   // ---------------------------------------------------------------- messaging
