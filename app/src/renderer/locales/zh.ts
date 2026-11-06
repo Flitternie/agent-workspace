@@ -365,7 +365,7 @@ export const zh: Record<string, string> = {
   'Loading…': '加载中…',
   'A new agent continues a copy of this conversation. {name} and its conversation stay as they are.': '新 Agent 会接着这段对话的副本继续，{name} 和它的对话保持不变。',
   'Only the conversation goes back; files stay as they are now.': '只回退对话，文件保持现在的状态。',
-  '(starts from {name}’s last commit; uncommitted changes are not copied)': '（从 {name} 最新的 commit 开始，未提交的改动不会复制）',
+  '(with {name}’s files as they are now, uncommitted changes included)': '（带上 {name} 现在的文件，包括未提交的改动）',
   'What should the new agent do?': '新 Agent 要做什么？',
   'forked from {name}': '分叉自 {name}',
   'Fork once this turn ends.': '等这一轮结束后再分叉。',

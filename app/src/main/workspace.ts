@@ -824,8 +824,8 @@ export class Workspace {
   /**
    * A new agent that continues a copy of this agent's conversation, from now or from just before
    * an earlier prompt; the original agent and its conversation are untouched. With `isolate`, the
-   * copy works in its own worktree starting from the original's last commit (only the conversation
-   * is rewound, never files).
+   * copy works in its own worktree with the original's files as they are now: its last commit plus
+   * its uncommitted changes (only the conversation is rewound, never files).
    */
   async forkTask(taskId: string, opts: { upToMessageId?: string; isolate: boolean; instruction?: string }): Promise<Task> {
     const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
@@ -837,11 +837,9 @@ export class Workspace {
     const title = clip(`${src.title} (fork)`, 120);
     let cwd = src.cwd;
     let worktree: Task['worktree'];
-    let uncommitted = false;
     if (opts.isolate && project.isGitRepo) {
       const head = await run('git', ['-C', src.cwd, 'rev-parse', '--verify', 'HEAD']);
       if (head.code !== 0) throw new Error(`Could not read ${src.alias}'s last commit: ${head.stderr.trim()}`);
-      uncommitted = !!(await run('git', ['-C', src.cwd, 'status', '--porcelain'])).stdout.trim();
       const id = randomUUID().slice(0, 8);
       worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(`${src.name} fork`)}-${id}`, head.stdout.trim());
       cwd = worktree.path;
@@ -853,6 +851,9 @@ export class Workspace {
       if (worktree) await this.worktrees.removeIfClean(worktree);
       throw error;
     }
+    // After the fork exists, so a failed fork still leaves a clean worktree to remove. Its conversation
+    // remembers the original's edits, so its files must have them too.
+    const copied = worktree ? await this.worktrees.copyChanges(src.cwd, worktree.path) : undefined;
     const alias = aliasFor(d.aliasCounter++, d.settings.language);
     const newId = `t-${randomUUID().slice(0, 8)}`;
     const record: SessionRecord = { localId: `s-${randomUUID().slice(0, 8)}`, taskId: newId, provider: src.provider, nativeSessionId: forkId, cwd, integrationMode: 'resumed', createdAt: now() };
@@ -883,7 +884,11 @@ export class Workspace {
     d.tasks.push(task);
     const notes = [
       `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}, from ${src.alias}'s last commit)` : ''}.`,
-      ...(uncommitted ? [`${src.alias}'s uncommitted changes were not copied.`] : []),
+      ...(copied?.error
+        ? [`${src.alias}'s uncommitted changes were not fully copied (${copied.error}); check ${alias}'s files before relying on them.`]
+        : copied?.files
+          ? [`${src.alias}'s uncommitted changes were copied too (${copied.files} file${copied.files === 1 ? '' : 's'}).`]
+          : []),
     ];
     this.coordinatorSay(`Forked ${src.alias} as ${alias}. ${notes.join(' ')}`);
     this.changed();
