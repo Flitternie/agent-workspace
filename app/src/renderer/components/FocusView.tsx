@@ -16,7 +16,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const connected = snapshot.connectedTaskIds.includes(task.taskId);
   const session = snapshot.sessions.find((s) => s.localId === task.sessionLocalId);
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
-  const [showMemory, setShowMemory] = useState(true);
+  // Closed by default; once opened it stays open for every agent.
+  const [showMemory, setShowMemoryState] = useState(() => localStorage.getItem('amw.showMemory') === '1');
+  const setShowMemory = (on: boolean) => {
+    localStorage.setItem('amw.showMemory', on ? '1' : '0');
+    setShowMemoryState(on);
+  };
   const [forking, setForking] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
   const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
