@@ -486,6 +486,7 @@ export const zh: Record<string, string> = {
   'checked what agents are waiting on': '查看了待办请求',
   'passed on a message': '转达了消息',
   'started an agent': '新建了 Agent',
+  'forked an agent': '分叉了 Agent',
   'stopped an agent': '停止了 Agent',
   'answered a request': '回复了请求',
   'saved a note': '记下了约定',

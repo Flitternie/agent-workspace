@@ -253,6 +253,7 @@ const WORKSPACE_ACTION: Record<string, string> = {
   list_requests: 'checked what agents are waiting on',
   send_to_agent: 'passed on a message',
   create_agent: 'started an agent',
+  fork_agent: 'forked an agent',
   stop_agent: 'stopped an agent',
   answer_request: 'answered a request',
   save_memory: 'saved a note',

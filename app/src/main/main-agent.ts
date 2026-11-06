@@ -22,6 +22,7 @@ export interface MainAgentHost {
   transcriptText(taskId: string, limit: number): string;
   sendFromMain(taskId: string, text: string, interrupt: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
   createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task>;
+  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
   stopFromMain(taskId: string): Promise<void>;
   saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void;
   availableProviders(): AgentProvider[];
@@ -38,6 +39,8 @@ export interface MainAgentHost {
 /** Calls per user message: a backstop for a model stuck in a loop, not a working limit. */
 export const MAX_CALLS_PER_TURN = 30;
 const MAX_SAME_CALL = 3;
+/** Forks per user message: each one carries a whole conversation, and every turn pays for it. */
+export const MAX_FORKS_PER_TURN = 3;
 
 /** Stops runaway loops: the same call over and over, or far too many in one turn. */
 function guard(host: MainAgentHost, tools: WorkspaceTool[]): WorkspaceTool[] {
@@ -70,6 +73,8 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
     if (!t) throw new Error(`No agent named "${String(name)}". Call list_workspace_agents to see the names.`);
     return t;
   };
+  let forkTurn = -1;
+  let forks = 0;
   return guard(host, [
     {
       name: 'list_workspace_agents',
@@ -137,6 +142,38 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         if (!provider || !providers.includes(provider)) return `Provider ${String(a.provider)} is not available here. Available: ${providers.join(', ') || 'none'}.`;
         const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), role: a.role ? String(a.role) : undefined });
         return `Started ${t.alias} (${provider}) on ${p.name}: "${t.title}".`;
+      },
+    },
+    {
+      name: 'fork_agent',
+      description:
+        'Branch off work from an agent: a new agent continues a copy of its conversation (so it already knows what the original found out and decided) in its own worktree with the original’s files as they are now, and gets its own instruction. The original is untouched. Use it to try different approaches in parallel, or to split the remaining work after an agent has explored the problem; use create_agent for unrelated work. Each fork carries the whole conversation, so fork only when that context matters, and say in one line what each branch does. Only an agent that is not working right now can be forked; otherwise wait for its turn to end (that comes to you on its own). Claude Code agents only, for now.',
+      schema: z.object({
+        agent: agentArg,
+        instruction: z.string().min(1).describe('What this branch does, different from the original’s work, and what done looks like.'),
+        before_prompt: z
+          .string()
+          .optional()
+          .describe('Fork from just before one of the user’s earlier prompts to this agent, given by its first words (as read_agent shows them). Omit to fork the whole conversation as it is now.'),
+        role: z.string().optional().describe('Optional short role for the new agent, e.g. "Approach B".'),
+      }),
+      run: async (a) => {
+        const t = agent(a.agent);
+        if (host.mainTurn() !== forkTurn) {
+          forkTurn = host.mainTurn();
+          forks = 0;
+        }
+        if (forks >= MAX_FORKS_PER_TURN) return `Not forked: at most ${MAX_FORKS_PER_TURN} forks per message from the user. Tell the user what you started, and fork more only if they ask.`;
+        const { task, delivery } = await host.forkFromMain(t.taskId, {
+          instruction: String(a.instruction),
+          beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
+          role: a.role ? String(a.role) : undefined,
+        });
+        forks++;
+        const where = task.worktree ? ` in its own worktree (${task.worktree.branch})` : '';
+        return delivery.ok
+          ? `Forked ${t.alias} as ${task.alias}${where}; it is working on its instruction.`
+          : `Forked ${t.alias} as ${task.alias}${where}, but its instruction was not delivered: ${delivery.error}. Send it again with send_to_agent.`;
       },
     },
     {
@@ -236,10 +273,11 @@ What you do yourself:
 
 What you always hand off, however small: anything that needs reading or changing the project's code or files, running commands or tests, looking things up, or several steps of work. Questions about the code ("what does this function do", "why does the build fail") go to an agent too.
 - Send it to the agent already working on that area (send_to_agent). If none fits, start one with create_agent, with a short role and a first instruction that says what to do and what done looks like. If you do not know which project, or which agent, ask.
+- When the user wants approaches tried side by side, or work split after an agent has explored the problem, fork_agent branches off that agent with its context; give each branch a distinct instruction.
 - Then tell the user in one line what went where ("Sent to Charlie: …" / "Started Dana on api: …"). Do not wait for the result or check on it again: the agent's progress, questions and completion come to you and to the user on their own.
 - With no projects yet, tell the user to add a project folder first (New task).
 
-You have only the workspace tools; you cannot read files, run commands or browse. Never use built-in sub-agent or collaboration tools (spawn_agent, followup_task, send_message, wait_agent and the like) even if you see them: those helpers are invisible to the user. Every agent is started with create_agent and reached with send_to_agent. project_overview gives a quick look at a project to decide where work belongs; it is not for doing the work.
+You have only the workspace tools; you cannot read files, run commands or browse. Never use built-in sub-agent or collaboration tools (spawn_agent, followup_task, send_message, wait_agent and the like) even if you see them: those helpers are invisible to the user. Every agent is started with create_agent (or branched off one with fork_agent) and reached with send_to_agent. project_overview gives a quick look at a project to decide where work belongs; it is not for doing the work.
 
 Reply in the user's language, concisely.`;
 

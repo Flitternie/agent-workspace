@@ -359,6 +359,44 @@ describe('main agent tools', () => {
     expect(await tools.create_agent.run({ project: 'nope', title: 'x', instruction: 'y' })).toMatch(/Unknown project/);
   });
 
+  it('branch off an agent with its context, never with more permissions than the default', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', name: 'backend', title: 'Bug', isolate: true, mockScript: 'work', instruction: 'Investigate the bug.' });
+    const idle = (id: string) => () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === id)!.status);
+    await until(idle(A.taskId));
+    await ws.send(A.taskId, 'Try the cache fix.', 'text');
+    await until(idle(A.taskId));
+    writeFileSync(join(A.cwd, 'findings.md'), 'the bug is in the cache');
+    // The user gave Alice more than the workspace default; a fork the main agent makes does not inherit that.
+    ws.updateSettings({ permissionMode: 'edits' });
+    await ws.setPermissionMode(A.taskId, 'auto');
+    const { workspaceTools, MAX_FORKS_PER_TURN } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+
+    const r = await tools.fork_agent.run({ agent: 'Alice', instruction: 'Try the index fix instead.', before_prompt: 'try the CACHE', role: 'Approach B' });
+    expect(r).toMatch(/^Forked Alice as \S+ in its own worktree \(amw\/.+\); it is working on its instruction\.$/);
+    const B = ws.snapshot().tasks.find((t) => t.forkedFrom?.taskId === A.taskId)!;
+    expect(B.name).toBe('Approach B');
+    expect(B.cwd).not.toBe(A.cwd);
+    expect(readFileSync(join(B.cwd, 'findings.md'), 'utf8')).toBe('the bug is in the cache');
+    expect(ws.permissionModeOf(B)).toBe('edits');
+    await until(idle(B.taskId));
+    const said = ws.transcript(B.taskId).filter((i) => i.role === 'user');
+    expect(said.map((i) => i.text)).toEqual(['Investigate the bug.', 'Try the index fix instead.']);
+    expect(said.at(-1)?.via).toBe('main');
+
+    // A stricter mode the user chose is kept.
+    await ws.setPermissionMode(A.taskId, 'ask');
+    await tools.fork_agent.run({ agent: 'Alice', instruction: 'Write a failing test first.' });
+    expect(ws.permissionModeOf(ws.snapshot().tasks.at(-1)!)).toBe('ask');
+
+    await expect(tools.fork_agent.run({ agent: 'Alice', instruction: 'x', before_prompt: 'nope' })).rejects.toThrow(/None of Alice's earlier prompts start with "nope". Its earlier prompts: "Try the cache fix."/);
+    for (let i = 2; i < MAX_FORKS_PER_TURN; i++) await tools.fork_agent.run({ agent: 'Alice', instruction: `Branch ${i}.` });
+    expect(await tools.fork_agent.run({ agent: 'Alice', instruction: 'One too many.' })).toMatch(/^Not forked: at most 3 forks/);
+    expect(ws.snapshot().tasks.filter((t) => t.forkedFrom).length).toBe(MAX_FORKS_PER_TURN);
+  });
+
   it('give a quick look at a project and at what an agent changed, without the files themselves', async () => {
     const ws = open();
     const root = repo();

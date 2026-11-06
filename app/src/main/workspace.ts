@@ -827,7 +827,10 @@ export class Workspace {
    * copy works in its own worktree with the original's files as they are now: its last commit plus
    * its uncommitted changes (only the conversation is rewound, never files).
    */
-  async forkTask(taskId: string, opts: { upToMessageId?: string; isolate: boolean; instruction?: string }): Promise<Task> {
+  async forkTask(
+    taskId: string,
+    opts: { upToMessageId?: string; isolate: boolean; instruction?: string; name?: string; permissionMode?: PermissionMode },
+  ): Promise<Task> {
     const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
     // Mid-turn, the saved conversation can end on a tool call with no result yet.
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
@@ -864,7 +867,7 @@ export class Workspace {
       taskId: newId,
       alias,
       // A custom name is a voice handle, so the fork gets its own.
-      name: src.name === src.alias ? alias : this.forkName(src.name),
+      name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name)),
       projectId: src.projectId,
       title,
       provider: src.provider,
@@ -874,7 +877,7 @@ export class Workspace {
       worktree,
       sharedCwdWarning: sharers.length ? `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.` : undefined,
       sessionLocalId: record.localId,
-      permissionMode: src.permissionMode,
+      permissionMode: 'permissionMode' in opts ? opts.permissionMode : src.permissionMode,
       forkedFrom: { taskId: src.taskId, alias: src.alias },
       mockScript: src.mockScript,
       createdAt: now(),
@@ -1579,6 +1582,33 @@ export class Workspace {
 
   sendFromMain(taskId: string, text: string, interrupt: boolean) {
     return this.send(taskId, text, 'main', { interrupt });
+  }
+
+  /**
+   * The main agent forks an agent to branch off work: the whole conversation as it is now, or from
+   * just before an earlier prompt (matched by its start). Always in its own worktree, and never with
+   * more permissions than the workspace default, which only the user can raise.
+   */
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
+    const src = this.task(taskId);
+    let upToMessageId: string | undefined;
+    const want = args.beforePrompt?.trim().toLowerCase();
+    if (want) {
+      const points = await this.forkPoints(taskId);
+      const hits = points.filter((p) => p.prompt.trim().toLowerCase().startsWith(want));
+      const listed = points.map((p) => `"${clip(p.prompt.replace(/\s+/g, ' '), 80)}"`).join(', ');
+      if (hits.length !== 1)
+        throw new Error(
+          `${hits.length ? 'Several' : 'None'} of ${src.alias}'s earlier prompts start with "${args.beforePrompt!.trim()}". ` +
+            (points.length ? `Its earlier prompts: ${listed}.` : `${src.alias} has no earlier prompt to fork before; omit before_prompt to fork it as it is now.`),
+        );
+      upToMessageId = hits[0].upToMessageId;
+    }
+    const RANK: Record<PermissionMode, number> = { ask: 0, edits: 1, auto: 2 };
+    const fallback = this.store.data.settings.permissionMode ?? 'auto';
+    const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
+    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.role, permissionMode });
+    return { task, delivery: await this.send(task.taskId, args.instruction, 'main') };
   }
 
   async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
