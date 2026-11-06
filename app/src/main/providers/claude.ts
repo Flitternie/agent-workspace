@@ -9,7 +9,7 @@ import type {
   Query,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import type { AttentionQuestion, ForkPoint, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
@@ -218,6 +218,27 @@ export class ClaudeAdapter implements ProviderAdapter {
     return out;
   }
 
+  async forkPoints(nativeSessionId: string, cwd: string): Promise<ForkPoint[]> {
+    const sdk = await loadSdk();
+    const messages = await sdk.getSessionMessages(nativeSessionId, { dir: cwd });
+    const points: ForkPoint[] = [];
+    messages.forEach((m, i) => {
+      if (i === 0 || m.type !== 'user' || m.parent_tool_use_id) return;
+      // Compact summaries ("This session is being continued…") come back flagged, not filtered.
+      const flags = m as { is_meta?: boolean; isCompactSummary?: boolean };
+      if (flags.is_meta || flags.isCompactSummary) return;
+      const prompt = cleanUserText(promptText(rec(m.message).content));
+      if (prompt && !INTERRUPTED.test(prompt)) points.push({ upToMessageId: messages[i - 1].uuid, prompt });
+    });
+    return points;
+  }
+
+  async forkSession(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string> {
+    const sdk = await loadSdk();
+    const r = await sdk.forkSession(nativeSessionId, { dir: opts.cwd, upToMessageId: opts.upToMessageId, title: opts.title });
+    return r.sessionId;
+  }
+
   async readHistory(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]> {
     const events: ProviderEvent[] = [];
     await new ClaudeSession({ cwd, host, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId);
@@ -227,6 +248,20 @@ export class ClaudeAdapter implements ProviderAdapter {
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession {
     return new ClaudeSession(args, onEvent);
   }
+}
+
+/** Claude Code's marker after the user stops a turn ("[Request interrupted by user for tool use]"). */
+const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
+
+/** What the user typed in a saved user message; '' for tool results. */
+function promptText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  const blocks = Array.isArray(content) ? content.map(rec) : [];
+  if (blocks.some((b) => b.type === 'tool_result')) return '';
+  return blocks
+    .filter((b) => b.type === 'text')
+    .map((b) => str(b.text))
+    .join('\n');
 }
 
 class ClaudeSession implements ProviderSession {

@@ -7,6 +7,7 @@ import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Conten
 import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
 import { Markdown } from './Markdown';
 import { RetryNotice } from './Retry';
+import { ForkDialog } from './Dialogs';
 import { t } from '../i18n';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -16,6 +17,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const session = snapshot.sessions.find((s) => s.localId === task.sessionLocalId);
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
   const [showMemory, setShowMemory] = useState(true);
+  const [forking, setForking] = useState(false);
+  // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
+  const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');
@@ -55,6 +59,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   {session.integrationMode} · {session.nativeSessionId.slice(0, 8)}
                 </span>
               ) : null}
+              {task.forkedFrom ? (
+                <span>
+                  <Icon name="branch" size={12} /> {t('forked from {name}', { name: task.forkedFrom.alias })}
+                </span>
+              ) : null}
               {task.injectedMemoryIds?.length ? <span>{t('{n} memory note(s) loaded', { n: task.injectedMemoryIds.length })}</span> : null}
             </div>
           </div>
@@ -89,6 +98,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="power" /> {t('Stop')}
               </button>
             )}
+            {canFork ? (
+              <button
+                className="btn"
+                data-testid="fork-task"
+                disabled={task.status === 'running' || task.status === 'starting'}
+                onClick={() => setForking(true)}
+                title={
+                  task.status === 'running' || task.status === 'starting'
+                    ? t('Fork once this turn ends.')
+                    : t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')
+                }
+              >
+                <Icon name="branch" /> {t('Fork')}
+              </button>
+            ) : null}
             <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
               <Icon name="note" /> {t('Memory')}
             </button>
@@ -112,6 +136,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
         ) : null}
         {error ? <div className="error-text pad">{error}</div> : null}
+        {forking ? <ForkDialog snapshot={snapshot} task={task} onClose={() => setForking(false)} onForked={(id) => onOpen?.(id)} /> : null}
 
         <div className="focus-body">
           <div className="focus-thread">

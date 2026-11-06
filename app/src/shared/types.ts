@@ -61,6 +61,8 @@ export interface Task {
   mockScript?: string;
   /** Overrides settings.permissionMode for this agent. */
   permissionMode?: PermissionMode;
+  /** The agent whose conversation this one was forked from (alias at the time). */
+  forkedFrom?: { taskId: string; alias: string };
   /** A failed model request that will be tried again by itself (model at capacity, rate limited…). */
   retry?: RetryState;
   createdAt: string;
@@ -82,6 +84,14 @@ export interface RetryState {
   /** app: the workspace runs the failed turn again; provider: the CLI retries within its turn. */
   by: 'app' | 'provider';
   error?: string;
+}
+
+/** A place an agent's conversation can be forked: just before one of the user's earlier prompts. */
+export interface ForkPoint {
+  /** Last message kept in the fork (the one before `prompt`). */
+  upToMessageId: string;
+  /** The user prompt the fork leaves out, and everything after it. */
+  prompt: string;
 }
 
 export interface SessionRecord {

@@ -1,4 +1,5 @@
 import type {
+  ForkPoint,
   PlanEntry,
   ToolCallInfo,
   ToolContent,
@@ -133,4 +134,12 @@ export interface ProviderAdapter {
   /** The CLI as installed and signed in on `host` (reached without prompts). */
   hostCapabilities?(host: string): Promise<ProviderCapabilities>;
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession;
+  /** The user's earlier prompts in a saved session, oldest first: the session can be forked just before each. */
+  forkPoints?(nativeSessionId: string, cwd: string): Promise<ForkPoint[]>;
+  /**
+   * Copies a saved session (all of it, or up to and including `upToMessageId`) into a new
+   * session and returns its id; the original is left as it is. That id resumes from `cwd`
+   * or any git worktree of the same repository.
+   */
+  forkSession?(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string>;
 }

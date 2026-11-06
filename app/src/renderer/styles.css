@@ -1913,6 +1913,21 @@ pre code {
   opacity: 0.5;
   cursor: default;
 }
+.fork-points {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.fork-points .radio {
+  flex: none;
+  min-width: 0;
+  font-weight: 400;
+}
+.fork-points .radio .muted {
+  flex: none;
+}
 .session-list {
   display: flex;
   flex-direction: column;
