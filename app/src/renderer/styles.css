@@ -1534,6 +1534,80 @@ pre code {
   font-size: 12px;
 }
 
+/* File preview: shares the Memory column, wider because documents need the room. */
+.memory.preview {
+  width: min(460px, 40%);
+  gap: 10px;
+}
+.preview-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.preview-ident {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+.preview-path {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+  /* Ellipsis at the start: the file name end of a long path is the useful part. */
+  direction: rtl;
+  text-align: left;
+}
+.preview-scripts {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.preview-doc,
+.preview-text,
+.preview-frame {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.preview-doc {
+  padding: 12px 14px;
+}
+.preview-doc img {
+  max-width: 100%;
+}
+.preview-text {
+  max-height: none;
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.preview-frame {
+  flex: 1;
+  min-height: 360px;
+  width: 100%;
+  background: #fff;
+}
+.preview-image {
+  max-width: 100%;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: repeating-conic-gradient(var(--hover) 0 25%, var(--panel) 0 50%) 0 0 / 16px 16px;
+}
+.file-actions {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
+}
+.file-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ------------------------------------------------------------------ meeting bar */
 
 .dock {

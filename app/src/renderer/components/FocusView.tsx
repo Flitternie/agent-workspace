@@ -3,7 +3,8 @@ import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem,
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
-import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
+import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
+import { FilePreviewPanel } from './FilePreview';
 import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
 import { Markdown } from './Markdown';
 import { RetryNotice } from './Retry';
@@ -22,6 +23,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     localStorage.setItem('amw.showMemory', on ? '1' : '0');
     setShowMemoryState(on);
   };
+  // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => setPreview(null), [task.taskId]);
   const [forking, setForking] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
   const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
@@ -30,6 +34,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setError('');
     fn().catch((e) => setError(errorText(e)));
   };
+  // "Open in default app" only for files on this Mac.
+  const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
   return (
     <div className="focus">
@@ -118,7 +124,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="branch" /> {t('Fork')}
               </button>
             ) : null}
-            <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
+            <button
+              className={`btn${showMemory && !preview ? ' btn-pressed' : ''}`}
+              onClick={() => {
+                if (preview) setShowMemory(true);
+                else setShowMemory(!showMemory);
+                setPreview(null);
+              }}
+              aria-pressed={showMemory && !preview}
+            >
               <Icon name="note" /> {t('Memory')}
             </button>
             {isMainAgent(task) ? null : (
@@ -146,7 +160,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         <div className="focus-body">
           <div className="focus-thread">
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
-            <Transcript items={transcript} main={isMainAgent(task)} />
+            <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
+              <Transcript items={transcript} main={isMainAgent(task)} />
+            </PreviewContext.Provider>
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length || task.retry ? (
               <div className="focus-attention" data-testid="focus-attention">
@@ -163,7 +179,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             <Composer task={task} />
           </div>
-          {showMemory ? <MemoryPanel snapshot={snapshot} task={task} /> : null}
+          {preview ? (
+            <FilePreviewPanel task={task} path={preview} transcript={transcript} onClose={() => setPreview(null)} onOpenExternal={openExternal && (() => openExternal(preview))} />
+          ) : showMemory ? (
+            <MemoryPanel snapshot={snapshot} task={task} />
+          ) : null}
         </div>
       </section>
     </div>

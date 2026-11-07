@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
@@ -104,11 +104,22 @@ function useThrottled(text: string, streaming: boolean): string {
   return shown;
 }
 
-export const Markdown = memo(function Markdown({ text, streaming = false, children }: { text: string; streaming?: boolean; children?: ReactNode }) {
+/**
+ * `image`: a file preview shows its own images (the caller loads them through the
+ * checked file reader); chat text keeps images as links.
+ */
+export const Markdown = memo(function Markdown({ text, streaming = false, children, image }: { text: string; streaming?: boolean; children?: ReactNode; image?: (src: string, alt: string) => ReactNode }) {
   const shown = useThrottled(text, streaming);
+  const [comps, transform] = useMemo(
+    () =>
+      image
+        ? [{ ...components, img: ({ src, alt }) => (typeof src === 'string' && src ? image(src, alt ?? '') : <span>{alt}</span>) } as Components, (url: string, key: string) => (key === 'src' ? url : urlTransform(url))]
+        : [components, urlTransform],
+    [image],
+  );
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={comps} urlTransform={transform}>
         {shown}
       </ReactMarkdown>
       {children}

@@ -2,6 +2,7 @@ import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type {
   AttentionItem,
   DispatchResult,
+  FilePreview,
   ForkPoint,
   MemoryRecord,
   NativeSessionInfo,
@@ -57,6 +58,8 @@ interface Outputs {
   'voice:transcribe': { text: string };
   'route:decide': RouteDecision;
   'route:dispatch': DispatchResult & { reply?: string };
+  'file:preview': FilePreview;
+  'file:open': void;
   'memory:add': MemoryRecord;
   'memory:update': void;
   'memory:delete': void;

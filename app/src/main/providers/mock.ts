@@ -364,6 +364,26 @@ class MockSession implements ProviderSession {
         ],
       },
     });
+    // A document row, so the demo shows the file preview (the README exists in every demo worktree).
+    this.emit({
+      type: 'transcriptItem',
+      itemId: `${id}:docs`,
+      role: 'tool',
+      text: '',
+      toolStatus: 'completed',
+      tool: {
+        name: 'Edit',
+        kind: 'edit',
+        title: 'Edit README.md',
+        locations: [{ path: 'README.md', line: 3 }],
+        content: [
+          {
+            type: 'diff',
+            diff: makeDiff({ path: 'README.md', operation: 'modify', phase: 'applied', hunks: parseUnifiedHunks('@@ -3,1 +3,3 @@\n A tiny demo repository for Agent Workspace.\n+\n+The dashboard reads orders from the v2 API.\n') }),
+          },
+        ],
+      },
+    });
     this.emit({
       type: 'transcriptItem',
       itemId: `${id}:test`,

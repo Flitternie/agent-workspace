@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { createContext, useContext, useState, type MouseEvent } from 'react';
+import { previewKind } from '../../shared/preview';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
 import { Icon, type IconName } from './bits';
@@ -190,6 +191,46 @@ const STATUS_TEXT: Partial<Record<NonNullable<TranscriptItem['toolStatus']>, str
   interrupted: 'interrupted',
 };
 
+/** Files this tool call created or changed that the preview column can show. */
+export function touchedPaths(item: TranscriptItem): string[] {
+  const tool = item.tool;
+  if (!tool) return [];
+  const paths = [
+    ...tool.content.flatMap((c) => (c.type === 'diff' && c.diff.operation !== 'delete' ? [c.diff.path] : [])),
+    ...(tool.kind === 'edit' || tool.kind === 'move' ? tool.locations.map((l) => l.path) : []),
+  ];
+  return [...new Set(paths)].filter((p) => previewKind(p));
+}
+
+/** Set by the Focus view; rows elsewhere (cards) offer no file actions. */
+export const PreviewContext = createContext<{ preview(path: string): void; openExternal?: (path: string) => void } | null>(null);
+
+function FileActions({ paths }: { paths: string[] }) {
+  const ctx = useContext(PreviewContext);
+  if (!ctx || !paths.length) return null;
+  // Inside <summary>: keep a click from also folding the row.
+  const act = (fn: () => void) => (e: MouseEvent) => {
+    e.preventDefault();
+    fn();
+  };
+  return (
+    <span className="file-actions">
+      {paths.map((p) => (
+        <span key={p} className="file-action" title={p}>
+          <button className="link small" data-testid="preview-file" onClick={act(() => ctx.preview(p))}>
+            {paths.length > 1 ? t('Preview {name}', { name: p.split('/').pop() ?? p }) : t('Preview')}
+          </button>
+          {ctx.openExternal ? (
+            <button className="link small" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={act(() => ctx.openExternal!(p))}>
+              <Icon name="external" size={11} />
+            </button>
+          ) : null}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** One tool call in the transcript: a title row that expands into its content. */
 export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const tool = item.tool;
@@ -213,6 +254,7 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
         {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : null}
         {STATUS_TEXT[status] ? <span className={`tool-state state-${status}`}>{t(STATUS_TEXT[status]!)}</span> : null}
         {!openByDefault && (hasOutput || item.text) ? <span className="tool-more">{t('details')}</span> : null}
+        {status === 'completed' ? <FileActions paths={touchedPaths(item)} /> : null}
       </summary>
       {body}
     </details>

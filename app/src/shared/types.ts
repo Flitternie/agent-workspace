@@ -88,6 +88,21 @@ export interface RetryState {
   error?: string;
 }
 
+export type PreviewKind = 'markdown' | 'html' | 'image' | 'text';
+
+/** A file an agent wrote, read for the preview column. `path` is the resolved absolute path. */
+export interface FilePreview {
+  path: string;
+  kind: PreviewKind;
+  size: number;
+  /** markdown / html / text */
+  text?: string;
+  /** image */
+  dataUrl?: string;
+  /** html: where the sandboxed frame loads it (its own CSP, see main/index.ts). */
+  frameUrl?: string;
+}
+
 /** A place an agent's conversation can be forked: just before one of the user's earlier prompts. */
 export interface ForkPoint {
   /** Last message kept in the fork (the one before `prompt`). */
