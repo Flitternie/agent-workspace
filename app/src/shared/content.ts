@@ -45,6 +45,8 @@ export interface ToolCallInfo {
   title: string;
   locations: Array<{ path: string; line?: number }>;
   content: ToolContent[];
+  /** Typed by the user as `!command`, not run by the agent. */
+  byUser?: boolean;
 }
 
 export interface PlanEntry {

@@ -65,6 +65,8 @@ export interface Task {
   forkedFrom?: { taskId: string; alias: string };
   /** A failed model request that will be tried again by itself (model at capacity, rate limited…). */
   retry?: RetryState;
+  /** The agent's guess at what the user will say next; cleared when the user sends. */
+  suggestion?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -30,6 +30,7 @@ export const ipcSchemas = {
   }),
   'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),
   'task:interrupt': z.object({ taskId: id }),
+  'task:shell': z.object({ taskId: id, command: text.min(1) }),
   'task:forkPoints': z.object({ taskId: id }),
   'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
   'task:retry': z.object({ taskId: id }),

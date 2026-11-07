@@ -346,6 +346,8 @@ class ClaudeSession implements ProviderSession {
         // Plus: no reading the private folders (Read rules also keep Grep and Glob out of them).
         ...(privateDeny.length ? { settings: { permissions: { deny: privateDeny.map((dir) => `Read(/${dir}/**)`) } } } : {}),
         includePartialMessages: true,
+        // The CLI's grey "what you might say next" line, after each turn.
+        promptSuggestions: true,
         // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
         // will not approve, and everything in 'default', reaches canUseTool → the tile.
         permissionMode: CLAUDE_MODE[this.args.permissionMode ?? 'auto'],
@@ -563,6 +565,11 @@ class ClaudeSession implements ProviderSession {
         maxAttempts: Number(m.max_retries) || 1,
         delayMs: Number(m.retry_delay_ms) || 0,
       });
+      return;
+    }
+    if (type === 'prompt_suggestion') {
+      const text = str(m.suggestion).trim();
+      if (text && !history) this.emit({ type: 'suggestion', text });
       return;
     }
     // Output after a result means a queued message started a new turn.

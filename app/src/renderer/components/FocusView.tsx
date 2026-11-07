@@ -302,13 +302,18 @@ function Composer({ task }: { task: Task }) {
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
+  // `!command` runs a command in the agent's folder, as in the CLIs.
+  const shell = draft.trimStart().startsWith('!') && !isMainAgent(task);
+  const suggestion = !draft && task.suggestion ? task.suggestion : '';
   const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setError('');
     try {
-      const r = await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
+      const command = text.slice(1).trim();
+      if (shell && !command) return;
+      const r = shell ? await call('task:shell', { taskId: task.taskId, command }) : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
       if (r.ok) setDraft('');
       else setError(r.error ?? t('Not delivered'));
     } catch (e) {
@@ -319,15 +324,22 @@ function Composer({ task }: { task: Task }) {
   };
   return (
     <div className="composer">
-      <div className="composer-box">
+      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
         <textarea
           className="composer-input"
           rows={3}
           value={draft}
-          placeholder={t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
+          placeholder={suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
+          data-suggestion={suggestion || undefined}
           onKeyDown={(e) => {
+            // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
+            if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
+              e.preventDefault();
+              setDraft(suggestion);
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send(e.metaKey || e.ctrlKey);
@@ -336,11 +348,32 @@ function Composer({ task }: { task: Task }) {
         />
         <div className="composer-foot">
           <span className="to-label" data-testid="composer-target">
-            {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
-            <span className="muted"> — {t('typed text goes only to this agent')}</span>
+            {shell ? (
+              <>
+                {t('Command')} · {task.host ?? t('this Mac')}
+                <span className="muted">
+                  {' '}
+                  — {task.provider === 'codex' ? t('runs in {dir} through Codex, which sees the output', { dir: task.cwd }) : t('runs in {dir}; {alias} sees the output with your next message', { dir: task.cwd, alias: task.alias })}
+                </span>
+              </>
+            ) : (
+              <>
+                {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
+                <span className="muted"> — {t('typed text goes only to this agent')}</span>
+              </>
+            )}
           </span>
           <span className="hint" data-testid="composer-hint">
-            {working ? (
+            {suggestion ? (
+              <>
+                <Kbd>→</Kbd> {t('use suggestion')} ·{' '}
+              </>
+            ) : null}
+            {shell ? (
+              <>
+                <Kbd>↵</Kbd> {t('run')}
+              </>
+            ) : working ? (
               <>
                 <Kbd>↵</Kbd> {t('add to current work')} · <Kbd>⌘↵</Kbd> {t('stop and send')}
               </>
@@ -350,7 +383,7 @@ function Composer({ task }: { task: Task }) {
               </>
             )}
           </span>
-          {working ? (
+          {working && !shell ? (
             <button className="btn btn-sm" disabled={!draft.trim() || sending} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
               {t('Stop & send')}
             </button>

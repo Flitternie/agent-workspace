@@ -322,6 +322,9 @@ export class CodexAdapter implements ProviderAdapter {
   }
 }
 
+/** A `!command` the user typed is stopped after this long. */
+const SHELL_TIMEOUT_MS = 10 * 60_000;
+
 class CodexSession implements ProviderSession {
   readonly provider = 'codex' as const;
   private server?: AppServer;
@@ -467,6 +470,12 @@ class CodexSession implements ProviderSession {
     await this.server.rpc('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
   }
 
+  async shell(command: string): Promise<void> {
+    if (!this.server || this.server.closed || !this.threadId) throw new Error('Codex session is not connected.');
+    // Codex's own `!`: runs in the thread's shell and is recorded in its history (source userShell).
+    await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs: SHELL_TIMEOUT_MS });
+  }
+
   async close(): Promise<void> {
     this.server?.kill();
   }
@@ -555,7 +564,8 @@ class CodexSession implements ProviderSession {
     if (p.threadId && this.threadId && p.threadId !== this.threadId) return;
     switch (method) {
       case 'turn/started':
-        this.turnId = str(rec(p.turn).id) || this.turnId;
+        // Only our own turn: a `!command` runs in a turn of its own (see shell()).
+        if (this.working && !this.turnId) this.turnId = str(rec(p.turn).id) || undefined;
         return;
       case 'guardianWarning': {
         // Codex auto-review decided an escalation itself; keep that visible in the transcript.
@@ -572,6 +582,12 @@ class CodexSession implements ProviderSession {
           this.emit(e);
           if (method === 'item/started' && e.type === 'transcriptItem' && e.tool?.title) this.emit({ type: 'progress', text: e.tool.title });
         }
+        return;
+      }
+      case 'thread/prediction/updated': {
+        const result = rec(p.result);
+        const text = result.type === 'completed' ? str(result.text).trim() : '';
+        if (text) this.emit({ type: 'suggestion', text });
         return;
       }
       case 'item/agentMessage/delta':
@@ -605,6 +621,8 @@ class CodexSession implements ProviderSession {
       }
       case 'turn/completed': {
         const turn = rec(p.turn);
+        // The turn a `!command` ran in: its output is already on screen, and it is not the agent's work.
+        if (!this.working || (this.turnId && str(turn.id) && str(turn.id) !== this.turnId)) return;
         const status = str(turn.status);
         this.working = false;
         this.turnId = undefined;

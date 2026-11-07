@@ -38,6 +38,7 @@ interface Outputs {
   'task:create': Task;
   'task:send': DispatchResult;
   'task:interrupt': void;
+  'task:shell': { ok: boolean; error?: string };
   'task:forkPoints': ForkPoint[];
   'task:fork': Task;
   'task:retry': void;

@@ -97,6 +97,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt }),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
+  'task:shell': (i: { taskId: string; command: string }) => workspace.runShell(i.taskId, i.command),
   'task:forkPoints': (i: { taskId: string }) => workspace.forkPoints(i.taskId),
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),

@@ -386,6 +386,8 @@ class MockSession implements ProviderSession {
     this.record('assistant', reply);
     this.busy = false;
     this.emit({ type: 'turnCompleted', status: 'completed', finalText: reply });
+    // Like Claude Code's prompt suggestions: a guess at the user's next message, after the turn.
+    this.emit({ type: 'suggestion', text: this.zh ? '继续，并跑一下测试' : 'Keep going and run the tests' });
   }
 
   private record(role: 'user' | 'assistant' | 'tool', text: string): void {

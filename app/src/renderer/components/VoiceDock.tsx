@@ -455,6 +455,16 @@ export function VoiceDock({
     const entry: Entry = { id: nextId++, source: 'typed', text: u, phase: 'routing', at: new Date().toISOString(), interrupt: interrupt || undefined };
     addEntry(entry);
     setText('');
+    // `!command`: runs in the open agent's folder, never routed.
+    if (u.startsWith('!')) {
+      const target = focusedTaskId ? taskById(focusedTaskId) : undefined;
+      if (!target || target.taskId === snapshot.main?.taskId) patch(entry.id, { phase: 'error', error: tr('Open an agent to run a command in its folder.') });
+      else
+        void call('task:shell', { taskId: target.taskId, command: u.slice(1).trim() })
+          .then((r) => patch(entry.id, r.ok ? { phase: 'sent', outcome: tr('Ran in {alias}’s folder', { alias: displayName(target) }), taskId: target.taskId } : { phase: 'error', error: r.error }))
+          .catch((e) => patch(entry.id, { phase: 'error', error: errorText(e) }));
+      return;
+    }
     void route(entry);
   };
 

@@ -199,14 +199,17 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const stat = diffs.length ? diffStat(diffs) : undefined;
   const hasOutput = content.some((c) => (c.type === 'terminal' ? !!c.output : true));
   // Changes are what you review; show them. Command output opens when it failed.
-  const openByDefault = diffs.length > 0 || status === 'failed' || status === 'awaiting_approval';
+  const openByDefault = !!tool?.byUser || diffs.length > 0 || status === 'failed' || status === 'awaiting_approval';
   const body = content.length ? <ToolContentView content={content} /> : item.text ? <pre>{item.text}</pre> : null;
   return (
     <details className={`msg tool tool-${status} kind-${tool?.kind ?? 'other'}`} open={openByDefault} data-testid="tool-call" data-kind={tool?.kind ?? 'other'}>
       <summary>
         <span className="tool-status">{STATUS_ICON[status]}</span>
         <Icon name={KIND_ICON[tool?.kind ?? 'other']} size={13} />
-        <span className={`tool-label truncate${/^(\$ |Read |Edit |Write |Search |Find |Fetch )/.test(tool?.title ?? '') ? '' : ' prose'}`}>{tool?.title || item.toolLabel || t('Tool')}</span>
+        <span className={`tool-label truncate${/^(\$ |! |Read |Edit |Write |Search |Find |Fetch )/.test(tool?.title ?? '') ? '' : ' prose'}`}>
+          {tool?.byUser ? <span className="tool-by-user">{t('You ran')}</span> : null}
+          {tool?.title || item.toolLabel || t('Tool')}
+        </span>
         {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : null}
         {STATUS_TEXT[status] ? <span className={`tool-state state-${status}`}>{t(STATUS_TEXT[status]!)}</span> : null}
         {!openByDefault && (hasOutput || item.text) ? <span className="tool-more">{t('details')}</span> : null}

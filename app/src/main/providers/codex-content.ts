@@ -108,6 +108,8 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
         : allSearch && actions[0]?.type === 'search' && str(actions[0].query)
           ? `Search “${str(actions[0].query)}”${str(actions[0].path) ? ` in ${displayPath(str(actions[0].path), opts.cwd)}` : ''}`
           : `$ ${firstLine(command)}`;
+      const byUser = item.source === 'userShell';
+      const typed = byUser ? unwrapShell(command) : command;
       return {
         id,
         role: 'tool',
@@ -115,8 +117,9 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
         status: st(),
         tool: {
           name: 'commandExecution',
-          kind,
-          title,
+          kind: byUser ? 'execute' : kind,
+          title: byUser ? `! ${firstLine(typed)}` : title,
+          ...(byUser ? { byUser } : {}),
           locations: reads.map((a) => ({ path: str(a.path) })).filter((l) => l.path),
           content: [
             {
@@ -231,4 +234,10 @@ export function codexPlan(plan: unknown): PlanEntry[] {
     const st = str(x.status);
     return { id: String(i), content: str(x.step), status: st === 'inProgress' || st === 'in_progress' ? 'in_progress' : st === 'completed' ? 'completed' : 'pending' };
   });
+}
+
+/** `/bin/zsh -lc 'cat a && b'` → `cat a && b`: the command as the user typed it after `!`. */
+export function unwrapShell(command: string): string {
+  const m = /^\S*\/(?:ba|z|fi|da|k)?sh -l?c '([\s\S]*)'$/.exec(command.trim());
+  return m ? m[1].replace(/'\\''/g, "'") : command;
 }

@@ -74,6 +74,8 @@ export type ProviderEvent =
   /** The provider itself resolved / withdrew a request (e.g. turn ended). */
   | { type: 'requestResolved'; requestId: string; reason: string }
   | { type: 'progress'; text: string }
+  /** A predicted next message from the user (Claude Code prompt suggestions, Codex predictions). */
+  | { type: 'suggestion'; text: string }
   | { type: 'sessionFailed'; error: string }
   | { type: 'sessionDisconnected'; reason: string };
 
@@ -117,6 +119,12 @@ export interface ProviderSession {
   /** Answers a native approval / question by its provider request id. */
   respond(requestId: string, response: ApprovalResponse): Promise<void>;
   interrupt(): Promise<void>;
+  /**
+   * Runs a command the user typed as `!command` through the provider's own shell, recorded in
+   * its conversation (Codex). Without it, the workspace runs the command and hands the output
+   * over with the next message.
+   */
+  shell?(command: string): Promise<void>;
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
   close(): Promise<void>;
