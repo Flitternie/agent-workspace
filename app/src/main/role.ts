@@ -1,5 +1,6 @@
 // One-word role shown before an agent's name ("Database Charlie", "数据库小张").
-// A keyword guess is applied at once; the LLM (when configured) refines it.
+// A keyword guess (or the project's name) is applied at once; a model refines it: the user's own
+// Claude Code or Codex in the background, else OpenAI when a key is configured.
 
 type Lang = 'en' | 'zh';
 
@@ -22,10 +23,46 @@ export function guessRole(text: string, lang: Lang): string | undefined {
   return hit ? hit[lang] : undefined;
 }
 
-/** Accepts one short word in the requested language; anything else is rejected. */
+/** Words a model tends to add that say nothing about the area ("文档整理工具" → "文档整理"). */
+const ZH_FILLER = /(工程师|开发者|开发|助手|专员|负责人|工具|模块|相关|方面|角色)$/;
+
+/**
+ * One short word in the requested language, from a model's answer. Quotes, punctuation and, in
+ * Chinese, Latin letters and filler endings are dropped first ("后端API" → "后端"); anything still
+ * not a single short word is rejected.
+ */
 export function cleanRole(raw: string, lang: Lang): string | undefined {
-  const w = raw.trim().replace(/^["'“”‘’]+|["'“”‘’.。]+$/g, '');
-  if (lang === 'zh') return /^[一-鿿]{2,4}$/.test(w) ? w : undefined;
+  const w = raw.trim().replace(/^[\s"'“”‘’「」『』《》*]+|[\s"'“”‘’「」『』《》*.。!！]+$/g, '');
+  if (lang === 'zh') {
+    let zh = w.replace(/[^一-鿿]/g, '');
+    if (zh.length > 4) zh = zh.replace(ZH_FILLER, '');
+    return /^[一-鿿]{2,4}$/.test(zh) ? zh : undefined;
+  }
   if (!/^[A-Za-z][A-Za-z0-9-]{1,13}$/.test(w)) return undefined;
   return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+/** The project's name as a role, when nothing better is known ("agent_workspace" → "AgentWorkspace"). */
+export function projectRole(name: string): string | undefined {
+  const cjk = name.replace(/[^一-鿿]/g, '');
+  if (cjk.length >= 2 && cjk.length <= 6 && cjk.length === name.replace(/[\s_-]/g, '').length) return cjk;
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const joined = words.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join('');
+  if (/^[A-Za-z][A-Za-z0-9]{1,13}$/.test(joined)) return joined;
+  const first = words[0] ?? '';
+  return /^[A-Za-z][A-Za-z0-9]{1,13}$/.test(first) ? first.charAt(0).toUpperCase() + first.slice(1) : undefined;
+}
+
+/** Asks for the role, given what the agent is doing (title and the user's first messages). */
+export function rolePrompt(lang: Lang): string {
+  return lang === 'zh'
+    ? '给一个编码 Agent 起一个角色名，概括它负责的领域，比如 数据库、前端、后端、测试、文档、合同、计费。只回答一个 2 到 4 个汉字的词，不要别的。'
+    : 'Name the role of a coding agent from what it is doing, as one capitalized English word describing its area, e.g. Database, Frontend, Backend, Tests, Docs, Billing, Contracts. Answer with that single word only.';
+}
+
+/** A second ask when the first answer was not one short word. */
+export function roleRetry(lang: Lang, previous: string): string {
+  return lang === 'zh'
+    ? `"${previous.slice(0, 40)}" 不行：只回答一个 2 到 4 个汉字的词。`
+    : `"${previous.slice(0, 40)}" won't do: answer with one English word of at most 14 letters.`;
 }

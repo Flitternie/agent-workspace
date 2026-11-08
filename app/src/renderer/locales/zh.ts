@@ -134,7 +134,7 @@ export const zh: Record<string, string> = {
   'Speech recognition model': '语音识别模型',
   'Turns what you say into text.': '把你说的话转成文字。',
   'Routing model': '分配模型',
-  'Decides which agent a sentence is for when you do not name one, and names agent roles. It does not rewrite what you said.': '没点名时判断这句话该发给哪个 Agent，也用来起角色名。不会改写你说的话。',
+  'Decides which agent a sentence is for when you do not name one. It does not rewrite what you said.': '没点名时判断这句话该发给哪个 Agent。不会改写你说的话。',
   'Other models on your key': '你的 Key 可用的其他模型',
   'Most accurate; best with mixed Chinese and English': '最准，中英混说效果最好',
   'Faster and cheaper, slightly less accurate': '更快更便宜，准确度略低',
