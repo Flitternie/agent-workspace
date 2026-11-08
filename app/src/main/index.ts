@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
+import { previewKind } from '../shared/preview';
 import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
@@ -80,6 +82,32 @@ function ensureDemoRepo(): string {
   return dir;
 }
 
+// HTML previews load from amw-preview:// rather than iframe srcdoc: a srcdoc frame inherits
+// the app's CSP (script-src 'self'), so "Allow scripts" could never work. This scheme serves
+// only documents the preview just read, under a CSP of their own: nothing loads from the
+// network or disk, inline scripts run only when the iframe's sandbox allows them, and the
+// sandbox never grants same-origin, so a page cannot reach the app.
+const PREVIEW_SCHEME = 'amw-preview';
+const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline' data:; img-src data:; font-src data:; script-src 'unsafe-inline'";
+const previewDocs = new Map<string, string>();
+protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true } }]);
+
+function servePreviews(): void {
+  protocol.handle(PREVIEW_SCHEME, (req) => {
+    const html = previewDocs.get(new URL(req.url).pathname.slice(1));
+    if (html === undefined) return new Response('Preview expired. Refresh it.', { status: 404 });
+    return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': PREVIEW_CSP } });
+  });
+}
+
+/** Keeps the latest few documents (one per refresh); older frames show "expired". */
+function addPreviewDoc(html: string): string {
+  const key = randomUUID();
+  previewDocs.set(key, html);
+  for (const k of previewDocs.keys()) if (previewDocs.size > 8) previewDocs.delete(k);
+  return `${PREVIEW_SCHEME}://doc/${key}`;
+}
+
 type Handler = (input: never) => unknown;
 const handlers: { [C in IpcChannel]: Handler } = {
   'workspace:snapshot': () => workspace.snapshot(),
@@ -97,6 +125,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt }),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
+  'task:shell': (i: { taskId: string; command: string }) => workspace.runShell(i.taskId, i.command),
   'task:forkPoints': (i: { taskId: string }) => workspace.forkPoints(i.taskId),
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
@@ -124,6 +153,17 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'route:decide': (i: { utterance: string; focusedTaskId: string | null; namedOnly?: boolean }) => workspace.decideRoute(i.utterance, i.focusedTaskId, i.namedOnly),
   'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean; typed?: boolean }) =>
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt, typed: i.typed }),
+  'file:preview': async (i: { taskId: string; path: string }) => {
+    const p = await workspace.previewFile(i.taskId, i.path);
+    return p.kind === 'html' ? { ...p, frameUrl: addPreviewDoc(p.text ?? '') } : p;
+  },
+  'file:open': async (i: { taskId: string; path: string }) => {
+    const file = workspace.previewLocalPath(i.taskId, i.path);
+    // Only document types: openPath on a script or an app would run it.
+    if (!previewKind(file)) throw new Error('Only previewable files can be opened from here.');
+    const problem = await shell.openPath(file);
+    if (problem) throw new Error(problem);
+  },
   'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; originTaskId?: string; approvedForReuse: boolean }) =>
     workspace.addMemory({ ...i, source: 'user' }),
   'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
@@ -244,6 +284,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'clipboard-sanitized-write');
   if (!workspace.snapshot().settings.language) workspace.updateSettings({ language: app.getLocale().startsWith('zh') ? 'zh' : 'en' });
   registerIpc();
+  servePreviews();
   wireEvents();
   createWindow();
   void workspace.refreshCapabilities();

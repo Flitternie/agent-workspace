@@ -30,6 +30,7 @@ export const ipcSchemas = {
   }),
   'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),
   'task:interrupt': z.object({ taskId: id }),
+  'task:shell': z.object({ taskId: id, command: text.min(1) }),
   'task:forkPoints': z.object({ taskId: id }),
   'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
   'task:retry': z.object({ taskId: id }),
@@ -76,6 +77,9 @@ export const ipcSchemas = {
     /** Typed into the bar rather than spoken. */
     typed: z.boolean().optional(),
   }),
+  // A file the agent wrote, for the preview column (main checks it lies inside the task's folders).
+  'file:preview': z.object({ taskId: id, path: z.string().min(1).max(4096) }),
+  'file:open': z.object({ taskId: id, path: z.string().min(1).max(4096) }),
   'memory:add': z.object({
     scope: z.enum(['global', 'project', 'task']),
     scopeId: id,

@@ -65,6 +65,8 @@ export interface Task {
   forkedFrom?: { taskId: string; alias: string };
   /** A failed model request that will be tried again by itself (model at capacity, rate limited…). */
   retry?: RetryState;
+  /** The agent's guess at what the user will say next; cleared when the user sends. */
+  suggestion?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +86,21 @@ export interface RetryState {
   /** app: the workspace runs the failed turn again; provider: the CLI retries within its turn. */
   by: 'app' | 'provider';
   error?: string;
+}
+
+export type PreviewKind = 'markdown' | 'html' | 'image' | 'text';
+
+/** A file an agent wrote, read for the preview column. `path` is the resolved absolute path. */
+export interface FilePreview {
+  path: string;
+  kind: PreviewKind;
+  size: number;
+  /** markdown / html / text */
+  text?: string;
+  /** image */
+  dataUrl?: string;
+  /** html: where the sandboxed frame loads it (its own CSP, see main/index.ts). */
+  frameUrl?: string;
 }
 
 /** A place an agent's conversation can be forked: just before one of the user's earlier prompts. */

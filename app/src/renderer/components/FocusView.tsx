@@ -3,7 +3,8 @@ import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem,
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
-import { groupTranscript, PlanChecklist, ToolCallRow, ToolGroup } from './Content';
+import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
+import { FilePreviewPanel } from './FilePreview';
 import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
 import { Markdown } from './Markdown';
 import { RetryNotice } from './Retry';
@@ -16,7 +17,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const connected = snapshot.connectedTaskIds.includes(task.taskId);
   const session = snapshot.sessions.find((s) => s.localId === task.sessionLocalId);
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
-  const [showMemory, setShowMemory] = useState(true);
+  // Closed by default; once opened it stays open for every agent.
+  const [showMemory, setShowMemoryState] = useState(() => localStorage.getItem('amw.showMemory') === '1');
+  const setShowMemory = (on: boolean) => {
+    localStorage.setItem('amw.showMemory', on ? '1' : '0');
+    setShowMemoryState(on);
+  };
+  // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => setPreview(null), [task.taskId]);
   const [forking, setForking] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
   const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
@@ -25,6 +34,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setError('');
     fn().catch((e) => setError(errorText(e)));
   };
+  // "Open in default app" only for files on this Mac.
+  const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
   return (
     <div className="focus">
@@ -113,7 +124,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="branch" /> {t('Fork')}
               </button>
             ) : null}
-            <button className={`btn${showMemory ? ' btn-pressed' : ''}`} onClick={() => setShowMemory(!showMemory)} aria-pressed={showMemory}>
+            <button
+              className={`btn${showMemory && !preview ? ' btn-pressed' : ''}`}
+              onClick={() => {
+                if (preview) setShowMemory(true);
+                else setShowMemory(!showMemory);
+                setPreview(null);
+              }}
+              aria-pressed={showMemory && !preview}
+            >
               <Icon name="note" /> {t('Memory')}
             </button>
             {isMainAgent(task) ? null : (
@@ -141,7 +160,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         <div className="focus-body">
           <div className="focus-thread">
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
-            <Transcript items={transcript} main={isMainAgent(task)} />
+            <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
+              <Transcript items={transcript} main={isMainAgent(task)} />
+            </PreviewContext.Provider>
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length || task.retry ? (
               <div className="focus-attention" data-testid="focus-attention">
@@ -158,7 +179,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             <Composer task={task} />
           </div>
-          {showMemory ? <MemoryPanel snapshot={snapshot} task={task} /> : null}
+          {preview ? (
+            <FilePreviewPanel task={task} path={preview} transcript={transcript} onClose={() => setPreview(null)} onOpenExternal={openExternal && (() => openExternal(preview))} />
+          ) : showMemory ? (
+            <MemoryPanel snapshot={snapshot} task={task} />
+          ) : null}
         </div>
       </section>
     </div>
@@ -368,13 +393,18 @@ function Composer({ task }: { task: Task }) {
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
+  // `!command` runs a command in the agent's folder, as in the CLIs.
+  const shell = draft.trimStart().startsWith('!') && !isMainAgent(task);
+  const suggestion = !draft && task.suggestion ? task.suggestion : '';
   const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setError('');
     try {
-      const r = await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
+      const command = text.slice(1).trim();
+      if (shell && !command) return;
+      const r = shell ? await call('task:shell', { taskId: task.taskId, command }) : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
       if (r.ok) setDraft('');
       else setError(r.error ?? t('Not delivered'));
     } catch (e) {
@@ -385,15 +415,22 @@ function Composer({ task }: { task: Task }) {
   };
   return (
     <div className="composer">
-      <div className="composer-box">
+      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
         <textarea
           className="composer-input"
           rows={3}
           value={draft}
-          placeholder={t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
+          placeholder={suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
+          data-suggestion={suggestion || undefined}
           onKeyDown={(e) => {
+            // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
+            if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
+              e.preventDefault();
+              setDraft(suggestion);
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send(e.metaKey || e.ctrlKey);
@@ -402,11 +439,32 @@ function Composer({ task }: { task: Task }) {
         />
         <div className="composer-foot">
           <span className="to-label" data-testid="composer-target">
-            {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
-            <span className="muted"> — {t('typed text goes only to this agent')}</span>
+            {shell ? (
+              <>
+                {t('Command')} · {task.host ?? t('this Mac')}
+                <span className="muted">
+                  {' '}
+                  — {task.provider === 'codex' ? t('runs in {dir} through Codex, which sees the output', { dir: task.cwd }) : t('runs in {dir}; {alias} sees the output with your next message', { dir: task.cwd, alias: task.alias })}
+                </span>
+              </>
+            ) : (
+              <>
+                {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
+                <span className="muted"> — {t('typed text goes only to this agent')}</span>
+              </>
+            )}
           </span>
           <span className="hint" data-testid="composer-hint">
-            {working ? (
+            {suggestion ? (
+              <>
+                <Kbd>→</Kbd> {t('use suggestion')} ·{' '}
+              </>
+            ) : null}
+            {shell ? (
+              <>
+                <Kbd>↵</Kbd> {t('run')}
+              </>
+            ) : working ? (
               <>
                 <Kbd>↵</Kbd> {t('add to current work')} · <Kbd>⌘↵</Kbd> {t('stop and send')}
               </>
@@ -416,7 +474,7 @@ function Composer({ task }: { task: Task }) {
               </>
             )}
           </span>
-          {working ? (
+          {working && !shell ? (
             <button className="btn btn-sm" disabled={!draft.trim() || sending} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
               {t('Stop & send')}
             </button>

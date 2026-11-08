@@ -58,6 +58,15 @@ export const zh: Record<string, string> = {
   '{n} requests from agents': '{n} 个 agent 请求',
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',
+  // `!command` and suggested replies
+  Command: '命令',
+  'runs in {dir} through Codex, which sees the output': '在 {dir} 中通过 Codex 运行，Codex 能看到输出',
+  'runs in {dir}; {alias} sees the output with your next message': '在 {dir} 中运行；你发下一条消息时 {alias} 会看到输出',
+  run: '运行',
+  'use suggestion': '使用建议',
+  'You ran': '你运行了',
+  'Open an agent to run a command in its folder.': '先打开一个 agent，命令会在它的目录里运行。',
+  'Ran in {alias}’s folder': '已在 {alias} 的目录中运行',
   'Open conversation': '打开对话',
   Hide: '收起',
   'Working…': '处理中…',
@@ -492,4 +501,15 @@ export const zh: Record<string, string> = {
   'stopped an agent': '停止了 Agent',
   'answered a request': '回复了请求',
   'saved a note': '记下了约定',
+
+  // File preview
+  Preview: '预览',
+  'Preview {name}': '预览 {name}',
+  'Open in default app': '用默认应用打开',
+  'File preview': '文件预览',
+  Refresh: '刷新',
+  'Close preview': '关闭预览',
+  'Allow scripts': '允许脚本',
+  'Runs the page’s own scripts, still isolated from the app and the network.': '运行页面自带的脚本，仍与应用和网络隔离。',
+  'Not an image': '不是图片',
 };

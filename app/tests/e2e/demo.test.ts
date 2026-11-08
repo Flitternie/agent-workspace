@@ -109,6 +109,19 @@ describe('end-to-end demo script (mock agents)', () => {
     await shot(page, '04-dock-ambiguity');
     await dock.press('Escape');
 
+    // `!command` runs in the agent's folder; its output shows as the user's own command.
+    await input.fill('!echo shell-$((6*7))');
+    await expect.poll(() => page.locator('.composer-box.shell-mode').count()).toBe(1);
+    await input.press('Enter');
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('shell-42');
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('You ran');
+    // A suggested reply (from the last turn) fills the box with →.
+    await expect.poll(() => input.getAttribute('data-suggestion')).toBe('Keep going and run the tests');
+    await input.press('ArrowRight');
+    await expect.poll(() => input.inputValue()).toBe('Keep going and run the tests');
+    await input.fill('');
+    await shot(page, '04b-shell-and-suggestion');
+
     // 8. Typed text in B's composer goes to B.
     await input.fill('Use the shared Button component.');
     await input.press('Enter');
@@ -120,6 +133,9 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').getAttribute('data-route-kind')).toBe('coordinator');
     await page.getByTestId('route-send').click();
     await expect.poll(() => page.getByTestId('coordinator-log').innerText()).toContain('Saved to project');
+    // The panel is closed by default.
+    await expect.poll(() => page.getByTestId('memory-panel').count()).toBe(0);
+    await page.getByRole('button', { name: 'Memory' }).click();
     await expect.poll(() => page.getByTestId('memory-panel').innerText()).toContain('总是先跑集成测试');
     await shot(page, '05-focus-B-memory');
 

@@ -24,6 +24,9 @@ export function cleanUserText(raw: string): string {
     `\`${[name.trim(), args?.trim()].filter(Boolean).join(' ')}\``,
   );
   text = text.replace(/<command-args>[\s\S]*?<\/command-args>/g, '');
+  // A `!command` the user ran (Claude Code's bash mode), and its output.
+  text = text.replace(/<bash-input>([\s\S]*?)<\/bash-input>/g, (_m, cmd: string) => `\`! ${cmd.trim()}\``);
+  text = text.replace(/<bash-(stdout|stderr)>([\s\S]*?)<\/bash-\1>/g, (_m, _k, out: string) => (out.trim() ? `\n\`\`\`\n${out.trim()}\n\`\`\`\n` : ''));
   for (const re of DROP) text = text.replace(re, '');
   // Output of a local slash command becomes a code block.
   text = text.replace(/<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/g, (_m, _k, out: string) => (out.trim() ? `\n\`\`\`\n${out.trim()}\n\`\`\`\n` : ''));

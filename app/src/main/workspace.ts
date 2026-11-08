@@ -7,6 +7,7 @@ import type {
   AttentionItem,
   CoordinatorEntry,
   DispatchResult,
+  FilePreview,
   ForkPoint,
   MemoryRecord,
   MemoryScope,
@@ -37,6 +38,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -60,6 +62,17 @@ interface LiveSession {
   turnActive: boolean;
 }
 
+/** A `!command` the user typed is stopped after this long. */
+const SHELL_TIMEOUT_MS = 10 * 60_000;
+/** How much of a command's output goes to the agent with the next message. */
+const SHELL_CONTEXT_CHARS = 20_000;
+
+/** Claude Code's own markup for a `!command` and its output in a user turn. */
+export function shellContext(command: string, stdout: string, stderr: string): string {
+  const cut = (s: string) => (s.length > SHELL_CONTEXT_CHARS ? `…${s.slice(-SHELL_CONTEXT_CHARS)}` : s);
+  return `<bash-input>${command}</bash-input>\n<bash-stdout>${cut(stdout.trimEnd())}</bash-stdout><bash-stderr>${cut(stderr.trimEnd())}</bash-stderr>`;
+}
+
 export interface WorkspaceOptions {
   dataDir: string;
   adapters: Partial<Record<AgentProvider, ProviderAdapter>>;
@@ -81,6 +94,8 @@ export interface WorkspaceOptions {
 export class Workspace {
   readonly store: JsonStore;
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
+  /** `!command` output not yet handed to the agent (providers without their own shell). */
+  private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
@@ -923,7 +938,11 @@ export class Workspace {
       const busy = live.turnActive;
       const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
-      const delivery = await live.session.send(text, opts);
+      task.suggestion = undefined;
+      // Commands the user ran with `!` since the last message reach the agent with this one.
+      const ran = this.shellOutput.get(taskId) ?? [];
+      const delivery = await live.session.send(ran.length ? `${ran.join('\n')}\n\n${text}` : text, opts);
+      this.shellOutput.delete(taskId);
       if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.
@@ -943,6 +962,46 @@ export class Workspace {
       this.changed();
       return { ok: false, taskId, error: message };
     }
+  }
+
+  /**
+   * Runs a command the user typed as `!command` in the agent's folder (on its host), as in
+   * the CLIs: no permission prompt, since the user typed it. Codex runs it in its own shell
+   * and records it; otherwise it runs here and the output goes along with the next message.
+   */
+  async runShell(taskId: string, command: string): Promise<{ ok: boolean; error?: string }> {
+    const task = this.task(taskId);
+    if (task === this.store.data.mainAgent) return { ok: false, error: 'Commands run in an agent’s folder; the main agent has none. Open an agent first.' };
+    // Codex has its own `!`; connecting for it is needed anyway. Others need no session to run a command.
+    if (task.provider === 'codex' || this.live.get(taskId)?.session.shell) {
+      try {
+        const live = await this.connect(taskId);
+        if (live.session.shell) {
+          await live.session.shell(command);
+          return { ok: true };
+        }
+      } catch (error) {
+        return { ok: false, error: (error as Error).message };
+      }
+    }
+    const id = `sh-${randomUUID()}`;
+    const first = command.split('\n')[0];
+    const terminal = { type: 'terminal' as const, command, cwd: task.cwd, output: '' };
+    const tool: ToolCallInfo = { name: 'Bash', kind: 'execute', title: `! ${first}`, locations: [], content: [terminal], byUser: true };
+    this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: 'running', tool, createdAt: now() });
+    this.changed();
+    const r = task.host
+      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, SHELL_TIMEOUT_MS)
+      : process.platform === 'win32'
+        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS })
+        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS });
+    const output = [r.stdout, r.stderr].filter((s) => s.trim()).join('\n');
+    this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: r.code === 0 ? 'completed' : 'failed', createdAt: now() }, { content: [{ ...terminal, output: clipOutput(output), exitCode: r.code }] });
+    const pending = this.shellOutput.get(taskId) ?? [];
+    pending.push(shellContext(command, r.stdout, r.stderr));
+    this.shellOutput.set(taskId, pending.slice(-5));
+    this.changed();
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------- provider events
@@ -989,7 +1048,11 @@ export class Workspace {
         this.emitTranscript(taskId, item);
         return;
       }
+      case 'suggestion':
+        task.suggestion = clip(event.text, 500);
+        break;
       case 'turnStarted':
+        task.suggestion = undefined;
         live.turnActive = true;
         if (!this.hasOpenNative(taskId)) task.status = 'running';
         break;
@@ -1637,6 +1700,26 @@ export class Workspace {
 
   availableProviders(): AgentProvider[] {
     return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
+  }
+
+  // ---------------------------------------------------------------- file preview
+
+  /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
+  private previewRoots(t: Task): string[] {
+    const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
+    return [t.cwd, t.worktree?.path, project?.rootPath].filter((r): r is string => !!r);
+  }
+
+  async previewFile(taskId: string, path: string): Promise<FilePreview> {
+    const t = this.task(taskId);
+    return t.host ? readRemote(t.host, t.cwd, path, this.previewRoots(t)) : readLocal(t.cwd, path, this.previewRoots(t));
+  }
+
+  /** The checked local path to hand to the default app (this Mac only). */
+  previewLocalPath(taskId: string, path: string): string {
+    const t = this.task(taskId);
+    if (t.host) throw new Error(`The file is on ${t.host}; it can only be previewed here.`);
+    return localPath(t.cwd, path, this.previewRoots(t));
   }
 
   // ---------------------------------------------------------------- demo
