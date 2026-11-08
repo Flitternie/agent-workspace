@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { MemoryCandidate, MemoryRecord, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
+import { MemoryShare } from './MemoryShare';
 import { timeAgo } from '../state';
 import { Icon } from './bits';
 
@@ -98,8 +99,10 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="memory-settings">
       <p className="muted small">
-        {t('Notes the app gives to every agent it starts, with Claude Code or Codex, here or over SSH. They load when a session starts or resumes. The CLIs’ own memory files are only read, never changed.')}
+        {t('Notes the app gives to every agent it starts, with Claude Code or Codex, here or over SSH. They load when a session starts or resumes.')}
       </p>
+
+      <MemoryShare snapshot={snapshot} />
 
       <div className="settings-row" data-testid="memory-sync">
         <label className="check">
@@ -108,7 +111,7 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
             <strong>{t('Keep user memory in sync')}</strong>
             <span className="muted small">
               {' '}
-              — {t('imports user-level notes from Claude Code memory (user and feedback) and ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md on this Mac and every connected SSH machine: at start, when a machine connects, and every 10 minutes. Your edits and deletions here are kept.')}
+              — {t('on every linked machine (below): new user-level notes there (Claude Code memory of type user or feedback, ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md) come in, and your user memory goes out to the CLIs there. At start, when a machine connects, every 10 minutes, and right after you change a note. Your edits and deletions here are kept.')}
             </span>
           </span>
         </label>

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { MemoryCandidate, MemoryRecord, Project } from '../shared/types';
+import { stripAppText } from './memory-writeback';
 
 // Bringing the CLIs' own memory into app memory (read-only on their side: nothing
 // here writes to ~/.claude, ~/.codex, ~/AGENTS.md or a repo). Two sources:
@@ -189,7 +190,8 @@ export function candidatesFrom(host: string | undefined, home: string, files: Sc
       out.push({ ...base, key: memoryKey('claude-memory', host, file), source: 'claude-memory', file, title: meta.name || mem[2], ...cap(text), suggestedScope: scope, memoryType: type, projectId: project?.projectId, folderHint: scope === 'project' && !project ? mem[1] : undefined });
       continue;
     }
-    for (const s of splitInstructions(f.content)) {
+    // The app's own import line and section are not the user's notes (they come from here).
+    for (const s of splitInstructions(stripAppText(f.content))) {
       out.push({ ...base, key: memoryKey('instructions', host, file, s.section), source: 'instructions', file, title: s.title || file, ...cap(s.body), suggestedScope: 'global' });
     }
   }
