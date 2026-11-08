@@ -360,6 +360,7 @@ class CodexSession implements ProviderSession {
       if (reason !== 'stopped') this.emit({ type: 'sessionDisconnected', reason });
     };
     await server.initialize();
+    await this.reloadSkills();
     const resumeId = this.args.resumeNativeSessionId;
     // Always sandboxed to the workspace; never bypass. The mode decides who reviews escalations.
     const tools = this.args.tools ?? [];
@@ -468,6 +469,12 @@ class CodexSession implements ProviderSession {
     if (!this.server || !this.working || !this.turnId) return;
     this.interruptRequested = true;
     await this.server.rpc('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
+  }
+
+  /** The library as an extra skill root (per app-server process; Codex also watches it for changes). */
+  async reloadSkills(): Promise<void> {
+    if (!this.server || !this.args.skills) return;
+    await this.server.rpc('skills/extraRoots/set', { extraRoots: [this.args.skills.root] }).catch((e: Error) => console.warn('[codex] skills', e.message));
   }
 
   async shell(command: string): Promise<void> {

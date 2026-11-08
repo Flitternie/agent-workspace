@@ -3101,3 +3101,39 @@ details[open] > summary .tool-more {
   border-color: var(--accent, var(--ink));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--ink)) 25%, transparent);
 }
+
+/* Settings › Skills */
+.skills {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skills .section-label.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.skill-row.off strong {
+  color: var(--text-3);
+}
+.skill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.skill-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skill-machine {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-machine-name {
+  font-weight: 600;
+}

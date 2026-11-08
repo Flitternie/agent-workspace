@@ -58,6 +58,27 @@ export const zh: Record<string, string> = {
   '{n} requests from agents': '{n} 个 agent 请求',
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',
+  // Settings › Skills
+  Skills: 'Skills',
+  'Skills here are loaded into every agent the app starts — Claude Code and Codex, on this Mac and on remote machines. Your ~/.claude/skills and ~/.codex/skills are only read.':
+    '这里的 skill 会加载到 app 启动的每个 agent 中，包括 Claude Code 和 Codex，本机和远程机器都一样。你的 ~/.claude/skills 和 ~/.codex/skills 只会被读取，不会被修改。',
+  'Library · {n}': 'Skill 库 · {n}',
+  'No skills yet. Find the ones on your machines below and import them.': '还没有 skill。可以在下面查找你各台机器上已有的 skill 并导入。',
+  'Loaded into new agents': '会加载到新的 agent',
+  'Not loaded': '未加载',
+  'from {where}': '来自 {where}',
+  'Remove from the library (the original stays where it was)': '从 skill 库中移除（原文件保留在原处）',
+  'On your machines': '你的机器上',
+  'Looking…': '查找中…',
+  'Look again': '重新查找',
+  'Find skills': '查找 skill',
+  'No skills in ~/.claude/skills, ~/.codex/skills or ~/.agents/skills.': '~/.claude/skills、~/.codex/skills 和 ~/.agents/skills 中都没有 skill。',
+  'In library': '已在库中',
+  'In library · off': '已在库中 · 已停用',
+  'The library has a different {name}; this replaces it': '库中已有内容不同的 {name}，导入会替换它',
+  'Replace library copy': '替换库中的版本',
+  'Changes reach running agents too: Codex picks them up by itself, Claude Code reloads its plugins. An agent started before the library had any skills picks them up when restarted.':
+    '改动也会同步到正在运行的 agent：Codex 会自动读取，Claude Code 会重新加载插件。如果 agent 启动时库里还没有任何 skill，需要重启后才能用上。',
   // `!command` and suggested replies
   Command: '命令',
   'runs in {dir} through Codex, which sees the output': '在 {dir} 中通过 Codex 运行，Codex 能看到输出',

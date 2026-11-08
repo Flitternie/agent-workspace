@@ -40,6 +40,7 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
+import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -108,8 +109,12 @@ export class Workspace {
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
 
+  /** The skill library loaded into every agent the app starts (see skills.ts). */
+  readonly skills: SkillLibrary;
+
   constructor(private opts: WorkspaceOptions) {
     this.store = new JsonStore(opts.dataDir);
+    this.skills = new SkillLibrary(opts.dataDir);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
@@ -604,6 +609,7 @@ export class Workspace {
     this.changed();
 
     const isMain = task === this.store.data.mainAgent;
+    const skills = isMain ? undefined : await this.skillsFor(task);
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -617,6 +623,7 @@ export class Workspace {
         mockScript: task.mockScript,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
+        skills,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
@@ -1012,6 +1019,65 @@ export class Workspace {
     this.shellOutput.set(taskId, pending.slice(-5));
     this.changed();
     return { ok: true };
+  }
+
+  /** The library for an agent on this Mac, or its copy on the agent's host (copied when it changed). */
+  private async skillsFor(task: Task): Promise<{ pluginDir: string; root: string } | undefined> {
+    try {
+      return task.host ? await this.skills.ensureOnHost(task.host) : this.skills.localLoad();
+    } catch (error) {
+      // The agent still starts, just without the workspace skills.
+      this.appendSystem(task.taskId, `Workspace skills not loaded: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /** Last scan's results, so an import names a found skill by key rather than by path. */
+  private foundSkills = new Map<string, FoundSkill>();
+
+  /** Skills in the CLIs' own folders on this Mac and on every reachable enabled host. */
+  async scanSkills(): Promise<{ found: FoundSkill[]; errors: Array<{ host: string; error: string }> }> {
+    const errors: Array<{ host: string; error: string }> = [];
+    const found: FoundSkill[] = [...scanLocal()];
+    await Promise.all(
+      this.enabledHosts().map(async (host) => {
+        if (this.hostStatus.get(host)?.ssh !== 'ok') return errors.push({ host, error: this.hostStatus.get(host)?.error ?? `${host} is not connected.` });
+        const r = await sshRun(host, remoteScanScript(), 60_000);
+        if (r.code !== 0) return errors.push({ host, error: r.code === 255 ? sshError(host, r.stderr) : `Could not list skills on ${host}.` });
+        found.push(...parseRemoteScan(host, r.stdout));
+      }),
+    );
+    this.foundSkills = new Map(found.map((f) => [f.key, f]));
+    return { found, errors };
+  }
+
+  async importSkill(key: string): Promise<void> {
+    const found = this.foundSkills.get(key);
+    if (!found) throw new Error('That skill is no longer in the list. Scan again.');
+    await this.skills.import(found);
+    await this.skillsChanged();
+  }
+
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    this.skills.setEnabled(name, enabled);
+    await this.skillsChanged();
+  }
+
+  async removeSkill(name: string): Promise<void> {
+    this.skills.remove(name);
+    await this.skillsChanged();
+  }
+
+  /** After the library changed: copy it to hosts with running agents and tell running sessions. */
+  async skillsChanged(): Promise<void> {
+    const hosts = new Set<string>();
+    for (const [taskId] of this.live) {
+      const host = this.findTask(taskId)?.host;
+      if (host) hosts.add(host);
+    }
+    for (const host of hosts) await this.skills.ensureOnHost(host).catch((e: Error) => this.log('skills sync', host, e.message));
+    await Promise.all([...this.live.values()].map((l) => l.session.reloadSkills?.()));
+    this.changed();
   }
 
   // ---------------------------------------------------------------- provider events

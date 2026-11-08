@@ -1,4 +1,5 @@
 import type { IpcChannel, IpcInput } from '../shared/ipc';
+import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
   AttentionItem,
   DispatchResult,
@@ -40,6 +41,11 @@ interface Outputs {
   'task:send': DispatchResult;
   'task:interrupt': void;
   'task:shell': { ok: boolean; error?: string };
+  'skills:list': LibrarySkill[];
+  'skills:scan': { found: FoundSkill[]; errors: Array<{ host: string; error: string }> };
+  'skills:import': void;
+  'skills:setEnabled': void;
+  'skills:remove': void;
   'task:forkPoints': ForkPoint[];
   'task:fork': Task;
   'task:retry': void;

@@ -348,6 +348,8 @@ class ClaudeSession implements ProviderSession {
         // Plus: no reading the private folders (Read rules also keep Grep and Glob out of them).
         ...(privateDeny.length ? { settings: { permissions: { deny: privateDeny.map((dir) => `Read(/${dir}/**)`) } } } : {}),
         includePartialMessages: true,
+        // The workspace skill library, as a local plugin (on a host: its copy there).
+        ...(this.args.skills ? { plugins: [{ type: 'local' as const, path: this.args.skills.pluginDir }] } : {}),
         // The CLI's grey "what you might say next" line, after each turn.
         promptSuggestions: true,
         // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
@@ -438,6 +440,10 @@ class ClaudeSession implements ProviderSession {
     if (!this.query || !this.active) return;
     this.interruptRequested = true;
     await this.query.interrupt();
+  }
+
+  async reloadSkills(): Promise<void> {
+    await this.query?.reloadPlugins().catch((e: Error) => console.warn('[claude] skills', e.message));
   }
 
   async close(): Promise<void> {
