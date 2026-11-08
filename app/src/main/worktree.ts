@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { cp, mkdir } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import type { WorktreeInfo } from '../shared/types';
 import { run } from './util/exec';
 
@@ -25,6 +26,41 @@ export class WorktreeService {
     const r = await run('git', ['-C', repoRoot, 'worktree', 'add', '-b', branch, path, baseRef]);
     if (r.code !== 0) throw new Error(`git worktree add failed: ${r.stderr.trim() || r.stdout.trim()}`);
     return { path, branch, baseRef, parentRepo: repoRoot };
+  }
+
+  /**
+   * Copies the uncommitted work of the checkout `from` is in (tracked changes and untracked,
+   * non-ignored files, across the whole repository even when `from` is a subfolder) into the
+   * worktree at `to`, which must start at the same commit. `from` is left exactly as it is.
+   */
+  async copyChanges(from: string, to: string): Promise<{ files: number; error?: string }> {
+    const cdup = await run('git', ['-C', from, 'rev-parse', '--show-cdup']);
+    if (cdup.code !== 0) return { files: 0, error: cdup.stderr.trim() || 'git rev-parse failed' };
+    const root = resolve(from, cdup.stdout.trim() || '.');
+    // A stash commit of the tracked changes, made without touching `from`'s files or index.
+    // Worktrees of one repository share their objects, so `to` can apply it directly.
+    const stash = await run('git', ['-C', from, 'stash', 'create']);
+    if (stash.code !== 0) return { files: 0, error: stash.stderr.trim() || 'git stash create failed' };
+    if (stash.stdout.trim()) {
+      const applied = await run('git', ['-C', to, 'stash', 'apply', '--quiet', stash.stdout.trim()]);
+      if (applied.code !== 0) return { files: 0, error: applied.stderr.trim() || 'git stash apply failed' };
+    }
+    // From the top of the checkout: from a subfolder, ls-files would list only that folder, relative to it.
+    const untracked = await run('git', ['-C', root, 'ls-files', '--others', '--exclude-standard', '-z']);
+    if (untracked.code !== 0) return { files: 0, error: untracked.stderr.trim() || 'git ls-files failed' };
+    // Entries ending in "/" are nested repositories, which are not copied.
+    for (const file of untracked.stdout.split('\0').filter((f) => f && !f.endsWith('/'))) {
+      try {
+        // Async, so a large untracked file does not stall the app.
+        await mkdir(dirname(join(to, file)), { recursive: true });
+        await cp(join(root, file), join(to, file), { verbatimSymlinks: true });
+      } catch (error) {
+        return { files: 0, error: `could not copy ${file}: ${(error as Error).message}` };
+      }
+    }
+    const status = await run('git', ['-C', to, 'status', '--porcelain', '-uall']);
+    if (status.code !== 0) return { files: 0, error: status.stderr.trim() || 'git status failed' };
+    return { files: status.stdout.split('\n').filter(Boolean).length };
   }
 
   /** Why the worktree must be kept, or null when it is safe to remove. */
