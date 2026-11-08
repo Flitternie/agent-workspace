@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
+import { memorySourceText } from './MemorySettings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
@@ -496,8 +497,8 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
   const mem = snapshot.memory;
   const groups: Array<{ title: string; records: MemoryRecord[]; hint: string }> = [
     { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to {alias}.', { alias: task.alias }) },
-    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here.') },
-    { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session.') },
+    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Applies to every agent in this project.') },
+    { title: t('User'), records: mem.filter((m) => m.scope === 'global'), hint: t('Applies to every agent the app starts, on every machine.') },
   ];
   const run = (fn: () => Promise<unknown>) => {
     setError('');
@@ -532,9 +533,11 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
           {g.records.length === 0 ? <div className="muted small">{g.hint}</div> : null}
           {g.records.map((m) => (
             <div key={m.id} className="memory-record" data-testid="memory-record" data-scope={m.scope}>
+              {m.title && !m.body.startsWith(`#`) ? <div className="memory-title">{m.title}</div> : null}
               <div className="memory-body">{m.body}</div>
               <div className="memory-meta">
-                {m.source}
+                {memorySourceText(m)}
+                {m.sourceRemoved ? ` · ${t('source removed')}` : ''}
                 {m.originTaskId ? ` · ${t('from {alias}', { alias: snapshot.tasks.find((x) => x.taskId === m.originTaskId)?.alias ?? t('removed task') })}` : ''}
                 {task.injectedMemoryIds?.includes(m.id) ? ` · ${t('loaded in this session')}` : ''}
               </div>
@@ -551,7 +554,7 @@ function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Ta
                 ) : null}
                 {m.scope !== 'global' ? (
                   <button className="link" onClick={() => run(() => call('memory:promote', { id: m.id, scope: 'global' }))}>
-                    {t('Save as global')}
+                    {t('Save as user memory')}
                   </button>
                 ) : null}
                 <button className="link danger" onClick={() => run(() => call('memory:delete', { id: m.id }))}>
