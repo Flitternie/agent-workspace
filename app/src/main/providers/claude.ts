@@ -14,7 +14,7 @@ import { transientKind } from '../retry';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
 import { privateFolders } from '../private-folders';
-import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteSessionStore, remoteSpawn, scanRemoteSessions } from './claude-remote';
+import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteExitError, remoteSessionStore, remoteSpawn, scanRemoteSessions, type RemoteExit } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
@@ -271,6 +271,8 @@ class ClaudeSession implements ProviderSession {
   private queue: SDKUserMessage[] = [];
   private wake?: () => void;
   private closed = false;
+  /** On an SSH host: how its CLI process last ended, to explain a failure. */
+  private remoteExit?: RemoteExit;
   /** User turns sent but not yet answered by a result message. */
   /** A turn is running. Messages sent meanwhile are folded into it by Claude Code. */
   private active = false;
@@ -334,7 +336,7 @@ class ClaudeSession implements ProviderSession {
         cwd: this.args.cwd,
         env,
         pathToClaudeCodeExecutable: executable,
-        ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, this.args.cwd, env) } : {}),
+        ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, this.args.cwd, env, (exit) => (this.remoteExit = exit)) } : {}),
         ...(resume ? { resume: this.sessionId } : { sessionId: this.sessionId }),
         systemPrompt: {
           type: 'preset',
@@ -459,8 +461,13 @@ class ClaudeSession implements ProviderSession {
       for await (const message of this.query as Query) this.receive(message, false);
       if (!this.closed) this.emit({ type: 'sessionDisconnected', reason: 'Claude process ended.' });
     } catch (error) {
-      if (!this.closed)
-        this.emit({ type: 'sessionFailed', error: error instanceof Error ? error.message : String(error) });
+      let message = error instanceof Error ? error.message : String(error);
+      const exit = this.remoteExit;
+      if (exit && this.args.host && /process exited with code|terminated by signal/i.test(message)) {
+        await exit.settled;
+        message = remoteExitError(this.args.host, exit, message);
+      }
+      if (!this.closed) this.emit({ type: 'sessionFailed', error: message });
     } finally {
       this.cancelPermissions('disconnected');
       this.closed = true;

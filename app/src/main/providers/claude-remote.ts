@@ -85,19 +85,53 @@ export function entrypointOf(entries: Array<Record<string, unknown>>): string | 
  */
 export const isSubAgentEntrypoint = (entrypoint: string | undefined) => !!entrypoint && (entrypoint === 'sdk-cli' || entrypoint.includes('daemon'));
 
+/** How the host's `claude` (or the SSH connection to it) last ended; see remoteExitError. */
+export interface RemoteExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** The last of its stderr: ssh's own messages, or the CLI's reason for quitting. */
+  stderr: string;
+  /** Settles once stderr is fully read (or shortly after exit). */
+  settled: Promise<void>;
+}
+
 /** Runs the SDK's CLI command line with the host's own `claude`, in `cwd` there. */
-export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>): (o: SpawnOptions) => SpawnedProcess {
+export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>, onExit?: (exit: RemoteExit) => void): (o: SpawnOptions) => SpawnedProcess {
   return (o) => {
     // Only what the SDK itself adds for the CLI crosses over; the user's environment stays here.
     const added = Object.entries(o.env).filter(([k, v]) => typeof v === 'string' && localEnv[k] !== v && /^CLAUDE_[A-Z0-9_]+$/.test(k));
     const exports = added.map(([k, v]) => `export ${k}=${shq(v!)}; `).join('');
     const command = `cd ${shq(cwd)} || exit 3; ${exports}exec claude ${o.args.map(shq).join(' ')}`;
     const proc = sshSpawn(host, command);
-    // stderr may hold private diagnostics; never forwarded.
-    proc.stderr.resume();
+    // Only the tail is kept, and only to explain an exit (as the SDK does for a local CLI).
+    let stderr = '';
+    proc.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString()).slice(-STDERR_TAIL)));
+    const closed = new Promise<void>((resolve) => proc.stderr.once('close', () => resolve()));
+    proc.once('exit', (code, signal) => {
+      const settled = Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 500))]);
+      onExit?.({ code, signal, get stderr() { return stderr; }, settled });
+    });
     o.signal.addEventListener('abort', () => proc.kill('SIGTERM'), { once: true });
     return proc;
   };
+}
+
+const STDERR_TAIL = 2048;
+
+/**
+ * A clear reason for a remote session that ended with an error, instead of the SDK's bare
+ * "process exited with code N": 255 is ssh itself (connection, login, refused session),
+ * 3 and 127 are our own checks, anything else is the CLI there, with its last words.
+ */
+export function remoteExitError(host: string, exit: RemoteExit, fallback: string): string {
+  const lines = exit.stderr.split('\n').map((l) => l.trim()).filter(Boolean);
+  // ssh also exits 255, silently, when the remote process is killed by a signal there.
+  if (exit.code === 255) return lines.length ? sshError(host, exit.stderr) : `Claude Code on ${host} ended unexpectedly: it was stopped on ${host}, or the SSH connection closed.`;
+  if (exit.code === 3) return `The project folder no longer exists on ${host}.`;
+  if (exit.code === 127) return `Claude Code is not installed on ${host} (not on its login shell's PATH).`;
+  const why = lines.slice(-3).join(' ').slice(-400);
+  const how = exit.signal ? `was stopped (${exit.signal})` : `exited with code ${exit.code}`;
+  return why ? `Claude Code on ${host} ${how}: ${why}` : fallback.replace(/^Claude Code process/, `Claude Code on ${host}`);
 }
 
 /** Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. */

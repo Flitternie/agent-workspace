@@ -55,6 +55,9 @@ export const zh: Record<string, string> = {
   '{alias} is asking you: {what}': '{alias} 在问你：{what}',
   '{alias}’s request is settled: {what}': '{alias} 的请求已处理：{what}',
   'Waiting on you · {n}': '等你处理 · {n}',
+  '{n} requests from agents': '{n} 个 agent 请求',
+  '{n} settled': '{n} 个已处理',
+  'Show the request': '展开请求',
   // `!command` and suggested replies
   Command: '命令',
   'runs in {dir} through Codex, which sees the output': '在 {dir} 中通过 Codex 运行，Codex 能看到输出',
