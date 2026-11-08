@@ -4,7 +4,9 @@ import type {
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryCandidate,
   MemoryRecord,
+  MemorySyncStatus,
   NativeSessionInfo,
   Project,
   RemoteHostStatus,
@@ -64,6 +66,9 @@ interface Outputs {
   'memory:update': void;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
+  'memory:scanImports': { candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> };
+  'memory:import': number;
+  'memory:syncNow': MemorySyncStatus | undefined;
   'settings:update': void;
   'capabilities:refresh': void;
   'models:list': string[];

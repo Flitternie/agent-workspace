@@ -169,6 +169,9 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
+  'memory:scanImports': () => workspace.scanMemoryImports(),
+  'memory:import': (i: { items: Parameters<Workspace['importMemory']>[0] }) => workspace.importMemory(i.items),
+  'memory:syncNow': () => workspace.syncMemory(true),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
   'capabilities:refresh': () => workspace.refreshCapabilities(),
   'models:list': async () => workspace.openAi()?.listModels() ?? [],
@@ -288,6 +291,8 @@ app.whenReady().then(() => {
   wireEvents();
   createWindow();
   void workspace.refreshCapabilities();
+  // Demo runs (and the tests built on them) leave the real native memory alone unless asked.
+  if (!demoMode || process.env.AMW_MEMORY_SYNC === '1') workspace.startMemorySync();
   if (demoMode && workspace.snapshot().tasks.length === 0) void workspace.seedDemo(ensureDemoRepo());
 });
 

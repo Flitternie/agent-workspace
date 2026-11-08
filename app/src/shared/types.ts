@@ -204,6 +204,48 @@ export interface MemoryRecord {
   source: string;
   approvedForReuse: boolean;
   updatedAt: string;
+  /** Short heading for imported notes (memory name, file section). */
+  title?: string;
+  /** Imported: every native source with this text (`source|host|file|section`, see memory-import). */
+  importKeys?: string[];
+  /** Hash of the body as last imported; a different body hash means the user edited it, so sync leaves it alone. */
+  importedHash?: string;
+  /** Every source file of an imported note is gone (kept until the user deletes it). */
+  sourceRemoved?: boolean;
+}
+
+/** A note found in a CLI's native memory or instruction files, offered for import. */
+export interface MemoryCandidate {
+  key: string;
+  source: 'claude-memory' | 'instructions';
+  /** SSH alias; unset = this Mac. */
+  host?: string;
+  /** Path as found, `~/`-relative when under the home folder. */
+  file: string;
+  title: string;
+  body: string;
+  /** The body was cut to fit one note. */
+  truncated: boolean;
+  suggestedScope: 'global' | 'project';
+  /** The app project whose folder this Claude memory belongs to (project-type notes only). */
+  projectId?: string;
+  /** Claude memory type (user | feedback | project | reference). */
+  memoryType?: string;
+  /** For project notes without a matching app project: the folder Claude recorded (decoded best-effort). */
+  folderHint?: string;
+  alreadyImported: boolean;
+  /** The user deleted the imported note in the app; sync will not bring it back. */
+  dismissed: boolean;
+}
+
+export interface MemorySyncStatus {
+  at: string;
+  added: number;
+  updated: number;
+  removed: number;
+  /** Machines scanned ('local' = this Mac). */
+  hosts: string[];
+  errors: Array<{ host: string; error: string }>;
 }
 
 export interface ProviderCapabilities {
@@ -279,6 +321,8 @@ export interface Settings {
   language?: Language;
   /** SSH aliases (from ~/.ssh/config) whose agents and sessions the app uses. */
   remoteHosts?: string[];
+  /** Keep user memory in sync with the CLIs' native user-level memory; unset = on. */
+  memorySync?: boolean;
 }
 
 /**
@@ -335,6 +379,8 @@ export interface WorkspaceSnapshot {
   sessions: SessionRecord[];
   attention: AttentionItem[];
   memory: MemoryRecord[];
+  /** Last automatic user-memory sync (Settings › Memory). */
+  memorySync: { running: boolean; last?: MemorySyncStatus };
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   /** Enabled SSH hosts and what works on them. */

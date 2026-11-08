@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } from '../voice/shortcut';
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
+import { MemorySettings } from './MemorySettings';
 
 const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
@@ -573,6 +574,7 @@ const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'remote', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
   { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
+  { id: 'memory', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
   { id: 'voice', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
@@ -720,6 +722,10 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             ? t('Changing it starts a new main-agent conversation.')
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
+      </Section>
+
+      <Section id="memory" query={query}>
+        <MemorySettings snapshot={snapshot} />
       </Section>
 
       <Section id="permissions" query={query}>
