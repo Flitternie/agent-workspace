@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
@@ -304,6 +304,46 @@ export class CodexAdapter implements ProviderAdapter {
     }
   }
 
+
+  async oneShot(system: string, prompt: string): Promise<string> {
+    // Outside any project, read-only, no tools, and an ephemeral thread: nothing is saved.
+    const cwd = tmpdir();
+    const server = AppServer.spawn(cwd);
+    try {
+      await server.initialize();
+      const listed = rec(await server.rpc('model/list', {})).data;
+      const models = (Array.isArray(listed) ? listed : []).map(rec).filter((m) => !m.hidden);
+      // Codex names its light models by description, not by id ("Fast and affordable model for easier tasks").
+      const light = models.find((m) => /\b(fast|affordable|efficient|lightweight|small)\b/i.test(str(m.description)));
+      const efforts = (Array.isArray(light?.supportedReasoningEfforts) ? (light!.supportedReasoningEfforts as unknown[]) : []).map((e) => str(rec(e).reasoningEffort) || str(e));
+      const thread = rec(
+        rec(await server.rpc('thread/start', { cwd, ephemeral: true, approvalPolicy: 'never', sandbox: 'read-only', config: MAIN_AGENT_CONFIG, baseInstructions: system, ...(light ? { model: str(light.id) } : {}) })).thread,
+      );
+      const threadId = str(thread.id);
+      if (!threadId) throw new Error('Codex did not start a thread.');
+      let answer = '';
+      const done = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Codex did not answer in time.')), 90_000);
+        server.onExit = (reason) => {
+          clearTimeout(timer);
+          reject(new Error(reason));
+        };
+        server.onNotification = (method, p) => {
+          if (method === 'item/completed' && rec(p.item).type === 'agentMessage') answer = str(rec(p.item).text);
+          if (method !== 'turn/completed') return;
+          clearTimeout(timer);
+          const turn = rec(p.turn);
+          if (str(turn.status) === 'failed') reject(new Error(str(rec(turn.error).message) || 'Codex could not answer.'));
+          else resolve();
+        };
+      });
+      await server.rpc('turn/start', { threadId, input: [{ type: 'text', text: prompt, text_elements: [] }], ...(efforts.includes('low') ? { effort: 'low' } : {}) });
+      await done;
+      return answer.trim();
+    } finally {
+      server.kill();
+    }
+  }
   async readHistory(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]> {
     // thread/read loads the rollout without resuming the thread.
     const server = AppServer.spawn(host || existsSync(cwd) ? cwd : homedir(), host);

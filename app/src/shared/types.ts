@@ -39,6 +39,8 @@ export interface Task {
   /** Short spoken/visual handle, e.g. "A". Stable for the life of the task. */
   alias: string;
   name: string;
+  /** Who set the name: 'user' names are never changed automatically. Unset on older tasks. */
+  nameSource?: 'auto' | 'user';
   projectId: string;
   title: string;
   provider: AgentProvider;

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { open, readdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   CanUseTool,
@@ -216,6 +216,41 @@ export class ClaudeAdapter implements ProviderAdapter {
       out.push({ provider: 'claude', nativeSessionId: s.sessionId, cwd: dir, host, title: info.customTitle || info.summary || info.firstPrompt || s.sessionId, updatedAt: new Date(s.mtime).toISOString(), ...(automated ? { automated } : {}) });
     }
     return out;
+  }
+
+  async oneShot(system: string, prompt: string): Promise<string> {
+    const sdk = await loadSdk();
+    const executable = findExecutable('claude');
+    if (!executable) throw new Error('Claude Code CLI not found.');
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), 60_000);
+    try {
+      let answer = '';
+      const q = sdk.query({
+        prompt,
+        options: {
+          // Outside any project, so no CLAUDE.md or project settings apply.
+          cwd: tmpdir(),
+          env: childEnv(),
+          pathToClaudeCodeExecutable: executable,
+          model: 'haiku',
+          systemPrompt: system,
+          settingSources: [],
+          tools: [],
+          maxTurns: 1,
+          persistSession: false,
+          abortController,
+        },
+      });
+      for await (const m of q) {
+        if (m.type !== 'result') continue;
+        if (m.subtype !== 'success') throw new Error(`Claude Code could not answer (${m.subtype}).`);
+        answer = m.result;
+      }
+      return answer.trim();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async forkPoints(nativeSessionId: string, cwd: string): Promise<ForkPoint[]> {
