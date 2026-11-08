@@ -845,7 +845,9 @@ export class Workspace {
       if (head.code !== 0) throw new Error(`Could not read ${src.alias}'s last commit: ${head.stderr.trim()}`);
       const id = randomUUID().slice(0, 8);
       worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(`${src.name} fork`)}-${id}`, head.stdout.trim());
-      cwd = worktree.path;
+      // The same subfolder as the original (an imported session can work in one), so its paths still hold.
+      const prefix = (await run('git', ['-C', src.cwd, 'rev-parse', '--show-prefix'])).stdout.trim().replace(/\/+$/, '');
+      cwd = prefix ? join(worktree.path, prefix) : worktree.path;
     }
     let forkId: string;
     try {
@@ -886,7 +888,7 @@ export class Workspace {
     d.sessions.push(record);
     d.tasks.push(task);
     const notes = [
-      `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}, from ${src.alias}'s last commit)` : ''}.`,
+      `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
       ...(copied?.error
         ? [`${src.alias}'s uncommitted changes were not fully copied (${copied.error}); check ${alias}'s files before relying on them.`]
         : copied?.files
@@ -1586,16 +1588,18 @@ export class Workspace {
 
   /**
    * The main agent forks an agent to branch off work: the whole conversation as it is now, or from
-   * just before an earlier prompt (matched by its start). Always in its own worktree, and never with
-   * more permissions than the workspace default, which only the user can raise.
+   * just before an earlier prompt (matched by its start). In its own worktree when the project is a
+   * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
   async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
-    const want = args.beforePrompt?.trim().toLowerCase();
+    // Whitespace as read_agent and the error below show it: collapsed.
+    const norm = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+    const want = args.beforePrompt ? norm(args.beforePrompt) : '';
     if (want) {
       const points = await this.forkPoints(taskId);
-      const hits = points.filter((p) => p.prompt.trim().toLowerCase().startsWith(want));
+      const hits = points.filter((p) => norm(p.prompt).startsWith(want));
       const listed = points.map((p) => `"${clip(p.prompt.replace(/\s+/g, ' '), 80)}"`).join(', ');
       if (hits.length !== 1)
         throw new Error(

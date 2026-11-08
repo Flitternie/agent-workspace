@@ -300,6 +300,32 @@ describe('worktrees', () => {
     expect(branches()).toBe('');
   });
 
+  it('a fork of an agent working in a subfolder works in the same subfolder, with all the uncommitted work', async () => {
+    const ws = open();
+    const root = repo();
+    mkdirSync(join(root, 'app'));
+    writeFileSync(join(root, 'app', 'main.ts'), 'v1');
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'app'], { cwd: root });
+    const p = await ws.addProject(root);
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'App', isolate: true, mockScript: 'work', instruction: 'Work on the app.' });
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status));
+    // As an imported session can: the agent works in the app/ subfolder of its checkout.
+    const top = a.cwd;
+    const sub = join(top, 'app');
+    (ws as unknown as { store: { data: { tasks: Array<{ taskId: string; cwd: string }> } } }).store.data.tasks.find((t) => t.taskId === a.taskId)!.cwd = sub;
+    writeFileSync(join(sub, 'main.ts'), 'v2');
+    writeFileSync(join(sub, 'new.ts'), 'new');
+    writeFileSync(join(top, 'TODO.md'), 'outside the subfolder');
+
+    const b = await ws.forkTask(a.taskId, { isolate: true });
+    expect(b.cwd).toBe(join(b.worktree!.path, 'app'));
+    expect(readFileSync(join(b.cwd, 'main.ts'), 'utf8')).toBe('v2');
+    expect(readFileSync(join(b.cwd, 'new.ts'), 'utf8')).toBe('new');
+    expect(readFileSync(join(b.worktree!.path, 'TODO.md'), 'utf8')).toBe('outside the subfolder');
+    expect(existsSync(join(b.worktree!.path, 'new.ts'))).toBe(false);
+  });
+
   it('a fork waits for the current turn to end', async () => {
     const ws = open();
     const p = await ws.addProject(repo());
@@ -365,7 +391,7 @@ describe('main agent tools', () => {
     const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', name: 'backend', title: 'Bug', isolate: true, mockScript: 'work', instruction: 'Investigate the bug.' });
     const idle = (id: string) => () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === id)!.status);
     await until(idle(A.taskId));
-    await ws.send(A.taskId, 'Try the cache fix.', 'text');
+    await ws.send(A.taskId, 'Try the\n  cache fix.', 'text');
     await until(idle(A.taskId));
     writeFileSync(join(A.cwd, 'findings.md'), 'the bug is in the cache');
     // The user gave Alice more than the workspace default; a fork the main agent makes does not inherit that.
@@ -374,6 +400,7 @@ describe('main agent tools', () => {
     const { workspaceTools, MAX_FORKS_PER_TURN } = await import('../../src/main/main-agent');
     const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
 
+    // Matched with whitespace collapsed, as read_agent shows it.
     const r = await tools.fork_agent.run({ agent: 'Alice', instruction: 'Try the index fix instead.', before_prompt: 'try the CACHE', role: 'Approach B' });
     expect(r).toMatch(/^Forked Alice as \S+ in its own worktree \(amw\/.+\); it is working on its instruction\.$/);
     const B = ws.snapshot().tasks.find((t) => t.forkedFrom?.taskId === A.taskId)!;
@@ -392,9 +419,21 @@ describe('main agent tools', () => {
     expect(ws.permissionModeOf(ws.snapshot().tasks.at(-1)!)).toBe('ask');
 
     await expect(tools.fork_agent.run({ agent: 'Alice', instruction: 'x', before_prompt: 'nope' })).rejects.toThrow(/None of Alice's earlier prompts start with "nope". Its earlier prompts: "Try the cache fix."/);
-    for (let i = 2; i < MAX_FORKS_PER_TURN; i++) await tools.fork_agent.run({ agent: 'Alice', instruction: `Branch ${i}.` });
-    expect(await tools.fork_agent.run({ agent: 'Alice', instruction: 'One too many.' })).toMatch(/^Not forked: at most 3 forks/);
+    // Calls made in parallel cannot all pass the per-message limit.
+    const parallel = await Promise.all([1, 2, 3].map((i) => tools.fork_agent.run({ agent: 'Alice', instruction: `Branch ${i}.` })));
+    expect(parallel.filter((x) => x.startsWith('Not forked: at most 3 forks')).length).toBe(2);
     expect(ws.snapshot().tasks.filter((t) => t.forkedFrom).length).toBe(MAX_FORKS_PER_TURN);
+  });
+
+  it('fork_agent says when the fork shares the folder, outside a git repository', async () => {
+    const ws = open();
+    const folder = mkdtempSync(join(tmpdir(), 'amw-test-plain-'));
+    const project = await ws.addProject(folder, 'notes');
+    const A = await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'Notes', isolate: true, mockScript: 'work', instruction: 'Tidy the notes.' });
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === A.taskId)!.status));
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    expect(await tools.fork_agent.run({ agent: A.alias, instruction: 'Try a shorter layout.' })).toMatch(/sharing Alice's folder \(the project is not a git repository, so their edits are not isolated\)/);
   });
 
   it('give a quick look at a project and at what an agent changed, without the files themselves', async () => {

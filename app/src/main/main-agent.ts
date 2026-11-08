@@ -147,7 +147,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
     {
       name: 'fork_agent',
       description:
-        'Branch off work from an agent: a new agent continues a copy of its conversation (so it already knows what the original found out and decided) in its own worktree with the original’s files as they are now, and gets its own instruction. The original is untouched. Use it to try different approaches in parallel, or to split the remaining work after an agent has explored the problem; use create_agent for unrelated work. Each fork carries the whole conversation, so fork only when that context matters, and say in one line what each branch does. Only an agent that is not working right now can be forked; otherwise wait for its turn to end (that comes to you on its own). Claude Code agents only, for now.',
+        'Branch off work from an agent: a new agent continues a copy of its conversation (so it already knows what the original found out and decided) in its own worktree with the original’s files as they are now (in a git repository; otherwise it shares the folder), and gets its own instruction. The original is untouched. Use it to try different approaches in parallel, or to split the remaining work after an agent has explored the problem; use create_agent for unrelated work. Each fork carries the whole conversation, so fork only when that context matters, and say in one line what each branch does. Only an agent that is not working right now can be forked; otherwise wait for its turn to end (that comes to you on its own). Claude Code agents only, for now.',
       schema: z.object({
         agent: agentArg,
         instruction: z.string().min(1).describe('What this branch does, different from the original’s work, and what done looks like.'),
@@ -164,13 +164,23 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           forks = 0;
         }
         if (forks >= MAX_FORKS_PER_TURN) return `Not forked: at most ${MAX_FORKS_PER_TURN} forks per message from the user. Tell the user what you started, and fork more only if they ask.`;
-        const { task, delivery } = await host.forkFromMain(t.taskId, {
-          instruction: String(a.instruction),
-          beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
-          role: a.role ? String(a.role) : undefined,
-        });
+        // Taken before the await, so calls made in parallel cannot all pass the check.
         forks++;
-        const where = task.worktree ? ` in its own worktree (${task.worktree.branch})` : '';
+        let forked: Awaited<ReturnType<MainAgentHost['forkFromMain']>>;
+        try {
+          forked = await host.forkFromMain(t.taskId, {
+            instruction: String(a.instruction),
+            beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
+            role: a.role ? String(a.role) : undefined,
+          });
+        } catch (error) {
+          forks--;
+          throw error;
+        }
+        const { task, delivery } = forked;
+        const where = task.worktree
+          ? ` in its own worktree (${task.worktree.branch})`
+          : `, sharing ${t.alias}'s folder (the project is not a git repository, so their edits are not isolated)`;
         return delivery.ok
           ? `Forked ${t.alias} as ${task.alias}${where}; it is working on its instruction.`
           : `Forked ${t.alias} as ${task.alias}${where}, but its instruction was not delivered: ${delivery.error}. Send it again with send_to_agent.`;
