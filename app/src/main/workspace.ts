@@ -43,6 +43,7 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
+import { MemoryWriteback, plan as planWriteback, type BackupEntry } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -118,10 +119,12 @@ export class Workspace {
 
   /** The skill library loaded into every agent the app starts (see skills.ts). */
   readonly skills: SkillLibrary;
+  private writeback: MemoryWriteback;
 
   constructor(private opts: WorkspaceOptions) {
     this.store = new JsonStore(opts.dataDir);
     this.skills = new SkillLibrary(opts.dataDir);
+    this.writeback = new MemoryWriteback(opts.dataDir, opts.home);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
@@ -332,6 +335,7 @@ export class Workspace {
       attention: d.attention,
       memory: d.memory,
       memorySync: { running: this.memSync.running, last: d.memorySync },
+      memoryShare: Object.fromEntries(Object.entries(d.settings.memoryLinks ?? {}).map(([h, l]) => [h, { ...l, ...this.shareResults.get(h) }])),
       coordinator: d.coordinator.slice(-50),
       capabilities: this.capabilities,
       remoteHosts: this.enabledHosts().map((host) => this.hostStatus.get(host) ?? { host, ssh: 'checking', capabilities: [] }),
@@ -1603,6 +1607,7 @@ export class Workspace {
     const rec: MemoryRecord = { ...m, id: `m-${randomUUID().slice(0, 8)}`, updatedAt: now() };
     this.store.data.memory.push(rec);
     this.changed();
+    this.schedulePush();
     return rec;
   }
 
@@ -1613,6 +1618,7 @@ export class Workspace {
     if (patch.approvedForReuse !== undefined) m.approvedForReuse = patch.approvedForReuse;
     m.updatedAt = now();
     this.changed();
+    this.schedulePush();
   }
 
   deleteMemory(id: string): void {
@@ -1620,6 +1626,7 @@ export class Workspace {
     if (m) tombstone(this.store.data, m);
     this.store.data.memory = this.store.data.memory.filter((m) => m.id !== id);
     this.changed();
+    this.schedulePush();
   }
 
   /** Explicit promotion: copies a note upward with provenance; the original stays. */
@@ -1687,6 +1694,7 @@ export class Workspace {
     });
     const n = importCandidates(this.store.data, picks).length;
     this.changed();
+    this.schedulePush();
     return n;
   }
 
@@ -1713,7 +1721,14 @@ export class Workspace {
     this.changed();
     try {
       const scan = await this.scanMemoryImports();
-      const counts = syncUserMemory(this.store.data, scan.candidates, scan.scanned);
+      // Only linked machines take part; others are linked once, from Settings › Memory.
+      const linked = (h: string | undefined) => !!this.store.data.settings.memoryLinks?.[h ?? LOCAL];
+      const counts = syncUserMemory(
+        this.store.data,
+        scan.candidates.filter((c) => linked(c.host)),
+        scan.scanned.filter((h) => linked(h === LOCAL ? undefined : h)),
+      );
+      await this.pushMemory();
       this.store.data.memorySync = { at: now(), ...counts, hosts: scan.scanned, errors: scan.errors };
       this.lastScan = new Map(markCandidates([...this.lastScan.values()], this.store.data).map((c) => [c.key, c]));
     } catch (error) {
@@ -1727,6 +1742,95 @@ export class Workspace {
       void this.syncMemory(manual);
     }
     return this.store.data.memorySync;
+  }
+
+  // ---------------------------------------------------------------- user memory in the CLIs' files
+
+  private shareResults = new Map<string, { lastWrite?: string; errors?: string[] }>();
+  private pushTimer?: NodeJS.Timeout;
+  /** Writes to the CLIs' files run one at a time (a link, a push, a restore never overlap). */
+  private shareQueue: Promise<unknown> = Promise.resolve();
+  private shareSerial<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.shareQueue.then(fn, fn);
+    this.shareQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Soon after user memory changed in the app: the linked machines get it. */
+  private schedulePush(): void {
+    clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => void this.pushMemory(), 2000);
+    this.pushTimer.unref?.();
+  }
+
+  /** Writes the shared user memory to every linked, reachable machine (offline ones catch up on the next sync). */
+  pushMemory(): Promise<void> {
+    return this.shareSerial(() => this.doPush());
+  }
+
+  private async doPush(): Promise<void> {
+    if (this.store.data.settings.memorySync === false) return;
+    const hosts = Object.keys(this.store.data.settings.memoryLinks ?? {}).filter((h) => h === LOCAL || this.hostStatus.get(h)?.ssh === 'ok');
+    await Promise.all(
+      hosts.map(async (h) => {
+        const r = await this.writeback.write(h, this.store.data.memory, 'sync').catch((e: Error) => ({ written: [], errors: [e.message] }));
+        this.shareResults.set(h, { lastWrite: r.written.length ? now() : this.shareResults.get(h)?.lastWrite, errors: r.errors.length ? r.errors : undefined });
+      }),
+    );
+    this.changed();
+  }
+
+  /**
+   * What linking a machine would do: its user-level notes that would join the shared
+   * user memory, and each of its CLI files before and after (nothing is changed).
+   */
+  async linkPreview(host: string): Promise<{ incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }> }> {
+    const incoming = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
+    const marked = markCandidates(incoming, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
+    const after = [...this.store.data.memory, ...marked.map((c, i) => ({ id: `preview-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, source: c.key, importKeys: [c.key], approvedForReuse: true, updatedAt: now() }))];
+    const files = planWriteback(await this.writeback.read(host), after);
+    return { incoming: marked, files: files.map(({ file, next }) => ({ path: file.path, kind: file.kind, exists: file.exists, before: file.content, after: next })) };
+  }
+
+  /** The first sync with a machine: back up its files, merge its user-level notes in, write the shared user memory there. */
+  linkMachine(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
+    return this.shareSerial(() => this.doLink(host));
+  }
+
+  private async doLink(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
+    const incoming = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
+    const fresh = markCandidates(incoming, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
+    const added = importCandidates(this.store.data, fresh.map((candidate) => ({ candidate, scope: 'global' as const, scopeId: 'global' }))).length;
+    const r = await this.writeback.write(host, this.store.data.memory, 'link');
+    this.store.data.settings.memoryLinks = { ...this.store.data.settings.memoryLinks, [host]: { linkedAt: now() } };
+    this.shareResults.set(host, { lastWrite: r.written.length ? now() : undefined, errors: r.errors.length ? r.errors : undefined });
+    this.changed();
+    // Machines linked earlier get the notes this one brought.
+    if (added) this.schedulePush();
+    return { added, ...r };
+  }
+
+  /** Stops sharing with a machine: takes the app's text out, or puts the files back as they were before linking. */
+  async unlinkMachine(host: string, how: 'remove' | 'original'): Promise<void> {
+    await this.shareSerial(() => this.writeback.unlink(host, how));
+    const links = { ...this.store.data.settings.memoryLinks };
+    delete links[host];
+    this.store.data.settings.memoryLinks = links;
+    this.shareResults.delete(host);
+    this.changed();
+  }
+
+  memoryBackups(host?: string): BackupEntry[] {
+    return this.writeback.backups(host).slice().reverse();
+  }
+
+  memoryBackupContent(id: string): string {
+    return this.writeback.backupContent(id);
+  }
+
+  async restoreMemoryBackup(id: string): Promise<void> {
+    await this.shareSerial(() => this.writeback.restore(id));
+    this.changed();
   }
 
   updateSettings(patch: Partial<Settings>): void {

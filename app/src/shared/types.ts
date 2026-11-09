@@ -240,6 +240,19 @@ export interface MemoryCandidate {
   dismissed: boolean;
 }
 
+/** A backup of a CLI file taken before the app changed it (main/memory-writeback.ts). */
+export interface MemoryBackup {
+  id: string;
+  host: string;
+  path: string;
+  at: string;
+  reason: 'link' | 'sync' | 'restore' | 'unlink';
+  existed: boolean;
+  size: number;
+  /** The file as it was before the machine was linked: never pruned. */
+  original?: boolean;
+}
+
 export interface MemorySyncStatus {
   at: string;
   added: number;
@@ -325,6 +338,11 @@ export interface Settings {
   remoteHosts?: string[];
   /** Keep user memory in sync with the CLIs' native user-level memory; unset = on. */
   memorySync?: boolean;
+  /**
+   * Machines whose CLIs share user memory ('local' = this Mac), linked once (files backed
+   * up, notes merged); from then on the shared user memory is kept in sync there.
+   */
+  memoryLinks?: Record<string, { linkedAt: string }>;
 }
 
 /**
@@ -383,6 +401,8 @@ export interface WorkspaceSnapshot {
   memory: MemoryRecord[];
   /** Last automatic user-memory sync (Settings › Memory). */
   memorySync: { running: boolean; last?: MemorySyncStatus };
+  /** Per linked machine: the last write of user memory into its CLI files. */
+  memoryShare: Record<string, { linkedAt: string; lastWrite?: string; errors?: string[] }>;
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   /** Enabled SSH hosts and what works on them. */

@@ -5,6 +5,7 @@ import type {
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryBackup,
   MemoryCandidate,
   MemoryRecord,
   MemorySyncStatus,
@@ -43,6 +44,12 @@ interface Outputs {
   'task:send': DispatchResult;
   'task:interrupt': void;
   'task:shell': { ok: boolean; error?: string };
+  'memory:linkPreview': { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }> };
+  'memory:link': { added: number; written: string[]; errors: string[] };
+  'memory:unlink': void;
+  'memory:backups': MemoryBackup[];
+  'memory:backupContent': string;
+  'memory:restoreBackup': void;
   'skills:list': LibrarySkill[];
   'skills:scan': { found: FoundSkill[]; errors: Array<{ host: string; error: string }> };
   'skills:import': void;

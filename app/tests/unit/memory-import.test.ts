@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,10 @@ vi.mock('../../src/main/util/ssh', async (orig) => ({
         resolve({ code: e ? 1 : 0, stdout, stderr }),
       ),
     ),
+  sshRunInput: async (host: string, command: string, input: Buffer) => {
+    const r = spawnSync('/bin/sh', ['-c', command], { env: { ...process.env, HOME: remoteHomes[host] }, input });
+    return { code: r.status ?? 1, stdout: r.stdout.toString(), stderr: r.stderr.toString() };
+  },
 }));
 
 const { bodyHash, candidatesFrom, encodeClaudeCwd, importCandidates, markCandidates, memoryKey, parseFrontmatter, parseScanOutput, scopeForType, splitInstructions, syncUserMemory, tombstone, MAX_BODY } = await import('../../src/main/memory-import');
@@ -211,7 +215,8 @@ describe('workspace scan over SSH (local sh, temp HOME)', () => {
         ].sort(),
       );
 
-      ws.updateSettings({ memorySync: true });
+      // Only linked machines sync (linking itself is covered in memory-writeback.test.ts).
+      ws.updateSettings({ memorySync: true, memoryLinks: { local: { linkedAt: 'earlier' }, devbox: { linkedAt: 'earlier' } } });
       const status = await ws.syncMemory(true);
       expect(status).toMatchObject({ added: 3, updated: 0, removed: 0, errors: [] }); // Tests ×2 collapse into one
       const user = ws.snapshot().memory.filter((m) => m.scope === 'global');
