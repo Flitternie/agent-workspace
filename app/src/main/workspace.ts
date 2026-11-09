@@ -1808,6 +1808,9 @@ export class Workspace {
 
   /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
   private previewRoots(t: Task): string[] {
+    // The main agent talks about every agent's files: any project or agent folder on this Mac.
+    if (t === this.store.data.mainAgent)
+      return [t.cwd, ...this.store.data.projects.filter((p) => !p.host).map((p) => p.rootPath), ...this.store.data.tasks.filter((x) => !x.host).flatMap((x) => [x.cwd, x.worktree?.path])].filter((r): r is string => !!r);
     const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
     return [t.cwd, t.worktree?.path, project?.rootPath].filter((r): r is string => !!r);
   }
