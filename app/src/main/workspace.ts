@@ -38,7 +38,7 @@ import type { ProviderAdapter, ProviderEvent, ProviderSession } from './provider
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
-import { cleanRole, guessRole } from './role';
+import { cleanRole, guessRole, projectRole, rolePrompt, roleRetry } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote } from './preview';
@@ -91,6 +91,8 @@ export interface WorkspaceOptions {
   retry?: Partial<RetryPolicy>;
   /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
   home?: string;
+  /** Replaces the CLIs' one-shot answers for background jobs (tests). */
+  backgroundModel?: (system: string, prompt: string) => Promise<string>;
 }
 
 /**
@@ -437,6 +439,8 @@ export class Workspace {
     projectId: string;
     provider: AgentProvider;
     title: string;
+    /** Who chose `name` (default: the user, who typed it). */
+    nameSource?: 'auto' | 'user';
     name?: string;
     instruction?: string;
     isolate: boolean;
@@ -470,6 +474,7 @@ export class Workspace {
       taskId,
       alias,
       name: args.name?.trim() || alias,
+      nameSource: args.name?.trim() ? (args.nameSource ?? 'user') : 'auto',
       projectId: project.projectId,
       title: args.title.trim(),
       provider: args.provider,
@@ -494,12 +499,13 @@ export class Workspace {
   }
 
   /** Shows an imported session's past conversation right away, before anything is resumed. */
-  private async previewHistory(task: Task, provider: 'claude' | 'codex', nativeSessionId: string): Promise<void> {
+  /** Shows a saved conversation before it is resumed, and returns it (undefined when it could not be read). */
+  private async previewHistory(task: Task, provider: 'claude' | 'codex', nativeSessionId: string): Promise<TranscriptItem[] | undefined> {
     const adapter = this.opts.adapters[provider];
-    if (!adapter?.readHistory) return;
+    if (!adapter?.readHistory) return undefined;
     try {
       const events = await adapter.readHistory(nativeSessionId, task.cwd, task.host);
-      if (this.live.has(task.taskId) || !this.store.data.tasks.includes(task)) return; // resumed meanwhile, or removed
+      if (this.live.has(task.taskId) || !this.store.data.tasks.includes(task)) return undefined; // resumed meanwhile, or removed
       const items: TranscriptItem[] = [];
       for (const e of events) {
         if (e.type !== 'transcriptItem') continue;
@@ -508,41 +514,88 @@ export class Workspace {
         if (i === -1) items.push(item);
         else items[i] = item;
       }
-      if (!items.length) return;
+      if (!items.length) return items;
       // A preview: long sessions show their latest part; resuming restores everything.
       this.store.setTranscript(task.taskId, items.slice(-400));
       for (const cb of this.transcriptListeners) cb(task.taskId, null);
       const last = [...items].reverse().find((x) => x.role === 'assistant' && x.text.trim());
       if (last) task.summary = summaryFor(last.text);
       this.changed();
+      return items;
     } catch (error) {
       this.log('history preview failed', provider, error);
+      return undefined;
     }
   }
 
   /**
-   * Gives an unnamed agent a one-word role in the language of its name: a keyword
-   * guess now, refined by the LLM when configured. A role the user sets wins.
+   * Gives an unnamed agent a one-word role in the language of its name: a keyword guess (else the
+   * project's name) now, then, unless `refine` is false, a model's suggestion. A name the user sets wins.
    */
-  private autoRole(task: Task, title: string, instruction = ''): void {
+  private autoRole(task: Task, title: string, instruction = '', opts: { refine?: boolean } = {}): void {
     const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
-    const text = `${title}\n${instruction}`.trim();
     // The title says what the agent is for; the instruction only breaks ties.
-    const guess = guessRole(title, lang) ?? guessRole(instruction, lang);
+    const guess = guessRole(title, lang) ?? guessRole(instruction, lang) ?? projectRole(this.store.data.projects.find((p) => p.projectId === task.projectId)?.name ?? '');
     if (guess) task.name = guess;
+    task.nameSource = 'auto';
+    if (opts.refine !== false) this.refineRole(task, `${title}\n${instruction}`.trim());
+  }
+
+  /** Replaces an automatic role with a model's suggestion from `text`, unless the name changed meanwhile. */
+  private refineRole(task: Task, text: string): void {
+    if (!text.trim() || this.opts.demo) return;
+    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
     const auto = task.name;
-    const ai = this.opts.openai;
-    if (!ai || !text.trim()) return;
-    void ai
-      .suggestRole(text, lang)
-      .then((raw) => {
-        const role = cleanRole(raw, lang);
+    void this.suggestRole(text, lang)
+      .then((role) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!role || !t || t.name !== auto) return;
+        if (!role || !t || t.name !== auto || t.nameSource === 'user') return;
         t.name = role;
+        t.nameSource = 'auto';
         this.changed();
       })
       .catch((error) => this.log('role suggestion failed', error));
+  }
+
+  /** A role from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
+  private async suggestRole(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
+    const ask = this.backgroundAsk();
+    if (ask) {
+      try {
+        const prompt = `${lang === 'zh' ? '这个 Agent 在做的事：' : 'What the agent is doing:'}\n${text.slice(0, 1500)}`;
+        const first = await ask(rolePrompt(lang), prompt);
+        const role = cleanRole(first, lang);
+        if (role) return role;
+        const second = cleanRole(await ask(rolePrompt(lang), `${prompt}\n\n${roleRetry(lang, first)}`), lang);
+        if (second) return second;
+      } catch (error) {
+        this.log('background role failed', error);
+      }
+    }
+    const ai = this.opts.openai;
+    return ai ? cleanRole(await ai.suggestRole(text, lang), lang) : undefined;
+  }
+
+  /**
+   * One-shot answers for background jobs from the user's own CLI, one at a time: the main agent's
+   * provider first, then any installed and signed-in one. Undefined when none can answer.
+   */
+  private backgroundAsk(): ((system: string, prompt: string) => Promise<string>) | undefined {
+    const model = this.opts.backgroundModel;
+    if (model) return (system, prompt) => this.serial(() => model(system, prompt));
+    const setting = this.store.data.settings.mainAgent;
+    const order: Array<'claude' | 'codex'> = setting === 'claude' || setting === 'codex' ? [setting, setting === 'claude' ? 'codex' : 'claude'] : ['claude', 'codex'];
+    const adapter = order.map((p) => (this.providerReady(p) ? this.opts.adapters[p] : undefined)).find((a) => a?.oneShot);
+    if (!adapter?.oneShot) return undefined;
+    return (system, prompt) => this.serial(() => adapter.oneShot!(system, prompt));
+  }
+
+  private backgroundQueue: Promise<unknown> = Promise.resolve();
+
+  private serial<T>(job: () => Promise<T>): Promise<T> {
+    const result = this.backgroundQueue.then(job);
+    this.backgroundQueue = result.catch(() => {});
+    return result;
   }
 
   permissionModeOf(task: Task): PermissionMode {
@@ -561,6 +614,8 @@ export class Workspace {
   rename(taskId: string, name: string): void {
     const t = this.task(taskId);
     t.name = name.trim() || t.alias;
+    // Cleared, the name is the app's to choose again.
+    t.nameSource = name.trim() ? 'user' : 'auto';
     t.updatedAt = now();
     this.changed();
   }
@@ -831,9 +886,16 @@ export class Workspace {
     };
     d.sessions.push(record);
     d.tasks.push(task);
-    this.autoRole(task, task.title);
+    // A keyword guess (or the project's name) now; the model refines it once it can read the conversation.
+    this.autoRole(task, task.title, '', { refine: false });
     this.changed();
-    void this.previewHistory(task, args.provider, args.nativeSessionId);
+    void this.previewHistory(task, args.provider, args.nativeSessionId).then((items) => {
+      const said = (items ?? [])
+        .filter((i) => i.role === 'user' && i.text.trim())
+        .slice(0, 4)
+        .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
+      this.refineRole(task, [task.title, ...said].join('\n'));
+    });
     return task;
   }
 
@@ -906,6 +968,7 @@ export class Workspace {
       alias,
       // A custom name is a voice handle, so the fork gets its own.
       name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name)),
+      nameSource: 'auto',
       projectId: src.projectId,
       title,
       provider: src.provider,
@@ -1954,7 +2017,7 @@ export class Workspace {
   }
 
   async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
-    return this.createTask({ ...args, name: args.role, isolate: true });
+    return this.createTask({ ...args, name: args.role, nameSource: 'auto', isolate: true });
   }
 
   async stopFromMain(taskId: string): Promise<void> {
