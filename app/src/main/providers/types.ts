@@ -146,6 +146,12 @@ export interface ProviderAdapter {
   /** The CLI as installed and signed in on `host` (reached without prompts). */
   hostCapabilities?(host: string): Promise<ProviderCapabilities>;
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession;
+  /**
+   * One short answer from the provider's own CLI, under the user's existing login: a light model,
+   * no tools, none of the user's settings or hooks, and nothing saved as a session. For small
+   * background jobs such as naming an agent; slow to start (seconds), so never on a hot path.
+   */
+  oneShot?(system: string, prompt: string): Promise<string>;
   /** The user's earlier prompts in a saved session, oldest first: the session can be forked just before each. */
   forkPoints?(nativeSessionId: string, cwd: string): Promise<ForkPoint[]>;
   /**

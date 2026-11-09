@@ -68,7 +68,8 @@ export function PermissionChoice({ value, onChange }: { value: PermissionMode; o
 }
 
 // Two separate models: one turns speech into text, the other decides which agent a
-// sentence is for (and names agent roles). Nothing rewrites what you said.
+// sentence is for (and names agent roles when no Claude Code or Codex is signed in). Nothing
+// rewrites what you said.
 // Both are picked from scrollable card lists with 1–5 dot ratings (as in VoiceInk),
 // so more models can be added without the picker getting harder to read.
 
@@ -249,7 +250,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
       <div className="model-pick-head">
         <span>
           <strong>{t('Routing model')}</strong>
-          <span className="muted small">{t('Decides which agent a sentence is for when you do not name one, and names agent roles. It does not rewrite what you said.')}</span>
+          <span className="muted small">{t('Decides which agent a sentence is for when you do not name one. It does not rewrite what you said.')}</span>
         </span>
       </div>
       {v.cloudAvailable ? (

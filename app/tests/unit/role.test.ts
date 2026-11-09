@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanRole, guessRole } from '../../src/main/role';
+import { cleanRole, guessRole, projectRole } from '../../src/main/role';
 
 describe('agent roles', () => {
   it('guesses one word from the task, in the language of the agent name', () => {
@@ -16,5 +16,21 @@ describe('agent roles', () => {
     expect(cleanRole('Database migration', 'en')).toBeUndefined();
     expect(cleanRole('支付', 'zh')).toBe('支付');
     expect(cleanRole('负责数据库迁移的工程师', 'zh')).toBeUndefined();
+  });
+
+  it('trims what a model adds around the word instead of dropping the answer', () => {
+    expect(cleanRole('后端API', 'zh')).toBe('后端');
+    expect(cleanRole('「合同」', 'zh')).toBe('合同');
+    expect(cleanRole('文档整理工具', 'zh')).toBe('文档整理');
+    expect(cleanRole('**时效分析**', 'zh')).toBe('时效分析');
+    expect(cleanRole('**Contracts**', 'en')).toBe('Contracts');
+  });
+
+  it('falls back to the project name, made into one word', () => {
+    expect(projectRole('agent_workspace')).toBe('AgentWorkspace');
+    expect(projectRole('shop')).toBe('Shop');
+    expect(projectRole('合同审查')).toBe('合同审查');
+    expect(projectRole('my-very-long-project-name')).toBe('My');
+    expect(projectRole('---')).toBeUndefined();
   });
 });
