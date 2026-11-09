@@ -9,8 +9,10 @@ import type {
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryCandidate,
   MemoryRecord,
   MemoryScope,
+  MemorySyncStatus,
   NativeSessionInfo,
   PermissionMode,
   Project,
@@ -28,6 +30,7 @@ import type {
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
+import { candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
@@ -40,6 +43,7 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
+import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -84,6 +88,8 @@ export interface WorkspaceOptions {
   hiddenSessionDirs?: string[];
   /** Automatic retries of turns that failed because the model was busy (tests use short waits). */
   retry?: Partial<RetryPolicy>;
+  /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
+  home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
 }
@@ -110,8 +116,12 @@ export class Workspace {
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
 
+  /** The skill library loaded into every agent the app starts (see skills.ts). */
+  readonly skills: SkillLibrary;
+
   constructor(private opts: WorkspaceOptions) {
     this.store = new JsonStore(opts.dataDir);
+    this.skills = new SkillLibrary(opts.dataDir);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
@@ -237,6 +247,8 @@ export class Workspace {
     const status: RemoteHostStatus = { host, ssh: probe.state, error: probe.error, capabilities, checkedAt: now() };
     if (this.enabledHosts().includes(host)) this.hostStatus.set(host, status);
     this.changed();
+    // A machine that just became reachable may hold user memory we have not seen.
+    if (status.ssh === 'ok' && prev?.ssh !== 'ok') void this.syncMemory();
     return status;
   }
 
@@ -280,6 +292,8 @@ export class Workspace {
   }
 
   async shutdown(): Promise<void> {
+    clearInterval(this.memSync.timer);
+    this.memSync.started = false;
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
@@ -317,6 +331,7 @@ export class Workspace {
       sessions: d.sessions,
       attention: d.attention,
       memory: d.memory,
+      memorySync: { running: this.memSync.running, last: d.memorySync },
       coordinator: d.coordinator.slice(-50),
       capabilities: this.capabilities,
       remoteHosts: this.enabledHosts().map((host) => this.hostStatus.get(host) ?? { host, ssh: 'checking', capabilities: [] }),
@@ -659,6 +674,7 @@ export class Workspace {
     this.changed();
 
     const isMain = task === this.store.data.mainAgent;
+    const skills = isMain ? undefined : await this.skillsFor(task);
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -672,6 +688,7 @@ export class Workspace {
         mockScript: task.mockScript,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
+        skills,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
@@ -1075,6 +1092,65 @@ export class Workspace {
     this.shellOutput.set(taskId, pending.slice(-5));
     this.changed();
     return { ok: true };
+  }
+
+  /** The library for an agent on this Mac, or its copy on the agent's host (copied when it changed). */
+  private async skillsFor(task: Task): Promise<{ pluginDir: string; root: string } | undefined> {
+    try {
+      return task.host ? await this.skills.ensureOnHost(task.host) : this.skills.localLoad();
+    } catch (error) {
+      // The agent still starts, just without the workspace skills.
+      this.appendSystem(task.taskId, `Workspace skills not loaded: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /** Last scan's results, so an import names a found skill by key rather than by path. */
+  private foundSkills = new Map<string, FoundSkill>();
+
+  /** Skills in the CLIs' own folders on this Mac and on every reachable enabled host. */
+  async scanSkills(): Promise<{ found: FoundSkill[]; errors: Array<{ host: string; error: string }> }> {
+    const errors: Array<{ host: string; error: string }> = [];
+    const found: FoundSkill[] = [...scanLocal()];
+    await Promise.all(
+      this.enabledHosts().map(async (host) => {
+        if (this.hostStatus.get(host)?.ssh !== 'ok') return errors.push({ host, error: this.hostStatus.get(host)?.error ?? `${host} is not connected.` });
+        const r = await sshRun(host, remoteScanScript(), 60_000);
+        if (r.code !== 0) return errors.push({ host, error: r.code === 255 ? sshError(host, r.stderr) : `Could not list skills on ${host}.` });
+        found.push(...parseRemoteScan(host, r.stdout));
+      }),
+    );
+    this.foundSkills = new Map(found.map((f) => [f.key, f]));
+    return { found, errors };
+  }
+
+  async importSkill(key: string): Promise<void> {
+    const found = this.foundSkills.get(key);
+    if (!found) throw new Error('That skill is no longer in the list. Scan again.');
+    await this.skills.import(found);
+    await this.skillsChanged();
+  }
+
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    this.skills.setEnabled(name, enabled);
+    await this.skillsChanged();
+  }
+
+  async removeSkill(name: string): Promise<void> {
+    this.skills.remove(name);
+    await this.skillsChanged();
+  }
+
+  /** After the library changed: copy it to hosts with running agents and tell running sessions. */
+  async skillsChanged(): Promise<void> {
+    const hosts = new Set<string>();
+    for (const [taskId] of this.live) {
+      const host = this.findTask(taskId)?.host;
+      if (host) hosts.add(host);
+    }
+    for (const host of hosts) await this.skills.ensureOnHost(host).catch((e: Error) => this.log('skills sync', host, e.message));
+    await Promise.all([...this.live.values()].map((l) => l.session.reloadSkills?.()));
+    this.changed();
   }
 
   // ---------------------------------------------------------------- provider events
@@ -1540,6 +1616,8 @@ export class Workspace {
   }
 
   deleteMemory(id: string): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (m) tombstone(this.store.data, m);
     this.store.data.memory = this.store.data.memory.filter((m) => m.id !== id);
     this.changed();
   }
@@ -1559,7 +1637,100 @@ export class Workspace {
     return this.addMemory({ scope, scopeId, body: m.body, originTaskId: m.originTaskId ?? (m.scope === 'task' ? m.scopeId : undefined), approvedForReuse: true, source: `promoted from ${m.scope} note ${m.id}` });
   }
 
+  // ---------------------------------------------------------------- memory import / sync
+
+  private lastScan = new Map<string, MemoryCandidate>();
+  private memSync: { started: boolean; running: boolean; queued: boolean; timer?: NodeJS.Timeout } = { started: false, running: false, queued: false };
+
+  /** One machine's native memory files in one round trip (read-only), as candidates. */
+  private async scanMachine(host?: string): Promise<MemoryCandidate[]> {
+    const r = host
+      ? await sshRun(host, `sh -c ${shq(MEMORY_SCAN_SCRIPT)}`, 30_000)
+      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
+    const out = parseScanOutput(r.stdout);
+    if (!out.complete) throw new Error(host ? sshError(host, r.stderr) : r.stderr.trim() || 'Could not read the memory files.');
+    return candidatesFrom(host, out.home, out.files, this.store.data.projects);
+  }
+
+  /** This Mac and every reachable enabled host; hosts that are not connected are reported, not waited for. */
+  async scanMemoryImports(): Promise<{ candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> }> {
+    const errors: Array<{ host: string; error: string }> = [];
+    const ready: Array<string | undefined> = [undefined];
+    for (const h of this.enabledHosts()) {
+      const st = this.hostStatus.get(h);
+      if (st?.ssh === 'ok') ready.push(h);
+      else errors.push({ host: h, error: st?.ssh === 'checking' || !st ? 'Still connecting.' : (st.error ?? 'Not connected.') });
+    }
+    const results = await Promise.all(
+      ready.map((h) =>
+        this.scanMachine(h)
+          .then((candidates) => ({ host: h ?? LOCAL, candidates }))
+          .catch((error: Error) => {
+            errors.push({ host: h ?? LOCAL, error: error.message });
+            return null;
+          }),
+      ),
+    );
+    const ok = results.filter((x) => x !== null);
+    const candidates = markCandidates(ok.flatMap((x) => x.candidates), this.store.data);
+    this.lastScan = new Map(candidates.map((c) => [c.key, c]));
+    return { candidates, scanned: ok.map((x) => x.host), errors };
+  }
+
+  /** Explicit import of scanned notes (approved); re-importing a note updates its record. */
+  importMemory(items: Array<{ key: string; scope: 'global' | 'project'; projectId?: string }>): number {
+    const picks = items.map((i) => {
+      const candidate = this.lastScan.get(i.key);
+      if (!candidate) throw new Error('A picked note is no longer in the scan results. Scan again.');
+      if (i.scope === 'project' && !this.store.data.projects.some((p) => p.projectId === i.projectId)) throw new Error('Pick a project for project memory.');
+      return { candidate, scope: i.scope, scopeId: i.scope === 'project' ? i.projectId! : 'global' };
+    });
+    const n = importCandidates(this.store.data, picks).length;
+    this.changed();
+    return n;
+  }
+
+  /** Starts automatic user-memory sync: now and every `intervalMs` (and when a host becomes reachable). */
+  startMemorySync(intervalMs = 10 * 60_000): void {
+    this.memSync.started = true;
+    clearInterval(this.memSync.timer);
+    this.memSync.timer = setInterval(() => void this.syncMemory(), intervalMs);
+    this.memSync.timer.unref?.();
+    void this.syncMemory();
+  }
+
+  /**
+   * Imports and refreshes user-level notes from every reachable machine (never project
+   * notes: those stay manual). `manual` runs it even before startMemorySync (Sync now).
+   */
+  async syncMemory(manual = false): Promise<MemorySyncStatus | undefined> {
+    if ((!manual && !this.memSync.started) || this.store.data.settings.memorySync === false) return undefined;
+    if (this.memSync.running) {
+      this.memSync.queued = true;
+      return undefined;
+    }
+    this.memSync.running = true;
+    this.changed();
+    try {
+      const scan = await this.scanMemoryImports();
+      const counts = syncUserMemory(this.store.data, scan.candidates, scan.scanned);
+      this.store.data.memorySync = { at: now(), ...counts, hosts: scan.scanned, errors: scan.errors };
+      this.lastScan = new Map(markCandidates([...this.lastScan.values()], this.store.data).map((c) => [c.key, c]));
+    } catch (error) {
+      this.log('memory sync failed', error);
+    } finally {
+      this.memSync.running = false;
+      this.changed();
+    }
+    if (this.memSync.queued) {
+      this.memSync.queued = false;
+      void this.syncMemory(manual);
+    }
+    return this.store.data.memorySync;
+  }
+
   updateSettings(patch: Partial<Settings>): void {
+    if (patch.memorySync && this.store.data.settings.memorySync === false) queueMicrotask(() => void this.syncMemory(true));
     Object.assign(this.store.data.settings, patch);
     this.applyModels();
     if ('mainAgent' in patch) this.syncMainAgent();

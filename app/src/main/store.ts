@@ -4,6 +4,7 @@ import type {
   AttentionItem,
   CoordinatorEntry,
   MemoryRecord,
+  MemorySyncStatus,
   Project,
   SessionRecord,
   Settings,
@@ -18,6 +19,9 @@ export interface WorkspaceData {
   sessions: SessionRecord[];
   attention: AttentionItem[];
   memory: MemoryRecord[];
+  /** Imported notes the user deleted (keys and `hash:`): sync never brings them back. */
+  memoryTombstones?: string[];
+  memorySync?: MemorySyncStatus;
   coordinator: CoordinatorEntry[];
   settings: Settings;
   /** Monotonic counter behind agent names (never reused). */

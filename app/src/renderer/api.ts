@@ -1,10 +1,13 @@
 import type { IpcChannel, IpcInput } from '../shared/ipc';
+import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
   AttentionItem,
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryCandidate,
   MemoryRecord,
+  MemorySyncStatus,
   NativeSessionInfo,
   Project,
   RemoteHostStatus,
@@ -40,6 +43,11 @@ interface Outputs {
   'task:send': DispatchResult;
   'task:interrupt': void;
   'task:shell': { ok: boolean; error?: string };
+  'skills:list': LibrarySkill[];
+  'skills:scan': { found: FoundSkill[]; errors: Array<{ host: string; error: string }> };
+  'skills:import': void;
+  'skills:setEnabled': void;
+  'skills:remove': void;
   'task:forkPoints': ForkPoint[];
   'task:fork': Task;
   'task:retry': void;
@@ -64,6 +72,9 @@ interface Outputs {
   'memory:update': void;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
+  'memory:scanImports': { candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> };
+  'memory:import': number;
+  'memory:syncNow': MemorySyncStatus | undefined;
   'settings:update': void;
   'capabilities:refresh': void;
   'models:list': string[];

@@ -89,6 +89,8 @@ export interface StartArgs {
   developerInstructions?: string;
   /** Mock only. */
   mockScript?: string;
+  /** The workspace skill library, as paths on the machine the CLI runs on. */
+  skills?: { pluginDir: string; root: string };
   permissionMode?: PermissionMode;
   /** Main agent only: workspace tools it may call; the session is limited to these plus read-only tools. */
   tools?: WorkspaceTool[];
@@ -125,6 +127,8 @@ export interface ProviderSession {
    * over with the next message.
    */
   shell?(command: string): Promise<void>;
+  /** The skill library changed (same paths, new contents): pick it up without a restart. */
+  reloadSkills?(): Promise<void>;
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
   close(): Promise<void>;

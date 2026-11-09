@@ -109,6 +109,25 @@ export async function sshRun(host: string, command: string, timeoutMs = 30_000):
   return run('ssh', sshArgs(host, command), childEnv(), timeoutMs);
 }
 
+/** Like sshRun, with `input` as the remote command's stdin (binary-safe: ssh -T passes bytes through). */
+export function sshRunInput(host: string, command: string, input: Buffer, timeoutMs = 120_000): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn('ssh', sshArgs(host, command), { env: childEnv(), stdio: 'pipe' });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => proc.kill('SIGTERM'), timeoutMs);
+    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
+    proc.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString()).slice(-8000)));
+    proc.on('error', (e) => (stderr += e.message));
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? 255, stdout, stderr });
+    });
+    proc.stdin.on('error', () => {});
+    proc.stdin.end(input);
+  });
+}
+
 // ------------------------------------------------------------ prompts (user-initiated only)
 
 const ASKPASS = `#!/bin/sh
