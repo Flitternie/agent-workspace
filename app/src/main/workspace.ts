@@ -1687,7 +1687,7 @@ export class Workspace {
   private pushTimer?: NodeJS.Timeout;
   /** Writes to the CLIs' files run one at a time (a link, a push, a restore never overlap). */
   private shareQueue: Promise<unknown> = Promise.resolve();
-  private serial<T>(fn: () => Promise<T>): Promise<T> {
+  private shareSerial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.shareQueue.then(fn, fn);
     this.shareQueue = next.catch(() => undefined);
     return next;
@@ -1702,7 +1702,7 @@ export class Workspace {
 
   /** Writes the shared user memory to every linked, reachable machine (offline ones catch up on the next sync). */
   pushMemory(): Promise<void> {
-    return this.serial(() => this.doPush());
+    return this.shareSerial(() => this.doPush());
   }
 
   private async doPush(): Promise<void> {
@@ -1731,7 +1731,7 @@ export class Workspace {
 
   /** The first sync with a machine: back up its files, merge its user-level notes in, write the shared user memory there. */
   linkMachine(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
-    return this.serial(() => this.doLink(host));
+    return this.shareSerial(() => this.doLink(host));
   }
 
   private async doLink(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
@@ -1749,7 +1749,7 @@ export class Workspace {
 
   /** Stops sharing with a machine: takes the app's text out, or puts the files back as they were before linking. */
   async unlinkMachine(host: string, how: 'remove' | 'original'): Promise<void> {
-    await this.serial(() => this.writeback.unlink(host, how));
+    await this.shareSerial(() => this.writeback.unlink(host, how));
     const links = { ...this.store.data.settings.memoryLinks };
     delete links[host];
     this.store.data.settings.memoryLinks = links;
@@ -1766,7 +1766,7 @@ export class Workspace {
   }
 
   async restoreMemoryBackup(id: string): Promise<void> {
-    await this.serial(() => this.writeback.restore(id));
+    await this.shareSerial(() => this.writeback.restore(id));
     this.changed();
   }
 
