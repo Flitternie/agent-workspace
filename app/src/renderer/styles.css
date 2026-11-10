@@ -3101,3 +3101,23 @@ details[open] > summary .tool-more {
   border-color: var(--accent, var(--ink));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--ink)) 25%, transparent);
 }
+
+/* A file path in an agent's message: opens the preview. */
+.md-file {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.md-file:hover {
+  text-decoration-style: solid;
+}
+.md-file code {
+  color: var(--accent);
+}

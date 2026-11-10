@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, type MouseEvent } from 'react';
+import { useContext, useState, type MouseEvent } from 'react';
 import { previewKind } from '../../shared/preview';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
 import { Icon, type IconName } from './bits';
+import { PreviewContext } from './filePaths';
 import { Markdown } from './Markdown';
 import { t, t as tr } from '../i18n';
 
@@ -203,7 +204,7 @@ export function touchedPaths(item: TranscriptItem): string[] {
 }
 
 /** Set by the Focus view; rows elsewhere (cards) offer no file actions. */
-export const PreviewContext = createContext<{ preview(path: string): void; openExternal?: (path: string) => void } | null>(null);
+export { PreviewContext } from './filePaths';
 
 function FileActions({ paths }: { paths: string[] }) {
   const ctx = useContext(PreviewContext);

@@ -1,10 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { memo, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { t } from '../i18n';
 import { Icon } from './bits';
+import { FILE_SCHEME, PreviewContext, remarkFilePaths } from './filePaths';
 
 // Agent text is untrusted Markdown (GFM: tables, task lists, strikethrough).
 // Safety rules follow Parallel Code's chat renderer (MIT): raw HTML stays text
@@ -13,7 +14,19 @@ import { Icon } from './bits';
 // is highlight.js via rehype-highlight, as in vibe-kanban's MarkdownPreview.
 
 const SAFE_URL = /^(https?:|mailto:)/i;
-const urlTransform = (url: string) => (SAFE_URL.test(url) ? url : '');
+// File paths become FILE_SCHEME links (remarkFilePaths); they open the preview, never navigate.
+const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) ? url : '');
+
+/** A path in a message: a button that opens the preview (in the agent view), else just the text. */
+function FileLink({ path, children }: { path: string; children: ReactNode }) {
+  const ctx = useContext(PreviewContext);
+  if (!ctx) return <>{children}</>;
+  return (
+    <button type="button" className="md-file" title={t('Preview {name}', { name: path })} data-testid="md-file" data-path={path} onClick={() => ctx.preview(path)}>
+      {children}
+    </button>
+  );
+}
 
 function CodeBlock({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
   const ref = useRef<HTMLPreElement>(null);
@@ -44,7 +57,9 @@ function CodeBlock({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
 const components: Components = {
   pre: CodeBlock,
   a: ({ href, children }) =>
-    href ? (
+    href?.startsWith(FILE_SCHEME) ? (
+      <FileLink path={decodeURIComponent(href.slice(FILE_SCHEME.length))}>{children}</FileLink>
+    ) : href ? (
       <a href={href} target="_blank" rel="noreferrer" title={href}>
         {children}
       </a>
@@ -77,7 +92,7 @@ function remarkHtmlAsText() {
 }
 
 // Chat text uses single newlines as line breaks, as the CLIs display them.
-const remarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText];
+const remarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText, remarkFilePaths];
 const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
 
 /** Streaming text re-renders at most this often; the final text renders at once. */

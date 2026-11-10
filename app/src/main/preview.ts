@@ -1,4 +1,5 @@
 import { realpathSync, statSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import type { FilePreview, PreviewKind } from '../shared/types';
 import { previewKind } from '../shared/preview';
@@ -17,7 +18,9 @@ const MARK = '__AMW_FILE__';
 type PathApi = Pick<typeof path.posix, 'resolve' | 'relative' | 'isAbsolute' | 'sep'>;
 
 /** `requested` as an absolute, normalized path (relative ones are taken from `cwd`). */
-export function resolveRequested(cwd: string, requested: string, p: PathApi = path): string {
+export function resolveRequested(cwd: string, requested: string, p: PathApi = path, home = homedir()): string {
+  // "~/notes.md" as agents write it: the home folder (still checked against the agent's roots).
+  if (requested === '~' || requested.startsWith('~/')) return p.resolve(home, requested.slice(2));
   return p.resolve(cwd, requested);
 }
 
@@ -79,10 +82,13 @@ export function readLocal(cwd: string, requested: string, roots: string[]): File
  * check runs here, then a second call sends the file as base64 (safe for any bytes).
  */
 export async function readRemote(host: string, cwd: string, requested: string, roots: string[]): Promise<FilePreview> {
-  const wanted = resolveRequested(cwd, requested, path.posix);
+  // "~/…" is the host's home: left for the shell there to expand.
+  const home = requested.startsWith('~/');
+  const wanted = home ? requested : resolveRequested(cwd, requested, path.posix);
   kindOf(wanted); // no round trip for a type we would refuse anyway
+  const arg = (p: string) => (home && p === wanted ? `"$HOME"/${shq(p.slice(2))}` : shq(p));
   // One marked line per path (login shells may print their own text first); a missing root prints an empty one.
-  const r = await sshRun(host, [wanted, ...roots].map((p) => `printf '${MARK}%s\\n' "$(realpath ${shq(p)} 2>/dev/null)"`).join('; '), 20_000);
+  const r = await sshRun(host, [wanted, ...roots].map((p) => `printf '${MARK}%s\\n' "$(realpath ${arg(p)} 2>/dev/null)"`).join('; '), 20_000);
   if (r.code !== 0 && !r.stdout) throw new Error(sshError(host, r.stderr));
   const [file, ...realRoots] = r.stdout.split('\n').filter((l) => l.startsWith(MARK)).map((l) => l.slice(MARK.length));
   if (!file) throw new Error(`File not found: ${requested}`);
