@@ -25,6 +25,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   };
   // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
   const [preview, setPreview] = useState<string | null>(null);
+  // The preview column's width: dragged by the user, kept for next time.
+  const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
+  const setPreviewWidth = (w: number) => {
+    setPreviewWidthState(w);
+    localStorage.setItem('amw.previewWidth', String(Math.round(w)));
+  };
   useEffect(() => setPreview(null), [task.taskId]);
   const [forking, setForking] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
@@ -180,13 +186,55 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <Composer task={task} />
           </div>
           {preview ? (
-            <FilePreviewPanel task={task} path={preview} transcript={transcript} onClose={() => setPreview(null)} onOpenExternal={openExternal && (() => openExternal(preview))} />
+            <>
+              <PanelResizer width={previewWidth} onChange={setPreviewWidth} />
+              <FilePreviewPanel task={task} path={preview} transcript={transcript} width={previewWidth} onClose={() => setPreview(null)} onOpenExternal={openExternal && (() => openExternal(preview))} />
+            </>
           ) : showMemory ? (
             <MemoryPanel snapshot={snapshot} task={task} />
           ) : null}
         </div>
       </section>
     </div>
+  );
+}
+
+const PREVIEW_WIDTH = 460;
+
+/** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
+function PanelResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  return (
+    <div
+      className="panel-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('Resize the preview')}
+      title={t('Drag to resize; double-click to reset')}
+      data-testid="panel-resizer"
+      onDoubleClick={() => onChange(PREVIEW_WIDTH)}
+      onPointerDown={(e) => {
+        const bar = e.currentTarget;
+        const body = bar.parentElement!.getBoundingClientRect();
+        const startX = e.clientX;
+        const startW = width;
+        bar.setPointerCapture(e.pointerId);
+        document.body.classList.add('resizing');
+        const move = (ev: PointerEvent) => {
+          // Room for the conversation stays; the preview never gets too narrow to read.
+          const max = Math.max(320, body.width - 380);
+          onChange(Math.min(max, Math.max(280, startW + (startX - ev.clientX))));
+        };
+        const up = () => {
+          bar.removeEventListener('pointermove', move);
+          bar.removeEventListener('pointerup', up);
+          bar.removeEventListener('pointercancel', up);
+          document.body.classList.remove('resizing');
+        };
+        bar.addEventListener('pointermove', move);
+        bar.addEventListener('pointerup', up);
+        bar.addEventListener('pointercancel', up);
+      }}
+    />
   );
 }
 
@@ -286,6 +334,17 @@ function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
+  // Also when the size changes (the preview opens or is resized, the window, images loading):
+  // a conversation that was at its end stays at its end.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const keep = () => stick.current && (el.scrollTop = el.scrollHeight);
+    const ro = new ResizeObserver(keep);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, []);
   return (
     <div
       className="transcript"

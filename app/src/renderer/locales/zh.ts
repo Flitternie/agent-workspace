@@ -58,6 +58,11 @@ export const zh: Record<string, string> = {
   '{n} requests from agents': '{n} 个 agent 请求',
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',
+  // File preview
+  'This file is outside the agent’s folder and project. Show it anyway?': '这个文件不在 agent 的目录和项目里，仍要显示吗？',
+  'Show anyway': '仍要显示',
+  'Resize the preview': '调整预览宽度',
+  'Drag to resize; double-click to reset': '拖动调整宽度，双击恢复默认',
   // `!command` and suggested replies
   Command: '命令',
   'runs in {dir} through Codex, which sees the output': '在 {dir} 中通过 Codex 运行，Codex 能看到输出',

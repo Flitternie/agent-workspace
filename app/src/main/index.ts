@@ -153,12 +153,12 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'route:decide': (i: { utterance: string; focusedTaskId: string | null; namedOnly?: boolean }) => workspace.decideRoute(i.utterance, i.focusedTaskId, i.namedOnly),
   'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean; typed?: boolean }) =>
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt, typed: i.typed }),
-  'file:preview': async (i: { taskId: string; path: string }) => {
-    const p = await workspace.previewFile(i.taskId, i.path);
+  'file:preview': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
+    const p = await workspace.previewFile(i.taskId, i.path, i.allowOutside);
     return p.kind === 'html' ? { ...p, frameUrl: addPreviewDoc(p.text ?? '') } : p;
   },
-  'file:open': async (i: { taskId: string; path: string }) => {
-    const file = workspace.previewLocalPath(i.taskId, i.path);
+  'file:open': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
+    const file = workspace.previewLocalPath(i.taskId, i.path, i.allowOutside);
     // Only document types: openPath on a script or an app would run it.
     if (!previewKind(file)) throw new Error('Only previewable files can be opened from here.');
     const problem = await shell.openPath(file);

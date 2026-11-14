@@ -1332,11 +1332,15 @@ pre code {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Messages fade out above the reply box instead of being cut off by it. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }
 .transcript-inner {
   max-width: 860px;
   margin: 0 auto;
-  padding: 16px 24px;
+  /* Bottom room so the last message, scrolled to the end, sits above the fade. */
+  padding: 16px 24px 36px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1538,6 +1542,45 @@ pre code {
 .memory.preview {
   width: min(460px, 40%);
   gap: 10px;
+  border-left: 0;
+  min-width: 0;
+  /* However wide it was dragged, the conversation keeps room. */
+  max-width: calc(100% - 380px);
+}
+/* Between the conversation and the preview: drag to resize. */
+.panel-resizer {
+  flex: none;
+  width: 6px;
+  margin: 0 -3px;
+  position: relative;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.12s, width 0.12s, left 0.12s;
+}
+.panel-resizer:hover::after,
+body.resizing .panel-resizer::after {
+  left: 1px;
+  width: 3px;
+  background: var(--accent);
+}
+/* While dragging, the preview's iframe must not swallow the pointer. */
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.resizing iframe {
+  pointer-events: none;
 }
 .preview-head {
   display: flex;

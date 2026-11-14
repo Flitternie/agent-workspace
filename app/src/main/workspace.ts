@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, join, posix, resolve, sep } from 'node:path';
 import type {
   AgentProvider,
   AttentionItem,
@@ -38,7 +38,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanRole, guessRole, projectRole, rolePrompt, roleRetry } from './role';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
-import { localPath, readLocal, readRemote } from './preview';
+import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -1815,16 +1815,22 @@ export class Workspace {
     return [t.cwd, t.worktree?.path, project?.rootPath].filter((r): r is string => !!r);
   }
 
-  async previewFile(taskId: string, path: string): Promise<FilePreview> {
+  /** Where to look for a file an agent named, and which files it may show without asking. */
+  private previewWhere(t: Task, allowOutside?: boolean): PreviewWhere {
+    return { cwd: t.cwd, bases: workDirs(this.store.transcript(t.taskId), t.cwd, t.host ? posix : undefined), roots: this.previewRoots(t), allowOutside };
+  }
+
+  async previewFile(taskId: string, path: string, allowOutside?: boolean): Promise<FilePreview> {
     const t = this.task(taskId);
-    return t.host ? readRemote(t.host, t.cwd, path, this.previewRoots(t)) : readLocal(t.cwd, path, this.previewRoots(t));
+    const where = this.previewWhere(t, allowOutside);
+    return t.host ? readRemote(t.host, path, where) : readLocal(path, where);
   }
 
   /** The checked local path to hand to the default app (this Mac only). */
-  previewLocalPath(taskId: string, path: string): string {
+  previewLocalPath(taskId: string, path: string, allowOutside?: boolean): string {
     const t = this.task(taskId);
     if (t.host) throw new Error(`The file is on ${t.host}; it can only be previewed here.`);
-    return localPath(t.cwd, path, this.previewRoots(t));
+    return localPath(path, this.previewWhere(t, allowOutside));
   }
 
   // ---------------------------------------------------------------- demo
