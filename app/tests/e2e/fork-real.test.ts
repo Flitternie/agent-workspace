@@ -113,8 +113,10 @@ describe.runIf(enabled)('fork a real Claude Code conversation', () => {
       .toBeTruthy()
       .then(async () => (await snap()).tasks.find((t) => t.forkedFrom?.taskId === a.taskId)!)
       .catch(async (e) => {
-        const main = (await snap()).main;
-        if (main) console.log((await transcript(main.taskId)).map((i) => `[${i.role}] ${i.text}`.slice(0, 300)).join('\n'));
+        // What happened instead: the main agent's conversation and where the message went.
+        const s2 = await snap();
+        if (s2.main) console.log((await transcript(s2.main.taskId)).map((i) => `[main ${i.role}] ${i.text}`.slice(0, 300)).join('\n'));
+        console.log((await transcript(a.taskId)).map((i) => `[${a.alias} ${i.role}${i.via ? ` via ${i.via}` : ''}] ${i.text}`.slice(0, 200)).join('\n'));
         throw e;
       });
     expect(fork.cwd).not.toBe(a.cwd);

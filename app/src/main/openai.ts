@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { LlmRouteAnswer, RouteContext } from './router';
-import { labelPrompt } from './label';
+import { labelPrompt, labelRequest } from './label';
 
 // OpenAI is used for two opt-in helpers only: speech-to-text and the routing
 // classifier. The key never leaves the main process. Only the utterance and
@@ -121,7 +121,7 @@ export class OpenAiClient {
   async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string> {
     const r = await this.chatJson<{ label: string }>(
       labelPrompt(lang),
-      `What the agent is doing:\n${text.slice(0, 1500)}`,
+      labelRequest(text),
       { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } },
       'label',
     );

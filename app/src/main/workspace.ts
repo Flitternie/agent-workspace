@@ -35,7 +35,7 @@ import type { ProviderAdapter, ProviderEvent, ProviderSession } from './provider
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
-import { cleanLabel, labelLang, labelPrompt, labelRetry, titleLabel } from './label';
+import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
@@ -542,7 +542,7 @@ export class Workspace {
     const ask = this.backgroundAsk();
     if (ask) {
       try {
-        const prompt = `${lang === 'zh' ? '这个 Agent 在做的事：' : 'What the agent is doing:'}\n${text.slice(0, 1500)}`;
+        const prompt = labelRequest(text);
         const first = await ask(labelPrompt(lang), prompt);
         const label = cleanLabel(first, lang);
         if (label) return label;
@@ -591,8 +591,22 @@ export class Workspace {
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
   }
 
+  /** The user did something with this agent: it moves up in the sidebar. */
+  private touched(t: Task): void {
+    t.lastUserActivityAt = now();
+  }
+
+  /** The user opened this agent's view. At most once a minute, so browsing does not churn the store. */
+  markViewed(taskId: string): void {
+    const t = this.findTask(taskId);
+    if (!t || (t.lastUserActivityAt && Date.now() - Date.parse(t.lastUserActivityAt) < 60_000)) return;
+    this.touched(t);
+    this.changed();
+  }
+
   rename(taskId: string, name: string): void {
     const t = this.task(taskId);
+    this.touched(t);
     t.name = name.trim() || t.alias;
     // Cleared, the name is the app's to choose again.
     t.nameSource = name.trim() ? 'user' : 'auto';
@@ -1028,6 +1042,8 @@ export class Workspace {
       // Steering adds to the work in progress; the summary keeps describing it.
       if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
       task.updatedAt = now();
+      // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
+      this.touched(task);
       this.changed();
       return { ok: true, taskId, delivery };
     } catch (error) {
@@ -1358,6 +1374,8 @@ export class Workspace {
   async respondAttention(attentionId: string, decision?: string, answers?: Record<string, string>): Promise<void> {
     const a = this.store.data.attention.find((x) => x.id === attentionId);
     if (!a) throw new Error('Unknown attention item.');
+    const answered = this.findTask(a.taskId);
+    if (answered) this.touched(answered);
     if (a.state !== 'open') throw new Error(`This request is already ${a.state}.`);
     if (!a.providerRequestId) throw new Error('This report is answered by replying to the agent.');
     const live = this.live.get(a.taskId);
@@ -1429,6 +1447,7 @@ export class Workspace {
         taskId: t.taskId,
         alias: t.alias,
         name: t.name,
+        nameSource: t.nameSource,
         title: t.title,
         projectId: t.projectId,
         projectName: d.projects.find((p) => p.projectId === t.projectId)?.name ?? '',

@@ -123,3 +123,17 @@ describe('router decision matrix', () => {
     expect(d).toMatchObject({ kind: 'existing', taskId: 't-A', confidence: 'medium' });
   });
 });
+
+describe('work labels and names', () => {
+  it('an automatic work label describes an agent; only a name the user gave it calls it', () => {
+    const labelled = [task('Alice', 'Codewords', { name: 'Codewords', nameSource: 'auto', status: 'done' }), task('Bob', 'Docs', { status: 'done' })];
+    // Talking about "the codewords task" is not addressing Alice (the main agent takes it).
+    const about = decideDeterministic(ctx('Fork the agent working on the codewords task', null, labelled));
+    expect(about?.kind === 'existing' && /^explicitly named/.test(about.reason)).toBe(false);
+    // A name the user chose is a handle.
+    const named = [task('Alice', 'Codewords', { name: 'Codewords', nameSource: 'user', status: 'done' }), task('Bob', 'Docs', { status: 'done' })];
+    const call = decideDeterministic(ctx('codewords agent, what is the codeword?', null, named));
+    expect(call?.kind === 'existing' && call.taskId).toBe('t-Alice');
+    expect(call?.kind === 'existing' && call.reason).toMatch(/^explicitly named/);
+  });
+});

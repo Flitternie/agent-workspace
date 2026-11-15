@@ -3205,3 +3205,120 @@ details[open] > summary .tool-more {
   font-weight: 400;
   color: var(--text-3);
 }
+
+/* Sidebar teams: one per project, folded or open; idle members behind one row. */
+.needs-strip {
+  margin: 4px 0 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.06));
+}
+.needs-head .count {
+  margin-left: 4px;
+}
+.row-project {
+  color: var(--text-3);
+}
+.team-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-2, inherit);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border-radius: var(--radius-md);
+}
+.team-head:hover {
+  background: var(--hover);
+}
+.team-chevron {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+.team.open .team-chevron {
+  transform: rotate(90deg);
+}
+.team-name {
+  flex: 1;
+  min-width: 0;
+}
+.team-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.team-count.needs {
+  color: var(--needs);
+}
+.team-count.running {
+  color: var(--accent);
+}
+.team-count.failed {
+  color: #dc2626;
+}
+.team-count.idle {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.team .agent-row {
+  padding-left: 14px;
+}
+.team-idle {
+  display: block;
+  width: 100%;
+  padding: 3px 8px 5px 38px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-align: left;
+}
+.team-idle:hover {
+  color: var(--text-2, inherit);
+}
+.kbd-hint {
+  flex: none;
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0;
+}
+.agent-list:hover .kbd-hint,
+.agent-row.active .kbd-hint {
+  opacity: 1;
+}
+
+/* Overview layout: how many tiles; the most urgent agents fill them. */
+.layout-pick {
+  display: inline-flex;
+  margin-right: 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.layout-opt {
+  min-width: 28px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.layout-opt.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.overview-more {
+  padding: 6px 16px 10px;
+  text-align: center;
+}
+.overview-quiet {
+  min-height: 200px;
+}

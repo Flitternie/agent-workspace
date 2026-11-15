@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { Icon } from './components/bits';
@@ -10,12 +11,16 @@ import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
+import { useTeamExpansion } from './teams';
 
 interface Toast {
   id: number;
   text: string;
   taskId?: string;
 }
+
+/** Columns for a chosen layout: 2 and 4 tiles in two columns, 6 and 9 in three. */
+const LAYOUT_COLUMNS: Record<number, number> = { 1: 1, 2: 2, 4: 2, 6: 3, 9: 3 };
 
 /** Gallery columns like a video call: fill the window, keep tiles roughly square-ish. */
 function columnsFor(n: number): number {
@@ -42,16 +47,38 @@ export function App() {
   const [error, setError] = useState('');
   const now = useTick();
 
+  const { expanded, toggle } = useTeamExpansion();
+  // The Overview holds still while the pointer is over it; tiles settle when it leaves.
+  const [hovering, setHovering] = useState(false);
+  const slotsRef = useRef<string[]>([]);
+  const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
+  const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now) : [];
+  const order = visibleOrder(teamList, expanded);
+  // Overview: busy or recently busy agents, by priority, in as many tiles as the layout has.
+  const layout = snapshot?.settings.overviewSlots ?? 0;
+  const candidates = snapshot ? overviewCandidates(snapshot.tasks, openAll, now) : [];
+  const exists = new Set(snapshot?.tasks.map((t) => t.taskId) ?? []);
+  const shownIds = hovering ? slotsRef.current.filter((id) => exists.has(id)) : fillSlots(slotsRef.current, candidates, openAll, slotsFor(layout, candidates.length), selectedId);
+  slotsRef.current = shownIds;
+  const shown = shownIds.map((id) => snapshot!.tasks.find((t) => t.taskId === id)!).filter(Boolean);
+  const offscreen = candidates.filter((t) => !shownIds.includes(t.taskId));
+
   // The main agent opens in the same Focus view as any agent.
   const focusTask = snapshot?.tasks.find((t) => t.taskId === focusId) ?? (snapshot?.main?.taskId === focusId ? snapshot.main : undefined);
-  const taskIds = [...(snapshot?.tasks ?? []), ...(snapshot?.main ? [snapshot.main] : [])].map((t) => t.taskId).join(',');
-  // Tiles show recent activity, so every task's transcript is kept current.
+  // Tiles show recent activity: transcripts are kept current for what is on screen (not every agent ever).
+  const taskIds = [...shownIds, ...(focusId ? [focusId] : []), ...(snapshot?.main ? [snapshot.main.taskId] : [])].join(',');
   useEffect(() => {
     for (const id of taskIds.split(',').filter(Boolean)) load(id);
   }, [taskIds, load]);
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
+  // Opening an agent, or picking its tile to talk to, counts as using it (it moves up in its team).
+  useEffect(() => {
+    const id = focusId ?? selectedId;
+    if (id && snapshot?.tasks.some((t) => t.taskId === id)) void call('task:viewed', { taskId: id }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, selectedId]);
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);
@@ -79,6 +106,8 @@ export function App() {
     setTimeout(() => setFlash((f) => (f === taskId ? null : f)), 1600);
   }, []);
 
+  const orderRef = useRef(order);
+  orderRef.current = order;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
@@ -92,7 +121,8 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
         if (e.key === '0') setFocusId(null);
-        else setFocusId(snapshot.tasks[Number(e.key) - 1]?.taskId ?? null);
+        // The numbers shown in the sidebar: expanded teams, in order.
+        else setFocusId(orderRef.current[Number(e.key) - 1]?.taskId ?? null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -104,7 +134,7 @@ export function App() {
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
   const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
-  const cols = columnsFor(snapshot.tasks.length);
+  const cols = layout ? LAYOUT_COLUMNS[layout] : columnsFor(shown.length);
 
   const loadDemo = () =>
     call('demo:seed', {})
@@ -128,6 +158,9 @@ export function App() {
         onResume={() => setDialog('import')}
         onSettings={() => setSettingsOpen(true)}
         settingsOpen={settingsOpen}
+        teamList={teamList}
+        expanded={expanded}
+        toggle={toggle}
       />
 
       <div className="stage">
@@ -145,6 +178,21 @@ export function App() {
                 {needYou ? <strong className="needs-text">{t('{n} need you', { n: needYou })}</strong> : <span>{t('none waiting on you')}</span>}
               </div>
               <div className="stage-actions">
+                <div className="layout-pick" role="radiogroup" aria-label={t('Overview layout')} data-testid="layout-pick">
+                  {OVERVIEW_SLOTS.map((n) => (
+                    <button
+                      key={n}
+                      role="radio"
+                      aria-checked={layout === n}
+                      className={`layout-opt${layout === n ? ' on' : ''}`}
+                      title={n ? t('Up to {n} tiles; the most urgent agents fill them', { n }) : t('Every agent that is busy or recently was')}
+                      onClick={() => void call('settings:update', { overviewSlots: n }).catch((e) => setError(errorText(e)))}
+                      data-testid={`layout-${n}`}
+                    >
+                      {n ? n : t('Auto')}
+                    </button>
+                  ))}
+                </div>
                 <button className="btn btn-primary" onClick={() => setDialog('new')} data-testid="new-task">
                   <Icon name="plus" /> {t('New task')}
                 </button>
@@ -201,8 +249,21 @@ export function App() {
                 </div>
               </div>
             ) : (
-              <div className="gallery" data-testid="overview" style={{ ['--cols' as string]: cols }} onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}>
-                {snapshot.tasks.map((t) => (
+              <>
+              {shown.length === 0 ? (
+                <div className="empty overview-quiet" data-testid="overview-quiet">
+                  <p className="muted">{t('Nothing is running or waiting on you right now. Every agent is in its team on the left.')}</p>
+                </div>
+              ) : (
+              <div
+                className="gallery"
+                data-testid="overview"
+                style={{ ['--cols' as string]: cols }}
+                onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}
+                onMouseEnter={() => setHovering(true)}
+                onMouseLeave={() => setHovering(false)}
+              >
+                {shown.map((t) => (
                   <AgentCard
                     key={t.taskId}
                     task={t}
@@ -218,6 +279,13 @@ export function App() {
                   />
                 ))}
               </div>
+              )}
+              {offscreen.length ? (
+                <div className="overview-more muted small" data-testid="overview-more">
+                  {t('{n} more active agents are in their teams on the left', { n: offscreen.length })}
+                </div>
+              ) : null}
+              </>
             )}
           </>
         )}

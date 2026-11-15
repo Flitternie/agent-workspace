@@ -530,3 +530,31 @@ describe('one pending state for every view', () => {
     expect(ws.transcript('t-main-y').some((i) => /Alice's request is settled: Replied: Keep it for one release\./.test(i.text))).toBe(true);
   });
 });
+
+describe('user activity (orders the sidebar)', () => {
+  it('counts messages, opening and answering an agent, not the agent’s own output', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'ops', isolate: false, mockScript: 'approval:deploy', instruction: 'deploy' });
+    const at = () => ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.lastUserActivityAt;
+    // The first instruction is the user's.
+    expect(at()).toBeTruthy();
+    await until(() => ws.snapshot().attention.some((x) => x.taskId === a.taskId && x.kind === 'approval' && x.state === 'open'));
+    const afterSend = at();
+    // The agent working and asking is not the user's doing.
+    ws.handleEvent(a.taskId, ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.sessionLocalId!, { type: 'progress', text: 'still deploying' });
+    expect(at()).toBe(afterSend);
+    // Opening it: once a minute at most.
+    await new Promise((r) => setTimeout(r, 5));
+    ws.markViewed(a.taskId);
+    expect(at()).toBe(afterSend);
+    const store = (ws as unknown as { store: { data: { tasks: Array<{ taskId: string; lastUserActivityAt?: string }> } } }).store;
+    store.data.tasks.find((t) => t.taskId === a.taskId)!.lastUserActivityAt = new Date(Date.now() - 120_000).toISOString();
+    ws.markViewed(a.taskId);
+    expect(Date.now() - Date.parse(at()!)).toBeLessThan(5_000);
+    // Answering its request.
+    store.data.tasks.find((t) => t.taskId === a.taskId)!.lastUserActivityAt = new Date(Date.now() - 120_000).toISOString();
+    await ws.respondAttention(ws.snapshot().attention.find((x) => x.kind === 'approval')!.id, 'deny');
+    expect(Date.now() - Date.parse(at()!)).toBeLessThan(5_000);
+  });
+});
