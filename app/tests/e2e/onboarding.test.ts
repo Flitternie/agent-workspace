@@ -114,7 +114,7 @@ describe('first-run guide', () => {
     await expect.poll(() => page.getByTestId('onboarding').isVisible(), { timeout: 20_000 }).toBe(true);
     await expect.poll(() => state('claude'), { timeout: 20_000 }).toBe('signed_out');
     await expect.poll(() => state('codex')).toBe('signed_out');
-    expect(await done(2)).toBe('false');
+    expect(await done(3)).toBe('false');
     await page.screenshot({ path: join(shots, 'onboarding-01-signed-out.png') });
 
     // Claude: the app runs its login (the CLI would open the browser) and shows its link meanwhile.
@@ -138,13 +138,7 @@ describe('first-run guide', () => {
     await expect.poll(() => page.getByTestId('onboarding').innerText()).toContain('Your main agent');
     await page.screenshot({ path: join(shots, 'onboarding-03-connected.png') });
 
-    // Bring work in (the folder picker is native, so the folder comes in through the same IPC).
-    await expect.poll(() => page.getByTestId('onboarding-bring').isVisible()).toBe(true);
-    await page.screenshot({ path: join(shots, 'onboarding-04-bring-in.png') });
-    await invoke('project:add', { rootPath: repo('shop'), name: 'shop' });
-    await expect.poll(() => done(2)).toBe('true');
-
-    // Other machines: a host from ~/.ssh/config with no agent installed says how to install one there.
+    // Other machines (before bringing work in): a host with no agent says how to get one there.
     await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
     await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
     expect(await page.getByTestId('host-devbox').innerText()).toContain('Install on devbox');
@@ -172,7 +166,10 @@ describe('first-run guide', () => {
     await expect.poll(async () => (await panel('host-signin', 'claude').getByTestId('host-signin-link').getAttribute('href')) ?? '', { timeout: 20_000 }).toContain('claude.ai/oauth');
     await panel('host-signin', 'claude').getByTestId('host-signin-code').fill('good-code');
     await panel('host-signin', 'claude').getByTestId('host-signin-code').press('Enter');
-    await expect.poll(() => remoteState('claude'), { timeout: 30_000 }).toBe('ready');
+    // A machine with an agent ready ticks the step off (it folds); open it again for Codex there.
+    await expect.poll(() => done(2), { timeout: 30_000 }).toBe('true');
+    await page.getByTestId('onboarding-step-2').getByRole('button', { name: /Connect other machines/ }).click();
+    expect(await remoteState('claude')).toBe('ready');
     // Codex: installed the same way, then a device code shown in the app.
     await page.evaluate(() => window.scrollTo(0, 0));
     await invoke('ssh:install', { host: 'devbox', provider: 'codex' });
@@ -182,7 +179,13 @@ describe('first-run guide', () => {
     await page.screenshot({ path: join(shots, 'onboarding-07-remote-device-code.png') });
     await expect.poll(() => remoteState('codex'), { timeout: 30_000 }).toBe('ready');
     await page.screenshot({ path: join(shots, 'onboarding-08-remote-ready.png') });
-    await page.getByTestId('onboarding-remote-skip').click();
+
+    // Then bring work in, from this Mac and the machine just connected, in one place
+    // (the folder picker is native, so the folder comes in through the same IPC).
+    await expect.poll(() => page.getByTestId('onboarding-bring').count()).toBe(2);
+    await expect.poll(() => page.getByTestId('onboarding-step-3').innerText()).toContain('devbox');
+    await page.screenshot({ path: join(shots, 'onboarding-04-bring-in.png') });
+    await invoke('project:add', { rootPath: repo('shop'), name: 'shop' });
     await expect.poll(() => done(3)).toBe('true');
 
     // Voice can wait; then the workspace, and the guide stays out of the way.

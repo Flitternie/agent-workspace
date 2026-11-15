@@ -275,7 +275,7 @@ export const zh: Record<string, string> = {
   "{provider} on {host} is not signed in.": "{host} 上的 {provider} 还没有登录。",
   "Sign in myself": "我自己登录",
   "In a terminal on {host} (“Open in Terminal”):": "在 {host} 的终端里运行（点“在终端中打开”）：",
-  "Work on other machines (optional)": "导入远程机器上的工作（可选）",
+  "Connect other machines (optional)": "连接远程机器（可选）",
   "{n} machines": "{n} 台机器",
   "Agents can run on machines in your ~/.ssh/config, with Claude Code or Codex installed and signed in there; their sessions stay on those machines.": "Agent 也可以在你 ~/.ssh/config 里的机器上运行，前提是那台机器上装好并登录了 Claude Code 或 Codex；会话会留在那台机器上。",
   "Looking for sessions on {host}…": "正在查找 {host} 上的会话…",

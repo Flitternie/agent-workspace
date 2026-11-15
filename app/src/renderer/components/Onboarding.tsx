@@ -22,9 +22,11 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const [signingIn, setSigningIn] = useState<Partial<Record<Provider, boolean>>>({});
   const connected = ready.length > 0;
   const broughtIn = snapshot.projects.length > 0;
-  const remote = snapshot.tasks.some((x) => x.host) || !!ob.remoteSkipped;
+
   // Machines connected and with an agent signed in: their sessions can be listed.
   const remoteReady = snapshot.remoteHosts.filter((h) => h.ssh === 'ok' && h.capabilities.some((c) => readiness(c) === 'ready')).map((h) => h.host);
+  // Other machines come before bringing work in, so their sessions are picked with this Mac's.
+  const remote = remoteReady.length > 0 || !!ob.remoteSkipped;
   const voice = snapshot.voice.sttAvailable || !!ob.voiceSkipped;
 
   // Until one agent is ready (or while signing in), look again every few seconds: installing or
@@ -51,13 +53,20 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           {ready.length === 2 ? <MainAgentChoice snapshot={snapshot} /> : null}
         </Step>
 
-        <Step n={2} title={t('Bring in your work')} done={broughtIn} summary={t('{n} projects', { n: snapshot.projects.length })} locked={!connected}>
-          <BringIn snapshot={snapshot} now={now} />
-        </Step>
-
-        <Step n={3} title={t('Work on other machines (optional)')} done={remote} summary={ob.remoteSkipped && !snapshot.tasks.some((x) => x.host) ? t('Skipped') : t('{n} machines', { n: remoteReady.length })}>
+        <Step n={2} title={t('Connect other machines (optional)')} done={remote} summary={remoteReady.length ? t('{n} machines', { n: remoteReady.length }) : t('Skipped')}>
           <p className="muted small">{t('Agents can run on machines in your ~/.ssh/config, with Claude Code or Codex installed and signed in there; their sessions stay on those machines.')}</p>
           <RemoteHosts snapshot={snapshot} autoRecheck />
+          {remoteReady.length ? null : (
+            <div className="row">
+              <button className="btn btn-ghost" onClick={() => save({ remoteSkipped: true })} data-testid="onboarding-remote-skip">
+                {t('Skip')}
+              </button>
+            </div>
+          )}
+        </Step>
+
+        <Step n={3} title={t('Bring in your work')} done={broughtIn} summary={t('{n} projects', { n: snapshot.projects.length })} locked={!connected}>
+          <BringIn snapshot={snapshot} now={now} />
           {remoteReady.map((host) => (
             <div key={host} className="ob-remote">
               <div className="ob-remote-head">
@@ -66,11 +75,6 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
               <BringIn snapshot={snapshot} now={now} host={host} />
             </div>
           ))}
-          <div className="row">
-            <button className="btn btn-ghost" onClick={() => save({ remoteSkipped: true })} data-testid="onboarding-remote-skip">
-              {t('Skip')}
-            </button>
-          </div>
         </Step>
 
         <Step n={4} title={t('Voice (optional)')} done={voice} summary={snapshot.voice.sttAvailable ? t('Ready') : t('Skipped')} locked={!connected}>
