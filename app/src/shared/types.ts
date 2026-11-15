@@ -41,6 +41,15 @@ export interface Task {
   name: string;
   /** Who set the name: 'user' names are never changed automatically. Unset on older tasks. */
   nameSource?: 'auto' | 'user';
+  /** An old automatic role replaced by a stopgap; a model labels the work when the agent is next used. */
+  labelStale?: boolean;
+  /** When a model last wrote the label, and how many messages the user sent since (to keep it current). */
+  labelAt?: string;
+  saidSinceLabel?: number;
+  /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
+  lastUserActivityAt?: string;
+  /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */
+  subtasks?: SubtaskInfo[];
   projectId: string;
   title: string;
   provider: AgentProvider;
@@ -90,7 +99,7 @@ export interface RetryState {
   error?: string;
 }
 
-export type PreviewKind = 'markdown' | 'html' | 'image' | 'text';
+export type PreviewKind = 'markdown' | 'html' | 'image' | 'text' | 'code';
 
 /** A file an agent wrote, read for the preview column. `path` is the resolved absolute path. */
 export interface FilePreview {
@@ -300,7 +309,24 @@ export interface CoordinatorEntry {
   text: string;
 }
 
+/** A sub-agent the agent started in this turn (Claude Code's Task tool, a Codex sub-agent). */
+export interface SubtaskInfo {
+  id: string;
+  description: string;
+  status: 'running' | 'done' | 'failed';
+  /** What it is doing right now ("Reading src/api/legacy.ts"). */
+  step?: string;
+  /** Every step so far, oldest first (the last 50). */
+  steps?: Array<{ at: string; text: string }>;
+  /** What it reported back to its agent, once done. */
+  result?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
 export interface Settings {
+  /** Overview tiles: 1, 2, 4, 6 or 9; unset or 0 = automatic (every agent that is busy or recently was). */
+  overviewSlots?: number;
   /** When true every voice route needs a click, even if high confidence. */
   alwaysConfirmVoice: boolean;
   /** Open the mic on launch, like joining a call. */

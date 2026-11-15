@@ -98,7 +98,7 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').innerText()).toContain('Alice');
     await shot(page, '03-dock-route-preview');
     await page.getByTestId('route-send').click();
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (\w+ )?Alice/);
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Alice/);
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob'); // focus did not move
     expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
 
@@ -149,10 +149,10 @@ describe('end-to-end demo script (mock agents)', () => {
     await card(page, 'Bob').getByTestId('card-summary').click();
     await expect.poll(() => card(page, 'Bob').getAttribute('aria-selected')).toBe('true');
     const bar = page.getByTestId('dock-input');
-    expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend Bob');
+    expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend dashboard… · Bob');
     await bar.fill('Make the cards a bit bigger.');
     await bar.press('Enter');
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to Frontend Bob/);
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
     expect(await page.getByTestId('route-preview').count()).toBe(0);
     await shot(page, '06b-overview-selected');
     await card(page, 'Bob').getByTestId('card-summary').dblclick();

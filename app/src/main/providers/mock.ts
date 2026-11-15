@@ -183,6 +183,37 @@ class MockSession implements ProviderSession {
       }, 1);
       return;
     }
+    // Sub-agents: three helpers, one finishes, two keep working (a long turn, to look at).
+    if (script === 'subagents') {
+      const zh = this.zh;
+      const sub = (id: string, description: string, step: string, at: number) =>
+        this.later(() => this.emit({ type: 'subtask', id, description, step, status: 'running' }), at);
+      sub('s1', zh ? '查找旧接口的调用方' : 'Find callers of the old API', zh ? '读 src/api/legacy.ts' : 'Reading src/api/legacy.ts', 1);
+      sub('s2', zh ? '补充接口测试' : 'Add endpoint tests', zh ? '写 tests/orders.test.ts' : 'Writing tests/orders.test.ts', 1.5);
+      sub('s3', zh ? '检查更新日志' : 'Check the changelog', zh ? '读 CHANGELOG.md' : 'Reading CHANGELOG.md', 2);
+      this.later(() => this.emit({ type: 'subtask', id: 's3', step: zh ? '对照 v2 的接口变更' : 'Comparing with the v2 API changes' }), 3);
+      this.later(
+        () =>
+          this.emit({
+            type: 'subtask',
+            id: 's3',
+            status: 'done',
+            step: '',
+            result: zh ? '更新日志里 v2 只改了 /orders 的分页参数（page → cursor），其他接口不变。' : 'The changelog shows v2 only changes /orders pagination (page → cursor); other endpoints are unchanged.',
+          }),
+        4,
+      );
+      this.later(() => this.emit({ type: 'subtask', id: 's1', step: zh ? '搜索 /v1/orders' : 'Searching for /v1/orders' }), 5);
+      this.later(() => this.emit({ type: 'subtask', id: 's1', step: zh ? '在 3 个文件里找到 7 处调用' : 'Found 7 calls in 3 files' }), 6);
+      this.later(() => this.emit({ type: 'subtask', id: 's2', step: zh ? '运行 npm test -- orders' : 'Running npm test -- orders' }), 6.5);
+      this.later(() => this.emit({ type: 'progress', text: zh ? '等两个子任务完成…' : 'Waiting on two sub-agents…' }), 5);
+      this.later(() => {
+        for (const id of ['s1', 's2']) this.emit({ type: 'subtask', id, status: 'done', step: '' });
+        this.busy = false;
+        this.emit({ type: 'turnCompleted', status: 'completed', finalText: zh ? '两个子任务都完成了。' : 'Both sub-agents are done.' });
+      }, 400);
+      return;
+    }
     if (first && script.startsWith('choice:')) {
       const question = script.slice('choice:'.length);
       this.later(() => {

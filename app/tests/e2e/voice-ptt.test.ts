@@ -83,7 +83,7 @@ describe.runIf(enabled)('push to talk', () => {
     await expect.poll(() => mic.getAttribute('aria-pressed')).toBe('false');
 
     const toasts = () => page.getByTestId('caption').allInnerTexts().then((t) => t.join('\n'));
-    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (\w+ )?Alice/);
+    await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (.+ · )?Alice/);
     await page.screenshot({ path: join(shots, 'ptt-02-sent.png') });
 
     const voiceMessages = () =>

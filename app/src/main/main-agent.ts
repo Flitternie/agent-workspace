@@ -21,8 +21,8 @@ export interface MainAgentHost {
   findAgent(name: string): Task | undefined;
   transcriptText(taskId: string, limit: number): string;
   sendFromMain(taskId: string, text: string, interrupt: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
-  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task>;
-  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
+  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string }): Promise<Task>;
+  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
   stopFromMain(taskId: string): Promise<void>;
   saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void;
   availableProviders(): AgentProvider[];
@@ -65,7 +65,7 @@ function guard(host: MainAgentHost, tools: WorkspaceTool[]): WorkspaceTool[] {
   }));
 }
 
-const agentArg = z.string().describe('The agent’s name, e.g. "Alice" or "小王" (case-insensitive). A role like "Database" also works when it is unique.');
+const agentArg = z.string().describe('The agent’s name, e.g. "Alice" or "小王" (case-insensitive). Its work label, e.g. "Order API migration", also works when it is unique.');
 
 export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
   const agent = (name: unknown): Task => {
@@ -79,7 +79,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
     {
       name: 'list_workspace_agents',
       description:
-        'List every coding agent in the workspace: name, role, provider, project, status (running / waiting_for_user / done / idle…), its latest report, and what it is waiting on from the user.',
+        'List every coding agent in the workspace: name, the label of its work, provider, project, status (running / waiting_for_user / done / idle…), its latest report, and what it is waiting on from the user.',
       schema: z.object({}),
       run: async () => {
         const all = host.listAgents();
@@ -87,7 +87,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         return all
           .map(({ task: t, projectName, pending, connected }) =>
             [
-              `- ${t.alias}${t.name !== t.alias ? ` (role: ${t.name})` : ''} — ${t.provider}, project "${projectName}", status ${t.status}${connected ? '' : ' (not connected; resumes when messaged)'}`,
+              `- ${t.alias}${t.name !== t.alias ? ` (working on: ${t.name})` : ''} — ${t.provider}, project "${projectName}", status ${t.status}${connected ? '' : ' (not connected; resumes when messaged)'}`,
               `  task: ${t.title}`,
               `  latest: ${t.summary}`,
               ...(pending.length ? [`  waiting on the user: ${pending.join(' | ')}`] : []),
@@ -130,7 +130,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         title: z.string().min(1).describe('Short task title.'),
         instruction: z.string().min(1).describe('The first instruction for the new agent.'),
         provider: z.enum(['claude', 'codex']).optional().describe('Defaults to the first available.'),
-        role: z.string().optional().describe('Optional one-word role, e.g. "Database".'),
+        label: z.string().optional().describe('Optional short label for the work, e.g. "Order API migration"; otherwise one is written from the instruction.'),
       }),
       run: async (a) => {
         const projects = host.listProjects();
@@ -140,7 +140,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         const providers = host.availableProviders();
         const provider = (a.provider as AgentProvider | undefined) ?? providers[0];
         if (!provider || !providers.includes(provider)) return `Provider ${String(a.provider)} is not available here. Available: ${providers.join(', ') || 'none'}.`;
-        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), role: a.role ? String(a.role) : undefined });
+        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), label: a.label ? String(a.label) : undefined });
         return `Started ${t.alias} (${provider}) on ${p.name}: "${t.title}".`;
       },
     },
@@ -155,7 +155,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           .string()
           .optional()
           .describe('Fork from just before one of the user’s earlier prompts to this agent, given by its first words (as read_agent shows them). Omit to fork the whole conversation as it is now.'),
-        role: z.string().optional().describe('Optional short role for the new agent, e.g. "Approach B".'),
+        label: z.string().optional().describe('Optional short label for this branch’s work, e.g. "Index-based fix"; otherwise one is written from the instruction.'),
       }),
       run: async (a) => {
         const t = agent(a.agent);
@@ -171,7 +171,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           forked = await host.forkFromMain(t.taskId, {
             instruction: String(a.instruction),
             beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
-            role: a.role ? String(a.role) : undefined,
+            label: a.label ? String(a.label) : undefined,
           });
         } catch (error) {
           forks--;
@@ -282,7 +282,7 @@ What you do yourself:
 - Answer general questions briefly from what you already know, and questions about this app. Save conventions the user wants remembered with save_memory.
 
 What you always hand off, however small: anything that needs reading or changing the project's code or files, running commands or tests, looking things up, or several steps of work. Questions about the code ("what does this function do", "why does the build fail") go to an agent too.
-- Send it to the agent already working on that area (send_to_agent). If none fits, start one with create_agent, with a short role and a first instruction that says what to do and what done looks like. If you do not know which project, or which agent, ask.
+- Send it to the agent already working on that area (send_to_agent). If none fits, start one with create_agent, with a first instruction that says what to do and what done looks like. If you do not know which project, or which agent, ask.
 - When the user wants approaches tried side by side, or work split after an agent has explored the problem, fork_agent branches off that agent with its context; give each branch a distinct instruction.
 - Then tell the user in one line what went where ("Sent to Charlie: …" / "Started Dana on api: …"). Do not wait for the result or check on it again: the agent's progress, questions and completion come to you and to the user on their own.
 - With no projects yet, tell the user to add a project folder first (New task).

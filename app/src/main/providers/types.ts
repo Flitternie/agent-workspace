@@ -41,6 +41,8 @@ export type ProviderEvent =
   /** Full snapshot of the agent's checklist. */
   | { type: 'planUpdated'; entries: PlanEntry[]; explanation?: string }
   | { type: 'turnStarted' }
+  /** A sub-agent started, moved on to another step, or finished (fields given are updated). */
+  | { type: 'subtask'; id: string; description?: string; status?: 'running' | 'done' | 'failed'; step?: string; result?: string }
   | {
       type: 'turnCompleted';
       status: 'completed' | 'interrupted' | 'failed';

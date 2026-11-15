@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, type MouseEvent } from 'react';
-import { previewKind } from '../../shared/preview';
+import { useContext, useState, type MouseEvent } from 'react';
+import { openableKind, previewKind } from '../../shared/preview';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
 import { Icon, type IconName } from './bits';
+import { PreviewContext } from './filePaths';
 import { Markdown } from './Markdown';
 import { t, t as tr } from '../i18n';
 
@@ -203,7 +204,7 @@ export function touchedPaths(item: TranscriptItem): string[] {
 }
 
 /** Set by the Focus view; rows elsewhere (cards) offer no file actions. */
-export const PreviewContext = createContext<{ preview(path: string): void; openExternal?: (path: string) => void } | null>(null);
+export { PreviewContext } from './filePaths';
 
 function FileActions({ paths }: { paths: string[] }) {
   const ctx = useContext(PreviewContext);
@@ -220,7 +221,7 @@ function FileActions({ paths }: { paths: string[] }) {
           <button className="link small" data-testid="preview-file" onClick={act(() => ctx.preview(p))}>
             {paths.length > 1 ? t('Preview {name}', { name: p.split('/').pop() ?? p }) : t('Preview')}
           </button>
-          {ctx.openExternal ? (
+          {ctx.openExternal && openableKind(p) ? (
             <button className="link small" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={act(() => ctx.openExternal!(p))}>
               <Icon name="external" size={11} />
             </button>
