@@ -7,6 +7,7 @@ import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
 import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
+import { SubtaskView } from './components/SubtaskView';
 import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
@@ -42,10 +43,13 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Overview: a clicked card is who you are talking to (voice/typed default target) without opening it.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A sub-agent's read-only view, opened from its row.
+  const [subView, setSubView] = useState<{ taskId: string; subtaskId: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const now = useTick();
+  // Every second while a sub-agent runs (its timer on the card), else every half minute.
+  const now = useTick(snapshot?.tasks.some((t) => t.subtasks?.some((x) => x.status === 'running')) ? 1000 : 30_000);
 
   const { expanded, toggle } = useTeamExpansion();
   // The Overview holds still while the pointer is over it; tiles settle when it leaves.
@@ -113,7 +117,8 @@ export function App() {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (e.key === 'Escape' && !typing && !dialog) {
         // Esc steps back one level: settings / focus first, then the Overview selection.
-        if (settingsOpen || focusId) {
+        if (subView) setSubView(null);
+        else if (settingsOpen || focusId) {
           setSettingsOpen(false);
           setFocusId(null);
         } else setSelectedId(null);
@@ -127,7 +132,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, snapshot, settingsOpen, focusId]);
+  }, [dialog, snapshot, settingsOpen, focusId, subView]);
 
   if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
   setLanguage(snapshot.settings.language ?? 'en');
@@ -148,11 +153,17 @@ export function App() {
         focusId={focusTask ? focusId : null}
         onSelect={(id) => {
           setSettingsOpen(false);
+          setSubView(null);
           setFocusId(id);
         }}
         onOverview={() => {
           setSettingsOpen(false);
+          setSubView(null);
           setFocusId(null);
+        }}
+        onOpenSubtask={(taskId, subtaskId) => {
+          setSettingsOpen(false);
+          setSubView({ taskId, subtaskId });
         }}
         onNewTask={() => setDialog('new')}
         onResume={() => setDialog('import')}
@@ -164,7 +175,17 @@ export function App() {
       />
 
       <div className="stage">
-        {settingsOpen ? (
+        {subView && !settingsOpen && snapshot.tasks.some((x) => x.taskId === subView.taskId) ? (
+          <SubtaskView
+            task={snapshot.tasks.find((x) => x.taskId === subView.taskId)!}
+            subtask={snapshot.tasks.find((x) => x.taskId === subView.taskId)!.subtasks?.find((s) => s.id === subView.subtaskId)}
+            now={now}
+            onBack={() => {
+              setFocusId(subView.taskId);
+              setSubView(null);
+            }}
+          />
+        ) : settingsOpen ? (
           <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
@@ -275,6 +296,7 @@ export function App() {
                     selected={selectedId === t.taskId}
                     onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
                     onOpen={() => setFocusId(t.taskId)}
+                    onOpenSubtask={(taskId, subtaskId) => setSubView({ taskId, subtaskId })}
                     now={now}
                   />
                 ))}

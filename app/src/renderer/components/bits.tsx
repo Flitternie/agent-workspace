@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
-import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
+import { useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../../shared/types';
 import { t, t as tr } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -149,5 +150,98 @@ export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d={ICONS[name]} />
     </svg>
+  );
+}
+
+/** m:ss between two times. */
+export function clock(fromIso: string, to: number): string {
+  const sec = Math.max(0, Math.round((to - Date.parse(fromIso)) / 1000));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+/** m:ss since a sub-agent started (or until it ended). */
+export function elapsed(s: SubtaskInfo, now: number): string {
+  return clock(s.startedAt, s.endedAt ? Date.parse(s.endedAt) : now);
+}
+
+/** Sub-agents are marked while their turn runs (or waits on you); afterwards they live in the conversation. */
+export function liveSubtasks(t: { status: AgentStatus; subtasks?: SubtaskInfo[] }): SubtaskInfo[] | undefined {
+  return t.status === 'running' || t.status === 'starting' || t.status === 'waiting_for_user' ? t.subtasks : undefined;
+}
+
+/**
+ * An agent's sub-agents as a few dots beside its status: no extra height. Running ones pulse,
+ * finished ones are grey, failed ones red. Hover for what each is doing; click to unfold the thread.
+ */
+export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskInfo[]; open: boolean; onToggle: () => void }) {
+  // The hover card floats above everything (rows clip their text), next to the dots.
+  const [pop, setPop] = useState<{ left: number; top: number } | null>(null);
+  if (!subtasks?.length) return null;
+  const shown = subtasks.slice(0, 4);
+  const running = subtasks.filter((s) => s.status === 'running').length;
+  const toggle = (e: { stopPropagation: () => void; preventDefault: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPop(null);
+    onToggle();
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={`subtask-dots${open ? ' open' : ''}`}
+      aria-expanded={open}
+      aria-label={tr('{n} sub-agents, {r} running', { n: subtasks.length, r: running })}
+      data-testid="subtask-dots"
+      onClick={toggle}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(e)}
+      onMouseEnter={(e) => {
+        if (open) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        setPop({ left: Math.min(r.left, window.innerWidth - 240), top: r.bottom + 4 });
+      }}
+      onMouseLeave={() => setPop(null)}
+    >
+      {shown.map((s) => (
+        <span key={s.id} className={`sdot sdot-${s.status}`} />
+      ))}
+      {subtasks.length > shown.length ? <span className="sdot-more">+{subtasks.length - shown.length}</span> : null}
+      {pop
+        ? createPortal(
+            <div className="subtask-pop" role="tooltip" style={{ left: pop.left, top: pop.top }} data-testid="subtask-pop">
+              {subtasks.map((s) => (
+                <div key={s.id} className="subtask-pop-row">
+                  <span className={`sdot sdot-${s.status}`} />
+                  <span className="subtask-pop-text">
+                    <span className="truncate">{s.description}</span>
+                    {s.status === 'running' && s.step ? <span className="subtask-pop-step truncate">{s.step}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
+/** Unfolded sub-agents: half-height rows on a thread line, no avatar, so they never read as sessions. */
+export function SubtaskThread({ subtasks, now, max = 3, onOpen }: { subtasks: SubtaskInfo[]; now: number; max?: number; onOpen: (id: string) => void }) {
+  const shown = subtasks.slice(0, max);
+  return (
+    <div className="subtask-thread" data-testid="subtask-thread">
+      {shown.map((s) => (
+        <button key={s.id} className={`subtask-row st-${s.status}`} data-testid="subtask-row" title={tr('See what it did')} onClick={() => onOpen(s.id)}>
+          <span className={`sdot sdot-${s.status}`} />
+          <span className="subtask-desc truncate">
+            {s.description}
+            {s.status === 'running' && s.step ? <span className="subtask-step"> · {s.step}</span> : null}
+          </span>
+          <span className="subtask-time">{s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : elapsed(s, now)}</span>
+        </button>
+      ))}
+      {subtasks.length > shown.length ? <div className="subtask-more">{tr('{n} more in the conversation', { n: subtasks.length - shown.length })}</div> : null}
+    </div>
   );
 }

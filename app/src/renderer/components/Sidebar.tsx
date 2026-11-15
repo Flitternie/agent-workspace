@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { needsYou, visibleOrder, type Team } from '../../shared/agent-order';
 import type { Task, WorkspaceSnapshot } from '../../shared/types';
-import { AgentName, Alias, displayName, Icon, Kbd, PROVIDER_LABEL, STATUS_LABEL } from './bits';
+import { AgentName, Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
+import { useTick } from '../state';
 import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 
@@ -21,6 +22,7 @@ export function Sidebar({
   teamList,
   expanded,
   toggle,
+  onOpenSubtask,
 }: {
   snapshot: WorkspaceSnapshot;
   focusId: string | null;
@@ -30,6 +32,8 @@ export function Sidebar({
   onResume: () => void;
   onSettings: () => void;
   settingsOpen?: boolean;
+  /** Opens a sub-agent's read-only view. */
+  onOpenSubtask: (taskId: string, subtaskId: string) => void;
   /** Project teams, in order (App computes them so ⌘1–9 match). */
   teamList: Team[];
   expanded: (team: Team) => boolean;
@@ -40,6 +44,17 @@ export function Sidebar({
   const open = openAll.filter((a) => a.kind !== 'completion');
   const needYou = new Set(open.map((a) => a.taskId)).size;
   const [showIdle, setShowIdle] = useState<Record<string, boolean>>({});
+  // Agents whose sub-agents are unfolded (folded by default; the marks go when the turn ends).
+  const [subOpen, setSubOpen] = useState<Set<string>>(new Set());
+  const toggleSub = (id: string, open?: boolean) =>
+    setSubOpen((cur) => {
+      const next = new Set(cur);
+      if (open ?? !next.has(id)) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  // Running sub-agents show their elapsed time.
+  const now = useTick(snapshot.tasks.some((t) => t.subtasks?.some((x) => x.status === 'running')) ? 1000 : 30_000);
   const waiting = needsYou(snapshot.tasks, openAll);
   const projectName = (id: string) => snapshot.projects.find((p) => p.projectId === id)?.name ?? '';
   // ⌘1–9 numbers, as App assigns them.
@@ -47,11 +62,21 @@ export function Sidebar({
   const row = (t: Task, opts: { project?: string; needs?: boolean } = {}) => {
     const pending = open.filter((a) => a.taskId === t.taskId);
     const n = opts.needs ? undefined : number.get(t.taskId);
+    const subs = opts.needs ? undefined : liveSubtasks(t);
+    const unfolded = !!subs?.length && subOpen.has(t.taskId);
     return (
+      // Unfolded, the row and its sub-agents are one card.
+      <div key={`${opts.needs ? 'needs-' : ''}${t.taskId}`} className={`agent-item${unfolded ? ' unfolded' : ''}${t.taskId === focusId ? ' active' : ''}`}>
       <button
-        key={`${opts.needs ? 'needs-' : ''}${t.taskId}`}
         className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}`}
         onClick={() => onSelect(t.taskId)}
+        onKeyDown={(e) => {
+          // Like a tree: → unfolds sub-agents, ← folds them.
+          if (subs?.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+            e.preventDefault();
+            toggleSub(t.taskId, e.key === 'ArrowRight');
+          }
+        }}
         data-testid={opts.needs ? 'needs-item' : 'rail-item'}
         data-alias={t.alias}
         title={`${displayName(t)} · ${PROVIDER_LABEL[t.provider]} · ${tr(STATUS_LABEL[t.status])}${n ? ` (⌘${n})` : ''}`}
@@ -66,11 +91,14 @@ export function Sidebar({
             </span>
           </span>
           <span className="agent-row-sub">
+            <SubtaskDots subtasks={subs} open={unfolded} onToggle={() => toggleSub(t.taskId)} />
             {opts.project ? <span className="row-project">{opts.project} · </span> : null}
             {pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : (t.summary && tr(t.summary)) || t.title}
           </span>
         </span>
       </button>
+      {unfolded ? <SubtaskThread subtasks={subs!} now={now} onOpen={(id) => onOpenSubtask(t.taskId, id)} /> : null}
+      </div>
     );
   };
   return (

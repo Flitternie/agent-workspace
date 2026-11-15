@@ -1197,6 +1197,7 @@ export class Workspace {
         break;
       case 'turnStarted':
         task.suggestion = undefined;
+        task.subtasks = undefined;
         live.turnActive = true;
         if (!this.hasOpenNative(taskId)) task.status = 'running';
         break;
@@ -1206,6 +1207,25 @@ export class Workspace {
       case 'progress':
         task.summary = clip(event.text, 200);
         return this.changedThrottled();
+      case 'subtask': {
+        const list = (task.subtasks ??= []);
+        let s = list.find((x) => x.id === event.id);
+        if (!s) {
+          s = { id: event.id, description: event.description ?? 'Sub-agent', status: 'running', startedAt: now() };
+          list.push(s);
+        }
+        if (event.description) s.description = clip(event.description, 120);
+        if (event.step !== undefined) {
+          s.step = clip(event.step, 160);
+          if (s.step) s.steps = [...(s.steps ?? []), { at: now(), text: s.step }].slice(-50);
+        }
+        if (event.result !== undefined) s.result = clip(event.result, 4000);
+        if (event.status && event.status !== s.status) {
+          s.status = event.status;
+          if (event.status !== 'running') s.endedAt = now();
+        }
+        return this.changedThrottled();
+      }
       case 'retrying':
         task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
         task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;

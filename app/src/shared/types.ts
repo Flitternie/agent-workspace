@@ -45,6 +45,8 @@ export interface Task {
   labelStale?: boolean;
   /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
   lastUserActivityAt?: string;
+  /** Sub-agents of the latest turn (marked while it runs); replaced when the next turn starts. */
+  subtasks?: SubtaskInfo[];
   projectId: string;
   title: string;
   provider: AgentProvider;
@@ -260,6 +262,21 @@ export interface CoordinatorEntry {
   createdAt: string;
   role: 'user' | 'coordinator';
   text: string;
+}
+
+/** A sub-agent the agent started in this turn (Claude Code's Task tool, a Codex sub-agent). */
+export interface SubtaskInfo {
+  id: string;
+  description: string;
+  status: 'running' | 'done' | 'failed';
+  /** What it is doing right now ("Reading src/api/legacy.ts"). */
+  step?: string;
+  /** Every step so far, oldest first (the last 50). */
+  steps?: Array<{ at: string; text: string }>;
+  /** What it reported back to its agent, once done. */
+  result?: string;
+  startedAt: string;
+  endedAt?: string;
 }
 
 export interface Settings {

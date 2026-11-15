@@ -5,7 +5,7 @@ import { timeAgo } from '../state';
 import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
-import { AgentName, Alias, Icon, labelOf, ProviderTag, StatusDot } from './bits';
+import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 
@@ -20,6 +20,7 @@ export function AgentCard({
   selected,
   onSelect,
   onOpen,
+  onOpenSubtask,
   now,
 }: {
   task: Task;
@@ -31,9 +32,12 @@ export function AgentCard({
   selected: boolean;
   onSelect: () => void;
   onOpen: () => void;
+  onOpenSubtask: (taskId: string, subtaskId: string) => void;
   now: number;
 }) {
   const [draft, setDraft] = useState('');
+  // Sub-agents unfold inside the card, above its activity; folded by default.
+  const [subOpen, setSubOpen] = useState(false);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -78,6 +82,7 @@ export function AgentCard({
             </div>
           )}
         </div>
+        <SubtaskDots subtasks={liveSubtasks(task)} open={subOpen} onToggle={() => setSubOpen((o) => !o)} />
         <StatusDot status={task.status} connected={connected} />
         <button className="icon-btn" aria-label={t('Open')} title={t('Open (⌘1–9)')} onClick={onOpen}>
           <Icon name="expand" />
@@ -97,6 +102,7 @@ export function AgentCard({
       </div>
 
       <div className="tile-body">
+        {subOpen && liveSubtasks(task)?.length ? <SubtaskThread subtasks={liveSubtasks(task)!} now={now} max={4} onOpen={(id) => onOpenSubtask(task.taskId, id)} /> : null}
         {task.sharedCwdWarning ? (
           <div className="warn-text">
             <Icon name="alert" size={12} /> {task.sharedCwdWarning}
