@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { previewKind, resolvePosix } from '../../src/shared/preview';
+import { codeLanguage, openableKind, previewKind, resolvePosix } from '../../src/shared/preview';
 
 // The "remote" reader runs its shell commands here instead of over SSH, so the
 // realpath / size / base64 script itself is exercised without any host.
@@ -29,9 +29,10 @@ function fixture() {
   writeFileSync(join(root, 'README.md'), '# hi\n');
   writeFileSync(join(root, 'docs', 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   writeFileSync(join(root, 'run.sh'), 'echo hi\n');
+  writeFileSync(join(root, 'tool.bin'), Buffer.from([0, 1, 2]));
   writeFileSync(join(base, 'outside.txt'), 'nope');
   symlinkSync(join(base, 'outside.txt'), join(root, 'escape.txt'));
-  symlinkSync(join(root, 'run.sh'), join(root, 'innocent.txt'));
+  symlinkSync(join(root, 'tool.bin'), join(root, 'innocent.txt'));
   return { base, root };
 }
 
@@ -66,11 +67,12 @@ describe('preview path containment', () => {
     expect(() => readLocal('innocent.txt', w(root))).toThrow(/cannot be previewed/);
   });
 
-  it('reads text and images, and refuses other types', () => {
+  it('reads text, code and images, and refuses other types', () => {
     const { root } = fixture();
     expect(readLocal('README.md', w(root))).toMatchObject({ kind: 'markdown', text: '# hi\n', path: join(root, 'README.md') });
     expect(readLocal('docs/a.png', w(root)).dataUrl).toBe('data:image/png;base64,iVBORw==');
-    expect(() => readLocal('run.sh', w(root))).toThrow(/cannot be previewed/);
+    expect(readLocal('run.sh', w(root))).toMatchObject({ kind: 'code', text: 'echo hi\n' });
+    expect(() => readLocal('tool.bin', w(root))).toThrow(/cannot be previewed/);
   });
 
   it('caps the size', async () => {
@@ -137,8 +139,20 @@ describe('preview kinds and renderer paths', () => {
     expect(previewKind('x.htm')).toBe('html');
     expect(previewKind('logo.svg')).toBe('image');
     expect(previewKind('data.json')).toBe('text');
-    expect(previewKind('main.ts')).toBeUndefined();
+    expect(previewKind('main.ts')).toBe('code');
+    expect(previewKind('a.tsx')).toBe('code');
+    expect(previewKind('photo.heic')).toBeUndefined();
     expect(previewKind('Makefile')).toBeUndefined();
+  });
+
+  it('colours source and structured text; only documents open in the default app', () => {
+    expect(codeLanguage('src/app.tsx')).toBe('typescript');
+    expect(codeLanguage('run.sh')).toBe('bash');
+    expect(codeLanguage('config.yml')).toBe('yaml');
+    expect(codeLanguage('notes.txt')).toBeUndefined();
+    expect(openableKind('report.md')).toBe(true);
+    expect(openableKind('run.sh')).toBe(false); // its default app might run it
+    expect(openableKind('tool.bin')).toBe(false);
   });
 
   it('resolves like path.posix.resolve', () => {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
-import { previewKind } from '../shared/preview';
+import { openableKind } from '../shared/preview';
 import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
@@ -160,7 +160,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'file:open': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
     const file = workspace.previewLocalPath(i.taskId, i.path, i.allowOutside);
     // Only document types: openPath on a script or an app would run it.
-    if (!previewKind(file)) throw new Error('Only previewable files can be opened from here.');
+    if (!openableKind(file)) throw new Error('Only documents (Markdown, HTML, images, text) can be opened from here.');
     const problem = await shell.openPath(file);
     if (problem) throw new Error(problem);
   },

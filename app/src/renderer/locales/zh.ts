@@ -59,6 +59,8 @@ export const zh: Record<string, string> = {
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',
   // File preview
+  Maximize: '最大化',
+  'Back to the side (Esc)': '还原到侧边（Esc）',
   'This file is outside the agent’s folder and project. Show it anyway?': '这个文件不在 agent 的目录和项目里，仍要显示吗？',
   'Show anyway': '仍要显示',
   'Resize the preview': '调整预览宽度',

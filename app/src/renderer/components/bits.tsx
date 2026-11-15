@@ -96,6 +96,7 @@ const ICONS = {
   send: 'M12 19V5 M6 11l6-6 6 6',
   plus: 'M12 5v14 M5 12h14',
   expand: 'M15 4h5v5 M9 20H4v-5 M20 4l-6 6 M4 20l6-6',
+  collapse: 'M14 4v6h6 M10 20v-6H4 M14 10l6-6 M10 14l-6 6',
   grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
   history: 'M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5 M12 7v5l3 2',
   pause: 'M8 5v14 M16 5v14',

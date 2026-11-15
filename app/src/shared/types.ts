@@ -90,7 +90,7 @@ export interface RetryState {
   error?: string;
 }
 
-export type PreviewKind = 'markdown' | 'html' | 'image' | 'text';
+export type PreviewKind = 'markdown' | 'html' | 'image' | 'text' | 'code';
 
 /** A file an agent wrote, read for the preview column. `path` is the resolved absolute path. */
 export interface FilePreview {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { dirnamePosix, resolvePosix } from '../../shared/preview';
+import { codeLanguage, openableKind, dirnamePosix, resolvePosix } from '../../shared/preview';
 import type { FilePreview, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
@@ -12,7 +12,7 @@ import { Markdown } from './Markdown';
  * main process (which only serves files inside the task's folders); the file is read
  * again whenever a later tool call in the conversation touches it.
  */
-export function FilePreviewPanel({ task, path, transcript, width, onClose, onOpenExternal }: { task: Task; path: string; transcript: TranscriptItem[]; width?: number; onClose: () => void; onOpenExternal?: () => void }) {
+export function FilePreviewPanel({ task, path, transcript, width, maximized, onToggleMax, onClose, onOpenExternal }: { task: Task; path: string; transcript: TranscriptItem[]; width?: number; maximized?: boolean; onToggleMax?: () => void; onClose: () => void; onOpenExternal?: () => void }) {
   const [file, setFile] = useState<FilePreview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,7 +47,9 @@ export function FilePreviewPanel({ task, path, transcript, width, onClose, onOpe
 
   const name = path.split('/').pop() ?? path;
   return (
-    <aside className="memory preview" aria-label={t('File preview')} data-testid="file-preview" style={width ? { width } : undefined}>
+    <aside className={`memory preview${maximized ? ' maximized' : ''}`} aria-label={t('File preview')} data-testid="file-preview" style={width && !maximized ? { width } : undefined}>
+      {/* Stays on top while the file scrolls, so it can be closed from anywhere. */}
+      <div className="preview-top">
       <div className="preview-head">
         <div className="preview-ident">
           <div className="panel-title truncate" title={file?.path ?? path}>
@@ -63,9 +65,14 @@ export function FilePreviewPanel({ task, path, transcript, width, onClose, onOpe
         <button className="icon-btn" title={t('Refresh')} aria-label={t('Refresh')} data-testid="preview-refresh" onClick={() => setManual((n) => n + 1)}>
           <Icon name="refresh" size={13} />
         </button>
-        {onOpenExternal && !task.host ? (
+        {onOpenExternal && !task.host && openableKind(path) ? (
           <button className="icon-btn" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={() => (outsideOk ? void call('file:open', { taskId: task.taskId, path, allowOutside: true }).catch((e) => setError(errorText(e))) : onOpenExternal())}>
             <Icon name="external" size={13} />
+          </button>
+        ) : null}
+        {onToggleMax ? (
+          <button className="icon-btn" title={maximized ? t('Back to the side (Esc)') : t('Maximize')} aria-label={maximized ? t('Back to the side (Esc)') : t('Maximize')} data-testid="preview-maximize" onClick={onToggleMax}>
+            <Icon name={maximized ? 'collapse' : 'expand'} size={13} />
           </button>
         ) : null}
         <button className="icon-btn" title={t('Close preview')} aria-label={t('Close preview')} data-testid="preview-close" onClick={onClose}>
@@ -77,6 +84,7 @@ export function FilePreviewPanel({ task, path, transcript, width, onClose, onOpe
           <input type="checkbox" checked={scripts} onChange={(e) => setScripts(e.target.checked)} data-testid="preview-scripts" /> {t('Allow scripts')}
         </label>
       ) : null}
+      </div>
       {outside ? (
         <div className="preview-outside" data-testid="preview-outside">
           <div className="small">{t('This file is outside the agent’s folder and project. Show it anyway?')}</div>
@@ -108,7 +116,23 @@ function PreviewBody({ task, file, scripts, version, outsideOk }: { task: Task; 
   if (file.kind === 'html')
     // No allow-same-origin, ever: with scripts on, the page would otherwise be able to reach the app.
     return <iframe key={`${file.frameUrl}${scripts}`} className="preview-frame" title={file.path} src={file.frameUrl} sandbox={scripts ? 'allow-scripts' : ''} data-testid="preview-frame" />;
+  // Source and structured text get colours (as code blocks in chat do); very large files stay plain.
+  const lang = codeLanguage(file.path);
+  if (lang && (file.text?.length ?? 0) <= HIGHLIGHT_MAX) return <CodeView text={file.text ?? ''} lang={lang} />;
   return <pre className="preview-text">{file.text}</pre>;
+}
+
+const HIGHLIGHT_MAX = 200_000;
+
+/** A source file as a highlighted code block (with its Copy button). */
+function CodeView({ text, lang }: { text: string; lang: string }) {
+  // A fence longer than any run of backticks in the file, so the file cannot end the block early.
+  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  return (
+    <div className="preview-code" data-testid="preview-code" data-lang={lang}>
+      <Markdown text={`${fence}${lang}\n${text.replace(/\n$/, '')}\n${fence}`} />
+    </div>
+  );
 }
 
 function MdImage({ taskId, dir, src, alt, outsideOk }: { taskId: string; dir: string; src: string; alt: string; outsideOk: boolean }) {

@@ -18,9 +18,10 @@ describe('file paths in agent messages', () => {
     expect(parts.map((p) => p.text).join('')).toBe('at src/app.json:12:3 now');
   });
 
-  it('leaves URLs, code files and plain words alone', () => {
+  it('leaves URLs, product names and plain words alone; finds source files', () => {
     expect(paths('https://github.com/x/y/blob/main/README.md and github.com/x/README.md')).toEqual([]);
-    expect(paths('edit src/main.ts and run npm test; version 1.2.3')).toEqual([]);
+    expect(paths('run npm test; version 1.2.3; built with Node.js, Vue.js and Next.js')).toEqual([]);
+    expect(paths('edit src/main.ts, app.tsx and scripts/run.sh')).toEqual(['src/main.ts', 'app.tsx', 'scripts/run.sh']);
   });
 
   it('reads whole code spans and link targets', () => {

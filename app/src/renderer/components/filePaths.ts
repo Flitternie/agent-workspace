@@ -1,18 +1,23 @@
 import { createContext } from 'react';
-import { previewKind } from '../../shared/preview';
+import { PREVIEW_EXTENSIONS, previewKind } from '../../shared/preview';
 
 /** Set by the agent view: what a click on a file (a tool row's Preview, a path in a message) does. */
 export const PreviewContext = createContext<{ preview(path: string): void; openExternal?: (path: string) => void } | null>(null);
 
 // File paths in agent messages become preview links: absolute (/…), home (~/…) and
-// relative (docs/a.md, ./a.md, ../a.md, README.md) paths to a file the preview can show.
+// relative (docs/a.md, ./a.md, ../a.md, src/app.ts) paths to a file the preview can show
+// (documents, images, text and source code).
 // A trailing :line or :line:col (as agents write them) is dropped. The main process
 // still checks every path (inside the agent's folder or project only).
 
 /** The scheme the links carry inside the Markdown tree (never a real URL). */
 export const FILE_SCHEME = 'amw-file:';
 
-const EXT = '(?:md|markdown|html?|png|jpe?g|gif|svg|webp|txt|json|csv|tsv|log|ya?ml|toml|xml)';
+// Longest first, so "tsx" is not read as "ts" followed by a letter.
+const EXT = `(?:${[...PREVIEW_EXTENSIONS].sort((a, b) => b.length - a.length).join('|')})`;
+
+/** Names that look like files but, in prose, are products: "Node.js", "Vue.js", "Next.js"… */
+const NOT_FILES = /^(node|vue|next|nuxt|react|three|d3|chart|express|nest|ember|backbone|angular|deno|bun|moment|lodash|alpine|solid|svelte|socket\.io|p5|pdf|ml5|tf)\.js$/i;
 // Not inside a URL or a longer word; segments are path-ish characters (no spaces in plain text).
 const PATH_RE = new RegExp(`(?<![\\w/.~:@-])((?:~/|\\.{1,2}/|/)?(?:[\\w@+.-]+/)*[\\w@+.-]*[\\w@+-]\\.${EXT})(?::\\d+(?::\\d+)?)?(?![\\w/-])`, 'gi');
 
@@ -38,6 +43,7 @@ export function splitPaths(text: string): Array<{ text: string; path?: string }>
     const at = m.index ?? 0;
     // "github.com/x/README.md" is a URL without its scheme, not a file (full URLs never match: see the lookbehind).
     if (/^[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\//i.test(m[1])) continue;
+    if (NOT_FILES.test(m[1])) continue;
     if (at > last) out.push({ text: text.slice(last, at) });
     out.push({ text: m[0], path: m[1] });
     last = at + m[0].length;

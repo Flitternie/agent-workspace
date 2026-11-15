@@ -27,6 +27,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const [preview, setPreview] = useState<string | null>(null);
   // The preview column's width: dragged by the user, kept for next time.
   const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
+  // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
+  const [previewMax, setPreviewMax] = useState(false);
+  useEffect(() => {
+    if (!preview) setPreviewMax(false);
+  }, [preview]);
+  useEffect(() => {
+    if (!previewMax) return;
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setPreviewMax(false);
+    };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
+  }, [previewMax]);
   const setPreviewWidth = (w: number) => {
     setPreviewWidthState(w);
     localStorage.setItem('amw.previewWidth', String(Math.round(w)));
@@ -164,7 +179,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         {forking ? <ForkDialog snapshot={snapshot} task={task} onClose={() => setForking(false)} onForked={(id) => onOpen?.(id)} /> : null}
 
         <div className="focus-body">
-          <div className="focus-thread">
+          {/* Kept mounted while the preview is maximized, so the conversation keeps its place. */}
+          <div className="focus-thread" hidden={!!preview && previewMax}>
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
               <Transcript items={transcript} main={isMainAgent(task)} />
@@ -187,8 +203,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
           {preview ? (
             <>
-              <PanelResizer width={previewWidth} onChange={setPreviewWidth} />
-              <FilePreviewPanel task={task} path={preview} transcript={transcript} width={previewWidth} onClose={() => setPreview(null)} onOpenExternal={openExternal && (() => openExternal(preview))} />
+              {previewMax ? null : <PanelResizer width={previewWidth} onChange={setPreviewWidth} />}
+              <FilePreviewPanel
+                task={task}
+                path={preview}
+                transcript={transcript}
+                width={previewWidth}
+                maximized={previewMax}
+                onToggleMax={() => setPreviewMax(!previewMax)}
+                onClose={() => setPreview(null)}
+                onOpenExternal={openExternal && (() => openExternal(preview))}
+              />
             </>
           ) : showMemory ? (
             <MemoryPanel snapshot={snapshot} task={task} />
