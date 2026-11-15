@@ -3445,7 +3445,8 @@ details[open] > summary .tool-more {
 
 .agent-row-sub .subtask-dots {
   margin: 0 5px 0 -4px;
-  vertical-align: 1px;
+  /* Centred on the 12px text beside it (measured in the sub-agent e2e). */
+  vertical-align: -1px;
 }
 
 /* Unfolded, the row and its sub-agents are one card. */

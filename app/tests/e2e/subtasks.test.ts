@@ -62,6 +62,31 @@ describe('sub-agents (mock agents)', () => {
     expect(await row.getByTestId('subtask-dots').getAttribute('data-state')).toBe('running');
     expect(await page.getByTestId('subtask-row').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'subtasks-01-folded.png') });
+    // Alignment: the mark's centre sits on the centre of the text beside it (sidebar line, card status).
+    const align = await page.evaluate((alias) => {
+      const box = (e: Element | null) => (e ? e.getBoundingClientRect() : null);
+      const mid = (r: DOMRect | null) => (r ? r.top + r.height / 2 : NaN);
+      const row = document.querySelector(`[data-testid="rail-item"][data-alias="${alias}"]`)!;
+      const badge = row.querySelector('[data-testid="subtask-dots"]')!;
+      // The text right after the mark, measured on its own glyph box.
+      const textNode = [...badge.parentElement!.childNodes].find((n) => n.nodeType === 3 && n.textContent!.trim()) ?? null;
+      const range = document.createRange();
+      if (textNode) range.selectNodeContents(textNode);
+      const textRect = textNode ? range.getClientRects()[0] : null;
+      const card = document.querySelector(`[data-testid="agent-card"][data-alias="${alias}"]`)!;
+      const cBadge = card.querySelector('[data-testid="subtask-dots"]')!;
+      const status = card.querySelector('.status-text');
+      return {
+        side: { badge: mid(box(badge)), icon: mid(box(badge.querySelector('.icon'))), count: mid(box(badge.querySelector('.subtask-count'))), text: mid(textRect as DOMRect), badgeH: box(badge)!.height, textH: textRect?.height },
+        card: { badge: mid(box(cBadge)), icon: mid(box(cBadge.querySelector('.icon'))), count: mid(box(cBadge.querySelector('.subtask-count'))), status: mid(box(status)), badgeH: box(cBadge)!.height, statusH: box(status)!.height },
+      };
+    }, orders.alias);
+    writeFileSync(join(shots, 'subtasks-align.json'), JSON.stringify(align, null, 2));
+    const off = (a: number, b: number) => Math.abs(a - b);
+    expect(off(align.side.badge, align.side.text)).toBeLessThanOrEqual(1);
+    expect(off(align.side.icon, align.side.count)).toBeLessThanOrEqual(1);
+    expect(off(align.card.badge, align.card.status)).toBeLessThanOrEqual(1);
+    expect(off(align.card.icon, align.card.count)).toBeLessThanOrEqual(1);
 
     // Hover: what each one is doing.
     await row.getByTestId('subtask-dots').hover();
