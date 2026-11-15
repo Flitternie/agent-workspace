@@ -426,9 +426,25 @@ pre code {
 /* ------------------------------------------------------------------ shell */
 
 .app {
+  position: relative;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w, 252px) minmax(0, 1fr);
   height: 100vh;
+}
+/* The sidebar's edge, draggable (same look as the preview's resizer). */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-w, 252px) - 3px);
+  width: 6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resizer:hover,
+body.resizing .sidebar-resizer {
+  background: linear-gradient(90deg, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
 }
 .sidebar {
   background: var(--sidebar);
@@ -3195,4 +3211,416 @@ details[open] > summary .tool-more {
 }
 .md-file code {
   color: var(--accent);
+}
+
+/* The agent's alias beside its work label: the stable handle, kept small. */
+.alias-tag {
+  flex: none;
+  margin-left: 6px;
+  font-size: 0.82em;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+/* Sidebar teams: one per project, folded or open; idle members behind one row. */
+.needs-strip {
+  margin: 4px 0 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.06));
+}
+.needs-head .count {
+  margin-left: 4px;
+}
+.row-project {
+  color: var(--text-3);
+}
+.team-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-2, inherit);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border-radius: var(--radius-md);
+}
+.team-head:hover {
+  background: var(--hover);
+}
+.team-chevron {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+.team.open .team-chevron {
+  transform: rotate(90deg);
+}
+.team-name {
+  flex: 1;
+  min-width: 0;
+}
+.team-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.team-count.needs {
+  color: var(--needs);
+}
+.team-count.running {
+  color: var(--accent);
+}
+.team-count.failed {
+  color: #dc2626;
+}
+.team-count.idle {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.team .agent-row {
+  padding-left: 14px;
+}
+.team-idle {
+  display: block;
+  width: 100%;
+  padding: 3px 8px 5px 38px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-align: left;
+}
+.team-idle:hover {
+  color: var(--text-2, inherit);
+}
+.kbd-hint {
+  flex: none;
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0;
+}
+.agent-list:hover .kbd-hint,
+.agent-row.active .kbd-hint {
+  opacity: 1;
+}
+
+/* Overview layout: how many tiles; the most urgent agents fill them. */
+.layout-pick {
+  display: inline-flex;
+  margin-right: 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.layout-opt {
+  min-width: 28px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.layout-opt.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.overview-more {
+  padding: 6px 16px 10px;
+  text-align: center;
+}
+.overview-quiet {
+  min-height: 200px;
+}
+
+/* Sub-agents: marks, not sessions. Dots beside the status (no extra height); unfolded, half-height
+   rows on a thread line, without an avatar. */
+.subtask-dots {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  margin: 0 6px 0 4px;
+  padding: 2px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.subtask-dots:hover,
+.subtask-dots.open,
+.subtask-dots:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.sdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-3);
+  opacity: 0.45;
+}
+.sdot-running {
+  background: var(--accent);
+  opacity: 1;
+  animation: sdot-pulse 1.4s ease-in-out infinite;
+}
+.sdot-failed {
+  background: var(--risk);
+  opacity: 1;
+}
+@keyframes sdot-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.sdot-more {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.subtask-pop {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  text-align: left;
+  cursor: default;
+}
+.subtask-pop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+.subtask-pop-row .sdot {
+  margin-top: 5px;
+}
+.subtask-pop-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.subtask-pop-step {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.subtask-thread {
+  margin: -2px 0 4px 23px;
+  padding: 1px 0 1px 10px;
+  border-left: 1px dashed var(--border-strong);
+}
+.team .subtask-thread {
+  margin-left: 29px;
+}
+.tile-body .subtask-thread {
+  margin: 0 0 8px 4px;
+}
+.subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.subtask-desc {
+  flex: 1;
+  min-width: 0;
+}
+.subtask-step {
+  color: var(--text-3);
+}
+.st-done .subtask-desc {
+  color: var(--text-3);
+}
+.subtask-time {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.subtask-more {
+  font-size: 10.5px;
+  color: var(--text-3);
+  padding: 1px 0 2px 12px;
+}
+
+.agent-row-sub .subtask-dots {
+  margin: 0 5px 0 -4px;
+  /* Centred on the 12px text beside it (measured in the sub-agent e2e). */
+  vertical-align: -1px;
+}
+
+/* Unfolded, the row and its sub-agents are one card. */
+.agent-item.unfolded {
+  margin: 2px 0;
+  background: var(--panel);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+.agent-item.unfolded > .agent-row,
+.agent-item.unfolded > .agent-row:hover,
+.agent-item.unfolded > .agent-row.active {
+  background: transparent;
+  box-shadow: none;
+}
+.agent-item.unfolded > .subtask-thread {
+  margin: -3px 10px 0 23px;
+  padding-bottom: 6px;
+}
+.team .agent-item.unfolded > .subtask-thread {
+  margin-left: 29px;
+}
+button.subtask-row {
+  width: 100%;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.subtask-row:hover {
+  background: var(--hover);
+}
+
+/* A sub-agent's run, read-only. */
+.subtask-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.subtask-view .btn-ghost .icon {
+  transform: rotate(180deg);
+}
+.subtask-view-body {
+  padding: 18px 28px;
+  overflow: auto;
+  max-width: 820px;
+}
+.subtask-view-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.subtask-view-title h2 {
+  margin: 0;
+  font-size: 17px;
+}
+.subtask-view-title .sdot {
+  width: 8px;
+  height: 8px;
+}
+.subtask-view-status {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.subtask-view-status.st-running {
+  color: var(--accent);
+}
+.subtask-steps {
+  margin: 14px 0;
+  padding: 0 0 0 12px;
+  border-left: 1px dashed var(--border-strong);
+  list-style: none;
+}
+.subtask-steps li {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.subtask-steps li.current {
+  color: var(--text);
+  font-weight: 500;
+}
+.subtask-step-time {
+  flex: none;
+  width: 34px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.subtask-result {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.subtask-result p {
+  margin: 6px 0 0;
+}
+
+/* The sub-agent mark: fixed width (branch + count), coloured by state. */
+.subtask-dots {
+  gap: 2px;
+  min-width: 26px;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-3);
+}
+.subtask-dots.st-running {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.subtask-dots.st-running .icon {
+  animation: sdot-pulse 1.4s ease-in-out infinite;
+}
+.subtask-dots.st-failed {
+  color: var(--risk);
+  background: var(--risk-bg);
+}
+.subtask-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Needs you" strip: one line per agent (it is a pointer; the full row is in its team). */
+.agent-row.compact {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.agent-row.compact .agent-row-sub {
+  -webkit-line-clamp: 1;
+}
+/* Sub-agents in a card: a section like the card's others. */
+.subtask-thread.with-heading {
+  border-left: none;
+  padding-left: 0;
+}
+.subtask-thread.with-heading .section-label {
+  margin-bottom: 2px;
+}
+.subtask-thread.with-heading .subtask-row {
+  padding-left: 2px;
+}
+
+.layout-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-glyph rect {
+  fill: currentColor;
+  opacity: 0.55;
+}
+.layout-opt.on .layout-glyph rect {
+  opacity: 1;
 }

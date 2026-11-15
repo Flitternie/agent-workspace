@@ -8,6 +8,8 @@ export interface RouteTask {
   taskId: string;
   alias: string;
   name: string;
+  /** 'user': a name the user chose, which they may call the agent by. Automatic labels only describe the work. */
+  nameSource?: 'auto' | 'user';
   title: string;
   projectId: string;
   projectName: string;
@@ -93,8 +95,12 @@ function explicitTargets(ctx: RouteContext): RouteTask[] {
       new RegExp(`(给|让|叫|告诉)\\s*${a}(?![A-Za-z])`),
     ];
     if (patterns.some((p) => p.test(u))) hits.set(t.taskId, t);
+    // A name the user gave the agent is a handle too. An automatic work label ("Codewords",
+    // "订单接口迁移") only describes the work: "the codewords task" talks about an agent, it does not
+    // call it, so labels count through the overlap score, not here. Short Chinese names ("测试")
+    // turn up in ordinary sentences and never count as a handle.
     const name = t.name.trim();
-    if (name.length >= 3 && name.toLowerCase() !== t.alias.toLowerCase()) {
+    if (t.nameSource === 'user' && name.length >= (CJK.test(name) ? 4 : 3) && name.toLowerCase() !== t.alias.toLowerCase()) {
       const re = CJK.test(name)
         ? new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         : new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b\\s*(agent|task|代理)?`, 'i');

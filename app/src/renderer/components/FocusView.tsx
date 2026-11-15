@@ -5,7 +5,7 @@ import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
 import { FilePreviewPanel } from './FilePreview';
-import { Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
+import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { RetryNotice } from './Retry';
 import { ForkDialog } from './Dialogs';
@@ -172,7 +172,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         </header>
         {task.sharedCwdWarning ? (
           <div className="warn-text pad">
-            <Icon name="alert" size={12} /> {task.sharedCwdWarning}
+            <Icon name="alert" size={12} /> {warningText(task.sharedCwdWarning)}
           </div>
         ) : null}
         {error ? <div className="error-text pad">{error}</div> : null}
@@ -283,7 +283,9 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
             <div key={a.id} className={`waiting-row kind-${a.kind}`} data-testid="waiting-row">
               <button className="waiting-row-main" onClick={() => setExpanded(a.id)} title={t('Show the request')}>
                 <Alias alias={worker.alias} size="sm" />
-                <span className="waiting-row-name">{displayName(worker)}</span>
+                <span className="waiting-row-name">
+                  <AgentName task={worker} />
+                </span>
                 <span className="waiting-row-text">{a.headline}</span>
               </button>
               {onOpen ? (
@@ -296,7 +298,7 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
         return (
           <div key={a.id} className="waiting-item">
             <div className="waiting-from">
-              <Alias alias={worker.alias} size="sm" /> {displayName(worker)}
+              <Alias alias={worker.alias} size="sm" /> <AgentName task={worker} />
               {onOpen ? (
                 <button className="link small" onClick={() => onOpen(worker.taskId)}>
                   {t('Open')}
@@ -331,7 +333,7 @@ function TaskName({ task }: { task: Task }) {
   if (!editing)
     return (
       <span className="task-name" onDoubleClick={() => setEditing(true)} title={t('Double-click to rename')}>
-        {displayName(task)}
+        <AgentName task={task} />
       </span>
     );
   return (

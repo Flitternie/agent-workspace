@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
-import type { AgentProvider, AgentStatus, AttentionKind } from '../../shared/types';
+import { useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../../shared/types';
 import { t, t as tr } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -78,12 +79,29 @@ export function isMainAgent(t: { taskId?: string } | undefined): boolean {
   return !!t?.taskId?.startsWith('t-main-');
 }
 
-export function displayName(t: { name: string; alias: string; taskId?: string }): string {
+type Named = { name: string; alias: string; taskId?: string };
+
+/** What the agent is working on ("订单接口迁移"), or its alias while it has no label yet. */
+export function labelOf(t: Named): string {
   if (isMainAgent(t)) return tr('Main agent');
-  if (t.name === t.alias || !t.name.trim()) return t.alias;
-  // Role first, like a job title: "Database Charlie", "数据库小张".
-  if (/[㐀-鿿]/.test(t.alias)) return `${t.name}${t.alias}`;
-  return `${t.name.charAt(0).toUpperCase()}${t.name.slice(1)} ${t.alias}`;
+  return t.name.trim() && t.name !== t.alias ? t.name : t.alias;
+}
+
+/** The whole reference, for captions, tooltips and confirmations: "订单接口迁移 · 小王", or just "小王". */
+export function displayName(t: Named): string {
+  const label = labelOf(t);
+  return isMainAgent(t) || label === t.alias ? label : `${label} · ${t.alias}`;
+}
+
+/** The label first, the alias (the agent's stable handle, what you say to it) small beside it. */
+export function AgentName({ task }: { task: Named }) {
+  const label = labelOf(task);
+  return (
+    <>
+      <span className="truncate">{label}</span>
+      {!isMainAgent(task) && label !== task.alias ? <span className="alias-tag">{task.alias}</span> : null}
+    </>
+  );
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
@@ -103,6 +121,7 @@ const ICONS = {
   play: 'M7 5l12 7-12 7z',
   power: 'M12 3v8 M6.3 6.3a8 8 0 1 0 11.4 0',
   branch: 'M6 3v12 M18 9a3 3 0 1 0 0-.01 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9',
+  subtasks: 'M6 4v14a2 2 0 0 0 2 2h10 M6 11h12 M14 7l4 4-4 4',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
   check: 'M5 12l5 5 9-10',
   x: 'M6 6l12 12 M18 6L6 18',
@@ -133,4 +152,126 @@ export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
       <path d={ICONS[name]} />
     </svg>
   );
+}
+
+/** m:ss between two times. */
+export function clock(fromIso: string, to: number): string {
+  const sec = Math.max(0, Math.round((to - Date.parse(fromIso)) / 1000));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+/** m:ss since a sub-agent started (or until it ended). */
+export function elapsed(s: SubtaskInfo, now: number): string {
+  return clock(s.startedAt, s.endedAt ? Date.parse(s.endedAt) : now);
+}
+
+/**
+ * The sub-agents of the agent's latest turn: still marked after the turn ends (grey dots), since
+ * coming back to see what an agent's helpers did is when they matter; the next turn replaces them.
+ */
+export function liveSubtasks(t: { status: AgentStatus; subtasks?: SubtaskInfo[] }): SubtaskInfo[] | undefined {
+  return t.subtasks?.length ? t.subtasks : undefined;
+}
+
+/**
+ * An agent's sub-agents as a few dots beside its status: no extra height. Running ones pulse,
+ * finished ones are grey, failed ones red. Hover for what each is doing; click to unfold the thread.
+ */
+export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskInfo[]; open: boolean; onToggle: () => void }) {
+  // The hover card floats above everything (rows clip their text), next to the dots.
+  const [pop, setPop] = useState<{ left: number; top: number } | null>(null);
+  if (!subtasks?.length) return null;
+  const running = subtasks.filter((s) => s.status === 'running').length;
+  const state = subtasks.some((s) => s.status === 'failed') ? 'failed' : running ? 'running' : 'done';
+  const toggle = (e: { stopPropagation: () => void; preventDefault: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPop(null);
+    onToggle();
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={`subtask-dots st-${state}${open ? ' open' : ''}`}
+      data-state={state}
+      aria-expanded={open}
+      aria-label={tr('{n} sub-agents, {r} running', { n: subtasks.length, r: running })}
+      data-testid="subtask-dots"
+      onClick={toggle}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(e)}
+      onMouseEnter={(e) => {
+        if (open) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        setPop({ left: Math.min(r.left, window.innerWidth - 240), top: r.bottom + 4 });
+      }}
+      onMouseLeave={() => setPop(null)}
+    >
+      {/* Same width however many there are: a branch mark and the count, coloured by state. */}
+      <Icon name="subtasks" size={11} />
+      <span className="subtask-count">{subtasks.length}</span>
+      {pop
+        ? createPortal(
+            <div className="subtask-pop" role="tooltip" style={{ left: pop.left, top: pop.top }} data-testid="subtask-pop">
+              {subtasks.map((s) => (
+                <div key={s.id} className="subtask-pop-row">
+                  <span className={`sdot sdot-${s.status}`} />
+                  <span className="subtask-pop-text">
+                    <span className="truncate">{s.description}</span>
+                    {s.status === 'running' && s.step ? <span className="subtask-pop-step truncate">{s.step}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
+/** Unfolded sub-agents: half-height rows on a thread line, no avatar, so they never read as sessions. */
+export function SubtaskThread({
+  subtasks,
+  now,
+  max = 3,
+  steps = true,
+  heading = false,
+  onOpen,
+}: {
+  subtasks: SubtaskInfo[];
+  now: number;
+  max?: number;
+  /** Show each one's current step (cards have the room; the sidebar shows it on hover). */
+  steps?: boolean;
+  /** A section label like the card's others ("Latest", "Activity"). */
+  heading?: boolean;
+  onOpen: (id: string) => void;
+}) {
+  const shown = subtasks.slice(0, max);
+  return (
+    <div className={`subtask-thread${heading ? ' with-heading' : ''}`} data-testid="subtask-thread">
+      {heading ? <div className="section-label">{tr('Sub-agents {n}', { n: subtasks.length })}</div> : null}
+      {shown.map((s) => (
+        <button key={s.id} className={`subtask-row st-${s.status}`} data-testid="subtask-row" title={tr('See what it did')} onClick={() => onOpen(s.id)}>
+          <span className={`sdot sdot-${s.status}`} />
+          <span className="subtask-desc truncate">
+            {s.description}
+            {steps && s.status === 'running' && s.step ? <span className="subtask-step"> · {s.step}</span> : null}
+          </span>
+          <span className="subtask-time">{s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : elapsed(s, now)}</span>
+        </button>
+      ))}
+      {subtasks.length > shown.length ? <div className="subtask-more">{tr('{n} more in the conversation', { n: subtasks.length - shown.length })}</div> : null}
+    </div>
+  );
+}
+
+/** Workspace warnings written by the main process, in the UI language. */
+export function warningText(text: string): string {
+  const shares = /^Shares a writable directory with (.+) — edits are not isolated\.$/.exec(text);
+  if (shares) return tr('Shares a writable directory with {names} — edits are not isolated.', { names: shares[1] });
+  const original = /^Uses its original directory, shared with (.+) — not isolated\.$/.exec(text);
+  if (original) return tr('Uses its original directory, shared with {names} — not isolated.', { names: original[1] });
+  return text;
 }
