@@ -120,7 +120,7 @@ export function AttentionView({
                         })
                       }
                     >
-                      {q.multiSelect ? <span className="check-box">{on ? '✓' : ''}</span> : null}
+                      {q.multiSelect ? <span className="check-box">{on ? <Icon name="check" size={10} /> : null}</span> : null}
                       {o.label}
                     </button>
                   );

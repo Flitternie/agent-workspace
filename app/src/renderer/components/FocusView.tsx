@@ -460,6 +460,7 @@ function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
   return (
     <details className="msg notices" data-testid="notice-group">
       <summary className="msg-system">
+        <Icon name="chevron" size={10} />
         {parts} — {names.slice(0, 4).join(', ')}
         {names.length > 4 ? ` +${names.length - 4}` : ''}
       </summary>
@@ -490,10 +491,18 @@ function Composer({ task }: { task: Task }) {
     try {
       const command = text.slice(1).trim();
       if (shell && !command) return;
+      // A command can run for a while (its row shows it running): the box is free at once, and
+      // gets the command back if it could not run.
+      if (shell) setDraft('');
       const r = shell ? await call('task:shell', { taskId: task.taskId, command }) : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
-      if (r.ok) setDraft('');
-      else setError(r.error ?? t('Not delivered'));
+      if (r.ok) {
+        if (!shell) setDraft('');
+      } else {
+        if (shell) setDraft((d) => d || text);
+        setError(r.error ?? t('Not delivered'));
+      }
     } catch (e) {
+      if (shell) setDraft((d) => d || text);
       setError(errorText(e));
     } finally {
       setSending(false);

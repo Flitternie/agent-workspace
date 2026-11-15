@@ -259,7 +259,7 @@ export function SubtaskThread({
             {s.description}
             {steps && s.status === 'running' && s.step ? <span className="subtask-step"> · {s.step}</span> : null}
           </span>
-          <span className="subtask-time">{s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : elapsed(s, now)}</span>
+          <span className="subtask-time">{s.status === 'done' ? <StatusIcon status="completed" /> : s.status === 'failed' ? <StatusIcon status="failed" /> : elapsed(s, now)}</span>
         </button>
       ))}
       {subtasks.length > shown.length ? <div className="subtask-more">{tr('{n} more in the conversation', { n: subtasks.length - shown.length })}</div> : null}
@@ -274,4 +274,50 @@ export function warningText(text: string): string {
   const original = /^Uses its original directory, shared with (.+) — not isolated\.$/.exec(text);
   if (original) return tr('Uses its original directory, shared with {names} — not isolated.', { names: original[1] });
   return text;
+}
+
+/**
+ * A small drawn state mark for a step, tool call or sub-task, in the current text colour
+ * (callers colour it). Drawn rather than font glyphs (… ✓ ✕ ⊘ ◼), which sit and size
+ * differently in every font.
+ */
+export function StatusIcon({ status, size = 12 }: { status: 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'declined' | 'interrupted'; size?: number }) {
+  const common = { width: size, height: size, viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
+  if (status === 'running')
+    return (
+      <svg {...common} className="status-icon spin">
+        <path d="M6 1.5a4.5 4.5 0 1 1-4.5 4.5" />
+      </svg>
+    );
+  if (status === 'completed')
+    return (
+      <svg {...common} className="status-icon">
+        <path d="M2.3 6.3l2.4 2.4 5-5.2" />
+      </svg>
+    );
+  if (status === 'failed')
+    return (
+      <svg {...common} className="status-icon">
+        <path d="M3 3l6 6M9 3l-6 6" />
+      </svg>
+    );
+  if (status === 'declined')
+    return (
+      <svg {...common} className="status-icon">
+        <circle cx="6" cy="6" r="4.5" />
+        <path d="M2.9 9.1l6.2-6.2" />
+      </svg>
+    );
+  if (status === 'interrupted')
+    return (
+      <svg {...common} className="status-icon">
+        <rect x="3" y="3" width="6" height="6" rx="1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  return (
+    <svg {...common} className="status-icon">
+      <circle cx="6" cy="6" r="4.5" />
+      <circle cx="6" cy="6" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
