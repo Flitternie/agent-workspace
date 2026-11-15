@@ -121,6 +121,7 @@ const ICONS = {
   play: 'M7 5l12 7-12 7z',
   power: 'M12 3v8 M6.3 6.3a8 8 0 1 0 11.4 0',
   branch: 'M6 3v12 M18 9a3 3 0 1 0 0-.01 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9',
+  subtasks: 'M6 4v14a2 2 0 0 0 2 2h10 M6 11h12 M14 7l4 4-4 4',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
   check: 'M5 12l5 5 9-10',
   x: 'M6 6l12 12 M18 6L6 18',
@@ -164,9 +165,12 @@ export function elapsed(s: SubtaskInfo, now: number): string {
   return clock(s.startedAt, s.endedAt ? Date.parse(s.endedAt) : now);
 }
 
-/** Sub-agents are marked while their turn runs (or waits on you); afterwards they live in the conversation. */
+/**
+ * The sub-agents of the agent's latest turn: still marked after the turn ends (grey dots), since
+ * coming back to see what an agent's helpers did is when they matter; the next turn replaces them.
+ */
 export function liveSubtasks(t: { status: AgentStatus; subtasks?: SubtaskInfo[] }): SubtaskInfo[] | undefined {
-  return t.status === 'running' || t.status === 'starting' || t.status === 'waiting_for_user' ? t.subtasks : undefined;
+  return t.subtasks?.length ? t.subtasks : undefined;
 }
 
 /**
@@ -177,8 +181,8 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
   // The hover card floats above everything (rows clip their text), next to the dots.
   const [pop, setPop] = useState<{ left: number; top: number } | null>(null);
   if (!subtasks?.length) return null;
-  const shown = subtasks.slice(0, 4);
   const running = subtasks.filter((s) => s.status === 'running').length;
+  const state = subtasks.some((s) => s.status === 'failed') ? 'failed' : running ? 'running' : 'done';
   const toggle = (e: { stopPropagation: () => void; preventDefault: () => void }) => {
     e.preventDefault();
     e.stopPropagation();
@@ -189,7 +193,8 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
     <span
       role="button"
       tabIndex={0}
-      className={`subtask-dots${open ? ' open' : ''}`}
+      className={`subtask-dots st-${state}${open ? ' open' : ''}`}
+      data-state={state}
       aria-expanded={open}
       aria-label={tr('{n} sub-agents, {r} running', { n: subtasks.length, r: running })}
       data-testid="subtask-dots"
@@ -202,10 +207,9 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
       }}
       onMouseLeave={() => setPop(null)}
     >
-      {shown.map((s) => (
-        <span key={s.id} className={`sdot sdot-${s.status}`} />
-      ))}
-      {subtasks.length > shown.length ? <span className="sdot-more">+{subtasks.length - shown.length}</span> : null}
+      {/* Same width however many there are: a branch mark and the count, coloured by state. */}
+      <Icon name="subtasks" size={11} />
+      <span className="subtask-count">{subtasks.length}</span>
       {pop
         ? createPortal(
             <div className="subtask-pop" role="tooltip" style={{ left: pop.left, top: pop.top }} data-testid="subtask-pop">
@@ -227,16 +231,33 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
 }
 
 /** Unfolded sub-agents: half-height rows on a thread line, no avatar, so they never read as sessions. */
-export function SubtaskThread({ subtasks, now, max = 3, onOpen }: { subtasks: SubtaskInfo[]; now: number; max?: number; onOpen: (id: string) => void }) {
+export function SubtaskThread({
+  subtasks,
+  now,
+  max = 3,
+  steps = true,
+  heading = false,
+  onOpen,
+}: {
+  subtasks: SubtaskInfo[];
+  now: number;
+  max?: number;
+  /** Show each one's current step (cards have the room; the sidebar shows it on hover). */
+  steps?: boolean;
+  /** A section label like the card's others ("Latest", "Activity"). */
+  heading?: boolean;
+  onOpen: (id: string) => void;
+}) {
   const shown = subtasks.slice(0, max);
   return (
-    <div className="subtask-thread" data-testid="subtask-thread">
+    <div className={`subtask-thread${heading ? ' with-heading' : ''}`} data-testid="subtask-thread">
+      {heading ? <div className="section-label">{tr('Sub-agents {n}', { n: subtasks.length })}</div> : null}
       {shown.map((s) => (
         <button key={s.id} className={`subtask-row st-${s.status}`} data-testid="subtask-row" title={tr('See what it did')} onClick={() => onOpen(s.id)}>
           <span className={`sdot sdot-${s.status}`} />
           <span className="subtask-desc truncate">
             {s.description}
-            {s.status === 'running' && s.step ? <span className="subtask-step"> · {s.step}</span> : null}
+            {steps && s.status === 'running' && s.step ? <span className="subtask-step"> · {s.step}</span> : null}
           </span>
           <span className="subtask-time">{s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : elapsed(s, now)}</span>
         </button>
@@ -244,4 +265,13 @@ export function SubtaskThread({ subtasks, now, max = 3, onOpen }: { subtasks: Su
       {subtasks.length > shown.length ? <div className="subtask-more">{tr('{n} more in the conversation', { n: subtasks.length - shown.length })}</div> : null}
     </div>
   );
+}
+
+/** Workspace warnings written by the main process, in the UI language. */
+export function warningText(text: string): string {
+  const shares = /^Shares a writable directory with (.+) — edits are not isolated\.$/.exec(text);
+  if (shares) return tr('Shares a writable directory with {names} — edits are not isolated.', { names: shares[1] });
+  const original = /^Uses its original directory, shared with (.+) — not isolated\.$/.exec(text);
+  if (original) return tr('Uses its original directory, shared with {names} — not isolated.', { names: original[1] });
+  return text;
 }

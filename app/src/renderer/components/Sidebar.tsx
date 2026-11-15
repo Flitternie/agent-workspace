@@ -68,7 +68,7 @@ export function Sidebar({
       // Unfolded, the row and its sub-agents are one card.
       <div key={`${opts.needs ? 'needs-' : ''}${t.taskId}`} className={`agent-item${unfolded ? ' unfolded' : ''}${t.taskId === focusId ? ' active' : ''}`}>
       <button
-        className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}`}
+        className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`}
         onClick={() => onSelect(t.taskId)}
         onKeyDown={(e) => {
           // Like a tree: → unfolds sub-agents, ← folds them.
@@ -97,7 +97,7 @@ export function Sidebar({
           </span>
         </span>
       </button>
-      {unfolded ? <SubtaskThread subtasks={subs!} now={now} onOpen={(id) => onOpenSubtask(t.taskId, id)} /> : null}
+      {unfolded ? <SubtaskThread subtasks={subs!} now={now} steps={false} onOpen={(id) => onOpenSubtask(t.taskId, id)} /> : null}
       </div>
     );
   };

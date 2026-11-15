@@ -56,9 +56,10 @@ describe('sub-agents (mock agents)', () => {
     await mk(legal.projectId, '合同条款时效梳理', 'work', '梳理合同里所有和时效相关的条款。');
 
     const row = page.locator(`[data-testid="rail-item"][data-alias="${orders.alias}"]`);
-    // Folded: a few dots on the agent's own row, nothing more.
-    await expect.poll(() => row.getByTestId('subtask-dots').locator(':scope > .sdot').count(), { timeout: 30_000 }).toBe(3);
-    await expect.poll(() => row.getByTestId('subtask-dots').locator(':scope > .sdot-done').count(), { timeout: 30_000 }).toBe(1);
+    // Folded: a small mark on the agent's own row, nothing more.
+    // One fixed-width mark: the count, coloured while any is running.
+    await expect.poll(() => row.getByTestId('subtask-dots').innerText(), { timeout: 30_000 }).toBe('3');
+    expect(await row.getByTestId('subtask-dots').getAttribute('data-state')).toBe('running');
     expect(await page.getByTestId('subtask-row').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'subtasks-01-folded.png') });
 
@@ -83,6 +84,7 @@ describe('sub-agents (mock agents)', () => {
     expect(rowH).toBeGreaterThan(subH * 1.8);
     await page.mouse.move(800, 30);
     await page.screenshot({ path: join(shots, 'subtasks-03-unfolded.png') });
+    await page.locator('.sidebar').screenshot({ path: join(shots, 'subtasks-03b-sidebar.png') });
 
     // On its Overview card, the same dots unfold above the card's activity.
     const card = page.locator(`[data-testid="agent-card"][data-alias="${orders.alias}"]`);
@@ -90,6 +92,7 @@ describe('sub-agents (mock agents)', () => {
     await expect.poll(() => card.getByTestId('subtask-row').count()).toBe(3);
     await page.mouse.move(800, 30);
     await page.screenshot({ path: join(shots, 'subtasks-04-card.png') });
+    await card.screenshot({ path: join(shots, 'subtasks-04b-card.png') });
 
     // Click a sub-agent: its run, read-only (each step, and what it reported back).
     await page.locator('.sidebar').getByTestId('subtask-row').filter({ hasText: '检查更新日志' }).click();

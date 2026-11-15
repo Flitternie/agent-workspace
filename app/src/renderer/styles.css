@@ -3549,3 +3549,48 @@ button.subtask-row:hover {
 .subtask-result p {
   margin: 6px 0 0;
 }
+
+/* The sub-agent mark: fixed width (branch + count), coloured by state. */
+.subtask-dots {
+  gap: 2px;
+  min-width: 26px;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-3);
+}
+.subtask-dots.st-running {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.subtask-dots.st-running .icon {
+  animation: sdot-pulse 1.4s ease-in-out infinite;
+}
+.subtask-dots.st-failed {
+  color: var(--risk);
+  background: var(--risk-bg);
+}
+.subtask-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Needs you" strip: one line per agent (it is a pointer; the full row is in its team). */
+.agent-row.compact {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.agent-row.compact .agent-row-sub {
+  -webkit-line-clamp: 1;
+}
+/* Sub-agents in a card: a section like the card's others. */
+.subtask-thread.with-heading {
+  border-left: none;
+  padding-left: 0;
+}
+.subtask-thread.with-heading .section-label {
+  margin-bottom: 2px;
+}
+.subtask-thread.with-heading .subtask-row {
+  padding-left: 2px;
+}

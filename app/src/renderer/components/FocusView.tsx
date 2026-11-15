@@ -5,7 +5,7 @@ import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
 import { FilePreviewPanel } from './FilePreview';
-import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText } from './bits';
+import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { RetryNotice } from './Retry';
 import { ForkDialog } from './Dialogs';
@@ -172,7 +172,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         </header>
         {task.sharedCwdWarning ? (
           <div className="warn-text pad">
-            <Icon name="alert" size={12} /> {task.sharedCwdWarning}
+            <Icon name="alert" size={12} /> {warningText(task.sharedCwdWarning)}
           </div>
         ) : null}
         {error ? <div className="error-text pad">{error}</div> : null}

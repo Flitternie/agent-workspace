@@ -5,7 +5,7 @@ import { timeAgo } from '../state';
 import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
-import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread } from './bits';
+import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread, warningText } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 
@@ -102,10 +102,10 @@ export function AgentCard({
       </div>
 
       <div className="tile-body">
-        {subOpen && liveSubtasks(task)?.length ? <SubtaskThread subtasks={liveSubtasks(task)!} now={now} max={4} onOpen={(id) => onOpenSubtask(task.taskId, id)} /> : null}
+        {subOpen && liveSubtasks(task)?.length ? <SubtaskThread subtasks={liveSubtasks(task)!} now={now} max={4} heading onOpen={(id) => onOpenSubtask(task.taskId, id)} /> : null}
         {task.sharedCwdWarning ? (
           <div className="warn-text">
-            <Icon name="alert" size={12} /> {task.sharedCwdWarning}
+            <Icon name="alert" size={12} /> {warningText(task.sharedCwdWarning)}
           </div>
         ) : null}
         {urgent.map((item) => (

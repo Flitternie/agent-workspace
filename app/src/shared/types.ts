@@ -45,7 +45,7 @@ export interface Task {
   labelStale?: boolean;
   /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
   lastUserActivityAt?: string;
-  /** Sub-agents of the latest turn (marked while it runs); replaced when the next turn starts. */
+  /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */
   subtasks?: SubtaskInfo[];
   projectId: string;
   title: string;
