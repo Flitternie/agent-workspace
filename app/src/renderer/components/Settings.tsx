@@ -405,7 +405,8 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
   useEffect(() => {
     if (!autoRecheck || !incomplete) return;
     const id = setInterval(() => {
-      for (const host of incomplete.split(',')) void call('ssh:check', { host }).catch(() => {});
+      // Quiet: the row keeps showing the last result while it looks (no "Checking…" flicker).
+      for (const host of incomplete.split(',')) void call('ssh:check', { host, quiet: true }).catch(() => {});
     }, 15_000);
     return () => clearInterval(id);
   }, [autoRecheck, incomplete]);

@@ -43,6 +43,7 @@ exit 1
   const ssh = `#!/bin/bash
 for a in "$@"; do [ "$a" = -G ] && { echo "hostname 10.0.0.5"; echo "user dev"; exit 0; }; done
 cmd="\${@: -1}"
+sleep 1
 PATH=/usr/bin:/bin exec bash -c "$cmd"
 `;
   writeFileSync(join(dir, 'ssh'), ssh, { mode: 0o755 });
@@ -123,6 +124,14 @@ describe('first-run guide', () => {
     await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
     await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
     expect(await page.getByTestId('host-devbox').innerText()).toContain('npm install -g @anthropic-ai/claude-code');
+    // A background look (the guide's every-15-seconds recheck) keeps the row as it is: no flicker.
+    const quiet = invoke('ssh:check', { host: 'devbox', quiet: true });
+    for (let i = 0; i < 6; i++) {
+      await page.waitForTimeout(250);
+      expect(await page.getByTestId('host-devbox').getByTestId('host-state').count()).toBe(0);
+      expect(await page.getByTestId('host-install').count()).toBe(2);
+    }
+    await quiet;
     await page.getByTestId('onboarding-step-3').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(shots, 'onboarding-05-remote.png') });
     await page.getByTestId('onboarding-remote-skip').click();

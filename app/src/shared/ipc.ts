@@ -16,7 +16,7 @@ export const ipcSchemas = {
   'project:add': z.object({ rootPath: z.string().min(1).max(4096), name: z.string().max(200).optional(), host: host.optional() }),
   'ssh:hosts': z.object({}),
   'ssh:setEnabled': z.object({ host, enabled: z.boolean() }),
-  'ssh:check': z.object({ host }),
+  'ssh:check': z.object({ host, quiet: z.boolean().optional() }),
   'ssh:connect': z.object({ host }),
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({

@@ -300,10 +300,17 @@ export class Workspace {
   }
 
   /** Whether `host` is reachable without prompting, and Claude Code / Codex there. Never prompts. */
-  async checkHost(host: string): Promise<RemoteHostStatus> {
+  /**
+   * Probes a host. `quiet` (a background look, e.g. while the user installs an agent there): the
+   * last result stays on screen meanwhile and the UI hears only of a change, so nothing flickers.
+   */
+  async checkHost(host: string, opts: { quiet?: boolean } = {}): Promise<RemoteHostStatus> {
     const prev = this.hostStatus.get(host);
-    this.hostStatus.set(host, { host, ssh: 'checking', capabilities: prev?.capabilities ?? [] });
-    this.changed();
+    const quiet = !!opts.quiet && !!prev && prev.ssh !== 'checking';
+    if (!quiet) {
+      this.hostStatus.set(host, { host, ssh: 'checking', capabilities: prev?.capabilities ?? [] });
+      this.changed();
+    }
     const probe = await sshProbe(host);
     const capabilities =
       probe.state === 'ok'
@@ -314,8 +321,9 @@ export class Workspace {
           )
         : [];
     const status: RemoteHostStatus = { host, ssh: probe.state, error: probe.error, capabilities, checkedAt: now() };
+    const same = (a?: RemoteHostStatus) => !!a && JSON.stringify({ ...a, checkedAt: undefined }) === JSON.stringify({ ...status, checkedAt: undefined });
     if (this.enabledHosts().includes(host)) this.hostStatus.set(host, status);
-    this.changed();
+    if (!quiet || !same(prev)) this.changed();
     return status;
   }
 
