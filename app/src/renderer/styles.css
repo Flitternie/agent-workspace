@@ -951,6 +951,22 @@ body.resizing .sidebar-resizer {
   gap: 6px;
   margin-top: 2px;
 }
+/* Above the reply box the requests scroll in a capped area: their buttons stay in view
+   at the bottom however long the request is. */
+.focus-attention .attention:not(.slim) .attention-actions {
+  position: sticky;
+  bottom: -10px;
+  margin: 2px -12px -10px;
+  padding: 8px 12px 10px;
+  background: var(--needs-bg);
+  border-top: 1px solid var(--needs-border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.focus-attention .attention.kind-error:not(.slim) .attention-actions,
+.focus-attention .attention.high-risk:not(.slim) .attention-actions {
+  background: var(--risk-bg);
+  border-top-color: var(--risk-border);
+}
 .attention-actions .hint {
   margin-left: 4px;
 }
