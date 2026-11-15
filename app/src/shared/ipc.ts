@@ -78,8 +78,8 @@ export const ipcSchemas = {
     typed: z.boolean().optional(),
   }),
   // A file the agent wrote, for the preview column (main checks it lies inside the task's folders).
-  'file:preview': z.object({ taskId: id, path: z.string().min(1).max(4096) }),
-  'file:open': z.object({ taskId: id, path: z.string().min(1).max(4096) }),
+  'file:preview': z.object({ taskId: id, path: z.string().min(1).max(4096), allowOutside: z.boolean().optional() }),
+  'file:open': z.object({ taskId: id, path: z.string().min(1).max(4096), allowOutside: z.boolean().optional() }),
   'memory:add': z.object({
     scope: z.enum(['global', 'project', 'task']),
     scopeId: id,
