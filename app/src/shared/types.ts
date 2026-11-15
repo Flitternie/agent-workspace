@@ -43,6 +43,9 @@ export interface Task {
   nameSource?: 'auto' | 'user';
   /** An old automatic role replaced by a stopgap; a model labels the work when the agent is next used. */
   labelStale?: boolean;
+  /** When a model last wrote the label, and how many messages the user sent since (to keep it current). */
+  labelAt?: string;
+  saidSinceLabel?: number;
   /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
   lastUserActivityAt?: string;
   /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */

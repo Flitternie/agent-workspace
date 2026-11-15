@@ -12,7 +12,9 @@ describe('agent labels', () => {
     expect(cleanLabel('「合同时效梳理」。', 'zh')).toBe('合同时效梳理');
     expect(cleanLabel('标签：登录页暗色模式', 'zh')).toBe('登录页暗色模式');
     expect(cleanLabel('订单接口迁移 v2', 'zh')).toBe('订单接口迁移 v2');
-    expect(cleanLabel('GitHub 子账号 SSH 密钥配置', 'zh')).toBe('GitHub 子账号 SSH 密钥配置');
+    // About 10 Chinese characters at most, so it shows whole in the sidebar.
+    expect(cleanLabel('GitHub SSH 密钥排查', 'zh')).toBe('GitHub SSH 密钥排查');
+    expect(cleanLabel('GitHub 子账号 SSH 密钥配置', 'zh')).toBeUndefined();
     expect(cleanLabel('负责把整个订单系统从旧接口迁移到新接口的工作', 'zh')).toBeUndefined();
     expect(cleanLabel('**order API migration**', 'en')).toBe('Order API migration');
     expect(cleanLabel('"Contract deadlines".\nBecause the user asked…', 'en')).toBe('Contract deadlines');
@@ -31,8 +33,8 @@ describe('agent labels', () => {
 
   it('fall back to the task’s title, shortened, until a model names the work', () => {
     expect(titleLabel('帮我梳理合同里所有和时效相关的条款', 'zh')).toBe('梳理合同里所有和时效…');
-    expect(titleLabel('Fix the login redirect', 'en')).toBe('Fix the login redirect');
-    expect(titleLabel('Please migrate the orders API to v2 and update the tests', 'en')).toBe('Migrate the orders API…');
+    expect(titleLabel('Fix login redirect', 'en')).toBe('Fix login redirect');
+    expect(titleLabel('Please migrate the orders API to v2 and update the tests', 'en')).toBe('Migrate the orders…');
     expect(titleLabel('Untitled', 'en')).toBeUndefined();
     expect(titleLabel('0b8f1c2e-55aa-4c1e-9f3a-1d2c3b4a5e6f', 'en')).toBeUndefined();
     expect(titleLabel('/clear', 'zh')).toBeUndefined();

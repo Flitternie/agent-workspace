@@ -426,9 +426,25 @@ pre code {
 /* ------------------------------------------------------------------ shell */
 
 .app {
+  position: relative;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w, 252px) minmax(0, 1fr);
   height: 100vh;
+}
+/* The sidebar's edge, draggable (same look as the preview's resizer). */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-w, 252px) - 3px);
+  width: 6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resizer:hover,
+body.resizing .sidebar-resizer {
+  background: linear-gradient(90deg, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
 }
 .sidebar {
   background: var(--sidebar);
@@ -3594,4 +3610,17 @@ button.subtask-row:hover {
 }
 .subtask-thread.with-heading .subtask-row {
   padding-left: 2px;
+}
+
+.layout-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-glyph rect {
+  fill: currentColor;
+  opacity: 0.55;
+}
+.layout-opt.on .layout-glyph rect {
+  opacity: 1;
 }

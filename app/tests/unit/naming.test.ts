@@ -131,7 +131,7 @@ describe('agent labels', () => {
     const ws = open();
     const p = await ws.addProject(repo(), 'agent_workspace');
     const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Please think about the roadmap for next quarter', isolate: false });
-    expect(t.name).toBe('Think about the roadmap…');
+    expect(t.name).toBe('Think about the…');
     expect(t.nameSource).toBe('auto');
     const named = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Roadmap', name: 'Planner', isolate: false });
     expect(named.nameSource).toBe('user');
@@ -214,5 +214,64 @@ describe('agent labels', () => {
     await until(() => tasks.every((_t, i) => name(i) === `Work ${i}`));
     expect(order).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(most).toBe(1);
+  });
+
+  it('keeps a label current: after new messages and a while, the latest work is labelled', async () => {
+    const asked: string[] = [];
+    const answers = ['Orders API', 'Pagination fix'];
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({
+      dataDir,
+      adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), 5) },
+      backgroundModel: async (_s, prompt) => (asked.push(prompt), answers.shift() ?? 'Pagination fix'),
+      labelRefreshMs: 0,
+    });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Migrate the orders API', mockScript: 'work', instruction: 'Migrate the orders API to v2.', isolate: false });
+    const idle = () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status);
+    await until(() => nameOf(ws, t.taskId) === 'Orders API' && idle());
+    // One more message is not enough to rewrite it…
+    await ws.send(t.taskId, 'Now fix the cursor pagination bug.', 'text');
+    await until(idle);
+    expect(nameOf(ws, t.taskId)).toBe('Orders API');
+    // …two are: the label follows the latest work.
+    await ws.send(t.taskId, 'And add tests for the cursor pagination.', 'text');
+    await until(() => nameOf(ws, t.taskId) === 'Pagination fix');
+    expect(asked.at(-1)).toContain('cursor pagination');
+    // A name the user set is never rewritten.
+    ws.rename(t.taskId, 'Orders');
+    await ws.send(t.taskId, 'Keep going.', 'text');
+    await ws.send(t.taskId, 'Almost there.', 'text');
+    await until(idle);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(nameOf(ws, t.taskId)).toBe('Orders');
+  });
+
+  it('an old name that failed to relabel (no model reachable yet) is tried again when the agent is opened', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const old = open({ dataDir });
+    const p = await old.addProject(repo(), 'shop');
+    const t = await old.createTask({ projectId: p.projectId, provider: 'mock', title: 'Contract deadlines', isolate: false });
+    const store = (old as unknown as { store: { data: { labelsVersion?: number; tasks: Array<Record<string, unknown>> }; save(): void } }).store;
+    Object.assign(store.data.tasks[0], { name: '文档', nameSource: undefined });
+    delete store.data.labelsVersion;
+    store.save();
+    await old.shutdown();
+    opened.splice(opened.indexOf(old), 1);
+
+    let up = false;
+    const ws = open({
+      dataDir,
+      model: async () => {
+        if (!up) throw new Error('not signed in yet');
+        return 'Deadline clauses';
+      },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(nameOf(ws, t.taskId)).toBe('Contract deadlines');
+    up = true;
+    ws.markViewed(t.taskId);
+    await until(() => nameOf(ws, t.taskId) === 'Deadline clauses');
   });
 });

@@ -86,6 +86,8 @@ export interface WorkspaceOptions {
   retry?: Partial<RetryPolicy>;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
+  /** How long a label stands before new work may rewrite it (tests use 0). */
+  labelRefreshMs?: number;
 }
 
 /**
@@ -118,8 +120,14 @@ export class Workspace {
     this.applyModels();
     this.recoverAfterRestart();
     this.migrateLabels();
-    // With a model at hand already (tests, an OpenAI key), relabel now; else once the CLIs are detected.
-    setTimeout(() => this.relabelStale(), 0);
+    // Relabelling waits for the CLIs to be detected (refreshCapabilities), so the user's own Claude Code
+    // or Codex writes the labels rather than a fallback; tests hand in a model directly.
+    if (opts.backgroundModel) setTimeout(() => this.relabelStale(), 0);
+  }
+
+  /** A label stands this long before the agent's newer work may rewrite it. */
+  private get labelRefreshMs(): number {
+    return this.opts.labelRefreshMs ?? 30 * 60_000;
   }
 
   private relabelTried = new Set<string>();
@@ -154,12 +162,33 @@ export class Workspace {
   private relabelFromHistory(t: Task): void {
     if (!t.labelStale || this.relabelTried.has(t.taskId) || !this.canLabel()) return;
     this.relabelTried.add(t.taskId);
+    const id = t.taskId;
     const said = this.store
       .transcript(t.taskId)
       .filter((i) => i.role === 'user' && i.text.trim())
       .slice(0, 4)
       .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
-    this.refineLabel(t, [t.title, ...said].join('\n'));
+    // Only a label written counts: after a failure (no CLI yet, a bad key) the next chance tries again.
+    void this.refineLabel(t, [t.title, ...said].join('\n')).then((ok) => {
+      if (!ok) this.relabelTried.delete(id);
+    });
+  }
+
+  /**
+   * Keeps an automatic label current: when a turn ends, if the user has sent the agent a couple of
+   * messages since its label was written and it has stood a while, a model relabels it from the
+   * user's latest messages and the agent's latest report.
+   */
+  private maybeRefreshLabel(t: Task): void {
+    if (t.nameSource !== 'auto' || t.labelStale || (t.saidSinceLabel ?? 0) < 2 || !this.canLabel()) return;
+    if (Date.now() - Date.parse(t.labelAt ?? t.createdAt) < this.labelRefreshMs) return;
+    const recent = this.store
+      .transcript(t.taskId)
+      .filter((i) => i.role === 'user' && i.text.trim())
+      .slice(-4)
+      .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
+    t.saidSinceLabel = 0;
+    void this.refineLabel(t, [`Latest work (label this, not the earlier work):`, ...recent, t.summary ? `Latest report: ${t.summary}` : ''].filter(Boolean).join('\n'));
   }
 
   /** Whether any model can write a label right now. */
@@ -567,25 +596,31 @@ export class Workspace {
     const stopgap = titleLabel(title, labelLang(task.alias)) ?? titleLabel(instruction, labelLang(task.alias));
     if (stopgap) task.name = stopgap;
     task.nameSource = 'auto';
-    if (opts.refine !== false) this.refineLabel(task, `${title}\n${instruction}`.trim());
+    if (opts.refine !== false) void this.refineLabel(task, `${title}\n${instruction}`.trim());
   }
 
   /** Replaces an automatic label with a model's label for `text`, unless the name changed meanwhile. */
-  private refineLabel(task: Task, text: string): void {
-    if (!text.trim() || this.opts.demo) return;
+  private refineLabel(task: Task, text: string): Promise<boolean> {
+    if (!text.trim() || this.opts.demo) return Promise.resolve(false);
     const lang = labelLang(task.alias);
     const auto = task.name;
     const project = this.store.data.projects.find((p) => p.projectId === task.projectId)?.name;
-    void this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
+    return this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
       .then((label) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!label || !t || t.name !== auto || t.nameSource === 'user') return;
+        if (!label || !t || t.name !== auto || t.nameSource === 'user') return false;
         t.name = label;
         t.nameSource = 'auto';
         t.labelStale = undefined;
+        t.labelAt = now();
+        t.saidSinceLabel = 0;
         this.changed();
+        return true;
       })
-      .catch((error) => this.log('label suggestion failed', error));
+      .catch((error) => {
+        this.log('label suggestion failed', error);
+        return false;
+      });
   }
 
   /** A label from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
@@ -649,12 +684,13 @@ export class Workspace {
     if (t.labelStale) this.relabelFromHistory(t);
   }
 
-  /** The user opened this agent's view. At most once a minute, so browsing does not churn the store. */
+  /**
+   * The user opened this agent's view. Looking is not working with it, so the order stays as it is
+   * (a click must not reshuffle the list under the pointer); an old name is relabelled now, though.
+   */
   markViewed(taskId: string): void {
     const t = this.findTask(taskId);
-    if (!t || (t.lastUserActivityAt && Date.now() - Date.parse(t.lastUserActivityAt) < 60_000)) return;
-    this.touched(t);
-    this.changed();
+    if (t?.labelStale) this.relabelFromHistory(t);
   }
 
   rename(taskId: string, name: string): void {
@@ -940,7 +976,7 @@ export class Workspace {
         .filter((i) => i.role === 'user' && i.text.trim())
         .slice(0, 4)
         .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
-      this.refineLabel(task, [task.title, ...said].join('\n'));
+      void this.refineLabel(task, [task.title, ...said].join('\n'));
     });
     return task;
   }
@@ -1045,7 +1081,7 @@ export class Workspace {
     if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
     const instruction = opts.instruction?.trim();
     // A fork with its own instruction is new work: label that work, not the original's.
-    if (instruction && !opts.name?.trim()) this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
+    if (instruction && !opts.name?.trim()) void this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
     if (instruction) {
       const r = await this.send(newId, instruction, 'text');
       // The fork itself exists, so keep it (failing here would invite a duplicate); keep the instruction to resend.
@@ -1098,6 +1134,8 @@ export class Workspace {
       task.updatedAt = now();
       // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
       this.touched(task);
+      // The first instruction is what the first label describes; later messages may change the work.
+      if (via !== 'initial') task.saidSinceLabel = (task.saidSinceLabel ?? 0) + 1;
       this.changed();
       return { ok: true, taskId, delivery };
     } catch (error) {
@@ -1273,6 +1311,7 @@ export class Workspace {
       }
       case 'turnCompleted': {
         live.turnActive = false;
+        if (task !== this.store.data.mainAgent) this.maybeRefreshLabel(task);
         // Text that was still streaming when the turn ended (e.g. cut off by a steer) is final now; tell the UI.
         for (const it of this.store.transcript(taskId))
           if (it.streaming) {
@@ -1832,7 +1871,7 @@ export class Workspace {
     const fallback = this.store.data.settings.permissionMode ?? 'auto';
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
     const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
-    if (!args.label?.trim()) this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
+    if (!args.label?.trim()) void this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
     return { task, delivery: await this.send(task.taskId, args.instruction, 'main') };
   }
 

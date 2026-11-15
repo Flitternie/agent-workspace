@@ -65,6 +65,29 @@ describe('teams and overview layouts (mock agents)', () => {
     await page.getByTestId('team').first().getByTestId('team-head').click();
     await expect.poll(() => page.getByTestId('team').first().getByTestId('rail-item').count()).toBe(3);
 
+    // Clicking an agent opens it without reshuffling the list (looking is not working with it).
+    const order = () => page.getByTestId('rail-item').evaluateAll((els) => els.map((e) => e.getAttribute('data-alias')).join(','));
+    const before = await order();
+    await page.getByTestId('rail-item').nth(2).click();
+    await page.waitForTimeout(500);
+    expect(await order()).toBe(before);
+    expect(await page.getByTestId('team').evaluateAll((els) => els.map((e) => e.getAttribute('data-project')).join(','))).toBe('demo-shop,legal-docs');
+    await page.getByRole('button', { name: /^Overview/ }).click();
+
+    // The sidebar's edge drags wider, and stays so.
+    const sidebarW = async () => (await page.locator('.sidebar').boundingBox())!.width;
+    const w0 = await sidebarW();
+    const edge = (await page.getByTestId('sidebar-resizer').boundingBox())!;
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(edge.x + edge.width / 2 + 100, edge.y + 300, { steps: 5 });
+    await page.mouse.up();
+    expect(Math.round((await sidebarW()) - w0)).toBe(100);
+    expect(await page.evaluate(() => localStorage.getItem('amw.sidebar.width'))).toBe(String(Math.round(w0 + 100)));
+    await page.screenshot({ path: join(shots, 'teams-00-wide-sidebar.png') });
+    await page.getByTestId('sidebar-resizer').dblclick();
+    expect(Math.round(await sidebarW())).toBe(252);
+
     // Overview layout with one tile: the agent waiting longest gets it; the rest wait on the left.
     await page.getByTestId('layout-1').click();
     await expect.poll(() => page.getByTestId('agent-card').count()).toBe(1);

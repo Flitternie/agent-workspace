@@ -20,8 +20,70 @@ interface Toast {
   taskId?: string;
 }
 
-/** Columns for a chosen layout: 2 and 4 tiles in two columns, 6 and 9 in three. */
+const SIDEBAR_KEY = 'amw.sidebar.width';
+const SIDEBAR_WIDTH = 252;
+const clampSidebar = (w: number) => Math.min(460, Math.max(200, Math.round(w)));
+
+/** The sidebar's edge: drag to widen (long labels), double-click for the default width. */
+function SidebarResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  const save = (w: number) => {
+    onChange(w);
+    localStorage.setItem(SIDEBAR_KEY, String(w));
+  };
+  return (
+    <div
+      className="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('Resize the sidebar')}
+      title={t('Drag to resize; double-click to reset')}
+      data-testid="sidebar-resizer"
+      onDoubleClick={() => save(SIDEBAR_WIDTH)}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = width;
+        let w = width;
+        document.body.classList.add('resizing');
+        // On the window, so a fast drag that outruns the thin bar keeps going.
+        const move = (ev: PointerEvent) => {
+          w = clampSidebar(startW + ev.clientX - startX);
+          onChange(w);
+        };
+        const up = () => {
+          document.body.classList.remove('resizing');
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          save(w);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      }}
+    />
+  );
+}
+
+/**
+ * Layouts are the tile counts that fill a whole grid (1, 2×1, 2×2, 3×2, 3×3); any other count leaves
+ * a hole. Shown as little grids, so the choice reads as a layout, not a number.
+ */
 const LAYOUT_COLUMNS: Record<number, number> = { 1: 1, 2: 2, 4: 2, 6: 3, 9: 3 };
+const GRID_LABEL: Record<number, string> = { 1: '1×1', 2: '2×1', 4: '2×2', 6: '3×2', 9: '3×3' };
+
+function LayoutGlyph({ slots }: { slots: number }) {
+  const cols = LAYOUT_COLUMNS[slots];
+  const rows = Math.ceil(slots / cols);
+  const gap = 1.5;
+  const w = (16 - gap * (cols - 1)) / cols;
+  const h = (12 - gap * (rows - 1)) / rows;
+  return (
+    <svg className="layout-glyph" width="16" height="12" viewBox="0 0 16 12" aria-hidden>
+      {Array.from({ length: slots }, (_, i) => (
+        <rect key={i} x={(i % cols) * (w + gap)} y={Math.floor(i / cols) * (h + gap)} width={w} height={h} rx="1" />
+      ))}
+    </svg>
+  );
+}
 
 /** Gallery columns like a video call: fill the window, keep tiles roughly square-ish. */
 function columnsFor(n: number): number {
@@ -52,6 +114,8 @@ export function App() {
   const now = useTick(snapshot?.tasks.some((t) => t.subtasks?.some((x) => x.status === 'running')) ? 1000 : 30_000);
 
   const { expanded, toggle } = useTeamExpansion();
+  // The sidebar's width: the user's own, kept on this machine.
+  const [sidebarW, setSidebarW] = useState(() => clampSidebar(Number(localStorage.getItem(SIDEBAR_KEY)) || SIDEBAR_WIDTH));
   // The Overview holds still while the pointer is over it; tiles settle when it leaves.
   const [hovering, setHovering] = useState(false);
   const slotsRef = useRef<string[]>([]);
@@ -147,7 +211,8 @@ export function App() {
       .catch((e) => setError(errorText(e)));
 
   return (
-    <div className="app">
+    <div className="app" style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
+      <SidebarResizer width={sidebarW} onChange={setSidebarW} />
       <Sidebar
         snapshot={snapshot}
         focusId={focusTask ? focusId : null}
@@ -206,11 +271,12 @@ export function App() {
                       role="radio"
                       aria-checked={layout === n}
                       className={`layout-opt${layout === n ? ' on' : ''}`}
-                      title={n ? t('Up to {n} tiles; the most urgent agents fill them', { n }) : t('Every agent that is busy or recently was')}
+                      title={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Every agent that is busy or recently was')}
+                      aria-label={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Auto')}
                       onClick={() => void call('settings:update', { overviewSlots: n }).catch((e) => setError(errorText(e)))}
                       data-testid={`layout-${n}`}
                     >
-                      {n ? n : t('Auto')}
+                      {n ? <LayoutGlyph slots={n} /> : t('Auto')}
                     </button>
                   ))}
                 </div>
