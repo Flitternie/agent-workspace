@@ -9,7 +9,7 @@ import type {
   Query,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AttentionQuestion, ForkPoint, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import type { AttentionQuestion, ForkPoint, ModelOption, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
@@ -157,6 +157,33 @@ export class ClaudeAdapter implements ProviderAdapter {
       auth = authState(status.code, status.stdout);
     }
     return describe(!!path, version, auth, path ? `Agent SDK → ${path}. Uses your existing Claude Code login and settings.` : 'Claude Code CLI not found on PATH.');
+  }
+
+  /**
+   * The models this Claude Code offers (the account's, as the CLI lists them): a CLI is
+   * started without a prompt just to ask, then closed. Nothing is sent to the model.
+   */
+  async listModels(host?: string): Promise<ModelOption[]> {
+    const sdk = await loadSdk();
+    const executable = findExecutable('claude') ?? (host ? process.execPath : null);
+    if (!executable) throw new Error('Claude Code CLI not found on PATH.');
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    async function* idle(): AsyncGenerator<SDKUserMessage> {
+      await hold;
+    }
+    const env = childEnv();
+    const q = sdk.query({
+      prompt: idle(),
+      options: { cwd: host ? '.' : tmpdir(), env, pathToClaudeCodeExecutable: executable, settingSources: ['user'], ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, '.', env) } : {}), stderr: () => {} },
+    });
+    try {
+      const models = await q.supportedModels();
+      return models.map((m) => ({ id: m.value, label: m.displayName || m.value, description: m.description, resolves: m.resolvedModel, isDefault: m.value === 'default' }));
+    } finally {
+      release();
+      q.close();
+    }
   }
 
   async hostCapabilities(host: string): Promise<ProviderCapabilities> {
@@ -388,6 +415,7 @@ class ClaudeSession implements ProviderSession {
         // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
         // will not approve, and everything in 'default', reaches canUseTool → the tile.
         permissionMode: CLAUDE_MODE[this.args.permissionMode ?? 'auto'],
+        ...(this.args.model ? { model: this.args.model } : {}),
         canUseTool: this.canUseTool,
         ...(this.args.tools?.length ? mainAgentOptions(sdk, this.args.tools) : {}),
         stderr: () => {
@@ -467,6 +495,13 @@ class ClaudeSession implements ProviderSession {
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.args.permissionMode = mode;
     await this.query?.setPermissionMode(CLAUDE_MODE[mode]);
+  }
+
+  /** From the next request on (the running turn keeps its model). */
+  async setModel(model: string | undefined): Promise<void> {
+    this.args.model = model;
+    await this.query?.setModel(model);
+    if (model) this.emit({ type: 'model', model });
   }
 
   async interrupt(): Promise<void> {
@@ -593,6 +628,7 @@ class ClaudeSession implements ProviderSession {
         this.sessionId = id;
         this.emit({ type: 'sessionStarted', nativeSessionId: id, resumed: !!this.args.resumeNativeSessionId });
       }
+      if (str(m.model) && !history) this.emit({ type: 'model', model: str(m.model) });
       return;
     }
     if (type === 'system' && m.subtype === 'api_retry') {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ForkPoint, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
+import type { ModelOption, ForkPoint, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
 import type { Delivery, ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 /**
@@ -26,6 +26,13 @@ interface MockHistory {
   messages: Array<{ role: 'user' | 'assistant' | 'tool'; text: string; itemId: string }>;
 }
 
+/** The demo's model list (shaped like a real CLI's). */
+const MOCK_MODELS: ModelOption[] = [
+  { id: 'mock-large', label: 'Mock Large', description: 'Most capable, for complex work', isDefault: true },
+  { id: 'mock-fast', label: 'Mock Fast', description: 'Quick answers for everyday tasks' },
+  { id: 'mock-mini', label: 'Mock Mini', description: 'Cheapest, for simple edits' },
+];
+
 export class MockAdapter implements ProviderAdapter {
   readonly provider = 'mock' as const;
   constructor(
@@ -33,6 +40,10 @@ export class MockAdapter implements ProviderAdapter {
     private delayMs = Number(process.env.AMW_MOCK_DELAY_MS ?? 900),
   ) {
     mkdirSync(dir, { recursive: true });
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    return MOCK_MODELS;
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -110,6 +121,7 @@ class MockSession implements ProviderSession {
   }
 
   async start(): Promise<void> {
+    this.emit({ type: 'model', model: this.args.model ?? MOCK_MODELS[0].id });
     const resumeId = this.args.resumeNativeSessionId;
     if (resumeId) {
       const file = this.file(resumeId);
@@ -326,6 +338,11 @@ class MockSession implements ProviderSession {
       const answer = Object.values(response.answers ?? {}).join(', ');
       this.later(() => this.finish(`Thanks — going with "${answer}".`), 0.5);
     }
+  }
+
+  async setModel(model: string | undefined): Promise<void> {
+    this.args.model = model;
+    this.emit({ type: 'model', model: model ?? MOCK_MODELS[0].id });
   }
 
   async interrupt(): Promise<void> {
