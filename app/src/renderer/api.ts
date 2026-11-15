@@ -34,6 +34,10 @@ interface Outputs {
   'ssh:hosts': Array<{ host: string; hostName?: string; user?: string }>;
   'ssh:setEnabled': void;
   'ssh:check': RemoteHostStatus;
+  'ssh:install': { ok: boolean; error?: string };
+  'ssh:login': { url?: string; code?: string };
+  'ssh:loginCode': void;
+  'ssh:loginCancel': void;
   'ssh:connect': RemoteHostStatus;
   'ssh:terminal': void;
   'task:create': Task;

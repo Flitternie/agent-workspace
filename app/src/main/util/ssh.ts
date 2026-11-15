@@ -84,8 +84,9 @@ function baseOptions(interactive: boolean): string[] {
 
 function sshArgs(host: string, command: string, interactive = false): string[] {
   if (!HOST_RE.test(host)) throw new Error(`Not a usable SSH host alias: ${host}`);
-  // Through the remote login shell, so the CLI is on PATH as it is in a terminal there.
-  const remote = `exec "\${SHELL:-/bin/sh}" -lc ${shq(command)}`;
+  // Through the remote login shell, so the CLI is on PATH as it is in a terminal there; plus
+  // ~/.local/bin, where Claude Code's and Codex's installers put them (not every profile adds it).
+  const remote = `exec "\${SHELL:-/bin/sh}" -lc ${shq(`export PATH="$HOME/.local/bin:$PATH"; ${command}`)}`;
   return ['-T', ...baseOptions(interactive), '--', host, remote];
 }
 

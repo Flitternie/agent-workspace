@@ -3934,3 +3934,32 @@ button.subtask-row:hover {
   gap: 6px;
   margin-bottom: 4px;
 }
+
+.host-setup {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.host-setup-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--text-2);
+}
+.host-setup-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--hover);
+}
+.device-code {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  user-select: all;
+}

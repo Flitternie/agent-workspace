@@ -17,6 +17,10 @@ export const ipcSchemas = {
   'ssh:hosts': z.object({}),
   'ssh:setEnabled': z.object({ host, enabled: z.boolean() }),
   'ssh:check': z.object({ host, quiet: z.boolean().optional() }),
+  'ssh:install': z.object({ host, provider: z.enum(['claude', 'codex']) }),
+  'ssh:login': z.object({ host, provider: z.enum(['claude', 'codex']) }),
+  'ssh:loginCode': z.object({ host, provider: z.enum(['claude', 'codex']), code: z.string().min(4).max(2000) }),
+  'ssh:loginCancel': z.object({ host, provider: z.enum(['claude', 'codex']) }),
   'ssh:connect': z.object({ host }),
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({

@@ -38,13 +38,37 @@ exit 1
 `;
   writeFileSync(join(dir, 'claude'), claude, { mode: 0o755 });
   writeFileSync(join(dir, 'codex'), codex, { mode: 0o755 });
-  // A fake `ssh`: "devbox" is reachable but has neither Claude Code nor Codex (commands run here,
-  // with a PATH that has neither).
+  // A fake `ssh`: "devbox" is reachable, with neither Claude Code nor Codex until "installed".
+  // Commands run here, as another user (its own HOME). Installers are never run: asked to install,
+  // it puts fake CLIs in that HOME's ~/.local/bin, which sign in with a pasted code (Claude) or a
+  // device code (Codex).
+  const remoteHome = mkdtempSync(join(tmpdir(), 'amw-remote-home-'));
+  const remoteBin = join(remoteHome, '.local', 'bin');
+  const remoteClaude = `#!/bin/bash
+S="${remoteHome}/claude-in"
+if [ "$1" = auth ] && [ "$2" = status ]; then [ -f "$S" ] && { echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0; }; echo '{"loggedIn":false}'; exit 1; fi
+if [ "$1" = auth ] && [ "$2" = login ]; then echo "Open this link to sign in: https://claude.ai/oauth/authorize?remote=1"; echo "Paste code here if prompted >"; read -r c; [ "$c" = good-code ] && { touch "$S"; exit 0; }; echo "Invalid code" >&2; exit 1; fi
+[ "$1" = --version ] && { echo "2.1.323 (Claude Code)"; exit 0; }
+exit 1
+`;
+  const remoteCodex = `#!/bin/bash
+S="${remoteHome}/codex-in"
+if [ "$1" = login ] && [ "$2" = status ]; then [ -f "$S" ] && { echo "Logged in using ChatGPT"; exit 0; }; echo "Not logged in"; exit 1; fi
+if [ "$1" = login ] && [ "$2" = --device-auth ]; then echo "Open https://auth.openai.com/codex/device and enter the code ABCD-1234"; sleep 2; touch "$S"; exit 0; fi
+[ "$1" = --version ] && { echo "codex-cli 0.162.1"; exit 0; }
+exit 1
+`;
+  writeFileSync(join(dir, 'remote-claude'), remoteClaude, { mode: 0o755 });
+  writeFileSync(join(dir, 'remote-codex'), remoteCodex, { mode: 0o755 });
   const ssh = `#!/bin/bash
 for a in "$@"; do [ "$a" = -G ] && { echo "hostname 10.0.0.5"; echo "user dev"; exit 0; }; done
 cmd="\${@: -1}"
 sleep 1
-PATH=/usr/bin:/bin exec bash -c "$cmd"
+case "$cmd" in
+  *claude.ai/install.sh*) mkdir -p "${remoteBin}"; cp "${dir}/remote-claude" "${remoteBin}/claude"; echo "Claude Code installed"; exit 0;;
+  *chatgpt.com/codex/install.sh*) mkdir -p "${remoteBin}"; cp "${dir}/remote-codex" "${remoteBin}/codex"; echo "Codex installed"; exit 0;;
+esac
+HOME="${remoteHome}" PATH=/usr/bin:/bin exec bash -c "$cmd"
 `;
   writeFileSync(join(dir, 'ssh'), ssh, { mode: 0o755 });
   return dir;
@@ -123,7 +147,7 @@ describe('first-run guide', () => {
     // Other machines: a host from ~/.ssh/config with no agent installed says how to install one there.
     await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
     await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
-    expect(await page.getByTestId('host-devbox').innerText()).toContain('npm install -g @anthropic-ai/claude-code');
+    expect(await page.getByTestId('host-devbox').innerText()).toContain('Install on devbox');
     // A background look (the guide's every-15-seconds recheck) keeps the row as it is: no flicker.
     const quiet = invoke('ssh:check', { host: 'devbox', quiet: true });
     for (let i = 0; i < 6; i++) {
@@ -134,6 +158,30 @@ describe('first-run guide', () => {
     await quiet;
     await page.getByTestId('onboarding-step-3').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(shots, 'onboarding-05-remote.png') });
+
+    // Install there from the app: the exact command first, then it runs (no terminal).
+    const panel = (testId: string, p: string) => page.locator(`[data-testid="${testId}"][data-provider="${p}"]`);
+    const remoteState = (p: string) => page.getByTestId('host-devbox').locator(`[data-testid="readiness"][data-provider="${p}"]`).getAttribute('data-state');
+    await panel('host-install', 'claude').getByTestId('host-install-start').click();
+    expect(await panel('host-install', 'claude').innerText()).toContain('curl -fsSL https://claude.ai/install.sh | bash');
+    await page.screenshot({ path: join(shots, 'onboarding-06-remote-confirm.png') });
+    await panel('host-install', 'claude').getByTestId('host-install-confirm').click();
+    await expect.poll(() => remoteState('claude'), { timeout: 30_000 }).toBe('signed_out');
+    // Sign in without a browser there: the link opens here; its page's code goes back to the host.
+    await panel('host-signin', 'claude').getByTestId('host-signin-start').click();
+    await expect.poll(async () => (await panel('host-signin', 'claude').getByTestId('host-signin-link').getAttribute('href')) ?? '', { timeout: 20_000 }).toContain('claude.ai/oauth');
+    await panel('host-signin', 'claude').getByTestId('host-signin-code').fill('good-code');
+    await panel('host-signin', 'claude').getByTestId('host-signin-code').press('Enter');
+    await expect.poll(() => remoteState('claude'), { timeout: 30_000 }).toBe('ready');
+    // Codex: installed the same way, then a device code shown in the app.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await invoke('ssh:install', { host: 'devbox', provider: 'codex' });
+    await expect.poll(() => remoteState('codex'), { timeout: 30_000 }).toBe('signed_out');
+    await panel('host-signin', 'codex').getByTestId('host-signin-start').click();
+    await expect.poll(() => panel('host-signin', 'codex').getByTestId('host-device-code').innerText(), { timeout: 20_000 }).toBe('ABCD-1234');
+    await page.screenshot({ path: join(shots, 'onboarding-07-remote-device-code.png') });
+    await expect.poll(() => remoteState('codex'), { timeout: 30_000 }).toBe('ready');
+    await page.screenshot({ path: join(shots, 'onboarding-08-remote-ready.png') });
     await page.getByTestId('onboarding-remote-skip').click();
     await expect.poll(() => done(3)).toBe('true');
 

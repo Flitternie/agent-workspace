@@ -13,7 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
-import { cancelLogin, desktopApps, loginWithApiKey, startLogin, type LoginMethod } from './login';
+import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
 
 // All app state lives in one app-owned directory (default: <app>/.data) so the
 // prototype never touches other apps' or the user's global configuration.
@@ -121,6 +121,15 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
   'ssh:check': (i: { host: string; quiet?: boolean }) => workspace.checkHost(i.host, { quiet: i.quiet }),
+  // Installing and signing in on a host, when the user asks (they see the command first).
+  'ssh:install': async (i: { host: string; provider: 'claude' | 'codex' }) => {
+    const r = await installOnHost(i.host, i.provider);
+    await workspace.checkHost(i.host, { quiet: true });
+    return r;
+  },
+  'ssh:login': (i: { host: string; provider: 'claude' | 'codex' }) => startHostLogin(i.host, i.provider, () => void workspace.checkHost(i.host, { quiet: true })),
+  'ssh:loginCode': (i: { host: string; provider: 'claude' | 'codex'; code: string }) => sendHostLoginCode(i.host, i.provider, i.code),
+  'ssh:loginCancel': (i: { host: string; provider: 'claude' | 'codex' }) => cancelHostLogin(i.host, i.provider),
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),

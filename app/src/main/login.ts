@@ -7,6 +7,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { childEnv, findExecutable, needsShell } from './util/exec';
+import { sshRun, sshSpawn } from './util/ssh';
+import { INSTALL_SCRIPT } from '../shared/install';
 
 export type LoginMethod = 'claudeai' | 'console' | 'chatgpt' | 'device';
 
@@ -112,4 +114,69 @@ export function desktopApps(): { claude: boolean; chatgpt: boolean } {
   if (process.platform !== 'darwin') return { claude: false, chatgpt: false };
   const has = (app: string) => existsSync(`/Applications/${app}.app`) || existsSync(`${homedir()}/Applications/${app}.app`);
   return { claude: has('Claude'), chatgpt: has('ChatGPT') };
+}
+
+// ---------------------------------------------------------------- on an SSH host
+
+/** Installs a CLI on the host (the user asked, after seeing the command). Errors carry the last lines it printed. */
+export async function installOnHost(host: string, provider: 'claude' | 'codex'): Promise<{ ok: boolean; error?: string }> {
+  const r = await sshRun(host, `command -v curl >/dev/null || { echo "curl is not installed on this machine" >&2; exit 3; }; ${INSTALL_SCRIPT[provider]}`, 10 * 60_000);
+  if (r.code === 0) return { ok: true };
+  const tail = `${r.stdout}\n${r.stderr}`.trim().split('\n').slice(-4).join('\n');
+  return { ok: false, error: tail || `The installer exited with ${r.code}.` };
+}
+
+/**
+ * Signs in on the host without a browser there: Codex with a device code (open the link here, enter
+ * the code); Claude Code prints a link and then takes the code its page shows (pasted in the app).
+ */
+export function startHostLogin(host: string, provider: 'claude' | 'codex', onDone: (ok: boolean) => void): Promise<LoginStarted> {
+  const key = `${host}:${provider}`;
+  running.get(key)?.kill();
+  const proc = sshSpawn(host, provider === 'codex' ? 'codex login --device-auth' : 'claude auth login');
+  running.set(key, proc);
+  let out = '';
+  return new Promise((resolve) => {
+    let settled = false;
+    const found = (): LoginStarted => {
+      const url = /https?:\/\/[^\s"'<>]+/.exec(out)?.[0];
+      const code = provider === 'codex' ? /\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/.exec(out)?.[0] : undefined;
+      return { ...(url ? { url } : {}), ...(code ? { code } : {}) };
+    };
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(found());
+    };
+    const read = (d: Buffer) => {
+      out = (out + d.toString()).slice(-8000);
+      const f = found();
+      if (f.url && (provider !== 'codex' || f.code)) settle();
+    };
+    proc.stdout.on('data', read);
+    proc.stderr.on('data', read);
+    const timer = setTimeout(settle, 15_000);
+    proc.on('exit', (code) => {
+      if (running.get(key) === proc) running.delete(key);
+      settle();
+      onDone(code === 0);
+    });
+    proc.on('error', () => {
+      settle();
+      onDone(false);
+    });
+  });
+}
+
+/** The code Claude's sign-in page showed, handed to the waiting login on the host. */
+export function sendHostLoginCode(host: string, provider: 'claude' | 'codex', code: string): void {
+  const proc = running.get(`${host}:${provider}`);
+  if (!proc?.stdin) throw new Error('That sign-in is no longer waiting; start it again.');
+  proc.stdin.write(`${code.trim()}\n`);
+}
+
+export function cancelHostLogin(host: string, provider: 'claude' | 'codex'): void {
+  running.get(`${host}:${provider}`)?.kill();
+  running.delete(`${host}:${provider}`);
 }
