@@ -4,16 +4,15 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL } from './bits';
-import { readiness } from './Settings';
+import { CopyCommand, INSTALL_COMMAND, readiness, RemoteHosts } from './Settings';
 
 type Provider = 'claude' | 'codex';
-const INSTALL: Record<Provider, string> = { claude: 'npm install -g @anthropic-ai/claude-code', codex: 'npm install -g @openai/codex' };
 const DOCS: Record<Provider, string> = { claude: 'https://docs.claude.com/en/docs/claude-code/setup', codex: 'https://developers.openai.com/codex/cli' };
 
 /**
  * First run, step by step, in the main area (skippable, nothing modal): connect a coding agent
- * (the only required step: sign-in happens from here), bring in the user's existing sessions,
- * hand over a first task, and optionally set up voice. Steps tick themselves off from the snapshot.
+ * (the only required step: sign-in happens from here), bring in the user's existing sessions on
+ * this Mac, then on their SSH machines, and optionally set up voice. Steps tick themselves off.
  */
 export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceSnapshot; onSettings: () => void; now: number }) {
   const ob = snapshot.settings.onboarding ?? {};
@@ -23,7 +22,9 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const [signingIn, setSigningIn] = useState<Partial<Record<Provider, boolean>>>({});
   const connected = ready.length > 0;
   const broughtIn = snapshot.projects.length > 0;
-  const firstTask = !!ob.firstTaskDone;
+  const remote = snapshot.tasks.some((x) => x.host) || !!ob.remoteSkipped;
+  // Machines connected and with an agent signed in: their sessions can be listed.
+  const remoteReady = snapshot.remoteHosts.filter((h) => h.ssh === 'ok' && h.capabilities.some((c) => readiness(c) === 'ready')).map((h) => h.host);
   const voice = snapshot.voice.sttAvailable || !!ob.voiceSkipped;
 
   // Until one agent is ready (or while signing in), look again every few seconds: installing or
@@ -54,8 +55,22 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           <BringIn snapshot={snapshot} now={now} />
         </Step>
 
-        <Step n={3} title={t('Give an agent its first task')} done={firstTask} summary={t('Started')} locked={!connected || !broughtIn}>
-          <FirstTask snapshot={snapshot} ready={ready} onDone={() => save({ firstTaskDone: true })} />
+        <Step n={3} title={t('Work on other machines (optional)')} done={remote} summary={ob.remoteSkipped && !snapshot.tasks.some((x) => x.host) ? t('Skipped') : t('{n} machines', { n: remoteReady.length })}>
+          <p className="muted small">{t('Agents can run on machines in your ~/.ssh/config, with Claude Code or Codex installed and signed in there; their sessions stay on those machines.')}</p>
+          <RemoteHosts snapshot={snapshot} autoRecheck />
+          {remoteReady.map((host) => (
+            <div key={host} className="ob-remote">
+              <div className="ob-remote-head">
+                <Icon name="terminal" size={12} /> <strong>{host}</strong>
+              </div>
+              <BringIn snapshot={snapshot} now={now} host={host} />
+            </div>
+          ))}
+          <div className="row">
+            <button className="btn btn-ghost" onClick={() => save({ remoteSkipped: true })} data-testid="onboarding-remote-skip">
+              {t('Skip')}
+            </button>
+          </div>
         </Step>
 
         <Step n={4} title={t('Voice (optional)')} done={voice} summary={snapshot.voice.sttAvailable ? t('Ready') : t('Skipped')} locked={!connected}>
@@ -105,7 +120,6 @@ function ProviderRow({ provider, cap, signingIn, onSigningIn }: { provider: Prov
   const [link, setLink] = useState<{ url?: string; code?: string }>({});
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
   const [apps, setApps] = useState<{ claude: boolean; chatgpt: boolean }>({ claude: false, chatgpt: false });
   useEffect(() => void call('apps:detect', {}).then(setApps).catch(() => {}), []);
   useEffect(() => {
@@ -227,19 +241,7 @@ function ProviderRow({ provider, cap, signingIn, onSigningIn }: { provider: Prov
       ) : state === 'missing' ? (
         <div className="ob-install">
           <span className="muted small">{t('Install it in a terminal; this updates by itself:')}</span>
-          <div className="ob-command">
-            <code>{INSTALL[provider]}</code>
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                void navigator.clipboard.writeText(INSTALL[provider]);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? t('Copied') : t('Copy')}
-            </button>
-          </div>
+          <CopyCommand command={INSTALL_COMMAND[provider]} />
           <a className="link small" href={DOCS[provider]} target="_blank" rel="noreferrer">
             {t('Installation guide')}
           </a>
@@ -269,7 +271,7 @@ function MainAgentChoice({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 }
 
 /** The user's own recent sessions, by folder; they pick what to bring in (nothing preselected). */
-function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }) {
+function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: number; host?: string }) {
   const [sessions, setSessions] = useState<NativeSessionInfo[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState('');
@@ -277,8 +279,8 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
   const [more, setMore] = useState<Set<string>>(new Set());
   useEffect(() => {
     let live = true;
-    call('sessions:discoverAll', {})
-      .then((list) => live && setSessions(list.filter((s) => !s.automated && !s.host)))
+    (host ? call('sessions:discoverHost', { host }) : call('sessions:discoverAll', {}))
+      .then((list) => live && setSessions(list.filter((s) => !s.automated && (host ? s.host === host : !s.host))))
       .catch((e) => {
         if (!live) return;
         setSessions([]);
@@ -287,7 +289,8 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
     return () => {
       live = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host]);
   const folders = useMemo(() => {
     const by = new Map<string, NativeSessionInfo[]>();
     for (const s of sessions ?? []) by.set(s.cwd, [...(by.get(s.cwd) ?? []), s]);
@@ -310,7 +313,7 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
     for (const [i, s] of chosen.entries()) {
       setBusy(t('Bringing in {i} of {n}…', { i: i + 1, n: chosen.length }));
       try {
-        await call('task:importSession', { provider: s.provider as Provider, nativeSessionId: s.nativeSessionId, cwd: s.cwd, title: s.title.slice(0, 500) || s.nativeSessionId });
+        await call('task:importSession', { provider: s.provider as Provider, nativeSessionId: s.nativeSessionId, cwd: s.cwd, host: s.host, title: s.title.slice(0, 500) || s.nativeSessionId });
       } catch (e) {
         setError(errorText(e));
       }
@@ -330,7 +333,7 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
   return (
     <div className="ob-bring" data-testid="onboarding-bring">
       {sessions === null ? (
-        <p className="muted small">{t('Looking for your Claude Code and Codex sessions on this Mac…')}</p>
+        <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your Claude Code and Codex sessions on this Mac…')}</p>
       ) : folders.length ? (
         <>
           <p className="muted small">{t('Pick the conversations to continue here. Each folder becomes a project team; each conversation an agent, named by its work.')}</p>
@@ -376,11 +379,15 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
             <button className="btn btn-primary" disabled={!picked.size || !!busy} onClick={() => void bringIn()} data-testid="onboarding-bring-in">
               {busy || t('Bring in {n} conversations', { n: picked.size })}
             </button>
-            <button className="link small" onClick={() => void addFolder()}>
-              {t('Or add a project folder')}
-            </button>
+            {host ? null : (
+              <button className="link small" onClick={() => void addFolder()}>
+                {t('Or add a project folder')}
+              </button>
+            )}
           </div>
         </>
+      ) : host ? (
+        <p className="muted small">{t('No sessions found on {host}.', { host })}</p>
       ) : (
         <>
           <p className="muted small">{t('No sessions found yet. Add the folder of a project you work on:')}</p>
@@ -389,77 +396,11 @@ function BringIn({ snapshot, now }: { snapshot: WorkspaceSnapshot; now: number }
           </button>
         </>
       )}
-      {snapshot.projects.length ? (
+      {!host && snapshot.projects.length ? (
         <p className="muted small">
           {t('Projects so far:')} {snapshot.projects.map((p) => p.name).join(', ')}
         </p>
       ) : null}
-      {error ? <div className="error-text small">{error}</div> : null}
-    </div>
-  );
-}
-
-/** First tasks that work on any project and show what an agent does (suggested, as in Claude's own Code tab). */
-const SUGGESTIONS = ['Explain how this project is organised', 'Find a TODO in the code and fix it', 'Add a test for an untested function', 'Write a CLAUDE.md for this project'];
-
-function FirstTask({ snapshot, ready, onDone }: { snapshot: WorkspaceSnapshot; ready: Provider[]; onDone: () => void }) {
-  const [text, setText] = useState('');
-  const [projectId, setProjectId] = useState(snapshot.projects.at(-1)?.projectId ?? '');
-  const [provider, setProvider] = useState<Provider>(ready[0] ?? 'claude');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    if (!projectId && snapshot.projects.length) setProjectId(snapshot.projects.at(-1)!.projectId);
-  }, [snapshot.projects, projectId]);
-  const project = snapshot.projects.find((p) => p.projectId === projectId);
-  const start = () => {
-    if (!text.trim() || !project) return;
-    setBusy(true);
-    setError('');
-    call('task:create', { projectId: project.projectId, provider, title: text.trim().split('\n')[0].slice(0, 80), instruction: text.trim(), isolate: project.isGitRepo })
-      .then(() => onDone())
-      .catch((e) => setError(errorText(e)))
-      .finally(() => setBusy(false));
-  };
-  return (
-    <div className="ob-first" data-testid="onboarding-first">
-      <div className="ob-suggest">
-        {SUGGESTIONS.map((x) => (
-          <button key={x} className="chip" onClick={() => setText(t(x))} data-testid="onboarding-suggestion">
-            {t(x)}
-          </button>
-        ))}
-      </div>
-      <textarea className="input" rows={3} placeholder={t('What should an agent do? e.g. “Find why the login page is slow and fix it.”')} value={text} onChange={(e) => setText(e.target.value)} data-testid="onboarding-first-text" />
-      <div className="row">
-        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          {snapshot.projects.map((p) => (
-            <option key={p.projectId} value={p.projectId}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        {ready.length > 1 ? (
-          <select className="input" value={provider} onChange={(e) => setProvider(e.target.value as Provider)}>
-            {ready.map((p) => (
-              <option key={p} value={p}>
-                {PROVIDER_LABEL[p]}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        <button className="btn btn-primary" disabled={!text.trim() || !project || busy} onClick={start} data-testid="onboarding-first-start">
-          {t('Hand it over')}
-        </button>
-        <button className="link small" onClick={onDone}>
-          {t('Later')}
-        </button>
-      </div>
-      <p className="muted small">
-        {project?.isGitRepo
-          ? t('It works in its own git worktree, so your checkout stays as it is. Permissions: Decide automatically (change in Settings).')
-          : t('This folder is not a git repository, so the agent edits it directly. Permissions: Decide automatically (change in Settings).')}
-      </p>
       {error ? <div className="error-text small">{error}</div> : null}
     </div>
   );

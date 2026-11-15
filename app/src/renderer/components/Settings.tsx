@@ -11,6 +11,30 @@ const LANGUAGES: Array<{ id: Language; label: string }> = [
 ];
 
 const SIGN_IN: Record<string, string> = { claude: 'claude  →  /login', codex: 'codex login' };
+/** On a machine without a browser: Claude prints a link to open here; Codex signs in with a device code. */
+const REMOTE_SIGN_IN: Record<string, string> = { claude: 'claude auth login', codex: 'codex login --device-auth' };
+/** How to install each CLI (also shown in the first-run guide). */
+export const INSTALL_COMMAND: Record<'claude' | 'codex', string> = { claude: 'npm install -g @anthropic-ai/claude-code', codex: 'npm install -g @openai/codex' };
+
+/** A command with a copy button. */
+export function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="copy-command">
+      <code>{command}</code>
+      <button
+        className="btn btn-sm"
+        onClick={() => {
+          void navigator.clipboard.writeText(command);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? t('Copied') : t('Copy')}
+      </button>
+    </span>
+  );
+}
 
 type Readiness = 'ready' | 'signed_out' | 'missing' | 'checking';
 
@@ -370,8 +394,21 @@ const address = (e?: HostEntry) => (e?.hostName ? `${e.user ? `${e.user}@` : ''}
  * Machines added from ~/.ssh/config, one line each; the rest stay behind "Add machine"
  * (a searchable list), so a long config does not fill the page.
  */
-function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: WorkspaceSnapshot; autoRecheck?: boolean }) {
   const [hosts, setHosts] = useState<HostEntry[] | null>(null);
+  // While a connected machine still lacks an agent (installing or signing in over there), look again
+  // now and then so it ticks off by itself (first-run guide).
+  const incomplete = snapshot.remoteHosts
+    .filter((h) => h.ssh === 'ok' && !(['claude', 'codex'] as const).some((p) => readiness(h.capabilities.find((x) => x.provider === p)) === 'ready'))
+    .map((h) => h.host)
+    .join(',');
+  useEffect(() => {
+    if (!autoRecheck || !incomplete) return;
+    const id = setInterval(() => {
+      for (const host of incomplete.split(',')) void call('ssh:check', { host }).catch(() => {});
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [autoRecheck, incomplete]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<{ host: string; text: string } | null>(null);
   const [picking, setPicking] = useState(false);
@@ -412,6 +449,9 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         const state = SSH_STATE[status.ssh];
         const addr = address(hosts.find((e) => e.host === host));
         const signedOut = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'signed_out') : [];
+        const missing = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'missing') : [];
+        // Nothing usable there yet: say how to install, and offer a terminal on that machine.
+        const noAgent = status.ssh === 'ok' && !(['claude', 'codex'] as const).some((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'ready');
         return (
           <div key={host} className="settings-row" data-testid={`host-${host}`}>
             <div className="settings-row-main">
@@ -442,7 +482,7 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                     {busy === host ? t('Waiting for you…') : t(state.action)}
                   </button>
                 ) : null}
-                {status.ssh !== 'ok' && status.ssh !== 'checking' ? (
+                {(status.ssh !== 'ok' && status.ssh !== 'checking') || noAgent || signedOut.length ? (
                   <button className="btn btn-sm" onClick={() => void act(host, () => call('ssh:terminal', { host }))} title={t('Opens Terminal with ssh {host}, for anything the app cannot handle', { host })}>
                     {t('Open in Terminal')}
                   </button>
@@ -456,10 +496,18 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               </span>
             </div>
             {signedOut.map((p) => (
-              <div key={p} className="muted small">
-                {t('Sign in on {host}:', { host })} <code>{SIGN_IN[p]}</code>
+              <div key={p} className="muted small host-hint" data-testid="host-signin">
+                {t('Sign in to {provider} on {host} (in its terminal):', { provider: PROVIDER_LABEL[p], host })} <CopyCommand command={REMOTE_SIGN_IN[p]} />
               </div>
             ))}
+            {noAgent
+              ? missing.map((p) => (
+                  <div key={p} className="muted small host-hint" data-testid="host-install">
+                    {t('Install {provider} on {host} (in its terminal):', { provider: PROVIDER_LABEL[p], host })} <CopyCommand command={INSTALL_COMMAND[p]} />
+                  </div>
+                ))
+              : null}
+            {noAgent || signedOut.length ? <div className="muted small">{t('“Open in Terminal” connects to {host}; run the command there, then come back.', { host })}</div> : null}
             {state.hint ? <div className="muted small">{t(state.hint)}</div> : null}
             {status.ssh === 'unreachable' && status.error ? <div className="muted small">{status.error}</div> : null}
             {error?.host === host ? <div className="error-text small">{error.text}</div> : null}

@@ -38,7 +38,23 @@ exit 1
 `;
   writeFileSync(join(dir, 'claude'), claude, { mode: 0o755 });
   writeFileSync(join(dir, 'codex'), codex, { mode: 0o755 });
+  // A fake `ssh`: "devbox" is reachable but has neither Claude Code nor Codex (commands run here,
+  // with a PATH that has neither).
+  const ssh = `#!/bin/bash
+for a in "$@"; do [ "$a" = -G ] && { echo "hostname 10.0.0.5"; echo "user dev"; exit 0; }; done
+cmd="\${@: -1}"
+PATH=/usr/bin:/bin exec bash -c "$cmd"
+`;
+  writeFileSync(join(dir, 'ssh'), ssh, { mode: 0o755 });
   return dir;
+}
+
+/** A home with an SSH config listing "devbox" (and no sessions of its own). */
+function fakeHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'amw-ob-home-'));
+  mkdirSync(join(home, '.ssh'));
+  writeFileSync(join(home, '.ssh', 'config'), 'Host devbox\n  HostName 10.0.0.5\n  User dev\n');
+  return home;
 }
 
 function repo(name: string): string {
@@ -52,7 +68,7 @@ function repo(name: string): string {
 }
 
 describe('first-run guide', () => {
-  it('signs in from the app, then brings work in, a first task, and gets out of the way', async () => {
+  it('signs in from the app, brings work in from this Mac and other machines, and gets out of the way', async () => {
     const bin = fakeClis();
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
@@ -60,7 +76,7 @@ describe('first-run guide', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 });
@@ -103,12 +119,14 @@ describe('first-run guide', () => {
     await invoke('project:add', { rootPath: repo('shop'), name: 'shop' });
     await expect.poll(() => done(2)).toBe('true');
 
-    // A first task, from a suggestion.
-    await page.getByTestId('onboarding-suggestion').first().click();
-    expect(await page.getByTestId('onboarding-first-text').inputValue()).toBe('Explain how this project is organised');
-    await page.screenshot({ path: join(shots, 'onboarding-05-first-task.png') });
-    await page.getByTestId('onboarding-first-start').click();
-    await expect.poll(() => done(3), { timeout: 20_000 }).toBe('true');
+    // Other machines: a host from ~/.ssh/config with no agent installed says how to install one there.
+    await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
+    await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
+    expect(await page.getByTestId('host-devbox').innerText()).toContain('npm install -g @anthropic-ai/claude-code');
+    await page.getByTestId('onboarding-step-3').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(shots, 'onboarding-05-remote.png') });
+    await page.getByTestId('onboarding-remote-skip').click();
+    await expect.poll(() => done(3)).toBe('true');
 
     // Voice can wait; then the workspace, and the guide stays out of the way.
     await page.getByTestId('onboarding-voice-skip').click();
@@ -116,7 +134,7 @@ describe('first-run guide', () => {
     await page.screenshot({ path: join(shots, 'onboarding-06-all-done.png') });
     await page.getByTestId('onboarding-done').click();
     await expect.poll(() => page.getByTestId('onboarding').count()).toBe(0);
-    await expect.poll(() => page.getByTestId('overview').isVisible()).toBe(true);
+    await expect.poll(() => page.getByTestId('new-task').isVisible()).toBe(true);
 
     // Settings can bring it back.
     await page.getByTestId('open-settings').click();

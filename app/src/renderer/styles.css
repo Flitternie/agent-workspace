@@ -3705,7 +3705,7 @@ button.subtask-row:hover {
   overflow: auto;
 }
 .onboarding-inner {
-  max-width: 760px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 40px 28px 48px;
 }
@@ -3903,4 +3903,34 @@ button.subtask-row:hover {
 .onboarding p,
 .ob-found {
   user-select: text;
+}
+
+.copy-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.copy-command code {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
+  user-select: text;
+}
+.host-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.ob-remote {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.ob-remote-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
 }
