@@ -112,9 +112,16 @@ describe('first-run guide', () => {
 
     // A fresh workspace opens on the guide; both agents are installed but signed out.
     await expect.poll(() => page.getByTestId('onboarding').isVisible(), { timeout: 20_000 }).toBe(true);
+    // Language first: English unless the user picks Chinese.
+    expect(await done(1)).toBe('false');
+    await page.getByTestId('onboarding-lang-en').click();
+    await expect.poll(() => done(1)).toBe('true');
     await expect.poll(() => state('claude'), { timeout: 20_000 }).toBe('signed_out');
     await expect.poll(() => state('codex')).toBe('signed_out');
-    expect(await done(3)).toBe('false');
+    expect(await done(4)).toBe('false');
+    // An agent here or on another machine: until one is connected, either step will do.
+    expect(await page.getByTestId('onboarding-step-2-tag').innerText()).toBe('This or the next step');
+    expect(await page.getByTestId('onboarding-step-3-tag').innerText()).toBe('This or the next step');
     await page.screenshot({ path: join(shots, 'onboarding-01-signed-out.png') });
 
     // Claude: the app runs its login (the CLI would open the browser) and shows its link meanwhile.
@@ -123,8 +130,10 @@ describe('first-run guide', () => {
     await expect.poll(async () => (await page.getByTestId('onboarding-claude-link').getAttribute('href')) ?? '').toContain('claude.ai/oauth');
     await page.screenshot({ path: join(shots, 'onboarding-02-signing-in.png') });
     // Signed in: the step ticks itself off and folds (no Recheck); open again, Claude reads ready.
-    await expect.poll(() => done(1), { timeout: 20_000 }).toBe('true');
-    await page.getByTestId('onboarding-step-1').getByRole('button', { name: /Connect a coding agent/ }).click();
+    await expect.poll(() => done(2), { timeout: 20_000 }).toBe('true');
+    // Connected here: the other machines become optional.
+    expect(await page.getByTestId('onboarding-step-3-tag').innerText()).toBe('Optional');
+    await page.getByTestId('onboarding-step-2').getByRole('button', { name: /Connect a coding agent/ }).click();
     expect(await state('claude')).toBe('ready');
 
     // Codex with an API key: a bad key says so; a good one signs in.
@@ -150,7 +159,7 @@ describe('first-run guide', () => {
       expect(await page.getByTestId('host-install').count()).toBe(2);
     }
     await quiet;
-    await page.getByTestId('onboarding-step-3').scrollIntoViewIfNeeded();
+    await page.getByTestId('onboarding-step-4').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(shots, 'onboarding-05-remote.png') });
 
     // Install there from the app: the exact command first, then it runs (no terminal).
@@ -167,8 +176,8 @@ describe('first-run guide', () => {
     await panel('host-signin', 'claude').getByTestId('host-signin-code').fill('good-code');
     await panel('host-signin', 'claude').getByTestId('host-signin-code').press('Enter');
     // A machine with an agent ready ticks the step off (it folds); open it again for Codex there.
-    await expect.poll(() => done(2), { timeout: 30_000 }).toBe('true');
-    await page.getByTestId('onboarding-step-2').getByRole('button', { name: /Connect other machines/ }).click();
+    await expect.poll(() => done(3), { timeout: 30_000 }).toBe('true');
+    await page.getByTestId('onboarding-step-3').getByRole('button', { name: /Connect other machines/ }).click();
     expect(await remoteState('claude')).toBe('ready');
     // Codex: installed the same way, then a device code shown in the app.
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -183,14 +192,14 @@ describe('first-run guide', () => {
     // Then bring work in, from this Mac and the machine just connected, in one place
     // (the folder picker is native, so the folder comes in through the same IPC).
     await expect.poll(() => page.getByTestId('onboarding-bring').count()).toBe(2);
-    await expect.poll(() => page.getByTestId('onboarding-step-3').innerText()).toContain('devbox');
+    await expect.poll(() => page.getByTestId('onboarding-step-4').innerText()).toContain('devbox');
     await page.screenshot({ path: join(shots, 'onboarding-04-bring-in.png') });
     await invoke('project:add', { rootPath: repo('shop'), name: 'shop' });
-    await expect.poll(() => done(3)).toBe('true');
+    await expect.poll(() => done(4)).toBe('true');
 
     // Voice can wait; then the workspace, and the guide stays out of the way.
     await page.getByTestId('onboarding-voice-skip').click();
-    await expect.poll(() => done(4)).toBe('true');
+    await expect.poll(() => done(5)).toBe('true');
     await page.screenshot({ path: join(shots, 'onboarding-06-all-done.png') });
     await page.getByTestId('onboarding-done').click();
     await expect.poll(() => page.getByTestId('onboarding').count()).toBe(0);
@@ -201,4 +210,44 @@ describe('first-run guide', () => {
     await page.getByTestId('reopen-onboarding').click();
     await expect.poll(() => page.getByTestId('onboarding').isVisible()).toBe(true);
   }, 180_000);
+
+  it('another machine is enough: no agent signed in on this Mac, one on the host', async () => {
+    await app?.close().catch(() => {});
+    const bin = fakeClis();
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+    app = await electron.launch({
+      executablePath: electronPath,
+      args: [appDir],
+      cwd: appDir,
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+    });
+    const page = await app.firstWindow();
+    await page.setViewportSize({ width: 1440, height: 920 });
+    await page.waitForSelector('.app');
+    const invoke = (c: string, p: unknown) => page.evaluate(([c, p]) => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke(c as string, p), [c, p] as const);
+    const done = (n: number) => page.getByTestId(`onboarding-step-${n}`).getAttribute('data-done');
+    // Chinese, picked in the first step: the guide switches at once.
+    await page.getByTestId('onboarding-lang-zh').click();
+    await expect.poll(() => page.getByTestId('onboarding').innerText()).toContain('欢迎使用 Agent Workspace');
+    await expect.poll(() => page.getByTestId('onboarding-claude').getAttribute('data-state'), { timeout: 20_000 }).toBe('signed_out');
+    expect(await page.getByTestId('onboarding-done').isDisabled()).toBe(true);
+
+    // Codex on devbox only: installed and signed in there.
+    await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
+    await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
+    await invoke('ssh:install', { host: 'devbox', provider: 'codex' });
+    const signin = page.locator('[data-testid="host-signin"][data-provider="codex"]');
+    await expect.poll(() => signin.count(), { timeout: 30_000 }).toBe(1);
+    await signin.getByTestId('host-signin-start').click();
+    await expect.poll(() => done(3), { timeout: 30_000 }).toBe('true');
+
+    // That is enough: this Mac stays optional, work comes in from devbox, the workspace opens.
+    expect(await done(2)).toBe('false');
+    expect(await page.getByTestId('onboarding-step-2-tag').innerText()).toBe('可选');
+    await expect.poll(() => page.getByTestId('onboarding-bring').count()).toBe(1);
+    expect(await page.getByTestId('onboarding-step-4').innerText()).toContain('devbox');
+    expect(await page.getByTestId('onboarding-done').isDisabled()).toBe(false);
+    await page.screenshot({ path: join(shots, 'onboarding-09-remote-only.png') });
+  }, 120_000);
 });

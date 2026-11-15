@@ -6,7 +6,7 @@ import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } fro
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
 import { INSTALL_SCRIPT } from '../../shared/install';
 
-const LANGUAGES: Array<{ id: Language; label: string }> = [
+export const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
   { id: 'zh', label: '中文' },
 ];

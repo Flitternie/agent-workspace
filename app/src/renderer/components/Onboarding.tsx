@@ -4,7 +4,7 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL } from './bits';
-import { CopyCommand, INSTALL_COMMAND, readiness, RemoteHosts } from './Settings';
+import { CopyCommand, INSTALL_COMMAND, LANGUAGES, readiness, RemoteHosts } from './Settings';
 
 type Provider = 'claude' | 'codex';
 const DOCS: Record<Provider, string> = { claude: 'https://docs.claude.com/en/docs/claude-code/setup', codex: 'https://developers.openai.com/codex/cli' };
@@ -20,18 +20,22 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const cap = (p: Provider) => snapshot.capabilities.find((c) => c.provider === p);
   const ready = (['claude', 'codex'] as const).filter((p) => readiness(cap(p)) === 'ready');
   const [signingIn, setSigningIn] = useState<Partial<Record<Provider, boolean>>>({});
-  const connected = ready.length > 0;
+  // This Mac's agents; another machine's count just as well (one of the two is enough).
+  const local = ready.length > 0;
   const broughtIn = snapshot.projects.length > 0;
 
   // Machines connected and with an agent signed in: their sessions can be listed.
   const remoteReady = snapshot.remoteHosts.filter((h) => h.ssh === 'ok' && h.capabilities.some((c) => readiness(c) === 'ready')).map((h) => h.host);
   // Other machines come before bringing work in, so their sessions are picked with this Mac's.
-  const remote = remoteReady.length > 0 || !!ob.remoteSkipped;
+  const remote = remoteReady.length > 0;
+  const connected = local || remote;
+  // Steps 1 and 2 are one requirement: an agent here or on another machine.
+  const either = (mine: boolean) => (connected ? (mine ? undefined : t('Optional')) : t('This or the next step'));
   const voice = snapshot.voice.sttAvailable || !!ob.voiceSkipped;
 
-  // Until one agent is ready (or while signing in), look again every few seconds: installing or
+  // Until an agent is ready here (or while signing in), look again every few seconds: installing or
   // signing in happens outside the app, and the step should tick itself off.
-  const waiting = !connected || Object.values(signingIn).some(Boolean);
+  const waiting = !local || Object.values(signingIn).some(Boolean);
   useEffect(() => {
     if (!waiting) return;
     const id = setInterval(() => void call('capabilities:refresh', {}).catch(() => {}), 3000);
@@ -42,9 +46,29 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
     <div className="onboarding" data-testid="onboarding">
       <div className="onboarding-inner">
         <h1>{t('Welcome to Agent Workspace')}</h1>
-        <p className="muted">{t('A few steps to get going. Only the first one is needed; the rest can wait.')}</p>
+        <p className="muted">{t('A few steps to get going: connect a coding agent on this Mac or on another machine; the rest can wait.')}</p>
 
-        <Step n={1} title={t('Connect a coding agent')} done={connected} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} required>
+        <Step n={1} title="Language · 语言" done={!!ob.languageChosen} summary={LANGUAGES.find((l) => l.id === (snapshot.settings.language ?? 'en'))?.label}>
+          <div className="segmented" role="radiogroup" aria-label="Language · 语言">
+            {LANGUAGES.map((l) => {
+              const on = (snapshot.settings.language ?? 'en') === l.id;
+              return (
+                <button
+                  key={l.id}
+                  role="radio"
+                  aria-checked={on}
+                  className={on ? 'on' : ''}
+                  onClick={() => void call('settings:update', { language: l.id, onboarding: { ...ob, languageChosen: true } }).catch(() => {})}
+                  data-testid={`onboarding-lang-${l.id}`}
+                >
+                  {l.label}
+                </button>
+              );
+            })}
+          </div>
+        </Step>
+
+        <Step n={2} title={t('Connect a coding agent on this Mac')} done={local} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} tag={either(local)}>
           <p className="muted small">{t('Agents run through Claude Code or Codex on this Mac, with the account you sign in with there. The app never sees your password or key.')}</p>
           <p className="muted small">{t('What agents do counts against that account’s plan (your Claude or ChatGPT subscription, or API usage).')}</p>
           {(['claude', 'codex'] as const).map((p) => (
@@ -53,10 +77,10 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           {ready.length === 2 ? <MainAgentChoice snapshot={snapshot} /> : null}
         </Step>
 
-        <Step n={2} title={t('Connect other machines (optional)')} done={remote} summary={remoteReady.length ? t('{n} machines', { n: remoteReady.length }) : t('Skipped')}>
+        <Step n={3} title={t('Connect other machines')} done={remote || (local && !!ob.remoteSkipped)} summary={remoteReady.length ? t('{n} machines', { n: remoteReady.length }) : t('Skipped')} tag={either(remote)}>
           <p className="muted small">{t('Agents can run on machines in your ~/.ssh/config, with Claude Code or Codex installed and signed in there; their sessions stay on those machines.')}</p>
           <RemoteHosts snapshot={snapshot} autoRecheck />
-          {remoteReady.length ? null : (
+          {remoteReady.length || !local ? null : (
             <div className="row">
               <button className="btn btn-ghost" onClick={() => save({ remoteSkipped: true })} data-testid="onboarding-remote-skip">
                 {t('Skip')}
@@ -65,8 +89,8 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           )}
         </Step>
 
-        <Step n={3} title={t('Bring in your work')} done={broughtIn} summary={t('{n} projects', { n: snapshot.projects.length })} locked={!connected}>
-          <BringIn snapshot={snapshot} now={now} />
+        <Step n={4} title={t('Bring in your work')} done={broughtIn} summary={t('{n} projects', { n: snapshot.projects.length })} locked={!connected}>
+          {local ? <BringIn snapshot={snapshot} now={now} /> : null}
           {remoteReady.map((host) => (
             <div key={host} className="ob-remote">
               <div className="ob-remote-head">
@@ -77,7 +101,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           ))}
         </Step>
 
-        <Step n={4} title={t('Voice (optional)')} done={voice} summary={snapshot.voice.sttAvailable ? t('Ready') : t('Skipped')} locked={!connected}>
+        <Step n={5} title={t('Voice (optional)')} done={voice} summary={snapshot.voice.sttAvailable ? t('Ready') : t('Skipped')} locked={!connected}>
           <p className="muted small">{t('Talk to your agents like on a call: say a name ("Alice, …") and it goes to that agent. An on-device speech model needs no key.')}</p>
           <div className="row">
             <button className="btn" onClick={onSettings} data-testid="onboarding-voice-settings">
@@ -102,7 +126,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   );
 }
 
-function Step({ n, title, done, summary, required, locked, children }: { n: number; title: string; done: boolean; summary?: string; required?: boolean; locked?: boolean; children: ReactNode }) {
+function Step({ n, title, done, summary, tag, locked, children }: { n: number; title: string; done: boolean; summary?: string; tag?: string; locked?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(!done);
   // A step that just got done folds; one that comes undone (signed out) opens again.
   useEffect(() => setOpen(!done), [done]);
@@ -111,7 +135,7 @@ function Step({ n, title, done, summary, required, locked, children }: { n: numb
       <button className="ob-step-head" onClick={() => !locked && setOpen((o) => !o)} disabled={locked} aria-expanded={open && !locked}>
         <span className="ob-step-mark">{done ? <Icon name="check" size={12} /> : n}</span>
         <span className="ob-step-title">{title}</span>
-        {required && !done ? <span className="ob-step-tag">{t('Needed')}</span> : null}
+        {tag && !done ? <span className="ob-step-tag" data-testid={`onboarding-step-${n}-tag`}>{tag}</span> : null}
         {done && summary ? <span className="ob-step-summary muted small">{summary}</span> : null}
       </button>
       {open && !locked ? <div className="ob-step-body">{children}</div> : null}
