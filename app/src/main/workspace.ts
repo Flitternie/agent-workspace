@@ -35,7 +35,7 @@ import type { ProviderAdapter, ProviderEvent, ProviderSession } from './provider
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
-import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, titleLabel } from './label';
+import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
@@ -117,6 +117,54 @@ export class Workspace {
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
     this.applyModels();
     this.recoverAfterRestart();
+    this.migrateLabels();
+    // With a model at hand already (tests, an OpenAI key), relabel now; else once the CLIs are detected.
+    setTimeout(() => this.relabelStale(), 0);
+  }
+
+  private relabelTried = new Set<string>();
+
+  /**
+   * Once, on updating: every agent's name from an older version becomes the task's title, shortened,
+   * and is marked for a model to label the work (all of them, in the background, most recently used
+   * first). Only names the user set since names were marked stay.
+   */
+  private migrateLabels(): void {
+    const d = this.store.data;
+    if ((d.labelsVersion ?? 0) >= 1) return;
+    for (const t of d.tasks) {
+      if (!needsNewLabel(t)) continue;
+      t.name = titleLabel(t.title, labelLang(t.alias)) ?? t.alias;
+      t.nameSource = 'auto';
+      t.labelStale = true;
+    }
+    d.labelsVersion = 1;
+    this.store.save();
+  }
+
+  /** Rewrites every stale label, most recently used agents first (the background queue takes one at a time). */
+  private relabelStale(): void {
+    const stale = this.store.data.tasks
+      .filter((t) => t.labelStale && !this.relabelTried.has(t.taskId))
+      .sort((a, b) => Date.parse(b.lastUserActivityAt ?? b.updatedAt) - Date.parse(a.lastUserActivityAt ?? a.updatedAt));
+    for (const t of stale) this.relabelFromHistory(t);
+  }
+
+  /** A model labels a stale agent from its title and the user's first messages. Once per run. */
+  private relabelFromHistory(t: Task): void {
+    if (!t.labelStale || this.relabelTried.has(t.taskId) || !this.canLabel()) return;
+    this.relabelTried.add(t.taskId);
+    const said = this.store
+      .transcript(t.taskId)
+      .filter((i) => i.role === 'user' && i.text.trim())
+      .slice(0, 4)
+      .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
+    this.refineLabel(t, [t.title, ...said].join('\n'));
+  }
+
+  /** Whether any model can write a label right now. */
+  private canLabel(): boolean {
+    return !this.opts.demo && (!!this.backgroundAsk() || !!this.opts.openai);
   }
 
   private keyInfo: WorkspaceSnapshot['voice']['openaiKey'] = { source: null };
@@ -198,6 +246,8 @@ export class Workspace {
     this.syncMainAgent();
     this.changed();
     void this.refreshHosts();
+    // The CLIs are known now: stale labels from older versions can be rewritten.
+    this.relabelStale();
   }
 
   // ---------------------------------------------------------------- remote hosts
@@ -532,6 +582,7 @@ export class Workspace {
         if (!label || !t || t.name !== auto || t.nameSource === 'user') return;
         t.name = label;
         t.nameSource = 'auto';
+        t.labelStale = undefined;
         this.changed();
       })
       .catch((error) => this.log('label suggestion failed', error));
@@ -594,6 +645,8 @@ export class Workspace {
   /** The user did something with this agent: it moves up in the sidebar. */
   private touched(t: Task): void {
     t.lastUserActivityAt = now();
+    // An old role name: label the work now that it is in use again.
+    if (t.labelStale) this.relabelFromHistory(t);
   }
 
   /** The user opened this agent's view. At most once a minute, so browsing does not churn the store. */
@@ -610,6 +663,7 @@ export class Workspace {
     t.name = name.trim() || t.alias;
     // Cleared, the name is the app's to choose again.
     t.nameSource = name.trim() ? 'user' : 'auto';
+    t.labelStale = undefined;
     t.updatedAt = now();
     this.changed();
   }

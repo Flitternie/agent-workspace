@@ -12,6 +12,7 @@ describe('agent labels', () => {
     expect(cleanLabel('「合同时效梳理」。', 'zh')).toBe('合同时效梳理');
     expect(cleanLabel('标签：登录页暗色模式', 'zh')).toBe('登录页暗色模式');
     expect(cleanLabel('订单接口迁移 v2', 'zh')).toBe('订单接口迁移 v2');
+    expect(cleanLabel('GitHub 子账号 SSH 密钥配置', 'zh')).toBe('GitHub 子账号 SSH 密钥配置');
     expect(cleanLabel('负责把整个订单系统从旧接口迁移到新接口的工作', 'zh')).toBeUndefined();
     expect(cleanLabel('**order API migration**', 'en')).toBe('Order API migration');
     expect(cleanLabel('"Contract deadlines".\nBecause the user asked…', 'en')).toBe('Contract deadlines');

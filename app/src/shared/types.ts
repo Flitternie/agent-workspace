@@ -41,6 +41,8 @@ export interface Task {
   name: string;
   /** Who set the name: 'user' names are never changed automatically. Unset on older tasks. */
   nameSource?: 'auto' | 'user';
+  /** An old automatic role replaced by a stopgap; a model labels the work when the agent is next used. */
+  labelStale?: boolean;
   /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
   lastUserActivityAt?: string;
   projectId: string;

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MockAdapter } from '../../src/main/providers/mock';
 import type { ProviderAdapter, ProviderEvent } from '../../src/main/providers/types';
+import type { Task } from '../../src/shared/types';
 import { Workspace } from '../../src/main/workspace';
 
 const opened: Workspace[] = [];
@@ -37,8 +38,8 @@ function savedClaude(said: string[]): ProviderAdapter {
   } as unknown as ProviderAdapter;
 }
 
-function open(opts: { model?: (system: string, prompt: string) => Promise<string>; said?: string[] } = {}): Workspace {
-  const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+function open(opts: { model?: (system: string, prompt: string) => Promise<string>; said?: string[]; dataDir?: string } = {}): Workspace {
+  const dataDir = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'amw-test-data-'));
   const ws = new Workspace({
     dataDir,
     adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), 5), claude: savedClaude(opts.said ?? []) },
@@ -134,5 +135,84 @@ describe('agent labels', () => {
     expect(t.nameSource).toBe('auto');
     const named = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Roadmap', name: 'Planner', isolate: false });
     expect(named.nameSource).toBe('user');
+  });
+
+  it('on updating, renames every agent from an older version once by its work; only names the user set stay', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const old = open({ dataDir });
+    const p = await old.addProject(repo(), 'agent_workspace');
+    const mk = (title: string) => old.createTask({ projectId: p.projectId, provider: 'mock', title, isolate: false });
+    const keyword = await mk('Migrate the orders API to v2');
+    const fallback = await mk('Think about the roadmap');
+    const unnamed = await mk('Contract deadlines');
+    const custom = await mk('Legal review');
+    const chosen = await mk('Docs site');
+    const recentOrder = [keyword, fallback, unnamed, custom, chosen];
+    // As an older version saved them: keyword roles, the project-name fallback, no name, an unmarked
+    // custom name, and a name the user set.
+    const store = (old as unknown as { store: { data: { labelsVersion?: number; tasks: Array<Record<string, unknown>> }; save(): void } }).store;
+    const set = (id: string, name: string, nameSource?: 'user') => Object.assign(store.data.tasks.find((t) => t.taskId === id)!, { name, nameSource, labelStale: undefined });
+    set(keyword.taskId, 'Backend');
+    set(fallback.taskId, 'AgentWorkspace');
+    set(unnamed.taskId, unnamed.alias);
+    set(custom.taskId, 'Paralegal');
+    set(chosen.taskId, 'Docs', 'user');
+    recentOrder.forEach((t, i) => (store.data.tasks.find((x) => x.taskId === t.taskId)!.lastUserActivityAt = new Date(Date.now() - i * 60_000).toISOString()));
+    delete store.data.labelsVersion;
+    store.save();
+    await old.shutdown();
+    opened.splice(opened.indexOf(old), 1);
+
+    const asked: string[] = [];
+    const ws = open({ dataDir, model: async (_s, prompt) => (asked.push(prompt), `Label ${/<task>\n(?:Project[^\n]*\n)?(\S+)/.exec(prompt)![1]}`) });
+    const name = (id: string) => ws.snapshot().tasks.find((t) => t.taskId === id)!.name;
+    // Every older name (unmarked ones included: older versions did not record who chose them).
+    await until(() => name(keyword.taskId) === 'Label Migrate');
+    await until(() => name(fallback.taskId) === 'Label Think');
+    await until(() => name(unnamed.taskId) === 'Label Contract');
+    await until(() => name(custom.taskId) === 'Label Legal');
+    // A name the user set since names were marked stays.
+    expect(name(chosen.taskId)).toBe('Docs');
+    expect(ws.snapshot().tasks.find((t) => t.taskId === keyword.taskId)!.labelStale).toBeUndefined();
+    // Once: a later start does not rename anything again.
+    const before = asked.length;
+    await ws.shutdown();
+    opened.splice(opened.indexOf(ws), 1);
+    open({ dataDir, model: async (_s, prompt) => (asked.push(prompt), 'Again') });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(asked.length).toBe(before);
+  });
+
+  it('relabels them all in the background, one at a time, most recently used first', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const old = open({ dataDir });
+    const p = await old.addProject(repo(), 'shop');
+    const tasks: Task[] = [];
+    for (let i = 0; i < 10; i++) tasks.push(await old.createTask({ projectId: p.projectId, provider: 'mock', title: `Task number ${i}`, isolate: false }));
+    const store = (old as unknown as { store: { data: { labelsVersion?: number; tasks: Array<Record<string, unknown>> }; save(): void } }).store;
+    tasks.forEach((t, i) => Object.assign(store.data.tasks.find((x) => x.taskId === t.taskId)!, { name: 'Frontend', nameSource: undefined, lastUserActivityAt: new Date(Date.now() - i * 60_000).toISOString() }));
+    delete store.data.labelsVersion;
+    store.save();
+    await old.shutdown();
+    opened.splice(opened.indexOf(old), 1);
+
+    const order: number[] = [];
+    let running = 0;
+    let most = 0;
+    const ws = open({
+      dataDir,
+      model: async (_s, prompt) => {
+        const n = Number(/Task number (\d)/.exec(prompt)![1]);
+        order.push(n);
+        most = Math.max(most, ++running);
+        await new Promise((r) => setTimeout(r, 5));
+        running--;
+        return `Work ${n}`;
+      },
+    });
+    const name = (i: number) => ws.snapshot().tasks.find((t) => t.taskId === tasks[i].taskId)!.name;
+    await until(() => tasks.every((_t, i) => name(i) === `Work ${i}`));
+    expect(order).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(most).toBe(1);
   });
 });

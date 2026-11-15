@@ -33,7 +33,8 @@ const NOT_A_LABEL = /^(ok|okay|yes|no|done|sure|none|n\/a|unknown|label|task|age
 export function cleanLabel(raw: string, lang: Lang): string | undefined {
   const w = unwrap(raw);
   if (w.length < 2 || NOT_A_LABEL.test(w)) return undefined;
-  if (lang === 'zh') return width(w) <= 24 ? w : undefined;
+  // Room for mixed Chinese and English work names ("GitHub 子账号 SSH 密钥配置").
+  if (lang === 'zh') return width(w) <= 28 ? w : undefined;
   const words = w.split(' ');
   if (words.length > 5 || w.length > 32) return undefined;
   return w.charAt(0).toUpperCase() + w.slice(1);
@@ -61,6 +62,15 @@ export function titleLabel(title: string, lang: Lang): string | undefined {
   const words = t.split(' ');
   t = words.slice(0, 4).join(' ');
   return words.length > 4 || t.length > 32 ? `${t.slice(0, 32).trim()}…` : t;
+}
+
+/**
+ * Whether a saved name gets the new work label when updating: every name except one the user set
+ * since names were marked (older versions did not record who chose a name, so theirs are relabelled
+ * too; renaming it again marks it as the user's for good).
+ */
+export function needsNewLabel(t: { nameSource?: 'auto' | 'user' }): boolean {
+  return t.nameSource !== 'user';
 }
 
 /** Asks for the label, given what the agent is doing (title and the user's first messages). */
