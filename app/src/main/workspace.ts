@@ -30,7 +30,7 @@ import type {
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
-import { candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
+import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
@@ -43,7 +43,7 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote } from './preview';
 import { run } from './util/exec';
-import { MemoryWriteback, plan as planWriteback, type BackupEntry } from './memory-writeback';
+import { MemoryWriteback, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -335,7 +335,7 @@ export class Workspace {
       attention: d.attention,
       memory: d.memory,
       memorySync: { running: this.memSync.running, last: d.memorySync },
-      memoryShare: Object.fromEntries(Object.entries(d.settings.memoryLinks ?? {}).map(([h, l]) => [h, { ...l, ...this.shareResults.get(h) }])),
+      memoryShare: Object.fromEntries(Object.entries(d.settings.memoryLinks ?? {}).map(([h, l]) => [h, { ...l, ...this.shareResults.get(h), paused: this.writeback.targets(h).filter((t) => t.paused).map((t) => ({ kind: t.kind, why: t.paused! })) }])),
       coordinator: d.coordinator.slice(-50),
       capabilities: this.capabilities,
       remoteHosts: this.enabledHosts().map((host) => this.hostStatus.get(host) ?? { host, ssh: 'checking', capabilities: [] }),
@@ -673,7 +673,12 @@ export class Workspace {
     task.sessionLocalId = record.localId;
     task.status = 'starting';
     task.lastError = undefined;
-    const injected = memoryForTask(task, this.store.data.memory);
+    // On a linked machine the CLI reads user memory from its own files: not given twice
+    // (unless a file there is paused and may be out of date: then rather twice than missing).
+    const machine = task.host ?? LOCAL;
+    const link = this.store.data.settings.memoryLinks?.[machine];
+    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(viaFiles && m.scope === 'global'));
     task.injectedMemoryIds = injected.map((m) => m.id);
     this.changed();
 
@@ -1712,7 +1717,8 @@ export class Workspace {
    * notes: those stay manual). `manual` runs it even before startMemorySync (Sync now).
    */
   async syncMemory(manual = false): Promise<MemorySyncStatus | undefined> {
-    if ((!manual && !this.memSync.started) || this.store.data.settings.memorySync === false) return undefined;
+    // Linking a machine is the switch: with none linked, this reads nothing that matters.
+    if (!manual && !this.memSync.started) return undefined;
     if (this.memSync.running) {
       this.memSync.queued = true;
       return undefined;
@@ -1746,7 +1752,7 @@ export class Workspace {
 
   // ---------------------------------------------------------------- user memory in the CLIs' files
 
-  private shareResults = new Map<string, { lastWrite?: string; errors?: string[] }>();
+  private shareResults = new Map<string, { lastWrite?: string; errors?: string[]; notices?: string[] }>();
   private pushTimer?: NodeJS.Timeout;
   /** Writes to the CLIs' files run one at a time (a link, a push, a restore never overlap). */
   private shareQueue: Promise<unknown> = Promise.resolve();
@@ -1756,6 +1762,10 @@ export class Workspace {
     return next;
   }
 
+  private reachable(host: string): boolean {
+    return host === LOCAL || this.hostStatus.get(host)?.ssh === 'ok';
+  }
+
   /** Soon after user memory changed in the app: the linked machines get it. */
   private schedulePush(): void {
     clearTimeout(this.pushTimer);
@@ -1763,61 +1773,152 @@ export class Workspace {
     this.pushTimer.unref?.();
   }
 
-  /** Writes the shared user memory to every linked, reachable machine (offline ones catch up on the next sync). */
+  /**
+   * Writes the shared user memory to every linked, reachable machine (offline ones catch
+   * up later), and finishes unlinking machines that were offline when the user unlinked them.
+   */
   pushMemory(): Promise<void> {
     return this.shareSerial(() => this.doPush());
   }
 
   private async doPush(): Promise<void> {
-    if (this.store.data.settings.memorySync === false) return;
-    const hosts = Object.keys(this.store.data.settings.memoryLinks ?? {}).filter((h) => h === LOCAL || this.hostStatus.get(h)?.ssh === 'ok');
-    await Promise.all(
-      hosts.map(async (h) => {
-        const r = await this.writeback.write(h, this.store.data.memory, 'sync').catch((e: Error) => ({ written: [], errors: [e.message] }));
-        this.shareResults.set(h, { lastWrite: r.written.length ? now() : this.shareResults.get(h)?.lastWrite, errors: r.errors.length ? r.errors : undefined });
-      }),
-    );
+    const links = this.store.data.settings.memoryLinks ?? {};
+    for (const [h, link] of Object.entries(links)) {
+      if (!this.reachable(h)) continue;
+      if (link.unlinking) {
+        await this.finishUnlink(h).catch((e: Error) => this.shareResults.set(h, { errors: [e.message] }));
+        continue;
+      }
+      const r = await this.writeback.write(h, this.store.data.memory, 'sync').catch((e: Error) => ({ written: [], notices: [], errors: [e.message] }));
+      this.shareResults.set(h, { lastWrite: r.written.length ? now() : this.shareResults.get(h)?.lastWrite, errors: r.errors.length ? r.errors : undefined, notices: r.notices.length ? r.notices : undefined });
+    }
     this.changed();
   }
 
-  /**
-   * What linking a machine would do: its user-level notes that would join the shared
-   * user memory, and each of its CLI files before and after (nothing is changed).
-   */
-  async linkPreview(host: string): Promise<{ incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }> }> {
-    const incoming = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
-    const marked = markCandidates(incoming, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
-    const after = [...this.store.data.memory, ...marked.map((c, i) => ({ id: `preview-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, source: c.key, importKeys: [c.key], approvedForReuse: true, updatedAt: now() }))];
-    const files = planWriteback(await this.writeback.read(host), after);
-    return { incoming: marked, files: files.map(({ file, next }) => ({ path: file.path, kind: file.kind, exists: file.exists, before: file.content, after: next })) };
+  /** Notes on a machine that linking would bring in: its Claude auto-memory (user, feedback) and its own instruction files. */
+  private async incoming(host: string): Promise<MemoryCandidate[]> {
+    const found = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
+    return markCandidates(found, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
   }
 
-  /** The first sync with a machine: back up its files, merge its user-level notes in, write the shared user memory there. */
-  linkMachine(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
+  /**
+   * What linking a machine would do: the notes that would join the shared user memory,
+   * and each of its CLI files before and after (nothing is changed).
+   */
+  async linkPreview(host: string): Promise<{ incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }>; blocked: string[] }> {
+    const incoming = await this.incoming(host);
+    const after = [...this.store.data.memory, ...incoming.map((c, i) => ({ id: `preview-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, title: c.title, source: c.key, importKeys: [c.key], importedHash: bodyHash(c.body), approvedForReuse: true, updatedAt: now() }))];
+    const files = await this.writeback.read(host);
+    // Text another Agent Workspace keeps there is never overwritten: say so up front.
+    const blocked = files.filter((f) => { const o = ownerOf(f.kind, f.content); return o && o !== this.writeback.owner; }).map((f) => f.file);
+    const plan = planWriteback(files, after, this.writeback.owner, this.writeback.label);
+    return { incoming, blocked, files: plan.map(({ file, next }) => ({ path: file.path, kind: file.kind, exists: file.exists, before: file.content, after: blocked.includes(file.file) ? null : next })) };
+  }
+
+  /**
+   * The first sync with a machine: its notes join the shared user memory (instruction
+   * files once, as notes the app then owns; Claude auto-memory stays in sync), its files
+   * are backed up and the shared memory is written there.
+   */
+  linkMachine(host: string): Promise<{ added: number } & WriteResult> {
     return this.shareSerial(() => this.doLink(host));
   }
 
-  private async doLink(host: string): Promise<{ added: number; written: string[]; errors: string[] }> {
-    const incoming = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
-    const fresh = markCandidates(incoming, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
+  private async doLink(host: string): Promise<{ added: number } & WriteResult> {
+    const fresh = await this.incoming(host);
+    const r = await this.writeback.write(host, [...this.store.data.memory, ...fresh.map((c, i) => ({ id: `link-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, title: c.title, source: c.key, importKeys: [c.key], importedHash: bodyHash(c.body), approvedForReuse: true, updatedAt: now() }))], 'link');
+    // Nothing could be written (and nothing was): not linked, the notes stay where they are.
+    if (!r.written.length && (r.errors.length || r.notices.length)) return { added: 0, ...r };
     const added = importCandidates(this.store.data, fresh.map((candidate) => ({ candidate, scope: 'global' as const, scopeId: 'global' }))).length;
-    const r = await this.writeback.write(host, this.store.data.memory, 'link');
     this.store.data.settings.memoryLinks = { ...this.store.data.settings.memoryLinks, [host]: { linkedAt: now() } };
-    this.shareResults.set(host, { lastWrite: r.written.length ? now() : undefined, errors: r.errors.length ? r.errors : undefined });
+    this.shareResults.set(host, { lastWrite: r.written.length ? now() : undefined, errors: r.errors.length ? r.errors : undefined, notices: r.notices.length ? r.notices : undefined });
     this.changed();
     // Machines linked earlier get the notes this one brought.
     if (added) this.schedulePush();
     return { added, ...r };
   }
 
-  /** Stops sharing with a machine: takes the app's text out, or puts the files back as they were before linking. */
-  async unlinkMachine(host: string, how: 'remove' | 'original'): Promise<void> {
-    await this.shareSerial(() => this.writeback.unlink(host, how));
+  /**
+   * Stops sharing with a machine: only the app's line, section and user.md are taken out
+   * (backed up first). If the machine is offline, it stops getting updates now and is
+   * cleaned up when it connects again.
+   */
+  async unlinkMachine(host: string): Promise<{ pending: boolean; notices: string[] }> {
+    if (!this.reachable(host)) {
+      const links = { ...this.store.data.settings.memoryLinks };
+      if (links[host]) links[host] = { ...links[host], unlinking: true };
+      this.store.data.settings.memoryLinks = links;
+      this.changed();
+      return { pending: true, notices: [] };
+    }
+    const notices = await this.shareSerial(() => this.finishUnlink(host));
+    return { pending: false, notices };
+  }
+
+  private async finishUnlink(host: string): Promise<string[]> {
+    const notices = await this.writeback.unlink(host);
     const links = { ...this.store.data.settings.memoryLinks };
     delete links[host];
     this.store.data.settings.memoryLinks = links;
     this.shareResults.delete(host);
     this.changed();
+    return notices;
+  }
+
+  /** For a file the app stopped writing: write again, or first bring the notes found there into user memory. */
+  async resolveShare(host: string, kind: TargetKind, how: 'resume' | 'adopt'): Promise<number> {
+    const notes = await this.shareSerial(() => this.writeback.resolve(host, kind, how));
+    // Compared as written in the file: unchanged blocks are skipped; a block whose title is a
+    // note's title is that note, edited there (the user chose to keep it); the rest is new.
+    const user = this.store.data.memory.filter((m) => m.scope === 'global');
+    const known = new Set(user.map((m) => renderNotes([{ title: m.title, body: m.body }])));
+    const titleOf = (block: string) => /^### (.*)$/m.exec(block)?.[1];
+    let added = 0;
+    for (const n of notes) {
+      const block = renderNotes([n]);
+      if (known.has(block)) continue;
+      const title = titleOf(block);
+      const same = title ? user.find((m) => titleOf(renderNotes([{ title: m.title, body: m.body }])) === title) : undefined;
+      if (same) {
+        const text = n.body.replace(/^#{1,6}\s+.*\n+/, '');
+        const heading = /^(#{1,6}\s+.*)\n/.exec(same.body)?.[1];
+        Object.assign(same, { body: heading ? `${heading}\n\n${text}` : text, updatedAt: now() });
+        continue;
+      }
+      this.store.data.memory.push({ id: `m-${randomUUID().slice(0, 8)}`, scope: 'global', scopeId: 'global', body: n.body, title: n.title, source: 'user', approvedForReuse: true, updatedAt: now() });
+      added++;
+    }
+    this.changed();
+    void this.pushMemory();
+    return added;
+  }
+
+  /** A note whose source changed after it was edited here: take the source's text, or keep this one. */
+  resolveConflict(id: string, take: 'source' | 'mine'): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m || m.sourceBody === undefined) return;
+    if (take === 'source') Object.assign(m, { body: m.sourceBody, importedHash: bodyHash(m.sourceBody) });
+    // Keep the app's text: the source's current text counts as seen, so it is not offered again
+    // (the note stays "edited", so later syncs leave it alone too).
+    else m.importedHash = bodyHash(m.sourceBody);
+    delete m.sourceBody;
+    m.updatedAt = now();
+    this.changed();
+    this.schedulePush();
+  }
+
+  /** A retired note (its source was deleted on its machine) back into use. */
+  restoreNote(id: string): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) return;
+    // It now belongs to the app: no source to follow (or retire it again).
+    Object.assign(m, { sourceRemoved: false, importKeys: (m.importKeys ?? []).filter((k) => !k.startsWith('claude-memory|')), updatedAt: now() });
+    this.changed();
+    this.schedulePush();
+  }
+
+  shareTargets(host?: string): TargetState[] {
+    return this.writeback.targets(host);
   }
 
   memoryBackups(host?: string): BackupEntry[] {

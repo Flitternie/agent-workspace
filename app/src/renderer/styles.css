@@ -3321,3 +3321,19 @@ details[open] > summary .tool-more {
   padding: 8px 10px;
   margin: 6px 0 0;
 }
+.share-paused,
+.memory-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--needs-border);
+  background: var(--needs-bg);
+  border-radius: 8px;
+}
+.share-paused .row,
+.memory-conflict .row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

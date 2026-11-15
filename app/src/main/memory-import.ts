@@ -265,75 +265,62 @@ export function importCandidates(state: MemoryState, picks: Array<{ candidate: M
 }
 
 /**
- * Automatic sync of user-level notes. Same text from several machines / files is one
- * record listing all its keys. New text is added; a source whose text changed updates
- * its record unless the user edited it (user wins); keys the user deleted (tombstones)
- * are skipped; a record whose every source was scanned and not found is marked
- * `sourceRemoved`, never deleted. `scanned` = machines read successfully this time:
- * keys on other machines are left as they are.
+ * Automatic sync of user memory, from Claude Code auto-memory only: one file is one note
+ * and its key, so additions, edits and deletions on a machine are unambiguous. (The
+ * user's own CLAUDE.md / AGENTS.md text is imported once, when a machine is linked or by
+ * hand, and then belongs to the app: no section matching.) Nothing is ever deleted or
+ * overwritten here:
+ * - a new file becomes a note, unless its text is already in memory or the user deleted it;
+ * - a changed file updates its note, unless the note was edited in the app: then the
+ *   file's text is kept beside it (`sourceBody`) for the user to choose;
+ * - a file gone from a machine that was read retires its note (`sourceRemoved`: no longer
+ *   shared or given to agents, kept so it can be restored); it comes back with the file.
+ * `scanned` = machines read successfully this time: other machines' notes are left alone.
  */
 export function syncUserMemory(state: MemoryState, candidates: MemoryCandidate[], scanned: string[]): { added: number; updated: number; removed: number } {
   const counts = { added: 0, updated: 0, removed: 0 };
   const dead = new Set(state.memoryTombstones ?? []);
-  const groups = new Map<string, { hash: string; title: string; body: string; keys: string[] }>();
-  for (const c of candidates) {
-    if (c.suggestedScope !== 'global') continue;
+  const notes = candidates.filter((c) => c.source === 'claude-memory' && c.suggestedScope === 'global');
+  const byKey = (key: string) => state.memory.find((r) => r.importKeys?.includes(key));
+  for (const c of notes) {
     const hash = bodyHash(c.body);
-    const g = groups.get(hash) ?? { hash, title: c.title, body: c.body, keys: [] };
-    g.keys.push(c.key);
-    groups.set(hash, g);
-  }
-  const live = [...groups.values()].filter((g) => !dead.has(`hash:${g.hash}`) && !g.keys.some((k) => dead.has(k)));
-  const imported = () => state.memory.filter((r) => r.scope === 'global' && r.importedHash);
-  const claimed = new Set<MemoryRecord>();
-  const placed = new Map<(typeof live)[number], MemoryRecord>();
-
-  // Unchanged text first, so a record stays with the text it holds when sources diverge.
-  for (const g of live) {
-    const r = imported().find((m) => m.importedHash === g.hash && !claimed.has(m));
-    if (r) {
-      claimed.add(r);
-      placed.set(g, r);
-    }
-  }
-  for (const g of live) {
-    if (placed.has(g)) continue;
-    let r = imported().find((m) => m.importKeys?.some((k) => g.keys.includes(k)));
-    if (r && !claimed.has(r)) {
-      if (!edited(r)) {
-        Object.assign(r, { body: g.body, title: g.title, importedHash: g.hash, updatedAt: now() });
-        counts.updated++;
-      }
-    } else {
-      r = newRecord(g, 'global', 'global');
-      state.memory.push(r);
+    const r = byKey(c.key);
+    if (!r) {
+      if (dead.has(c.key) || dead.has(`hash:${hash}`)) continue;
+      // The same text already in memory (any scope, e.g. imported by hand as project memory): not again.
+      if (state.memory.some((m) => !m.sourceRemoved && (m.importedHash === hash || bodyHash(m.body) === hash))) continue;
+      state.memory.push(newRecord({ title: c.title, body: c.body, keys: [c.key] }, 'global', 'global'));
       counts.added++;
-    }
-    claimed.add(r);
-    placed.set(g, r);
-  }
-  for (const [g, r] of placed) {
-    detach(state, g.keys, r);
-    r.importKeys = [...new Set([...(r.importKeys ?? []), ...g.keys])];
-  }
-
-  const found = new Set(candidates.map((c) => c.key));
-  const seen = new Set(scanned);
-  for (const r of state.memory) {
-    if (!r.importKeys?.length) {
-      if (r.importedHash && !r.sourceRemoved) {
-        // Every key moved to other records (its text is gone everywhere).
-        r.sourceRemoved = true;
-        counts.removed++;
-      }
       continue;
     }
-    const gone = r.importKeys.every((k) => seen.has(keyHost(k)) && !found.has(k));
-    if (gone && !r.sourceRemoved) {
+    if (r.scope !== 'global') continue; // imported by hand into a project: the user manages it
+    if (r.sourceRemoved) {
+      r.sourceRemoved = false;
+      r.updatedAt = now();
+    }
+    if (r.importedHash === hash) {
+      if (r.sourceBody !== undefined) delete r.sourceBody;
+      continue;
+    }
+    if (edited(r)) {
+      // Both changed: keep the user's version, offer the file's.
+      if (r.sourceBody !== c.body) r.sourceBody = c.body;
+      continue;
+    }
+    Object.assign(r, { body: c.body, title: c.title, importedHash: hash, updatedAt: now() });
+    delete r.sourceBody;
+    counts.updated++;
+  }
+  const found = new Set(notes.map((c) => c.key));
+  const seen = new Set(scanned);
+  for (const r of state.memory) {
+    if (r.scope !== 'global' || r.sourceRemoved) continue;
+    const keys = (r.importKeys ?? []).filter((k) => k.startsWith('claude-memory|'));
+    if (keys.length && keys.every((k) => seen.has(keyHost(k)) && !found.has(k))) {
       r.sourceRemoved = true;
       r.updatedAt = now();
       counts.removed++;
-    } else if (!gone && r.sourceRemoved) r.sourceRemoved = false;
+    }
   }
   return counts;
 }

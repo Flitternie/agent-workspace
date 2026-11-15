@@ -128,59 +128,55 @@ describe('import and sync', () => {
     expect(markCandidates([cand(A, 'Use spaces.'), cand(B, 'other')], s).map((c) => c.alreadyImported)).toEqual([true, false]);
   });
 
-  it('adds new notes and updates ones whose source changed', () => {
+  const M = memoryKey('claude-memory', 'devbox', '~/.claude/projects/p/memory/lang.md');
+  const M2 = memoryKey('claude-memory', undefined, '~/.claude/projects/q/memory/style.md');
+  const mem = (key: string, body: string, type = 'feedback') => ({ ...cand(key, body), source: 'claude-memory' as const, memoryType: type });
+
+  it('syncs Claude Code memory notes only: instruction files are imported once, by hand or when linking', () => {
     const s = state();
-    expect(syncUserMemory(s, [cand(A, 'Use tabs.'), cand('x|local|f|p', 'Project note', 'project')], ['local'])).toEqual({ added: 1, updated: 0, removed: 0 });
-    expect(s.memory).toHaveLength(1); // project notes are never synced automatically
-    expect(syncUserMemory(s, [cand(A, 'Use tabs.')], ['local'])).toEqual({ added: 0, updated: 0, removed: 0 });
-    expect(syncUserMemory(s, [cand(A, 'Use two spaces.')], ['local'])).toEqual({ added: 0, updated: 1, removed: 0 });
-    expect(s.memory).toHaveLength(1);
-    expect(s.memory[0]).toMatchObject({ body: 'Use two spaces.', scope: 'global', approvedForReuse: true, importedHash: bodyHash('Use two spaces.') });
+    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.'), cand(A, 'Use tabs.'), { ...mem(M2, 'Run make.'), suggestedScope: 'project' as const }], ['devbox', 'local'])).toEqual({ added: 1, updated: 0, removed: 0 });
+    expect(s.memory.map((m) => m.body)).toEqual(['Reply in Chinese.']);
+    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox'])).toEqual({ added: 0, updated: 0, removed: 0 });
   });
 
-  it('leaves notes the user edited alone', () => {
+  it('follows an edit at the source', () => {
     const s = state();
-    syncUserMemory(s, [cand(A, 'Use tabs.')], ['local']);
-    s.memory[0].body = 'Use tabs, except in YAML.';
-    expect(syncUserMemory(s, [cand(A, 'Use tabs!')], ['local'])).toEqual({ added: 0, updated: 0, removed: 0 });
+    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese; code in English.')], ['devbox'])).toEqual({ added: 0, updated: 1, removed: 0 });
     expect(s.memory).toHaveLength(1);
-    expect(s.memory[0].body).toBe('Use tabs, except in YAML.');
+    expect(s.memory[0].body).toBe('Reply in Chinese; code in English.');
   });
 
-  it('never re-imports a note the user deleted (by key or by text)', () => {
+  it('never overwrites a note edited in the app: the source’s new text waits beside it', () => {
     const s = state();
-    syncUserMemory(s, [cand(A, 'Use tabs.')], ['local']);
+    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    s.memory[0].body = 'Reply in Chinese, briefly.';
+    syncUserMemory(s, [mem(M, 'Reply in Chinese; code in English.')], ['devbox']);
+    expect(s.memory[0]).toMatchObject({ body: 'Reply in Chinese, briefly.', sourceBody: 'Reply in Chinese; code in English.' });
+  });
+
+  it('retires a note whose file is gone (never deletes it), only for machines that were read; it returns with the file', () => {
+    const s = state();
+    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    expect(syncUserMemory(s, [], ['local'])).toEqual({ added: 0, updated: 0, removed: 0 }); // devbox not read this time
+    expect(s.memory[0].sourceRemoved).toBeFalsy();
+    expect(syncUserMemory(s, [], ['devbox'])).toEqual({ added: 0, updated: 0, removed: 1 });
+    expect(s.memory).toHaveLength(1);
+    expect(s.memory[0].sourceRemoved).toBe(true);
+    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    expect(s.memory[0].sourceRemoved).toBe(false);
+  });
+
+  it('never re-imports a note the user deleted, nor text already in memory (any scope)', () => {
+    const s = state();
+    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
     tombstone(s, s.memory[0]);
     s.memory = [];
-    expect(syncUserMemory(s, [cand(A, 'Use tabs, changed.'), cand(B, 'Use tabs.')], ['local', 'devbox'])).toEqual({ added: 0, updated: 0, removed: 0 });
-    expect(s.memory).toEqual([]);
-    expect(markCandidates([cand(B, 'Use tabs.')], s)[0].dismissed).toBe(true);
-    // An explicit import brings it back.
-    importCandidates(s, [{ candidate: cand(A, 'Use tabs, changed.'), scope: 'global', scopeId: 'global' }]);
-    expect(s.memory).toHaveLength(1);
-  });
-
-  it('collapses the same text from several machines into one record', () => {
-    const s = state();
-    expect(syncUserMemory(s, [cand(A, 'Use  tabs.'), cand(B, 'Use tabs.\n')], ['local', 'devbox']).added).toBe(1);
-    expect(s.memory).toHaveLength(1);
-    expect(s.memory[0].importKeys).toEqual([A, B]);
-    // devbox diverges: its text becomes its own note, the original keeps this Mac's key.
-    expect(syncUserMemory(s, [cand(A, 'Use tabs.'), cand(B, 'Use spaces.')], ['local', 'devbox'])).toEqual({ added: 1, updated: 0, removed: 0 });
-    expect(s.memory.map((m) => [m.body, m.importKeys])).toEqual([
-      ['Use  tabs.', [A]],
-      ['Use spaces.', [B]],
-    ]);
-  });
-
-  it('marks a note whose sources are gone, only for machines that were scanned', () => {
-    const s = state();
-    syncUserMemory(s, [cand(A, 'Use tabs.'), cand(B, 'Use tabs.')], ['local', 'devbox']);
-    expect(syncUserMemory(s, [], ['local']).removed).toBe(0); // devbox was not reachable: still a source
-    expect(syncUserMemory(s, [], ['local', 'devbox']).removed).toBe(1);
-    expect(s.memory[0].sourceRemoved).toBe(true);
-    syncUserMemory(s, [cand(B, 'Use tabs.')], ['devbox']);
-    expect(s.memory[0].sourceRemoved).toBe(false);
+    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']).added).toBe(0);
+    const t = state();
+    importCandidates(t, [{ candidate: cand(A, 'Run make.'), scope: 'project', scopeId: 'p1' }]);
+    expect(syncUserMemory(t, [mem(M2, 'Run make.')], ['local']).added).toBe(0);
+    expect(t.memory).toHaveLength(1);
   });
 });
 
@@ -215,29 +211,28 @@ describe('workspace scan over SSH (local sh, temp HOME)', () => {
         ].sort(),
       );
 
-      // Only linked machines sync (linking itself is covered in memory-writeback.test.ts).
-      ws.updateSettings({ memorySync: true, memoryLinks: { local: { linkedAt: 'earlier' }, devbox: { linkedAt: 'earlier' } } });
+      // Only linked machines sync, and only Claude Code memory (instruction files come in when linking).
+      ws.updateSettings({ memoryLinks: { local: { linkedAt: 'earlier' }, devbox: { linkedAt: 'earlier' } } });
       const status = await ws.syncMemory(true);
-      expect(status).toMatchObject({ added: 3, updated: 0, removed: 0, errors: [] }); // Tests ×2 collapse into one
-      const user = ws.snapshot().memory.filter((m) => m.scope === 'global');
-      expect(user.find((m) => m.title === 'Tests')?.importKeys).toHaveLength(2);
-      expect(ws.snapshot().memory.some((m) => m.scope === 'project')).toBe(false);
+      expect(status).toMatchObject({ added: 1, updated: 0, removed: 0, errors: [] });
+      expect(ws.snapshot().memory.map((m) => m.title)).toEqual(['lang']);
 
       const build = (await ws.scanMemoryImports()).candidates.find((c) => c.title === 'build')!;
       expect(ws.importMemory([{ key: build.key, scope: 'project', projectId: project.projectId }])).toBe(1);
-      expect((await ws.scanMemoryImports()).candidates.every((c) => c.alreadyImported)).toBe(true);
 
       const task = { taskId: 't1', projectId: project.projectId } as Parameters<typeof memoryForTask>[0];
       const text = instructionsFor(task, memoryForTask(task, ws.snapshot().memory))!;
       expect(text).toContain('[user preference] About lang Reply in Chinese.');
       expect(text).toContain('[project convention] About build Run make before pushing.');
-      expect(text).toContain('[user preference] ## Remote Use tmux.');
 
-      // Deleted in the app: stays deleted after the next sync.
-      const remoteNote = ws.snapshot().memory.find((m) => m.title === 'Remote')!;
-      ws.deleteMemory(remoteNote.id);
-      expect((await ws.syncMemory(true))?.added).toBe(0);
-      expect(ws.snapshot().memory.some((m) => m.title === 'Remote')).toBe(false);
+      // Deleted on its machine: retired (not given to agents), not deleted.
+      rmSync(join(local, `.claude/projects/${encodeClaudeCwd(repo)}/memory/lang.md`));
+      expect((await ws.syncMemory(true))?.removed).toBe(1);
+      const lang = ws.snapshot().memory.find((m) => m.title === 'lang')!;
+      expect(lang.sourceRemoved).toBe(true);
+      expect(memoryForTask(task, ws.snapshot().memory).some((m) => m.id === lang.id)).toBe(false);
+      ws.restoreNote(lang.id);
+      expect(memoryForTask(task, ws.snapshot().memory).some((m) => m.id === lang.id)).toBe(true);
     } finally {
       await ws.shutdown();
       delete remoteHomes.devbox;

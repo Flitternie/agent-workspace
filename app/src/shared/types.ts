@@ -212,8 +212,10 @@ export interface MemoryRecord {
   importKeys?: string[];
   /** Hash of the body as last imported; a different body hash means the user edited it, so sync leaves it alone. */
   importedHash?: string;
-  /** Every source file of an imported note is gone (kept until the user deletes it). */
+  /** Retired: its source file is gone from the machine it came from. Not shared or given to agents; kept so it can be restored. */
   sourceRemoved?: boolean;
+  /** The source changed after the note was edited in the app: the source's text, for the user to choose. */
+  sourceBody?: string;
 }
 
 /** A note found in a CLI's native memory or instruction files, offered for import. */
@@ -342,7 +344,7 @@ export interface Settings {
    * Machines whose CLIs share user memory ('local' = this Mac), linked once (files backed
    * up, notes merged); from then on the shared user memory is kept in sync there.
    */
-  memoryLinks?: Record<string, { linkedAt: string }>;
+  memoryLinks?: Record<string, { linkedAt: string; /** Unlinked while offline: cleaned up when it connects. */ unlinking?: boolean }>;
 }
 
 /**
@@ -402,7 +404,7 @@ export interface WorkspaceSnapshot {
   /** Last automatic user-memory sync (Settings › Memory). */
   memorySync: { running: boolean; last?: MemorySyncStatus };
   /** Per linked machine: the last write of user memory into its CLI files. */
-  memoryShare: Record<string, { linkedAt: string; lastWrite?: string; errors?: string[] }>;
+  memoryShare: Record<string, { linkedAt: string; unlinking?: boolean; lastWrite?: string; errors?: string[]; notices?: string[]; paused?: Array<{ kind: string; why: string }> }>;
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   /** Enabled SSH hosts and what works on them. */

@@ -6,18 +6,28 @@ import { Modal } from './Dialogs';
 import { Icon } from './bits';
 import { t } from '../i18n';
 
-type Preview = { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }> };
+type Preview = { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }>; blocked: string[] };
 
 const FILE_ROLE: Record<string, string> = {
-  'claude-md': 'Claude Code reads it: one line is added that imports the file below',
+  'claude-md': 'Claude Code reads it: one line is added at the end that imports the file below',
   'claude-user': 'The shared user memory for Claude Code (the app’s own file)',
   'codex-md': 'Codex reads it: a marked section at the end holds the shared user memory',
+};
+const FILE_NAME: Record<string, string> = { 'claude-md': '~/.claude/CLAUDE.md', 'claude-user': '~/.agent-workspace/memory/user.md', 'codex-md': '~/.codex/AGENTS.md' };
+
+const PAUSED: Record<string, string> = {
+  edited: 'The Agent Workspace part was changed outside the app. It is left as it is until you choose.',
+  removed: 'The Agent Workspace part was removed by hand. It is not put back unless you ask.',
+  restored: 'Restored from a backup. The app does not write to it until you resume.',
+  'other-owner': 'Kept in sync by another Agent Workspace (another install or data folder). This one leaves it alone; unlink it there first to use this one.',
 };
 
 /**
  * Which machines share user memory with their CLIs (terminal Claude Code and Codex).
  * A machine is linked once, after a preview; then the shared user memory is kept in sync
- * there. Every change is backed up first and can be undone.
+ * there. Nothing on either side is deleted or overwritten: the user's own text is never
+ * changed, the app's own text is left alone once someone else changed it, and every
+ * change is backed up first.
  */
 export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [preview, setPreview] = useState<{ host: string; data?: Preview; error?: string } | null>(null);
@@ -25,13 +35,16 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [unlinking, setUnlinking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const machines = ['local', ...snapshot.remoteHosts.map((h) => h.host)];
+  const [note, setNote] = useState('');
+  // This Mac, the SSH machines in Settings, and any machine still linked after it was removed from there.
+  const machines = [...new Set(['local', ...snapshot.remoteHosts.map((h) => h.host), ...Object.keys(snapshot.memoryShare)])];
   const name = (h: string) => (h === 'local' ? t('This Mac') : h);
   const reachable = (h: string) => h === 'local' || snapshot.remoteHosts.find((x) => x.host === h)?.ssh === 'ok';
 
   const act = async (id: string, fn: () => Promise<unknown>) => {
     setBusy(id);
     setError('');
+    setNote('');
     try {
       await fn();
     } catch (e) {
@@ -47,12 +60,17 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       (e) => setPreview({ host, error: errorText(e) }),
     );
   };
+  const resolve = (host: string, kind: string, how: 'resume' | 'adopt') =>
+    void act(`${host}:${kind}`, async () => {
+      const added = await call('memory:resolveShare', { host, kind: kind as 'claude-md', how });
+      if (how === 'adopt') setNote(t('{n} notes from there joined your user memory.', { n: added }));
+    });
 
   return (
     <div className="memory-share" data-testid="memory-share">
       <div className="section-label">{t('Share with the CLIs on each machine')}</div>
       <p className="muted small">
-        {t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and merges the notes already there; after that, changes on any linked machine reach all of them.')}
+        {t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the notes already there. After that, new notes Claude Code saves there come in by themselves. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}
       </p>
       {machines.map((h) => {
         const link = snapshot.memoryShare[h];
@@ -60,7 +78,9 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
           <div key={h} className="settings-row" data-testid="share-machine" data-host={h} data-linked={link ? '1' : '0'}>
             <div className="settings-row-main">
               <strong className={h === 'local' ? '' : 'mono'}>{name(h)}</strong>
-              {link ? (
+              {link?.unlinking ? (
+                <span className="badge">{t('Unlinking: cleaned up when it connects')}</span>
+              ) : link ? (
                 <span className="badge badge-ready">
                   <Icon name="check" size={12} /> {t('Linked {time}', { time: timeAgo(link.linkedAt) })}
                 </span>
@@ -74,9 +94,11 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                     <button className="btn btn-sm btn-ghost" onClick={() => setBackups(h)} data-testid="share-backups">
                       {t('Backups')}
                     </button>
-                    <button className="btn btn-sm" disabled={!!busy || !reachable(h)} onClick={() => setUnlinking(h)} data-testid="share-unlink">
-                      {t('Unlink…')}
-                    </button>
+                    {link.unlinking ? null : (
+                      <button className="btn btn-sm" disabled={!!busy} onClick={() => setUnlinking(h)} data-testid="share-unlink">
+                        {t('Unlink…')}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <button className="btn btn-sm btn-primary" disabled={!!busy || !reachable(h)} onClick={() => openPreview(h)} data-testid="share-link">
@@ -85,7 +107,26 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                 )}
               </span>
             </div>
-            {!reachable(h) ? <div className="muted small">{t('Connect it under Remote machines first.')}</div> : null}
+            {!link && !reachable(h) ? <div className="muted small">{t('Connect it under Remote machines first.')}</div> : null}
+            {link?.paused?.map((p) => (
+              <div key={p.kind} className="share-paused" data-testid="share-paused" data-why={p.why}>
+                <div className="small">
+                  <Icon name="alert" size={12} /> <span className="mono">{FILE_NAME[p.kind] ?? p.kind}</span>: {t(PAUSED[p.why] ?? p.why)}
+                </div>
+                {p.why === 'other-owner' ? null : (
+                  <div className="row">
+                    {p.why === 'edited' ? (
+                      <button className="btn btn-sm" disabled={!!busy} onClick={() => resolve(h, p.kind, 'adopt')} data-testid="share-adopt">
+                        {t('Keep those edits (add them to user memory)')}
+                      </button>
+                    ) : null}
+                    <button className="btn btn-sm btn-ghost" disabled={!!busy || !reachable(h)} onClick={() => resolve(h, p.kind, 'resume')} data-testid="share-resume">
+                      {p.why === 'removed' ? t('Put it back') : p.why === 'edited' ? t('Replace with the app’s version (backed up first)') : t('Resume')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
             {link?.errors?.map((e) => (
               <div key={e} className="warn-text small">
                 <Icon name="alert" size={12} /> {e}
@@ -94,6 +135,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
           </div>
         );
       })}
+      {note ? <div className="muted small">{note}</div> : null}
       {error ? <div className="error-text small">{error}</div> : null}
 
       {preview ? (
@@ -114,6 +156,12 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               ) : (
                 <div className="muted small">{t('None: everything there is already in your user memory.')}</div>
               )}
+              <div className="muted small">{t('Notes from CLAUDE.md / AGENTS.md are copied in once. Claude Code memory notes stay in sync: edited there, they update here; deleted there, they are retired here (not deleted).')}</div>
+              {preview.data.blocked.map((f) => (
+                <div key={f} className="warn-text small">
+                  <Icon name="alert" size={12} /> {t('{file} is kept in sync by another Agent Workspace; it will not be touched.', { file: f })}
+                </div>
+              ))}
               <div className="section-label">{t('Files that will change')}</div>
               {preview.data.files.filter((f) => f.after !== null).length === 0 ? <div className="muted small">{t('None.')}</div> : null}
               {preview.data.files
@@ -128,7 +176,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   </details>
                 ))}
               <p className="muted small">
-                {t('Before anything changes, each file is backed up in the app and next to it on that machine (~/.agent-workspace/backups). Your own text in these files is never changed; you can unlink and put them back as they were at any time.')}
+                {t('Before anything changes, each file is backed up in the app and next to it on that machine (~/.agent-workspace/backups). Your own text in these files is never changed; unlinking takes out only what the app added.')}
               </p>
               <div className="modal-foot">
                 <button className="btn" onClick={() => setPreview(null)}>
@@ -141,7 +189,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   onClick={() =>
                     void act(preview.host, async () => {
                       const r = await call('memory:link', { host: preview.host });
-                      if (r.errors.length) throw new Error(r.errors.join(' '));
+                      if (!r.written.length && (r.errors.length || r.notices.length)) throw new Error([...r.errors, ...r.notices].join(' '));
                       setPreview(null);
                     })
                   }
@@ -156,16 +204,25 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
       {unlinking ? (
         <Modal title={t('Unlink {machine}', { machine: name(unlinking) })} onClose={() => setUnlinking(null)}>
-          <p>{t('The CLIs there stop getting your user memory. The notes stay in the app. Files are backed up before they change.')}</p>
+          <p>{t('The CLIs there stop getting your user memory. Only what the app added is taken out (its line in CLAUDE.md, its section in AGENTS.md, its own user.md), each file backed up first. Your own text there stays, and the notes stay in the app.')}</p>
+          {!reachable(unlinking) ? <p className="muted small">{t('It is not connected now: it stops getting updates at once and is cleaned up when it connects again.')}</p> : null}
           <div className="modal-foot">
             <button className="btn" onClick={() => setUnlinking(null)}>
               {t('Cancel')}
             </button>
-            <button className="btn" disabled={!!busy} data-testid="unlink-original" onClick={() => void act(unlinking, async () => (await call('memory:unlink', { host: unlinking, how: 'original' }), setUnlinking(null)))}>
-              {t('Put the files back as before linking')}
-            </button>
-            <button className="btn btn-primary" disabled={!!busy} data-testid="unlink-remove" onClick={() => void act(unlinking, async () => (await call('memory:unlink', { host: unlinking, how: 'remove' }), setUnlinking(null)))}>
-              {t('Remove only the app’s lines')}
+            <button
+              className="btn btn-primary"
+              disabled={!!busy}
+              data-testid="unlink-confirm"
+              onClick={() =>
+                void act(unlinking, async () => {
+                  const r = await call('memory:unlink', { host: unlinking });
+                  if (r.notices.length) setNote(r.notices.join(' '));
+                  setUnlinking(null);
+                })
+              }
+            >
+              {t('Unlink')}
             </button>
           </div>
         </Modal>
@@ -207,7 +264,7 @@ function BackupList({ host, name, onClose }: { host: string; name: string; onClo
                 disabled={busy}
                 data-testid="backup-restore"
                 onClick={() => {
-                  if (!window.confirm(t('Put {file} back as it was then? Its current version is backed up first.', { file: b.path }))) return;
+                  if (!window.confirm(t('Put {file} back as it was then? Its current version is backed up first, and the app stops writing to it until you resume.', { file: b.path }))) return;
                   setBusy(true);
                   call('memory:restoreBackup', { id: b.id })
                     .then(() => load())

@@ -44,9 +44,12 @@ interface Outputs {
   'task:send': DispatchResult;
   'task:interrupt': void;
   'task:shell': { ok: boolean; error?: string };
-  'memory:linkPreview': { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }> };
-  'memory:link': { added: number; written: string[]; errors: string[] };
-  'memory:unlink': void;
+  'memory:linkPreview': { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }>; blocked: string[] };
+  'memory:link': { added: number; written: string[]; notices: string[]; errors: string[] };
+  'memory:unlink': { pending: boolean; notices: string[] };
+  'memory:resolveShare': number;
+  'memory:resolveConflict': void;
+  'memory:restoreNote': void;
   'memory:backups': MemoryBackup[];
   'memory:backupContent': string;
   'memory:restoreBackup': void;

@@ -6,9 +6,10 @@ import { MemoryShare } from './MemoryShare';
 import { timeAgo } from '../state';
 import { Icon } from './bits';
 
-// Settings › Memory: user memory (scope `global`) and project memory, the automatic
-// sync of user-level notes from the CLIs' native files, and a manual import list for
-// everything else (project notes). Nothing here writes to the CLIs' own files.
+// Settings › Memory: user memory (scope `global`) and project memory, sharing user
+// memory with the CLIs on linked machines (MemoryShare), and a manual import list.
+// Sync never deletes or overwrites a note: a note whose source is gone is retired (and
+// can be restored), and an edited note whose source changed shows both versions.
 
 const MAX_BODY = 4000; // keep in sync with main/memory-import MAX_BODY
 
@@ -38,9 +39,32 @@ function RecordRow({ m, onError }: { m: MemoryRecord; onError: (e: string) => vo
       ) : (
         <textarea className="input" rows={Math.min(12, Math.max(3, draft.split('\n').length + 1))} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
       )}
+      {m.sourceBody !== undefined ? (
+        <div className="memory-conflict" data-testid="memory-conflict">
+          <div className="small">{t('Changed at its source too. Its source now says:')}</div>
+          <div className="memory-body">{m.sourceBody}</div>
+          <div className="row">
+            <button className="btn btn-sm" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'source' }))}>
+              {t('Use this version')}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'mine' }))}>
+              {t('Keep mine')}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="memory-meta">
         {memorySourceText(m)}
-        {m.sourceRemoved ? <span className="badge badge-missing memory-badge">{t('source removed')}</span> : null}
+        {m.sourceRemoved ? (
+          <>
+            <span className="badge badge-missing memory-badge" title={t('Its source was deleted on its machine, so it is no longer shared or given to agents. Nothing was deleted here.')}>
+              {t('source deleted · retired')}
+            </span>
+            <button className="link small" onClick={() => void run(call('memory:restoreNote', { id: m.id }))} data-testid="memory-restore-note">
+              {t('Use it again')}
+            </button>
+          </>
+        ) : null}
         {!m.approvedForReuse ? <span className="badge memory-badge">{t('not loaded (not approved)')}</span> : null}
       </div>
       <div className="memory-actions">
@@ -91,7 +115,6 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const sync = snapshot.memorySync;
-  const on = snapshot.settings.memorySync !== false;
   const user = snapshot.memory.filter((m) => m.scope === 'global');
   const last = sync.last;
   const hostName = (h: string) => (h === 'local' ? t('This Mac') : h);
@@ -104,44 +127,30 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
       <MemoryShare snapshot={snapshot} />
 
-      <div className="settings-row" data-testid="memory-sync">
-        <label className="check">
-          <input type="checkbox" checked={on} onChange={(e) => void call('settings:update', { memorySync: e.target.checked }).catch((err) => setError(errorText(err)))} data-testid="memory-sync-toggle" />
-          <span>
-            <strong>{t('Keep user memory in sync')}</strong>
-            <span className="muted small">
-              {' '}
-              — {t('on every linked machine (below): new user-level notes there (Claude Code memory of type user or feedback, ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md) come in, and your user memory goes out to the CLIs there. At start, when a machine connects, every 10 minutes, and right after you change a note. Your edits and deletions here are kept.')}
-            </span>
-          </span>
-        </label>
-        {on ? (
-          <div className="memory-sync-status small" data-testid="memory-sync-status">
-            <span className="muted">
-              {sync.running
-                ? t('Syncing…')
-                : last
-                  ? t('Last synced {time} · {machines}', { time: timeAgo(last.at), machines: last.hosts.map(hostName).join(', ') || t('no machine') })
-                  : t('Not synced yet')}
-            </span>
-            {last && !sync.running ? (
-              <span>{last.added || last.updated || last.removed ? t('{added} added, {updated} updated, {removed} source removed', { added: last.added, updated: last.updated, removed: last.removed }) : t('no changes')}</span>
-            ) : null}
-            <button className="btn btn-sm" disabled={sync.running} onClick={() => void call('memory:syncNow', {}).catch((e) => setError(errorText(e)))} data-testid="memory-sync-now">
-              <Icon name="refresh" size={12} /> {t('Sync now')}
-            </button>
-          </div>
+      <div className="memory-sync-status small" data-testid="memory-sync-status">
+        <span className="muted">
+          {sync.running
+            ? t('Syncing…')
+            : last
+              ? t('Last synced {time} · {machines}', { time: timeAgo(last.at), machines: last.hosts.map(hostName).join(', ') || t('no machine') })
+              : t('Not synced yet')}
+        </span>
+        {last && !sync.running ? (
+          <span>{last.added || last.updated || last.removed ? t('{added} added, {updated} updated, {removed} retired', { added: last.added, updated: last.updated, removed: last.removed }) : t('no changes')}</span>
         ) : null}
-        {on && last?.errors.length ? (
-          <ul className="memory-errors small">
-            {last.errors.map((e) => (
-              <li key={e.host}>
-                <strong>{hostName(e.host)}</strong>: {e.error}
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <button className="btn btn-sm" disabled={sync.running} onClick={() => void call('memory:syncNow', {}).catch((e) => setError(errorText(e)))} data-testid="memory-sync-now">
+          <Icon name="refresh" size={12} /> {t('Sync now')}
+        </button>
       </div>
+      {last?.errors.length ? (
+        <ul className="memory-errors small">
+          {last.errors.map((e) => (
+            <li key={e.host}>
+              <strong>{hostName(e.host)}</strong>: {e.error}
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className="memory-settings-head">
         <h3>
