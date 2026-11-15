@@ -236,6 +236,13 @@ describe('first-run guide', () => {
     // Codex on devbox only: installed and signed in there.
     await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
     await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
+    // Nothing signed in here, so the guide keeps looking at this Mac every few seconds: the host's
+    // row must hold still meanwhile (no "Checking…" flicker).
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(250);
+      expect(await page.getByTestId('host-devbox').getByTestId('host-state').count()).toBe(0);
+      expect(await page.getByTestId('host-install').count()).toBe(2);
+    }
     await invoke('ssh:install', { host: 'devbox', provider: 'codex' });
     const signin = page.locator('[data-testid="host-signin"][data-provider="codex"]');
     await expect.poll(() => signin.count(), { timeout: 30_000 }).toBe(1);

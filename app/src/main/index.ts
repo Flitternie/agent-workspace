@@ -181,7 +181,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
-  'capabilities:refresh': () => workspace.refreshCapabilities(),
+  'capabilities:refresh': (i: { localOnly?: boolean }) => workspace.refreshCapabilities({ localOnly: i?.localOnly }),
   // Sign-in runs the CLI's own login (it opens the browser); the capability check notices success.
   'provider:login': (i: { provider: 'claude' | 'codex'; method?: LoginMethod }) => startLogin(i.provider, i.method, () => void workspace.refreshCapabilities()),
   'provider:loginCancel': (i: { provider: 'claude' | 'codex' }) => cancelLogin(i.provider),

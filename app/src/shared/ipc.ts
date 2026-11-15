@@ -100,7 +100,7 @@ export const ipcSchemas = {
   'memory:delete': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
   'settings:update': z.object({ onboarding: z.object({ started: z.boolean().optional(), dismissed: z.boolean().optional(), voiceSkipped: z.boolean().optional(), remoteSkipped: z.boolean().optional(), languageChosen: z.boolean().optional() }).optional(), overviewSlots: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4), z.literal(6), z.literal(9)]).optional(), alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional() }),
-  'capabilities:refresh': z.object({}),
+  'capabilities:refresh': z.object({ localOnly: z.boolean().optional() }),
   'provider:login': z.object({ provider: z.enum(['claude', 'codex']), method: z.enum(['claudeai', 'console', 'chatgpt', 'device']).optional() }),
   'provider:loginCancel': z.object({ provider: z.enum(['claude', 'codex']) }),
   'provider:loginApiKey': z.object({ key: z.string().min(8).max(400) }),

@@ -38,7 +38,8 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const waiting = !local || Object.values(signingIn).some(Boolean);
   useEffect(() => {
     if (!waiting) return;
-    const id = setInterval(() => void call('capabilities:refresh', {}).catch(() => {}), 3000);
+    // This Mac only: SSH hosts are not probed every few seconds (they have their own quiet recheck).
+    const id = setInterval(() => void call('capabilities:refresh', { localOnly: true }).catch(() => {}), 3000);
     return () => clearInterval(id);
   }, [waiting]);
 
