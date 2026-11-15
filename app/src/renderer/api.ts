@@ -64,6 +64,7 @@ interface Outputs {
   'task:resume': void;
   'task:stop': void;
   'task:rename': void;
+  'task:viewed': void;
   'task:setPermissionMode': void;
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];

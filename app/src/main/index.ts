@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
-import { previewKind } from '../shared/preview';
+import { openableKind } from '../shared/preview';
 import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
@@ -146,6 +146,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
+  'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),
   'task:setPermissionMode': (i: { taskId: string; mode: PermissionMode }) => workspace.setPermissionMode(i.taskId, i.mode),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
@@ -167,14 +168,14 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'route:decide': (i: { utterance: string; focusedTaskId: string | null; namedOnly?: boolean }) => workspace.decideRoute(i.utterance, i.focusedTaskId, i.namedOnly),
   'route:dispatch': (i: { utterance: string; focusedTaskId: string | null; target: Parameters<Workspace['dispatch']>[1]; interrupt?: boolean; typed?: boolean }) =>
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt, typed: i.typed }),
-  'file:preview': async (i: { taskId: string; path: string }) => {
-    const p = await workspace.previewFile(i.taskId, i.path);
+  'file:preview': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
+    const p = await workspace.previewFile(i.taskId, i.path, i.allowOutside);
     return p.kind === 'html' ? { ...p, frameUrl: addPreviewDoc(p.text ?? '') } : p;
   },
-  'file:open': async (i: { taskId: string; path: string }) => {
-    const file = workspace.previewLocalPath(i.taskId, i.path);
+  'file:open': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
+    const file = workspace.previewLocalPath(i.taskId, i.path, i.allowOutside);
     // Only document types: openPath on a script or an app would run it.
-    if (!previewKind(file)) throw new Error('Only previewable files can be opened from here.');
+    if (!openableKind(file)) throw new Error('Only documents (Markdown, HTML, images, text) can be opened from here.');
     const problem = await shell.openPath(file);
     if (problem) throw new Error(problem);
   },

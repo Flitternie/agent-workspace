@@ -1,4 +1,4 @@
-// Opt-in: an imported Claude Code session gets a role from its conversation, with no OpenAI key
+// Opt-in: an imported Claude Code session gets a work label from its conversation, with no OpenAI key
 // (the user's own Claude Code names it in the background).
 //   AMW_E2E_REAL=1 npm run test:e2e -- naming-real
 import { execFileSync } from 'node:child_process';
@@ -50,11 +50,14 @@ describe.runIf(enabled)('naming an imported session', () => {
 
     const project = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: root, name: 'legal-docs' });
     const t = await invoke<Task>(page, 'task:importSession', { projectId: project.projectId, provider: 'claude', nativeSessionId: sessionId, cwd: root, title: 'Untitled' });
-    expect(t.name).toBe('LegalDocs');
+    // "Untitled" says nothing, so no stopgap: the alias until the model labels the work.
+    expect(t.name).toBe(t.alias);
     const name = await expect
       .poll(async () => (await snap()).tasks.find((x) => x.taskId === t.taskId)!.name, { timeout: 90_000, interval: 1000 })
-      .toMatch(/^[一-鿿]{2,4}$/)
+      .not.toBe(t.alias)
       .then(async () => (await snap()).tasks.find((x) => x.taskId === t.taskId)!.name);
+    // A label for the work, in Chinese like the UI: not the alias, short enough to show.
+    expect(name).toMatch(/^(?=.*[一-鿿])[一-鿿A-Za-z0-9 ·]{2,14}$/);
     console.log(`named: ${name}`);
     await page.screenshot({ path: join(shots, 'naming-01-imported.png') });
   }, 300_000);

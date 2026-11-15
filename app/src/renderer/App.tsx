@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { Icon } from './components/bits';
@@ -6,15 +7,82 @@ import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
 import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
+import { SubtaskView } from './components/SubtaskView';
 import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
+import { useTeamExpansion } from './teams';
 
 interface Toast {
   id: number;
   text: string;
   taskId?: string;
+}
+
+const SIDEBAR_KEY = 'amw.sidebar.width';
+const SIDEBAR_WIDTH = 252;
+const clampSidebar = (w: number) => Math.min(460, Math.max(200, Math.round(w)));
+
+/** The sidebar's edge: drag to widen (long labels), double-click for the default width. */
+function SidebarResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  const save = (w: number) => {
+    onChange(w);
+    localStorage.setItem(SIDEBAR_KEY, String(w));
+  };
+  return (
+    <div
+      className="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('Resize the sidebar')}
+      title={t('Drag to resize; double-click to reset')}
+      data-testid="sidebar-resizer"
+      onDoubleClick={() => save(SIDEBAR_WIDTH)}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = width;
+        let w = width;
+        document.body.classList.add('resizing');
+        // On the window, so a fast drag that outruns the thin bar keeps going.
+        const move = (ev: PointerEvent) => {
+          w = clampSidebar(startW + ev.clientX - startX);
+          onChange(w);
+        };
+        const up = () => {
+          document.body.classList.remove('resizing');
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          save(w);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      }}
+    />
+  );
+}
+
+/**
+ * Layouts are the tile counts that fill a whole grid (1, 2×1, 2×2, 3×2, 3×3); any other count leaves
+ * a hole. Shown as little grids, so the choice reads as a layout, not a number.
+ */
+const LAYOUT_COLUMNS: Record<number, number> = { 1: 1, 2: 2, 4: 2, 6: 3, 9: 3 };
+const GRID_LABEL: Record<number, string> = { 1: '1×1', 2: '2×1', 4: '2×2', 6: '3×2', 9: '3×3' };
+
+function LayoutGlyph({ slots }: { slots: number }) {
+  const cols = LAYOUT_COLUMNS[slots];
+  const rows = Math.ceil(slots / cols);
+  const gap = 1.5;
+  const w = (16 - gap * (cols - 1)) / cols;
+  const h = (12 - gap * (rows - 1)) / rows;
+  return (
+    <svg className="layout-glyph" width="16" height="12" viewBox="0 0 16 12" aria-hidden>
+      {Array.from({ length: slots }, (_, i) => (
+        <rect key={i} x={(i % cols) * (w + gap)} y={Math.floor(i / cols) * (h + gap)} width={w} height={h} rx="1" />
+      ))}
+    </svg>
+  );
 }
 
 /** Gallery columns like a video call: fill the window, keep tiles roughly square-ish. */
@@ -37,21 +105,48 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Overview: a clicked card is who you are talking to (voice/typed default target) without opening it.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A sub-agent's read-only view, opened from its row.
+  const [subView, setSubView] = useState<{ taskId: string; subtaskId: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const now = useTick();
+  // Every second while a sub-agent runs (its timer on the card), else every half minute.
+  const now = useTick(snapshot?.tasks.some((t) => t.subtasks?.some((x) => x.status === 'running')) ? 1000 : 30_000);
+
+  const { expanded, toggle } = useTeamExpansion();
+  // The sidebar's width: the user's own, kept on this machine.
+  const [sidebarW, setSidebarW] = useState(() => clampSidebar(Number(localStorage.getItem(SIDEBAR_KEY)) || SIDEBAR_WIDTH));
+  // The Overview holds still while the pointer is over it; tiles settle when it leaves.
+  const [hovering, setHovering] = useState(false);
+  const slotsRef = useRef<string[]>([]);
+  const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
+  const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now) : [];
+  const order = visibleOrder(teamList, expanded);
+  // Overview: busy or recently busy agents, by priority, in as many tiles as the layout has.
+  const layout = snapshot?.settings.overviewSlots ?? 0;
+  const candidates = snapshot ? overviewCandidates(snapshot.tasks, openAll, now) : [];
+  const exists = new Set(snapshot?.tasks.map((t) => t.taskId) ?? []);
+  const shownIds = hovering ? slotsRef.current.filter((id) => exists.has(id)) : fillSlots(slotsRef.current, candidates, openAll, slotsFor(layout, candidates.length), selectedId);
+  slotsRef.current = shownIds;
+  const shown = shownIds.map((id) => snapshot!.tasks.find((t) => t.taskId === id)!).filter(Boolean);
+  const offscreen = candidates.filter((t) => !shownIds.includes(t.taskId));
 
   // The main agent opens in the same Focus view as any agent.
   const focusTask = snapshot?.tasks.find((t) => t.taskId === focusId) ?? (snapshot?.main?.taskId === focusId ? snapshot.main : undefined);
-  const taskIds = [...(snapshot?.tasks ?? []), ...(snapshot?.main ? [snapshot.main] : [])].map((t) => t.taskId).join(',');
-  // Tiles show recent activity, so every task's transcript is kept current.
+  // Tiles show recent activity: transcripts are kept current for what is on screen (not every agent ever).
+  const taskIds = [...shownIds, ...(focusId ? [focusId] : []), ...(snapshot?.main ? [snapshot.main.taskId] : [])].join(',');
   useEffect(() => {
     for (const id of taskIds.split(',').filter(Boolean)) load(id);
   }, [taskIds, load]);
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
+  // Opening an agent, or picking its tile to talk to, counts as using it (it moves up in its team).
+  useEffect(() => {
+    const id = focusId ?? selectedId;
+    if (id && snapshot?.tasks.some((t) => t.taskId === id)) void call('task:viewed', { taskId: id }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, selectedId]);
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);
@@ -79,12 +174,15 @@ export function App() {
     setTimeout(() => setFlash((f) => (f === taskId ? null : f)), 1600);
   }, []);
 
+  const orderRef = useRef(order);
+  orderRef.current = order;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (e.key === 'Escape' && !typing && !dialog) {
         // Esc steps back one level: settings / focus first, then the Overview selection.
-        if (settingsOpen || focusId) {
+        if (subView) setSubView(null);
+        else if (settingsOpen || focusId) {
           setSettingsOpen(false);
           setFocusId(null);
         } else setSelectedId(null);
@@ -92,19 +190,20 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
         if (e.key === '0') setFocusId(null);
-        else setFocusId(snapshot.tasks[Number(e.key) - 1]?.taskId ?? null);
+        // The numbers shown in the sidebar: expanded teams, in order.
+        else setFocusId(orderRef.current[Number(e.key) - 1]?.taskId ?? null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, snapshot, settingsOpen, focusId]);
+  }, [dialog, snapshot, settingsOpen, focusId, subView]);
 
   if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
   setLanguage(snapshot.settings.language ?? 'en');
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
   const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
-  const cols = columnsFor(snapshot.tasks.length);
+  const cols = layout ? LAYOUT_COLUMNS[layout] : columnsFor(shown.length);
 
   const loadDemo = () =>
     call('demo:seed', {})
@@ -112,26 +211,46 @@ export function App() {
       .catch((e) => setError(errorText(e)));
 
   return (
-    <div className="app">
+    <div className="app" style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
+      <SidebarResizer width={sidebarW} onChange={setSidebarW} />
       <Sidebar
         snapshot={snapshot}
         focusId={focusTask ? focusId : null}
         onSelect={(id) => {
           setSettingsOpen(false);
+          setSubView(null);
           setFocusId(id);
         }}
         onOverview={() => {
           setSettingsOpen(false);
+          setSubView(null);
           setFocusId(null);
+        }}
+        onOpenSubtask={(taskId, subtaskId) => {
+          setSettingsOpen(false);
+          setSubView({ taskId, subtaskId });
         }}
         onNewTask={() => setDialog('new')}
         onResume={() => setDialog('import')}
         onSettings={() => setSettingsOpen(true)}
         settingsOpen={settingsOpen}
+        teamList={teamList}
+        expanded={expanded}
+        toggle={toggle}
       />
 
       <div className="stage">
-        {settingsOpen ? (
+        {subView && !settingsOpen && snapshot.tasks.some((x) => x.taskId === subView.taskId) ? (
+          <SubtaskView
+            task={snapshot.tasks.find((x) => x.taskId === subView.taskId)!}
+            subtask={snapshot.tasks.find((x) => x.taskId === subView.taskId)!.subtasks?.find((s) => s.id === subView.subtaskId)}
+            now={now}
+            onBack={() => {
+              setFocusId(subView.taskId);
+              setSubView(null);
+            }}
+          />
+        ) : settingsOpen ? (
           <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
@@ -145,6 +264,22 @@ export function App() {
                 {needYou ? <strong className="needs-text">{t('{n} need you', { n: needYou })}</strong> : <span>{t('none waiting on you')}</span>}
               </div>
               <div className="stage-actions">
+                <div className="layout-pick" role="radiogroup" aria-label={t('Overview layout')} data-testid="layout-pick">
+                  {OVERVIEW_SLOTS.map((n) => (
+                    <button
+                      key={n}
+                      role="radio"
+                      aria-checked={layout === n}
+                      className={`layout-opt${layout === n ? ' on' : ''}`}
+                      title={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Every agent that is busy or recently was')}
+                      aria-label={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Auto')}
+                      onClick={() => void call('settings:update', { overviewSlots: n }).catch((e) => setError(errorText(e)))}
+                      data-testid={`layout-${n}`}
+                    >
+                      {n ? <LayoutGlyph slots={n} /> : t('Auto')}
+                    </button>
+                  ))}
+                </div>
                 <button className="btn btn-primary" onClick={() => setDialog('new')} data-testid="new-task">
                   <Icon name="plus" /> {t('New task')}
                 </button>
@@ -201,8 +336,21 @@ export function App() {
                 </div>
               </div>
             ) : (
-              <div className="gallery" data-testid="overview" style={{ ['--cols' as string]: cols }} onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}>
-                {snapshot.tasks.map((t) => (
+              <>
+              {shown.length === 0 ? (
+                <div className="empty overview-quiet" data-testid="overview-quiet">
+                  <p className="muted">{t('Nothing is running or waiting on you right now. Every agent is in its team on the left.')}</p>
+                </div>
+              ) : (
+              <div
+                className="gallery"
+                data-testid="overview"
+                style={{ ['--cols' as string]: cols }}
+                onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}
+                onMouseEnter={() => setHovering(true)}
+                onMouseLeave={() => setHovering(false)}
+              >
+                {shown.map((t) => (
                   <AgentCard
                     key={t.taskId}
                     task={t}
@@ -214,10 +362,18 @@ export function App() {
                     selected={selectedId === t.taskId}
                     onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
                     onOpen={() => setFocusId(t.taskId)}
+                    onOpenSubtask={(taskId, subtaskId) => setSubView({ taskId, subtaskId })}
                     now={now}
                   />
                 ))}
               </div>
+              )}
+              {offscreen.length ? (
+                <div className="overview-more muted small" data-testid="overview-more">
+                  {t('{n} more active agents are in their teams on the left', { n: offscreen.length })}
+                </div>
+              ) : null}
+              </>
             )}
           </>
         )}

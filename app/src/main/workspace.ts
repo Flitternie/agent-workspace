@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, join, posix, resolve, sep } from 'node:path';
 import type {
   AgentProvider,
   AttentionItem,
@@ -38,10 +38,10 @@ import type { ProviderAdapter, ProviderEvent, ProviderSession } from './provider
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
-import { cleanRole, guessRole, projectRole, rolePrompt, roleRetry } from './role';
+import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
-import { localPath, readLocal, readRemote } from './preview';
+import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { MemoryWriteback, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
@@ -93,6 +93,8 @@ export interface WorkspaceOptions {
   home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
+  /** How long a label stands before new work may rewrite it (tests use 0). */
+  labelRefreshMs?: number;
 }
 
 /**
@@ -130,6 +132,81 @@ export class Workspace {
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
     this.applyModels();
     this.recoverAfterRestart();
+    this.migrateLabels();
+    // Relabelling waits for the CLIs to be detected (refreshCapabilities), so the user's own Claude Code
+    // or Codex writes the labels rather than a fallback; tests hand in a model directly.
+    if (opts.backgroundModel) setTimeout(() => this.relabelStale(), 0);
+  }
+
+  /** A label stands this long before the agent's newer work may rewrite it. */
+  private get labelRefreshMs(): number {
+    return this.opts.labelRefreshMs ?? 30 * 60_000;
+  }
+
+  private relabelTried = new Set<string>();
+
+  /**
+   * Once, on updating: every agent's name from an older version becomes the task's title, shortened,
+   * and is marked for a model to label the work (all of them, in the background, most recently used
+   * first). Only names the user set since names were marked stay.
+   */
+  private migrateLabels(): void {
+    const d = this.store.data;
+    if ((d.labelsVersion ?? 0) >= 1) return;
+    for (const t of d.tasks) {
+      if (!needsNewLabel(t)) continue;
+      t.name = titleLabel(t.title, labelLang(t.alias)) ?? t.alias;
+      t.nameSource = 'auto';
+      t.labelStale = true;
+    }
+    d.labelsVersion = 1;
+    this.store.save();
+  }
+
+  /** Rewrites every stale label, most recently used agents first (the background queue takes one at a time). */
+  private relabelStale(): void {
+    const stale = this.store.data.tasks
+      .filter((t) => t.labelStale && !this.relabelTried.has(t.taskId))
+      .sort((a, b) => Date.parse(b.lastUserActivityAt ?? b.updatedAt) - Date.parse(a.lastUserActivityAt ?? a.updatedAt));
+    for (const t of stale) this.relabelFromHistory(t);
+  }
+
+  /** A model labels a stale agent from its title and the user's first messages. Once per run. */
+  private relabelFromHistory(t: Task): void {
+    if (!t.labelStale || this.relabelTried.has(t.taskId) || !this.canLabel()) return;
+    this.relabelTried.add(t.taskId);
+    const id = t.taskId;
+    const said = this.store
+      .transcript(t.taskId)
+      .filter((i) => i.role === 'user' && i.text.trim())
+      .slice(0, 4)
+      .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
+    // Only a label written counts: after a failure (no CLI yet, a bad key) the next chance tries again.
+    void this.refineLabel(t, [t.title, ...said].join('\n')).then((ok) => {
+      if (!ok) this.relabelTried.delete(id);
+    });
+  }
+
+  /**
+   * Keeps an automatic label current: when a turn ends, if the user has sent the agent a couple of
+   * messages since its label was written and it has stood a while, a model relabels it from the
+   * user's latest messages and the agent's latest report.
+   */
+  private maybeRefreshLabel(t: Task): void {
+    if (t.nameSource !== 'auto' || t.labelStale || (t.saidSinceLabel ?? 0) < 2 || !this.canLabel()) return;
+    if (Date.now() - Date.parse(t.labelAt ?? t.createdAt) < this.labelRefreshMs) return;
+    const recent = this.store
+      .transcript(t.taskId)
+      .filter((i) => i.role === 'user' && i.text.trim())
+      .slice(-4)
+      .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
+    t.saidSinceLabel = 0;
+    void this.refineLabel(t, [`Latest work (label this, not the earlier work):`, ...recent, t.summary ? `Latest report: ${t.summary}` : ''].filter(Boolean).join('\n'));
+  }
+
+  /** Whether any model can write a label right now. */
+  private canLabel(): boolean {
+    return !this.opts.demo && (!!this.backgroundAsk() || !!this.opts.openai);
   }
 
   private keyInfo: WorkspaceSnapshot['voice']['openaiKey'] = { source: null };
@@ -211,6 +288,8 @@ export class Workspace {
     this.syncMainAgent();
     this.changed();
     void this.refreshHosts();
+    // The CLIs are known now: stale labels from older versions can be rewritten.
+    this.relabelStale();
   }
 
   // ---------------------------------------------------------------- remote hosts
@@ -489,7 +568,7 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
-    if (!args.name?.trim()) this.autoRole(task, args.title, args.instruction);
+    if (!args.name?.trim()) this.autoLabel(task, args.title, args.instruction);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -529,51 +608,57 @@ export class Workspace {
   }
 
   /**
-   * Gives an unnamed agent a one-word role in the language of its name: a keyword guess (else the
-   * project's name) now, then, unless `refine` is false, a model's suggestion. A name the user sets wins.
+   * Gives an unnamed agent a label for its work: its title, shortened, now; then, unless `refine` is
+   * false, a model's label from the title and instruction. A name the user sets always wins.
    */
-  private autoRole(task: Task, title: string, instruction = '', opts: { refine?: boolean } = {}): void {
-    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
-    // The title says what the agent is for; the instruction only breaks ties.
-    const guess = guessRole(title, lang) ?? guessRole(instruction, lang) ?? projectRole(this.store.data.projects.find((p) => p.projectId === task.projectId)?.name ?? '');
-    if (guess) task.name = guess;
+  private autoLabel(task: Task, title: string, instruction = '', opts: { refine?: boolean } = {}): void {
+    const stopgap = titleLabel(title, labelLang(task.alias)) ?? titleLabel(instruction, labelLang(task.alias));
+    if (stopgap) task.name = stopgap;
     task.nameSource = 'auto';
-    if (opts.refine !== false) this.refineRole(task, `${title}\n${instruction}`.trim());
+    if (opts.refine !== false) void this.refineLabel(task, `${title}\n${instruction}`.trim());
   }
 
-  /** Replaces an automatic role with a model's suggestion from `text`, unless the name changed meanwhile. */
-  private refineRole(task: Task, text: string): void {
-    if (!text.trim() || this.opts.demo) return;
-    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
+  /** Replaces an automatic label with a model's label for `text`, unless the name changed meanwhile. */
+  private refineLabel(task: Task, text: string): Promise<boolean> {
+    if (!text.trim() || this.opts.demo) return Promise.resolve(false);
+    const lang = labelLang(task.alias);
     const auto = task.name;
-    void this.suggestRole(text, lang)
-      .then((role) => {
+    const project = this.store.data.projects.find((p) => p.projectId === task.projectId)?.name;
+    return this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
+      .then((label) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!role || !t || t.name !== auto || t.nameSource === 'user') return;
-        t.name = role;
+        if (!label || !t || t.name !== auto || t.nameSource === 'user') return false;
+        t.name = label;
         t.nameSource = 'auto';
+        t.labelStale = undefined;
+        t.labelAt = now();
+        t.saidSinceLabel = 0;
         this.changed();
+        return true;
       })
-      .catch((error) => this.log('role suggestion failed', error));
+      .catch((error) => {
+        this.log('label suggestion failed', error);
+        return false;
+      });
   }
 
-  /** A role from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
-  private async suggestRole(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
+  /** A label from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
+  private async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
     const ask = this.backgroundAsk();
     if (ask) {
       try {
-        const prompt = `${lang === 'zh' ? '这个 Agent 在做的事：' : 'What the agent is doing:'}\n${text.slice(0, 1500)}`;
-        const first = await ask(rolePrompt(lang), prompt);
-        const role = cleanRole(first, lang);
-        if (role) return role;
-        const second = cleanRole(await ask(rolePrompt(lang), `${prompt}\n\n${roleRetry(lang, first)}`), lang);
+        const prompt = labelRequest(text);
+        const first = await ask(labelPrompt(lang), prompt);
+        const label = cleanLabel(first, lang);
+        if (label) return label;
+        const second = cleanLabel(await ask(labelPrompt(lang), `${prompt}\n\n${labelRetry(lang, first)}`), lang);
         if (second) return second;
       } catch (error) {
-        this.log('background role failed', error);
+        this.log('background label failed', error);
       }
     }
     const ai = this.opts.openai;
-    return ai ? cleanRole(await ai.suggestRole(text, lang), lang) : undefined;
+    return ai ? cleanLabel(await ai.suggestLabel(text, lang), lang) : undefined;
   }
 
   /**
@@ -611,11 +696,29 @@ export class Workspace {
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
   }
 
+  /** The user did something with this agent: it moves up in the sidebar. */
+  private touched(t: Task): void {
+    t.lastUserActivityAt = now();
+    // An old role name: label the work now that it is in use again.
+    if (t.labelStale) this.relabelFromHistory(t);
+  }
+
+  /**
+   * The user opened this agent's view. Looking is not working with it, so the order stays as it is
+   * (a click must not reshuffle the list under the pointer); an old name is relabelled now, though.
+   */
+  markViewed(taskId: string): void {
+    const t = this.findTask(taskId);
+    if (t?.labelStale) this.relabelFromHistory(t);
+  }
+
   rename(taskId: string, name: string): void {
     const t = this.task(taskId);
+    this.touched(t);
     t.name = name.trim() || t.alias;
     // Cleared, the name is the app's to choose again.
     t.nameSource = name.trim() ? 'user' : 'auto';
+    t.labelStale = undefined;
     t.updatedAt = now();
     this.changed();
   }
@@ -892,14 +995,14 @@ export class Workspace {
     d.sessions.push(record);
     d.tasks.push(task);
     // A keyword guess (or the project's name) now; the model refines it once it can read the conversation.
-    this.autoRole(task, task.title, '', { refine: false });
+    this.autoLabel(task, task.title, '', { refine: false });
     this.changed();
     void this.previewHistory(task, args.provider, args.nativeSessionId).then((items) => {
       const said = (items ?? [])
         .filter((i) => i.role === 'user' && i.text.trim())
         .slice(0, 4)
         .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
-      this.refineRole(task, [task.title, ...said].join('\n'));
+      void this.refineLabel(task, [task.title, ...said].join('\n'));
     });
     return task;
   }
@@ -972,7 +1075,7 @@ export class Workspace {
       taskId: newId,
       alias,
       // A custom name is a voice handle, so the fork gets its own.
-      name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name)),
+      name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name, labelLang(alias))),
       nameSource: 'auto',
       projectId: src.projectId,
       title,
@@ -1003,6 +1106,8 @@ export class Workspace {
     this.changed();
     if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
     const instruction = opts.instruction?.trim();
+    // A fork with its own instruction is new work: label that work, not the original's.
+    if (instruction && !opts.name?.trim()) void this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
     if (instruction) {
       const r = await this.send(newId, instruction, 'text');
       // The fork itself exists, so keep it (failing here would invite a duplicate); keep the instruction to resend.
@@ -1015,10 +1120,10 @@ export class Workspace {
     return task;
   }
 
-  /** "backend" -> "backend fork", then "backend fork 2", … — unique among the agents. */
-  private forkName(name: string): string {
+  /** "Order API" -> "Order API fork" ("订单接口 分叉"), then "… 2", … — unique among the agents. */
+  private forkName(name: string, lang: 'en' | 'zh'): string {
     const taken = new Set(this.store.data.tasks.map((t) => t.name.trim().toLowerCase()));
-    const base = `${name.trim()} fork`;
+    const base = `${name.trim()} ${lang === 'zh' ? '分叉' : 'fork'}`;
     let candidate = base;
     for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${base} ${n}`;
     return candidate;
@@ -1053,6 +1158,10 @@ export class Workspace {
       // Steering adds to the work in progress; the summary keeps describing it.
       if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
       task.updatedAt = now();
+      // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
+      this.touched(task);
+      // The first instruction is what the first label describes; later messages may change the work.
+      if (via !== 'initial') task.saidSinceLabel = (task.saidSinceLabel ?? 0) + 1;
       this.changed();
       return { ok: true, taskId, delivery };
     } catch (error) {
@@ -1211,6 +1320,7 @@ export class Workspace {
         break;
       case 'turnStarted':
         task.suggestion = undefined;
+        task.subtasks = undefined;
         live.turnActive = true;
         if (!this.hasOpenNative(taskId)) task.status = 'running';
         break;
@@ -1220,6 +1330,25 @@ export class Workspace {
       case 'progress':
         task.summary = clip(event.text, 200);
         return this.changedThrottled();
+      case 'subtask': {
+        const list = (task.subtasks ??= []);
+        let s = list.find((x) => x.id === event.id);
+        if (!s) {
+          s = { id: event.id, description: event.description ?? 'Sub-agent', status: 'running', startedAt: now() };
+          list.push(s);
+        }
+        if (event.description) s.description = clip(event.description, 120);
+        if (event.step !== undefined) {
+          s.step = clip(event.step, 160);
+          if (s.step) s.steps = [...(s.steps ?? []), { at: now(), text: s.step }].slice(-50);
+        }
+        if (event.result !== undefined) s.result = clip(event.result, 4000);
+        if (event.status && event.status !== s.status) {
+          s.status = event.status;
+          if (event.status !== 'running') s.endedAt = now();
+        }
+        return this.changedThrottled();
+      }
       case 'retrying':
         task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
         task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;
@@ -1267,6 +1396,7 @@ export class Workspace {
       }
       case 'turnCompleted': {
         live.turnActive = false;
+        if (task !== this.store.data.mainAgent) this.maybeRefreshLabel(task);
         // Text that was still streaming when the turn ended (e.g. cut off by a steer) is final now; tell the UI.
         for (const it of this.store.transcript(taskId))
           if (it.streaming) {
@@ -1442,6 +1572,8 @@ export class Workspace {
   async respondAttention(attentionId: string, decision?: string, answers?: Record<string, string>): Promise<void> {
     const a = this.store.data.attention.find((x) => x.id === attentionId);
     if (!a) throw new Error('Unknown attention item.');
+    const answered = this.findTask(a.taskId);
+    if (answered) this.touched(answered);
     if (a.state !== 'open') throw new Error(`This request is already ${a.state}.`);
     if (!a.providerRequestId) throw new Error('This report is answered by replying to the agent.');
     const live = this.live.get(a.taskId);
@@ -1513,6 +1645,7 @@ export class Workspace {
         taskId: t.taskId,
         alias: t.alias,
         name: t.name,
+        nameSource: t.nameSource,
         title: t.title,
         projectId: t.projectId,
         projectName: d.projects.find((p) => p.projectId === t.projectId)?.name ?? '',
@@ -2093,7 +2226,7 @@ export class Workspace {
    * just before an earlier prompt (matched by its start). In its own worktree when the project is a
    * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
-  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
     // Whitespace as read_agent and the error below show it: collapsed.
@@ -2113,12 +2246,13 @@ export class Workspace {
     const RANK: Record<PermissionMode, number> = { ask: 0, edits: 1, auto: 2 };
     const fallback = this.store.data.settings.permissionMode ?? 'auto';
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
-    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.role, permissionMode });
+    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
+    if (!args.label?.trim()) void this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
     return { task, delivery: await this.send(task.taskId, args.instruction, 'main') };
   }
 
-  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
-    return this.createTask({ ...args, name: args.role, nameSource: 'auto', isolate: true });
+  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string }): Promise<Task> {
+    return this.createTask({ ...args, name: args.label, nameSource: 'auto', isolate: true });
   }
 
   async stopFromMain(taskId: string): Promise<void> {
@@ -2184,20 +2318,29 @@ export class Workspace {
 
   /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
   private previewRoots(t: Task): string[] {
+    // The main agent talks about every agent's files: any project or agent folder on this Mac.
+    if (t === this.store.data.mainAgent)
+      return [t.cwd, ...this.store.data.projects.filter((p) => !p.host).map((p) => p.rootPath), ...this.store.data.tasks.filter((x) => !x.host).flatMap((x) => [x.cwd, x.worktree?.path])].filter((r): r is string => !!r);
     const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
     return [t.cwd, t.worktree?.path, project?.rootPath].filter((r): r is string => !!r);
   }
 
-  async previewFile(taskId: string, path: string): Promise<FilePreview> {
+  /** Where to look for a file an agent named, and which files it may show without asking. */
+  private previewWhere(t: Task, allowOutside?: boolean): PreviewWhere {
+    return { cwd: t.cwd, bases: workDirs(this.store.transcript(t.taskId), t.cwd, t.host ? posix : undefined), roots: this.previewRoots(t), allowOutside };
+  }
+
+  async previewFile(taskId: string, path: string, allowOutside?: boolean): Promise<FilePreview> {
     const t = this.task(taskId);
-    return t.host ? readRemote(t.host, t.cwd, path, this.previewRoots(t)) : readLocal(t.cwd, path, this.previewRoots(t));
+    const where = this.previewWhere(t, allowOutside);
+    return t.host ? readRemote(t.host, path, where) : readLocal(path, where);
   }
 
   /** The checked local path to hand to the default app (this Mac only). */
-  previewLocalPath(taskId: string, path: string): string {
+  previewLocalPath(taskId: string, path: string, allowOutside?: boolean): string {
     const t = this.task(taskId);
     if (t.host) throw new Error(`The file is on ${t.host}; it can only be previewed here.`);
-    return localPath(t.cwd, path, this.previewRoots(t));
+    return localPath(path, this.previewWhere(t, allowOutside));
   }
 
   // ---------------------------------------------------------------- demo
@@ -2205,7 +2348,7 @@ export class Workspace {
   /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
   async seedDemo(demoRepoPath: string): Promise<void> {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
-    // Roles (Backend, Frontend, Database) are filled in automatically from the titles.
+    // Labels come from the titles (the demo asks no model).
     const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
       this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });
     if (this.store.data.settings.language === 'zh') {

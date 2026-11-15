@@ -26,6 +26,8 @@ export interface WorkspaceData {
   settings: Settings;
   /** Monotonic counter behind agent names (never reused). */
   aliasCounter: number;
+  /** 1: agents are named by work labels (older role names were migrated once). */
+  labelsVersion?: number;
   /** The main agent's task record (kept apart from `tasks`: not a worker). */
   mainAgent?: Task;
 }
