@@ -2399,12 +2399,12 @@ details[open] > summary .tool-more {
   transition: width 200ms var(--ease);
 }
 .plan-current {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
   font-size: 12.5px;
   color: var(--text);
-}
-.plan-current::before {
-  content: '◐ ';
-  color: var(--run);
 }
 .plan-list {
   list-style: none;
@@ -2412,41 +2412,54 @@ details[open] > summary .tool-more {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   font-size: 12.5px;
+  line-height: 18px;
 }
 .plan-list li {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
+  gap: 7px;
+  align-items: flex-start;
   color: var(--text-2);
 }
-.plan-check {
-  display: inline-grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
+/* A plan step's state: centred on the first line of its text. */
+.plan-icon {
   flex: none;
-  border-radius: 4px;
-  border: 1.5px solid var(--border-strong);
-  font-size: 10px;
-  color: #fff;
+  margin-top: 2px;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.plan-completed {
-  color: var(--text-3) !important;
+.plan-current .plan-icon {
+  margin-top: 0;
+}
+.plan-icon-pending circle {
+  stroke: var(--text-3);
+}
+.plan-icon-in_progress circle {
+  stroke: var(--run);
+}
+.plan-icon-in_progress path {
+  fill: var(--run);
+  stroke: none;
+}
+.plan-icon-completed circle {
+  fill: var(--ok);
+  stroke: none;
+}
+.plan-icon-completed path {
+  stroke: #fff;
+  stroke-width: 1.8;
+}
+.plan-completed .plan-text {
+  color: var(--text-3);
   text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 55%, transparent);
 }
-.plan-completed .plan-check {
-  background: var(--ok);
-  border-color: var(--ok);
-}
-.plan-in_progress {
-  color: var(--text) !important;
+.plan-in_progress .plan-text {
+  color: var(--text);
   font-weight: 600;
-}
-.plan-in_progress .plan-check {
-  border-color: var(--run);
-  color: var(--run);
 }
 .pinned-plan {
   flex: none;

@@ -1,6 +1,6 @@
 import { useContext, useState, type MouseEvent } from 'react';
 import { openableKind, previewKind } from '../../shared/preview';
-import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
+import { diffStat, type FileDiff, type PlanEntry, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
 import { Icon, type IconName } from './bits';
 import { PreviewContext } from './filePaths';
@@ -342,6 +342,30 @@ export function ToolGroup({ items, main }: { items: TranscriptItem[]; main?: boo
 }
 
 /** Live checklist (TodoWrite / Codex plan). `compact` shows progress and the current step only. */
+/**
+ * A plan step's state as a small circle, drawn (not a font glyph, which sits differently
+ * in every font): empty = to do, half-filled ring = in progress, filled with a check = done.
+ */
+export function PlanStatusIcon({ status }: { status: PlanEntry['status'] }) {
+  return (
+    <svg className={`plan-icon plan-icon-${status}`} viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+      {status === 'completed' ? (
+        <>
+          <circle cx="8" cy="8" r="7" />
+          <path d="M4.8 8.3l2.1 2.1 4.3-4.6" />
+        </>
+      ) : status === 'in_progress' ? (
+        <>
+          <circle cx="8" cy="8" r="6.25" />
+          <path d="M8 4.25a3.75 3.75 0 0 1 0 7.5z" />
+        </>
+      ) : (
+        <circle cx="8" cy="8" r="6.25" />
+      )}
+    </svg>
+  );
+}
+
 export function PlanChecklist({ plan, compact }: { plan: PlanInfo; compact?: boolean }) {
   const done = plan.entries.filter((e) => e.status === 'completed').length;
   const current = plan.entries.find((e) => e.status === 'in_progress');
@@ -358,7 +382,10 @@ export function PlanChecklist({ plan, compact }: { plan: PlanInfo; compact?: boo
       </div>
       {compact ? (
         current ? (
-          <div className="plan-current truncate">{current.content}</div>
+          <div className="plan-current">
+            <PlanStatusIcon status="in_progress" />
+            <span className="truncate">{current.content}</span>
+          </div>
         ) : null
       ) : (
         <>
@@ -366,10 +393,8 @@ export function PlanChecklist({ plan, compact }: { plan: PlanInfo; compact?: boo
           <ul className="plan-list">
             {plan.entries.map((e, i) => (
               <li key={e.id ?? i} className={`plan-${e.status}`}>
-                <span className="plan-check" aria-hidden>
-                  {e.status === 'completed' ? '✓' : e.status === 'in_progress' ? '◐' : ''}
-                </span>
-                {e.content}
+                <PlanStatusIcon status={e.status} />
+                <span className="plan-text">{e.content}</span>
               </li>
             ))}
           </ul>
