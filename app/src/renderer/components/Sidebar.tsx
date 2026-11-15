@@ -169,7 +169,9 @@ export function Sidebar({
                 <span className="team-name truncate">{team.project.name}</span>
                 <span className="team-counts">
                   {team.counts.waiting ? <span className="team-count needs" title={tr('{n} need you', { n: team.counts.waiting })}>⚑ {team.counts.waiting}</span> : null}
-                  {team.counts.running ? <span className="team-count running" title={tr('{n} working', { n: team.counts.running })}>● {team.counts.running}</span> : null}
+                  {team.counts.running ? <span className="team-count running" title={tr('{n} working', { n: team.counts.running })}>
+                      <span className="count-dot" aria-hidden /> {team.counts.running}
+                    </span> : null}
                   {team.counts.failed ? <span className="team-count failed" title={tr('{n} failed', { n: team.counts.failed })}>! {team.counts.failed}</span> : null}
                   {!team.members.length ? <span className="team-count idle">{tr('{n} idle', { n: team.idle.length })}</span> : null}
                 </span>

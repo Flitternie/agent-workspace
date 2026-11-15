@@ -1416,6 +1416,9 @@ body.resizing .sidebar-resizer {
   color: var(--ok);
   width: 12px;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .tool-running .tool-status {
   color: var(--run);
@@ -3062,11 +3065,13 @@ details[open] > summary .tool-more {
 .msg.notices > summary::-webkit-details-marker {
   display: none;
 }
-.msg.notices > summary::before {
-  content: '▸ ';
+.msg.notices > summary .icon {
+  margin-right: 4px;
+  vertical-align: -1px;
+  transition: transform 0.12s;
 }
-.msg.notices[open] > summary::before {
-  content: '▾ ';
+.msg.notices[open] > summary .icon {
+  transform: rotate(90deg);
 }
 .waiting-from {
   display: flex;
@@ -3452,6 +3457,14 @@ details[open] > summary .tool-more {
   font-size: 10.5px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+}
+.st-done .subtask-time {
+  color: var(--ok);
+}
+.st-failed .subtask-time {
+  color: var(--risk);
 }
 .subtask-more {
   font-size: 10.5px;
@@ -3623,4 +3636,32 @@ button.subtask-row:hover {
 }
 .layout-opt.on .layout-glyph rect {
   opacity: 1;
+}
+
+/* Drawn state marks (StatusIcon): a running one turns. */
+.status-icon {
+  display: block;
+  flex: none;
+}
+.status-icon.spin {
+  animation: status-spin 0.9s linear infinite;
+}
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-icon.spin {
+    animation: none;
+  }
+}
+/* The sidebar's "working" count: a dot, not a font glyph. */
+.count-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
 }

@@ -2,7 +2,7 @@ import { useContext, useState, type MouseEvent } from 'react';
 import { openableKind, previewKind } from '../../shared/preview';
 import { diffStat, type FileDiff, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
 import type { TranscriptItem } from '../../shared/types';
-import { Icon, type IconName } from './bits';
+import { Icon, StatusIcon, type IconName } from './bits';
 import { PreviewContext } from './filePaths';
 import { Markdown } from './Markdown';
 import { t, t as tr } from '../i18n';
@@ -176,14 +176,6 @@ export function ToolContentView({ content, compact }: { content: ToolContent[]; 
   );
 }
 
-const STATUS_ICON: Record<NonNullable<TranscriptItem['toolStatus']>, string> = {
-  running: '…',
-  awaiting_approval: '?',
-  completed: '✓',
-  failed: '✕',
-  declined: '⊘',
-  interrupted: '◼',
-};
 
 const STATUS_TEXT: Partial<Record<NonNullable<TranscriptItem['toolStatus']>, string>> = {
   awaiting_approval: 'waiting for your approval',
@@ -246,7 +238,9 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
   return (
     <details className={`msg tool tool-${status} kind-${tool?.kind ?? 'other'}`} open={openByDefault} data-testid="tool-call" data-kind={tool?.kind ?? 'other'}>
       <summary>
-        <span className="tool-status">{STATUS_ICON[status]}</span>
+        <span className="tool-status">
+          <StatusIcon status={status} />
+        </span>
         <Icon name={KIND_ICON[tool?.kind ?? 'other']} size={13} />
         <span className={`tool-label truncate${/^(\$ |! |Read |Edit |Write |Search |Find |Fetch )/.test(tool?.title ?? '') ? '' : ' prose'}`}>
           {tool?.byUser ? <span className="tool-by-user">{t('You ran')}</span> : null}
@@ -328,7 +322,9 @@ export function ToolGroup({ items, main }: { items: TranscriptItem[]; main?: boo
   return (
     <details className="msg tool tool-group" data-testid="tool-group">
       <summary>
-        <span className="tool-status">{items.some((i) => i.toolStatus === 'running') ? '…' : failed ? '!' : '✓'}</span>
+        <span className="tool-status">
+          <StatusIcon status={items.some((i) => i.toolStatus === 'running') ? 'running' : failed ? 'failed' : 'completed'} />
+        </span>
         <Icon name="list" size={13} />
         <span className="tool-label">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
       </summary>
