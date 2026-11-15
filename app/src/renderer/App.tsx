@@ -103,6 +103,16 @@ export function App() {
   const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
   // Settings is a page in the main area, like VS Code, not a dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Opened from elsewhere (e.g. an agent's memory chip) at a given section.
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
+  useEffect(() => {
+    const open = (e: Event) => {
+      setSettingsSection((e as CustomEvent<{ section?: string }>).detail?.section);
+      setSettingsOpen(true);
+    };
+    window.addEventListener('amw:open-settings', open);
+    return () => window.removeEventListener('amw:open-settings', open);
+  }, []);
   // Overview: a clicked card is who you are talking to (voice/typed default target) without opening it.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // A sub-agent's read-only view, opened from its row.
@@ -251,7 +261,7 @@ export function App() {
             }}
           />
         ) : settingsOpen ? (
-          <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
+          <SettingsPage snapshot={snapshot} section={settingsSection} onClose={() => (setSettingsOpen(false), setSettingsSection(undefined))} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
         ) : (
