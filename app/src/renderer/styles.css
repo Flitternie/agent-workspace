@@ -6,6 +6,9 @@
  * - Motion is short (120–200 ms, ease-out) and only explains a change.
  */
 :root {
+  /* The conversation column (text, requests, plan, composer: one width, one left edge). It follows
+     the window: 80% of the room, no narrower than 908px when there is room, at most 1160px. */
+  --chat-w: min(1160px, max(908px, 80%));
   --bg: #f4f5f7;
   --sidebar: #eceef2;
   --panel: #ffffff;
@@ -1327,7 +1330,7 @@ body.resizing .sidebar-resizer {
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  max-width: 908px;
+  max-width: var(--chat-w);
   margin: 0 auto;
 }
 /* In the agent's own conversation: its message is right above, so only the label and actions. */
@@ -1353,7 +1356,7 @@ body.resizing .sidebar-resizer {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
 }
 .transcript-inner {
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   /* Bottom room so the last message, scrolled to the end, sits above the fade. */
   padding: 16px 24px 36px;
@@ -1451,7 +1454,7 @@ body.resizing .sidebar-resizer {
 .composer {
   flex: none;
   width: 100%;
-  max-width: 908px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 4px 24px 16px;
 }
@@ -2451,7 +2454,7 @@ details[open] > summary .tool-more {
 .pinned-plan {
   flex: none;
   width: 100%;
-  max-width: 908px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 8px 24px 0;
 }
@@ -2998,7 +3001,7 @@ details[open] > summary .tool-more {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   width: 100%;
   padding: 12px 24px 4px;

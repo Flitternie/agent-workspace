@@ -85,6 +85,27 @@ function LayoutGlyph({ slots }: { slots: number }) {
   );
 }
 
+/** Narrowest a tile gets before the Overview uses fewer columns. */
+const MIN_TILE = 320;
+const GALLERY_GAP = 12;
+
+/** How many tiles of at least MIN_TILE fit across `width` (the gallery's content box). */
+function fitColumns(width: number): number {
+  return Math.max(1, Math.floor((width + GALLERY_GAP) / (MIN_TILE + GALLERY_GAP)));
+}
+
+/** An element's content width, kept current as it resizes. */
+function useElementWidth(el: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return width;
+}
+
 /** Gallery columns like a video call: fill the window, keep tiles roughly square-ish. */
 function columnsFor(n: number): number {
   if (n <= 1) return 1;
@@ -119,6 +140,9 @@ export function App() {
   // The Overview holds still while the pointer is over it; tiles settle when it leaves.
   const [hovering, setHovering] = useState(false);
   const slotsRef = useRef<string[]>([]);
+  // The Overview's own width: columns follow it (window size, sidebar width).
+  const [galleryEl, setGalleryEl] = useState<HTMLDivElement | null>(null);
+  const galleryW = useElementWidth(galleryEl);
   const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
   const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now) : [];
   const order = visibleOrder(teamList, expanded);
@@ -203,7 +227,10 @@ export function App() {
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
   const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
-  const cols = layout ? LAYOUT_COLUMNS[layout] : columnsFor(shown.length);
+  // A layout keeps its number of tiles; when the Overview is too narrow for its columns, the same
+  // tiles go into fewer columns (3×2 becomes 2×3) rather than squeezing below a readable width.
+  const baseCols = layout ? LAYOUT_COLUMNS[layout] : columnsFor(shown.length);
+  const cols = galleryW ? Math.min(baseCols, fitColumns(galleryW)) : baseCols;
 
   const loadDemo = () =>
     call('demo:seed', {})
@@ -343,8 +370,10 @@ export function App() {
                 </div>
               ) : (
               <div
+                ref={setGalleryEl}
                 className="gallery"
                 data-testid="overview"
+                data-cols={cols}
                 style={{ ['--cols' as string]: cols }}
                 onClick={(e) => e.target === e.currentTarget && setSelectedId(null)}
                 onMouseEnter={() => setHovering(true)}
