@@ -58,7 +58,7 @@ async function until(pred: () => boolean, ms = 3000): Promise<void> {
 
 const nameOf = (ws: Workspace, taskId: string) => ws.snapshot().tasks.find((t) => t.taskId === taskId)!.name;
 
-describe('agent names', () => {
+describe('agent labels', () => {
   it('an imported session is named from its conversation by the user’s own CLI, with no OpenAI key', async () => {
     const prompts: string[] = [];
     const ws = open({
@@ -68,8 +68,8 @@ describe('agent names', () => {
     const folder = repo();
     const p = await ws.addProject(folder, 'legal');
     const t = await ws.importSession({ projectId: p.projectId, provider: 'claude', nativeSessionId: 's1', cwd: folder, title: '合同时效条款' });
-    // At once: no keyword in the title, so the project's name.
-    expect(t.name).toBe('Legal');
+    // At once: the session's title, shortened; the model then names the work.
+    expect(t.name).toBe('合同时效条款');
     await until(() => nameOf(ws, t.taskId) === 'Contracts');
     // The model read the conversation, not only the title.
     expect(prompts[0]).toContain('合同时效条款');
@@ -78,8 +78,8 @@ describe('agent names', () => {
     expect(ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.nameSource).toBe('auto');
   });
 
-  it('asks once more when the answer is not one short word, and a name the user sets always wins', async () => {
-    const answers = ['Contract review specialist', 'Contracts'];
+  it('asks once more when the answer is too long to show, and a name the user sets always wins', async () => {
+    const answers = ['Going through the whole contract to list every clause with a deadline', 'Contracts'];
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     let calls = 0;
@@ -126,11 +126,11 @@ describe('agent names', () => {
     expect(most).toBe(1);
   });
 
-  it('with no model at all, an agent without a keyword in its task is named after its project', async () => {
+  it('with no model at all, an agent is labelled with its title, shortened', async () => {
     const ws = open();
     const p = await ws.addProject(repo(), 'agent_workspace');
-    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Think about the roadmap', isolate: false });
-    expect(t.name).toBe('AgentWorkspace');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Please think about the roadmap for next quarter', isolate: false });
+    expect(t.name).toBe('Think about the roadmap…');
     expect(t.nameSource).toBe('auto');
     const named = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Roadmap', name: 'Planner', isolate: false });
     expect(named.nameSource).toBe('user');

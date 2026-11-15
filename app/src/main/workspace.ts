@@ -35,7 +35,7 @@ import type { ProviderAdapter, ProviderEvent, ProviderSession } from './provider
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
-import { cleanRole, guessRole, projectRole, rolePrompt, roleRetry } from './role';
+import { cleanLabel, labelLang, labelPrompt, labelRetry, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
@@ -470,7 +470,7 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
-    if (!args.name?.trim()) this.autoRole(task, args.title, args.instruction);
+    if (!args.name?.trim()) this.autoLabel(task, args.title, args.instruction);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -510,51 +510,50 @@ export class Workspace {
   }
 
   /**
-   * Gives an unnamed agent a one-word role in the language of its name: a keyword guess (else the
-   * project's name) now, then, unless `refine` is false, a model's suggestion. A name the user sets wins.
+   * Gives an unnamed agent a label for its work: its title, shortened, now; then, unless `refine` is
+   * false, a model's label from the title and instruction. A name the user sets always wins.
    */
-  private autoRole(task: Task, title: string, instruction = '', opts: { refine?: boolean } = {}): void {
-    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
-    // The title says what the agent is for; the instruction only breaks ties.
-    const guess = guessRole(title, lang) ?? guessRole(instruction, lang) ?? projectRole(this.store.data.projects.find((p) => p.projectId === task.projectId)?.name ?? '');
-    if (guess) task.name = guess;
+  private autoLabel(task: Task, title: string, instruction = '', opts: { refine?: boolean } = {}): void {
+    const stopgap = titleLabel(title, labelLang(task.alias)) ?? titleLabel(instruction, labelLang(task.alias));
+    if (stopgap) task.name = stopgap;
     task.nameSource = 'auto';
-    if (opts.refine !== false) this.refineRole(task, `${title}\n${instruction}`.trim());
+    if (opts.refine !== false) this.refineLabel(task, `${title}\n${instruction}`.trim());
   }
 
-  /** Replaces an automatic role with a model's suggestion from `text`, unless the name changed meanwhile. */
-  private refineRole(task: Task, text: string): void {
+  /** Replaces an automatic label with a model's label for `text`, unless the name changed meanwhile. */
+  private refineLabel(task: Task, text: string): void {
     if (!text.trim() || this.opts.demo) return;
-    const lang = /[\u4e00-\u9fff]/.test(task.alias) ? 'zh' : 'en';
+    const lang = labelLang(task.alias);
     const auto = task.name;
-    void this.suggestRole(text, lang)
-      .then((role) => {
+    const project = this.store.data.projects.find((p) => p.projectId === task.projectId)?.name;
+    void this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
+      .then((label) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!role || !t || t.name !== auto || t.nameSource === 'user') return;
-        t.name = role;
+        if (!label || !t || t.name !== auto || t.nameSource === 'user') return;
+        t.name = label;
         t.nameSource = 'auto';
         this.changed();
       })
-      .catch((error) => this.log('role suggestion failed', error));
+      .catch((error) => this.log('label suggestion failed', error));
   }
 
-  /** A role from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
-  private async suggestRole(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
+  /** A label from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
+  private async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
     const ask = this.backgroundAsk();
     if (ask) {
       try {
         const prompt = `${lang === 'zh' ? '这个 Agent 在做的事：' : 'What the agent is doing:'}\n${text.slice(0, 1500)}`;
-        const first = await ask(rolePrompt(lang), prompt);
-        const role = cleanRole(first, lang);
-        if (role) return role;
-        const second = cleanRole(await ask(rolePrompt(lang), `${prompt}\n\n${roleRetry(lang, first)}`), lang);
+        const first = await ask(labelPrompt(lang), prompt);
+        const label = cleanLabel(first, lang);
+        if (label) return label;
+        const second = cleanLabel(await ask(labelPrompt(lang), `${prompt}\n\n${labelRetry(lang, first)}`), lang);
         if (second) return second;
       } catch (error) {
-        this.log('background role failed', error);
+        this.log('background label failed', error);
       }
     }
     const ai = this.opts.openai;
-    return ai ? cleanRole(await ai.suggestRole(text, lang), lang) : undefined;
+    return ai ? cleanLabel(await ai.suggestLabel(text, lang), lang) : undefined;
   }
 
   /**
@@ -866,14 +865,14 @@ export class Workspace {
     d.sessions.push(record);
     d.tasks.push(task);
     // A keyword guess (or the project's name) now; the model refines it once it can read the conversation.
-    this.autoRole(task, task.title, '', { refine: false });
+    this.autoLabel(task, task.title, '', { refine: false });
     this.changed();
     void this.previewHistory(task, args.provider, args.nativeSessionId).then((items) => {
       const said = (items ?? [])
         .filter((i) => i.role === 'user' && i.text.trim())
         .slice(0, 4)
         .map((i) => i.text.replace(/\s+/g, ' ').slice(0, 300));
-      this.refineRole(task, [task.title, ...said].join('\n'));
+      this.refineLabel(task, [task.title, ...said].join('\n'));
     });
     return task;
   }
@@ -946,7 +945,7 @@ export class Workspace {
       taskId: newId,
       alias,
       // A custom name is a voice handle, so the fork gets its own.
-      name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name)),
+      name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name, labelLang(alias))),
       nameSource: 'auto',
       projectId: src.projectId,
       title,
@@ -977,6 +976,8 @@ export class Workspace {
     this.changed();
     if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
     const instruction = opts.instruction?.trim();
+    // A fork with its own instruction is new work: label that work, not the original's.
+    if (instruction && !opts.name?.trim()) this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
     if (instruction) {
       const r = await this.send(newId, instruction, 'text');
       // The fork itself exists, so keep it (failing here would invite a duplicate); keep the instruction to resend.
@@ -989,10 +990,10 @@ export class Workspace {
     return task;
   }
 
-  /** "backend" -> "backend fork", then "backend fork 2", … — unique among the agents. */
-  private forkName(name: string): string {
+  /** "Order API" -> "Order API fork" ("订单接口 分叉"), then "… 2", … — unique among the agents. */
+  private forkName(name: string, lang: 'en' | 'zh'): string {
     const taken = new Set(this.store.data.tasks.map((t) => t.name.trim().toLowerCase()));
-    const base = `${name.trim()} fork`;
+    const base = `${name.trim()} ${lang === 'zh' ? '分叉' : 'fork'}`;
     let candidate = base;
     for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${base} ${n}`;
     return candidate;
@@ -1717,7 +1718,7 @@ export class Workspace {
    * just before an earlier prompt (matched by its start). In its own worktree when the project is a
    * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
-  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; role?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
     // Whitespace as read_agent and the error below show it: collapsed.
@@ -1737,12 +1738,13 @@ export class Workspace {
     const RANK: Record<PermissionMode, number> = { ask: 0, edits: 1, auto: 2 };
     const fallback = this.store.data.settings.permissionMode ?? 'auto';
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
-    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.role, permissionMode });
+    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
+    if (!args.label?.trim()) this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
     return { task, delivery: await this.send(task.taskId, args.instruction, 'main') };
   }
 
-  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; role?: string }): Promise<Task> {
-    return this.createTask({ ...args, name: args.role, nameSource: 'auto', isolate: true });
+  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string }): Promise<Task> {
+    return this.createTask({ ...args, name: args.label, nameSource: 'auto', isolate: true });
   }
 
   async stopFromMain(taskId: string): Promise<void> {
@@ -1838,7 +1840,7 @@ export class Workspace {
   /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
   async seedDemo(demoRepoPath: string): Promise<void> {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
-    // Roles (Backend, Frontend, Database) are filled in automatically from the titles.
+    // Labels come from the titles (the demo asks no model).
     const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
       this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });
     if (this.store.data.settings.language === 'zh') {

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { LlmRouteAnswer, RouteContext } from './router';
+import { labelPrompt } from './label';
 
 // OpenAI is used for two opt-in helpers only: speech-to-text and the routing
 // classifier. The key never leaves the main process. Only the utterance and
@@ -116,18 +117,15 @@ export class OpenAiClient {
   }
 
   /** One-word role for an agent from its task title/instruction (title text only is sent). */
-  async suggestRole(text: string, lang: 'en' | 'zh'): Promise<string> {
-    const system =
-      lang === 'zh'
-        ? '给一个编码 Agent 起一个角色名，概括它负责的领域，比如 数据库、前端、后端、测试、文档。只回答一个 2 到 4 个汉字的词。'
-        : 'Name the role of a coding agent from its task, as one capitalized English word describing its area, e.g. Database, Frontend, Backend, Tests, Docs, Billing. Answer with that single word only.';
-    const r = await this.chatJson<{ role: string }>(
-      system,
-      `Task: ${text.slice(0, 500)}`,
-      { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string' } } },
-      'role',
+  /** A label for the agent's work (see label.ts); '' when the model gives none. */
+  async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string> {
+    const r = await this.chatJson<{ label: string }>(
+      labelPrompt(lang),
+      `What the agent is doing:\n${text.slice(0, 1500)}`,
+      { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } },
+      'label',
     );
-    return r?.role ?? '';
+    return r?.label ?? '';
   }
 
   async routeClassify(ctx: RouteContext): Promise<LlmRouteAnswer | null> {

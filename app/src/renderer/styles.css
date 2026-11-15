@@ -3196,3 +3196,12 @@ details[open] > summary .tool-more {
 .md-file code {
   color: var(--accent);
 }
+
+/* The agent's alias beside its work label: the stable handle, kept small. */
+.alias-tag {
+  flex: none;
+  margin-left: 6px;
+  font-size: 0.82em;
+  font-weight: 400;
+  color: var(--text-3);
+}

@@ -78,12 +78,29 @@ export function isMainAgent(t: { taskId?: string } | undefined): boolean {
   return !!t?.taskId?.startsWith('t-main-');
 }
 
-export function displayName(t: { name: string; alias: string; taskId?: string }): string {
+type Named = { name: string; alias: string; taskId?: string };
+
+/** What the agent is working on ("订单接口迁移"), or its alias while it has no label yet. */
+export function labelOf(t: Named): string {
   if (isMainAgent(t)) return tr('Main agent');
-  if (t.name === t.alias || !t.name.trim()) return t.alias;
-  // Role first, like a job title: "Database Charlie", "数据库小张".
-  if (/[㐀-鿿]/.test(t.alias)) return `${t.name}${t.alias}`;
-  return `${t.name.charAt(0).toUpperCase()}${t.name.slice(1)} ${t.alias}`;
+  return t.name.trim() && t.name !== t.alias ? t.name : t.alias;
+}
+
+/** The whole reference, for captions, tooltips and confirmations: "订单接口迁移 · 小王", or just "小王". */
+export function displayName(t: Named): string {
+  const label = labelOf(t);
+  return isMainAgent(t) || label === t.alias ? label : `${label} · ${t.alias}`;
+}
+
+/** The label first, the alias (the agent's stable handle, what you say to it) small beside it. */
+export function AgentName({ task }: { task: Named }) {
+  const label = labelOf(task);
+  return (
+    <>
+      <span className="truncate">{label}</span>
+      {!isMainAgent(task) && label !== task.alias ? <span className="alias-tag">{task.alias}</span> : null}
+    </>
+  );
 }
 
 export function Kbd({ children }: { children: ReactNode }) {

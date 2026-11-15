@@ -93,8 +93,10 @@ function explicitTargets(ctx: RouteContext): RouteTask[] {
       new RegExp(`(给|让|叫|告诉)\\s*${a}(?![A-Za-z])`),
     ];
     if (patterns.some((p) => p.test(u))) hits.set(t.taskId, t);
+    // The work label ("订单接口迁移", "Order API migration"). Short Chinese labels ("测试") turn up in
+    // ordinary sentences, so they count only through the overlap score below, not as a name.
     const name = t.name.trim();
-    if (name.length >= 3 && name.toLowerCase() !== t.alias.toLowerCase()) {
+    if (name.length >= (CJK.test(name) ? 4 : 3) && name.toLowerCase() !== t.alias.toLowerCase()) {
       const re = CJK.test(name)
         ? new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         : new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b\\s*(agent|task|代理)?`, 'i');

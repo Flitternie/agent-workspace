@@ -8,7 +8,7 @@ import { timeAgo, useTick } from '../state';
 import { holdMs, joinSpeech, stopIntent } from '../voice/compose';
 import { ContinuousListener, isLikelyNoise } from '../voice/listener';
 import { defaultShortcut, matches, PressGesture, recording, released, shortcutLabel, type PressAction } from '../voice/shortcut';
-import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, systemText } from './bits';
+import { AgentName, Alias, displayName, Icon, Kbd, labelOf, PROVIDER_LABEL, systemText } from './bits';
 import { t as tr } from '../i18n';
 
 type MicState = 'off' | 'starting' | 'listening' | 'speaking' | 'denied' | 'unavailable';
@@ -278,7 +278,7 @@ export function VoiceDock({
       return;
     }
     const head = said.trim().toLowerCase();
-    const addressed = snapRef.current.tasks.some((t) => head.startsWith(t.alias.toLowerCase()) || head.startsWith(displayName(t).toLowerCase()));
+    const addressed = snapRef.current.tasks.some((t) => head.startsWith(t.alias.toLowerCase()) || head.startsWith(labelOf(t).toLowerCase()));
     const wait = holdMs(said, snapRef.current.settings.voicePauseMs ?? DEFAULT_PAUSE_MS, addressed);
     d.timer = setTimeout(commitDraft, wait);
     patch(d.id, { text: said, phase: 'listening', holdUntil: Date.now() + wait, holdFor: wait });
@@ -491,7 +491,7 @@ export function VoiceDock({
         .filter((t): t is Task => !!t)
         .map((t) => (
           <button key={t.taskId} className="chip" disabled={busy} onClick={() => void dispatch(entry, { kind: 'existing', taskId: t.taskId })} data-testid="route-choice" data-alias={t.alias}>
-            <Alias alias={t.alias} size="sm" /> {displayName(t)}
+            <Alias alias={t.alias} size="sm" /> <AgentName task={t} />
           </button>
         ))}
     </div>
@@ -768,7 +768,7 @@ function RoutePreview({
             <span className="route-arrow">→</span>
             <Alias alias={target.alias} size="sm" />
             <strong>
-              {displayName(target)}
+              <AgentName task={target} />
             </strong>
             <span className="muted small">
               {tr(`${decision.confidence} confidence`)} · {decision.reason}

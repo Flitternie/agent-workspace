@@ -369,8 +369,8 @@ describe('main agent tools', () => {
     const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
 
     const list = await tools.list_workspace_agents.run({});
-    expect(list).toContain('Alice (role: backend)');
-    expect(list).toContain('Bob (role: frontend)');
+    expect(list).toContain('Alice (working on: backend)');
+    expect(list).toContain('Bob (working on: frontend)');
     expect(ws.findAgent('alice')?.taskId).toBe(A.taskId);
     expect(ws.findAgent('frontend')?.taskId).toBe(B.taskId);
     expect(ws.findAgent('Frontend Bob')?.taskId).toBe(B.taskId);
@@ -401,7 +401,7 @@ describe('main agent tools', () => {
     const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
 
     // Matched with whitespace collapsed, as read_agent shows it.
-    const r = await tools.fork_agent.run({ agent: 'Alice', instruction: 'Try the index fix instead.', before_prompt: 'try the CACHE', role: 'Approach B' });
+    const r = await tools.fork_agent.run({ agent: 'Alice', instruction: 'Try the index fix instead.', before_prompt: 'try the CACHE', label: 'Approach B' });
     expect(r).toMatch(/^Forked Alice as \S+ in its own worktree \(amw\/.+\); it is working on its instruction\.$/);
     const B = ws.snapshot().tasks.find((t) => t.forkedFrom?.taskId === A.taskId)!;
     expect(B.name).toBe('Approach B');

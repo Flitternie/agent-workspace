@@ -1,5 +1,5 @@
 import type { WorkspaceSnapshot } from '../../shared/types';
-import { Alias, displayName, Icon, Kbd, PROVIDER_LABEL, STATUS_LABEL } from './bits';
+import { AgentName, Alias, displayName, Icon, Kbd, PROVIDER_LABEL, STATUS_LABEL } from './bits';
 import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 
@@ -88,7 +88,7 @@ export function Sidebar({
               <Alias alias={t.alias} size="sm" />
               <span className="agent-row-text">
                 <span className="agent-row-name">
-                  <span className="truncate">{displayName(t)}</span>
+                  <AgentName task={t} />
                   <span className={`status status-${t.status}`}>
                     <span className="dot" aria-label={tr(STATUS_LABEL[t.status])} />
                   </span>

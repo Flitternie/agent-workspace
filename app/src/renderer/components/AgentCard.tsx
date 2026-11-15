@@ -5,7 +5,7 @@ import { timeAgo } from '../state';
 import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
-import { Alias, displayName, Icon, ProviderTag, StatusDot } from './bits';
+import { AgentName, Alias, Icon, labelOf, ProviderTag, StatusDot } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 
@@ -68,12 +68,15 @@ export function AgentCard({
         <Alias alias={task.alias} size="md" />
         <div className="tile-ident">
           <div className="tile-name">
-            <span className="truncate">{displayName(task)}</span>
+            <AgentName task={task} />
             <ProviderTag provider={task.provider} />
           </div>
-          <div className="tile-title truncate" title={task.title}>
-            {task.title}
-          </div>
+          {/* The original task, unless the label already says it (a label taken from the title). */}
+          {sameText(task.title, labelOf(task)) ? null : (
+            <div className="tile-title truncate" title={task.title}>
+              {task.title}
+            </div>
+          )}
         </div>
         <StatusDot status={task.status} connected={connected} />
         <button className="icon-btn" aria-label={t('Open')} title={t('Open (⌘1–9)')} onClick={onOpen}>
@@ -186,4 +189,12 @@ function stepText(a: TranscriptItem): string {
   if (a.role === 'plan') return `${t('Proposed a plan')}: ${first}`;
   if (a.role === 'user') return `${a.via === 'main' ? t('Main agent') : t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${first}`;
   return first;
+}
+
+/** "Fix the login redirect" and its shortened label "Fix the login…" say the same thing. */
+function sameText(title: string, label: string): boolean {
+  const norm = (x: string) => x.replace(/…$/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const a = norm(title);
+  const b = norm(label);
+  return !!b && (a === b || a.startsWith(b) || a.replace(/^(请|帮我|麻烦|帮忙|please|can you|could you)\s*/i, '').startsWith(b));
 }
