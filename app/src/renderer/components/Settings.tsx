@@ -605,8 +605,11 @@ function Section({ id, query, actions, children }: { id: string; query: string; 
  * Settings as a page in the main area (like VS Code): a fixed header with search,
  * a section index on the left, and the settings themselves scrolling on the right.
  */
-export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClose: () => void }) {
+export function SettingsPage({ snapshot, section, onClose }: { snapshot: WorkspaceSnapshot; section?: string; onClose: () => void }) {
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' });
+  }, [section]);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const s = snapshot.settings;

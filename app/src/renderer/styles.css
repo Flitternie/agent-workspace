@@ -1289,6 +1289,8 @@ body.resizing .sidebar-resizer {
 }
 .focus-meta {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 2px;
   gap: 14px;
   font-size: 11px;
   color: var(--text-3);
@@ -1388,6 +1390,9 @@ body.resizing .sidebar-resizer {
   font-size: 11px;
   color: var(--text-3);
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .msg-system {
   font-family: var(--mono);
@@ -1555,7 +1560,7 @@ body.resizing .sidebar-resizer {
 }
 
 /* File preview: shares the Memory column, wider because documents need the room. */
-.memory.preview {
+.side-panel {
   width: min(460px, 40%);
   gap: 10px;
   border-left: 0;
@@ -1598,13 +1603,13 @@ body.resizing * {
 body.resizing iframe {
   pointer-events: none;
 }
-.preview-head {
+.side-head {
   display: flex;
   align-items: flex-start;
   gap: 2px;
 }
 /* The title, actions and options stay on top while the file scrolls under them. */
-.preview-top {
+.side-top {
   position: sticky;
   top: -14px;
   z-index: 3;
@@ -1617,7 +1622,7 @@ body.resizing iframe {
   border-bottom: 1px solid var(--border);
 }
 /* Maximized: the preview takes the conversation's place. */
-.memory.preview.maximized {
+.side-panel.maximized {
   flex: 1;
   width: auto;
   max-width: none;
@@ -1635,12 +1640,12 @@ body.resizing iframe {
   max-height: none;
   overflow-y: visible;
 }
-.preview-ident {
+.side-ident {
   flex: 1;
   min-width: 0;
   padding-top: 4px;
 }
-.preview-path {
+.side-sub {
   font-size: 11px;
   color: var(--text-3);
   margin-top: 2px;
@@ -3859,4 +3864,139 @@ button.subtask-row:hover {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* An agent's memory: the chip in its header, and "Remember" on the user's messages. */
+.memory-chip {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.memory-chip:hover,
+.memory-chip.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.memory-pop-later {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--needs);
+}
+.remember {
+  position: relative;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.msg.user:hover .remember,
+.remember.shown,
+.remember:focus-within {
+  opacity: 1;
+}
+.remember-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.remember-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--ok);
+}
+.remember-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+.remember-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.remember-menu button:hover {
+  background: var(--hover);
+}
+
+/* The side column's memory view. */
+.am-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.am-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.am-note.later {
+  border-style: dashed;
+}
+.am-note-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.am-note-head .icon {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.12s;
+}
+.am-note.open .am-note-head .icon {
+  transform: rotate(90deg);
+}
+.am-note-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.am-note.open .am-note-title {
+  white-space: normal;
+  font-weight: 600;
+}
+.am-note-body {
+  padding: 0 12px 10px 27px;
+  font-size: 12.5px;
+}
+.am-manage {
+  align-self: flex-start;
 }

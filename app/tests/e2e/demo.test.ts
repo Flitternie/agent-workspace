@@ -133,11 +133,19 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').getAttribute('data-route-kind')).toBe('coordinator');
     await page.getByTestId('route-send').click();
     await expect.poll(() => page.getByTestId('coordinator-log').innerText()).toContain('Saved to project');
-    // The panel is closed by default.
-    await expect.poll(() => page.getByTestId('memory-panel').count()).toBe(0);
-    await page.getByRole('button', { name: 'Memory' }).click();
-    await expect.poll(() => page.getByTestId('memory-panel').innerText()).toContain('总是先跑集成测试');
+    // The agent's header shows which memory it works with; this project's note is there, for its next start.
+    await page.getByTestId('memory-chip').click();
+    await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('总是先跑集成测试');
     await shot(page, '05-focus-B-memory');
+    await page.getByTestId('side-close').click();
+    // "Remember" on the user's own message keeps it as project memory.
+    await page.locator('.msg.user').filter({ hasText: 'Use the shared Button component.' }).last().hover();
+    await page.locator('.msg.user').filter({ hasText: 'Use the shared Button component.' }).last().getByTestId('remember').click();
+    await page.getByTestId('remember-project').click();
+    await expect.poll(() => page.getByTestId('remember-done').count()).toBe(1);
+    await page.getByTestId('memory-chip').click();
+    await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('Use the shared Button component.');
+    await page.getByTestId('side-close').click();
 
     // 9. Quit and relaunch: overview, cards, sessions and pending items restored.
     await app!.close();

@@ -99,6 +99,7 @@ export const ipcSchemas = {
     scope: z.enum(['global', 'project', 'task']),
     scopeId: id,
     body: z.string().min(1).max(10_000),
+    title: z.string().max(200).optional(),
     originTaskId: id.optional(),
     approvedForReuse: z.boolean(),
   }),

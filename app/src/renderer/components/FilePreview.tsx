@@ -6,13 +6,14 @@ import { t } from '../i18n';
 import { Icon } from './bits';
 import { touchedPaths } from './Content';
 import { Markdown } from './Markdown';
+import { SidePanel, type SideFrame } from './SidePanel';
 
 /**
  * A file the agent wrote, in the Focus view's side column. Reading goes through the
  * main process (which only serves files inside the task's folders); the file is read
  * again whenever a later tool call in the conversation touches it.
  */
-export function FilePreviewPanel({ task, path, transcript, width, maximized, onToggleMax, onClose, onOpenExternal }: { task: Task; path: string; transcript: TranscriptItem[]; width?: number; maximized?: boolean; onToggleMax?: () => void; onClose: () => void; onOpenExternal?: () => void }) {
+export function FilePreviewPanel({ task, path, transcript, frame, onOpenExternal }: { task: Task; path: string; transcript: TranscriptItem[]; frame: SideFrame; onOpenExternal?: () => void }) {
   const [file, setFile] = useState<FilePreview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,44 +48,39 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
 
   const name = path.split('/').pop() ?? path;
   return (
-    <aside className={`memory preview${maximized ? ' maximized' : ''}`} aria-label={t('File preview')} data-testid="file-preview" style={width && !maximized ? { width } : undefined}>
-      {/* Stays on top while the file scrolls, so it can be closed from anywhere. */}
-      <div className="preview-top">
-      <div className="preview-head">
-        <div className="preview-ident">
-          <div className="panel-title truncate" title={file?.path ?? path}>
-            {name}
-          </div>
-          <div className="preview-path mono truncate" title={file?.path ?? path}>
-            <bdi>
-              {task.host ? `${task.host}:` : ''}
-              {file?.path ?? path}
-            </bdi>
-          </div>
-        </div>
-        <button className="icon-btn" title={t('Refresh')} aria-label={t('Refresh')} data-testid="preview-refresh" onClick={() => setManual((n) => n + 1)}>
-          <Icon name="refresh" size={13} />
-        </button>
-        {onOpenExternal && !task.host && openableKind(path) ? (
-          <button className="icon-btn" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={() => (outsideOk ? void call('file:open', { taskId: task.taskId, path, allowOutside: true }).catch((e) => setError(errorText(e))) : onOpenExternal())}>
-            <Icon name="external" size={13} />
+    <SidePanel
+      label={t('File preview')}
+      testId="file-preview"
+      frame={frame}
+      title={<span title={file?.path ?? path}>{name}</span>}
+      subtitle={
+        <span className="mono" title={file?.path ?? path}>
+          <bdi>
+            {task.host ? `${task.host}:` : ''}
+            {file?.path ?? path}
+          </bdi>
+        </span>
+      }
+      actions={
+        <>
+          <button className="icon-btn" title={t('Refresh')} aria-label={t('Refresh')} data-testid="preview-refresh" onClick={() => setManual((n) => n + 1)}>
+            <Icon name="refresh" size={13} />
           </button>
-        ) : null}
-        {onToggleMax ? (
-          <button className="icon-btn" title={maximized ? t('Back to the side (Esc)') : t('Maximize')} aria-label={maximized ? t('Back to the side (Esc)') : t('Maximize')} data-testid="preview-maximize" onClick={onToggleMax}>
-            <Icon name={maximized ? 'collapse' : 'expand'} size={13} />
-          </button>
-        ) : null}
-        <button className="icon-btn" title={t('Close preview')} aria-label={t('Close preview')} data-testid="preview-close" onClick={onClose}>
-          <Icon name="x" size={13} />
-        </button>
-      </div>
-      {file?.kind === 'html' ? (
-        <label className="small check preview-scripts" title={t('Runs the page’s own scripts, still isolated from the app and the network.')}>
-          <input type="checkbox" checked={scripts} onChange={(e) => setScripts(e.target.checked)} data-testid="preview-scripts" /> {t('Allow scripts')}
-        </label>
-      ) : null}
-      </div>
+          {onOpenExternal && !task.host && openableKind(path) ? (
+            <button className="icon-btn" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={() => (outsideOk ? void call('file:open', { taskId: task.taskId, path, allowOutside: true }).catch((e) => setError(errorText(e))) : onOpenExternal())}>
+              <Icon name="external" size={13} />
+            </button>
+          ) : null}
+        </>
+      }
+      options={
+        file?.kind === 'html' ? (
+          <label className="small check preview-scripts" title={t('Runs the page’s own scripts, still isolated from the app and the network.')}>
+            <input type="checkbox" checked={scripts} onChange={(e) => setScripts(e.target.checked)} data-testid="preview-scripts" /> {t('Allow scripts')}
+          </label>
+        ) : null
+      }
+    >
       {outside ? (
         <div className="preview-outside" data-testid="preview-outside">
           <div className="small">{t('This file is outside the agent’s folder and project. Show it anyway?')}</div>
@@ -97,7 +93,7 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
       ) : null}
       {!file && loading ? <div className="muted small">{t('Loading…')}</div> : null}
       {file ? <PreviewBody task={task} file={file} scripts={scripts} version={stamp + manual} outsideOk={outsideOk} /> : null}
-    </aside>
+    </SidePanel>
   );
 }
 

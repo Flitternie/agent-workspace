@@ -179,7 +179,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
     const problem = await shell.openPath(file);
     if (problem) throw new Error(problem);
   },
-  'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; originTaskId?: string; approvedForReuse: boolean }) =>
+  'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; title?: string; originTaskId?: string; approvedForReuse: boolean }) =>
     workspace.addMemory({ ...i, source: 'user' }),
   'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
