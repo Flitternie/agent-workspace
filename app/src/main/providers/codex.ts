@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
-import type { AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import type { ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
@@ -305,6 +305,21 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
 
+  /** The models Codex offers here or on `host` (its model/list, visible ones). */
+  async listModels(host?: string): Promise<ModelOption[]> {
+    const server = AppServer.spawn(host ? '~' : tmpdir(), host);
+    try {
+      await server.initialize();
+      const listed = rec(await server.rpc('model/list', {})).data;
+      return (Array.isArray(listed) ? listed : [])
+        .map(rec)
+        .filter((m) => !m.hidden && str(m.id))
+        .map((m) => ({ id: str(m.id), label: str(m.displayName) || str(m.id), description: str(m.description) || undefined, isDefault: m.isDefault === true }));
+    } finally {
+      server.kill();
+    }
+  }
+
   async oneShot(system: string, prompt: string): Promise<string> {
     // Outside any project, read-only, no tools, and an ephemeral thread: nothing is saved.
     const cwd = tmpdir();
@@ -373,6 +388,7 @@ class CodexSession implements ProviderSession {
   private working = false;
   private interruptRequested = false;
   private modeChanged = false;
+  private modelChanged = false;
   private idleWaiters: Array<() => void> = [];
   private lastAgentText = '';
   /** Our string request id -> the server's original JSON-RPC id and request kind. */
@@ -416,10 +432,11 @@ class CodexSession implements ProviderSession {
       await server.rpc(
         resumeId ? 'thread/resume' : 'thread/start',
         resumeId
-          ? { threadId: resumeId, cwd: this.args.cwd, ...policy, ...instructions }
-          : { cwd: this.args.cwd, ...policy, ...instructions },
+          ? { threadId: resumeId, cwd: this.args.cwd, ...policy, ...instructions, ...(this.args.model ? { model: this.args.model } : {}) }
+          : { cwd: this.args.cwd, ...policy, ...instructions, ...(this.args.model ? { model: this.args.model } : {}) },
       ),
     );
+    if (str(result.model)) this.emit({ type: 'model', model: str(result.model) });
     const thread = rec(result.thread);
     this.threadId = str(thread.id);
     if (!this.threadId) throw new Error('Codex did not return a thread id.');
@@ -472,10 +489,14 @@ class CodexSession implements ProviderSession {
           input,
           // Applies to this turn and later ones (a mode change takes effect here).
           ...(this.modeChanged && !this.args.tools?.length ? codexPolicy(this.args.permissionMode ?? 'auto') : {}),
+          // A model switch, likewise from this turn on.
+          ...(this.modelChanged && this.args.model ? { model: this.args.model } : {}),
         }),
       );
       this.turnId = str(rec(result.turn).id) || this.turnId;
       this.modeChanged = false;
+      if (this.modelChanged && this.args.model) this.emit({ type: 'model', model: this.args.model });
+      this.modelChanged = false;
     } catch (error) {
       this.working = false;
       throw error;
@@ -485,6 +506,17 @@ class CodexSession implements ProviderSession {
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.args.permissionMode = mode;
     this.modeChanged = true;
+  }
+
+  /** From the next turn on (Codex keeps it for the turns after). Unset: Codex's default model. */
+  async setModel(model: string | undefined): Promise<void> {
+    let id = model;
+    if (!id && this.server && !this.server.closed) {
+      const listed = rec(await this.server.rpc('model/list', {})).data;
+      id = str((Array.isArray(listed) ? listed : []).map(rec).find((m) => m.isDefault)?.id) || undefined;
+    }
+    this.args.model = id;
+    this.modelChanged = !!id;
   }
 
   async respond(requestId: string, response: ApprovalResponse): Promise<void> {

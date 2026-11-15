@@ -59,6 +59,15 @@ export const zh: Record<string, string> = {
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',
   // File preview
+  // Model picker
+  'Default model': '默认模型',
+  'The model {name} runs on. Click to switch.': '{name} 正在使用的模型，点击切换。',
+  'next turn': '下一轮生效',
+  'Model for this agent · from its next turn': '这个 agent 的模型 · 从下一轮开始生效',
+  'Asking {name} for its models…': '正在向 {name} 获取模型列表…',
+  default: '默认',
+  'Back to the default of {name}': '恢复 {name} 的默认模型',
+  'The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name (from its next turn).': '模型繁忙或触发了限流。稍后重试，或点 agent 名字旁边的模型名切换到其他模型（从下一轮开始生效）。',
   Maximize: '最大化',
   'Back to the side (Esc)': '还原到侧边（Esc）',
   'This file is outside the agent’s folder and project. Show it anyway?': '这个文件不在 agent 的目录和项目里，仍要显示吗？',
