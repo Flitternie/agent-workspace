@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -13,7 +13,21 @@ function extraPathDirs(): string[] {
     '/usr/local/bin',
     join(home, '.bun', 'bin'),
     join(home, '.npm-global', 'bin'),
+    join(home, '.volta', 'bin'),
+    // A GUI app does not get nvm's shell setup: look in its Node versions too, newest first.
+    ...nvmBinDirs(home),
   ];
+}
+
+function nvmBinDirs(home: string): string[] {
+  const root = join(home, '.nvm', 'versions', 'node');
+  try {
+    return readdirSync(root)
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .map((v) => join(root, v, 'bin'));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -57,10 +71,20 @@ export function childEnv(): Record<string, string> {
   return env;
 }
 
+/**
+ * CLIs that ship inside desktop apps, tried after PATH: the ChatGPT app carries a full Codex CLI, so
+ * someone with only that app installed can still run Codex agents (signed in with ChatGPT).
+ */
+function bundledDirs(name: string): string[] {
+  if (process.platform !== 'darwin') return [];
+  const apps = ['/Applications', join(homedir(), 'Applications')];
+  return name === 'codex' ? apps.map((a) => join(a, 'ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin')) : [];
+}
+
 export function findExecutable(name: string): string | null {
   // Windows CLIs are claude.exe / codex.cmd (npm shims); PATHEXT lists what counts as executable.
   const exts = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean) : [''];
-  for (const dir of childPath().split(delimiter))
+  for (const dir of [...childPath().split(delimiter), ...bundledDirs(name)])
     for (const ext of exts) {
       const candidate = join(dir, name + ext.toLowerCase());
       try {

@@ -660,9 +660,22 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
         id="agents"
         query={query}
         actions={
-          <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
-            {checking ? t('Checking…') : t('Recheck')}
-          </button>
+          <div className="row">
+            {/* The first-run guide again: installing, signing in, bringing work in. */}
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                void call('settings:update', { onboarding: { ...s.onboarding, started: true, dismissed: false } });
+                onClose();
+              }}
+              data-testid="reopen-onboarding"
+            >
+              {t('Setup guide')}
+            </button>
+            <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
+              {checking ? t('Checking…') : t('Recheck')}
+            </button>
+          </div>
         }
       >
         <p className="muted small">

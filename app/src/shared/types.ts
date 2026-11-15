@@ -283,6 +283,8 @@ export interface SubtaskInfo {
 }
 
 export interface Settings {
+  /** First-run guide: shown on a fresh workspace until finished or skipped; reopened from Settings. */
+  onboarding?: { started?: boolean; dismissed?: boolean; voiceSkipped?: boolean; firstTaskDone?: boolean };
   /** Overview tiles: 1, 2, 4, 6 or 9; unset or 0 = automatic (every agent that is busy or recently was). */
   overviewSlots?: number;
   /** When true every voice route needs a click, even if high confidence. */

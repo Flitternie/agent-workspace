@@ -8,6 +8,7 @@ import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
 import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
 import { SubtaskView } from './components/SubtaskView';
+import { Onboarding } from './components/Onboarding';
 import { Sidebar } from './components/Sidebar';
 import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
@@ -165,6 +166,12 @@ export function App() {
   useEffect(() => {
     if (focusId && snapshot && !focusTask) setFocusId(null);
   }, [focusId, focusTask, snapshot]);
+  // A fresh workspace starts the guide; marking it started keeps it up while work is brought in.
+  useEffect(() => {
+    const o = snapshot?.settings.onboarding;
+    if (snapshot && !snapshot.demo && snapshot.tasks.length === 0 && !o?.started && !o?.dismissed)
+      void call('settings:update', { onboarding: { ...o, started: true } }).catch(() => {});
+  }, [snapshot]);
   // Opening an agent, or picking its tile to talk to, counts as using it (it moves up in its team).
   useEffect(() => {
     const id = focusId ?? selectedId;
@@ -223,6 +230,10 @@ export function App() {
   }, [dialog, snapshot, settingsOpen, focusId, subView]);
 
   if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
+  // First run: the guide takes the Overview's place on a fresh workspace until finished or skipped
+  // (it stays while the user brings work in). Not in the demo, which seeds its own agents.
+  const ob = snapshot.settings.onboarding ?? {};
+  const onboarding = !snapshot.demo && !ob.dismissed && (!!ob.started || snapshot.tasks.length === 0);
   setLanguage(snapshot.settings.language ?? 'en');
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
   const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
@@ -281,6 +292,8 @@ export function App() {
           <SettingsPage snapshot={snapshot} onClose={() => setSettingsOpen(false)} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
+        ) : onboarding ? (
+          <Onboarding snapshot={snapshot} now={now} onSettings={() => setSettingsOpen(true)} />
         ) : (
           <>
             <header className="stage-head drag">
