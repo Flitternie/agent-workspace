@@ -13,7 +13,13 @@ import { t } from '../i18n';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
-  const items = snapshot.attention.filter((a) => a.taskId === task.taskId && a.state === 'open' && a.kind !== 'completion');
+  const open = snapshot.attention.filter((a) => a.taskId === task.taskId && a.state === 'open' && a.kind !== 'completion');
+  // A question the agent asked in its own words is its message right above: only the newest
+  // shows here, as one line (older ones are earlier in the conversation). Native requests
+  // (approvals, structured questions) and errors show in full, each.
+  const asked = (a: AttentionItem) => a.kind === 'question' && !a.providerRequestId;
+  const lastAsked = open.filter(asked).at(-1);
+  const items = open.filter((a) => !asked(a) || a === lastAsked);
   const connected = snapshot.connectedTaskIds.includes(task.taskId);
   const session = snapshot.sessions.find((s) => s.localId === task.sessionLocalId);
   const project = snapshot.projects.find((p) => p.projectId === task.projectId);
@@ -190,7 +196,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <div className="focus-attention" data-testid="focus-attention">
                 {task.retry ? <RetryNotice retry={task.retry} /> : null}
                 {items.map((i) => (
-                  <AttentionView key={i.id} item={i} task={task} now={now} compact shown={i.kind !== 'approval' && saidLast(transcript, i)} />
+                  <AttentionView key={i.id} item={i} task={task} now={now} compact shown={asked(i)} />
                 ))}
               </div>
             ) : null}
@@ -317,13 +323,6 @@ export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapsh
       {limit && open.length > limit ? <div className="muted small">{t('+{n} more', { n: open.length - limit })}</div> : null}
     </div>
   );
-}
-
-/** Whether the agent's latest message already says what this request says. */
-function saidLast(transcript: TranscriptItem[], a: AttentionItem): boolean {
-  const said = transcript.findLast((i) => i.role === 'assistant')?.text.replace(/\s+/g, ' ') ?? '';
-  const asked = (a.details || a.headline).replace(/\s+/g, ' ').trim();
-  return !!asked && said.includes(asked);
 }
 
 function TaskName({ task }: { task: Task }) {
