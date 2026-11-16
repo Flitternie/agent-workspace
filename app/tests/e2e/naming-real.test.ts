@@ -43,6 +43,8 @@ describe.runIf(enabled)('naming an imported session', () => {
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
     await page.waitForSelector('.app');
+    // Not about the first-run guide: skip it, as a returning user has.
+    await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
     const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
     await invoke(page, 'settings:update', { language: 'zh' });
     // Claude Code must be detected as signed in before the background naming can use it.

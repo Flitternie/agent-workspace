@@ -40,6 +40,8 @@ async function launch(): Promise<Page> {
   app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: dataDir, AMW_NO_AUTOLISTEN: '1' } });
   const page = await app.firstWindow();
   await page.waitForSelector('.app');
+  // Not about the first-run guide: skip it, as a returning user has.
+  await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
   return page;
 }
 
