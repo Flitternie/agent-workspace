@@ -24,6 +24,9 @@ const KINDS: Record<string, PreviewKind> = {
   markdown: 'markdown',
   html: 'html',
   htm: 'html',
+  pdf: 'pdf',
+  // Office documents, converted by macOS's textutil.
+  ...Object.fromEntries(['docx', 'doc', 'rtf', 'odt'].map((e) => [e, 'document' as const])),
   ...Object.fromEntries(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].map((e) => [e, 'image' as const])),
   ...Object.fromEntries(['txt', 'json', 'csv', 'tsv', 'log', 'yaml', 'yml', 'toml', 'xml'].map((e) => [e, 'text' as const])),
   ...Object.fromEntries(Object.keys(CODE).map((e) => [e, 'code' as const])),

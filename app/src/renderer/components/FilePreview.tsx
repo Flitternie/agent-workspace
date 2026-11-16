@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { highlightLines, shikiLang, type Token } from '../highlight';
 import { codeLanguage, openableKind, dirnamePosix, resolvePosix } from '../../shared/preview';
 import type { FilePreview, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
@@ -243,8 +244,14 @@ function PreviewBody({ task, file, scripts, version, outsideOk }: { task: Task; 
   if (file.kind === 'html')
     // No allow-same-origin, ever: with scripts on, the page would otherwise be able to reach the app.
     return <iframe key={`${file.frameUrl}${scripts}`} className="preview-frame" title={file.path} src={file.frameUrl} sandbox={scripts ? 'allow-scripts' : ''} data-testid="preview-frame" />;
-  // Source and structured text get colours (as code blocks in chat do); very large files stay plain.
-  const lang = codeLanguage(file.path);
+  // Chromium's own PDF viewer (a sandboxed frame would turn it off; the document runs nothing of its own).
+  if (file.kind === 'pdf') return <iframe key={file.frameUrl} className="preview-frame preview-pdf" title={file.path} src={file.frameUrl} data-testid="preview-pdf" />;
+  // A Word document as macOS converted it: no scripts, nothing loaded.
+  if (file.kind === 'document') return <iframe key={file.frameUrl} className="preview-frame preview-document" title={file.path} src={file.frameUrl} sandbox="" data-testid="preview-frame" />;
+  // CSV / TSV: a table.
+  if (/\.(csv|tsv)$/i.test(file.path) && (file.text?.length ?? 0) <= HIGHLIGHT_MAX) return <TableView text={file.text ?? ''} tab={/\.tsv$/i.test(file.path)} />;
+  // Source and structured text get colours (VS Code's grammars) and line numbers; very large files stay plain.
+  const lang = shikiLang(file.path) ?? codeLanguage(file.path);
   if (lang && (file.text?.length ?? 0) <= HIGHLIGHT_MAX) return <CodeView text={file.text ?? ''} lang={lang} />;
   // Plain text one line per row (so a line can be found even where rows wrap); huge files stay one block.
   const text = file.text ?? '';
@@ -307,11 +314,120 @@ const HIGHLIGHT_MAX = 200_000;
 
 /** A source file as a highlighted code block (with its Copy button). */
 function CodeView({ text, lang }: { text: string; lang: string }) {
-  // A fence longer than any run of backticks in the file, so the file cannot end the block early.
-  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  const lines = text.replace(/\n$/, '').split('\n');
+  // Plain rows at once (the line jump can find them), coloured when the grammar has loaded.
+  const [tokens, setTokens] = useState<Token[][] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setTokens(null);
+    void highlightLines(text.replace(/\n$/, ''), lang).then((t) => live && setTokens(t));
+    return () => {
+      live = false;
+    };
+  }, [text, lang]);
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="preview-code" data-testid="preview-code" data-lang={lang}>
-      <Markdown text={`${fence}${lang}\n${text.replace(/\n$/, '')}\n${fence}`} />
+    <div className="preview-code" data-testid="preview-code" data-lang={lang} data-colored={tokens ? 'true' : undefined}>
+      <div className="md-code-head preview-code-head">
+        <span>{lang}</span>
+        <button
+          className="md-copy"
+          onClick={() =>
+            void navigator.clipboard.writeText(text).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            })
+          }
+          aria-label={t('Copy')}
+        >
+          <Icon name={copied ? 'check' : 'file'} size={11} /> {copied ? t('Copied') : t('Copy')}
+        </button>
+      </div>
+      <div className="preview-lines" style={{ ['--gutter' as string]: `${String(lines.length).length}ch` }}>
+        {lines.map((l, i) => (
+          <div key={i} className="pl" data-line={i + 1}>
+            <span className="ln" aria-hidden>
+              {i + 1}
+            </span>
+            <span className="lc">
+              {tokens?.[i]
+                ? tokens[i].map((tk, k) => (
+                    <span key={k} style={{ color: tk.color, fontStyle: tk.fontStyle && tk.fontStyle & 1 ? 'italic' : undefined, fontWeight: tk.fontStyle && tk.fontStyle & 2 ? 600 : undefined }}>
+                      {tk.content}
+                    </span>
+                  ))
+                : l || '\u200b'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** CSV / TSV rows as cells: quotes, escaped quotes and separators or line breaks inside quotes. */
+export function parseDelimited(text: string, sep: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"' && cell === '') quoted = true;
+    else if (c === sep) {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += c;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+const TABLE_ROWS = 2000;
+
+function TableView({ text, tab }: { text: string; tab: boolean }) {
+  const rows = useMemo(() => parseDelimited(text, tab ? '\t' : ','), [text, tab]);
+  const [head, ...body] = rows;
+  if (!head) return <pre className="preview-text">{text}</pre>;
+  return (
+    <div className="preview-table-wrap">
+      <table className="preview-table" data-testid="preview-table">
+        <thead>
+          <tr>
+            <th className="rn" aria-hidden />
+            {head.map((h, i) => (
+              <th key={i}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.slice(0, TABLE_ROWS).map((r, i) => (
+            // data-line: the file's line for this row (the header is line 1), for the line jump.
+            <tr key={i} data-line={i + 2}>
+              <td className="rn">{i + 1}</td>
+              {head.map((_, k) => (
+                <td key={k}>{r[k] ?? ''}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {body.length > TABLE_ROWS ? <div className="muted small preview-table-more">{t('First {n} of {total} rows', { n: TABLE_ROWS, total: body.length })}</div> : null}
     </div>
   );
 }

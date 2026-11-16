@@ -17,7 +17,7 @@ import { shq, sshError, sshRun } from './util/ssh';
 // confirms (allowOutside), and credential locations never do, so a crafted path in a
 // transcript cannot quietly turn the preview into a general file reader.
 
-export const MAX_BYTES: Record<PreviewKind, number> = { markdown: 2_000_000, html: 2_000_000, text: 2_000_000, code: 1_000_000, image: 10_000_000 };
+export const MAX_BYTES: Record<PreviewKind, number> = { markdown: 2_000_000, html: 2_000_000, text: 2_000_000, code: 1_000_000, image: 10_000_000, pdf: 50_000_000, document: 20_000_000 };
 
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
 
@@ -176,6 +176,7 @@ function tooLarge(kind: PreviewKind, size: number): Error {
 
 function toPreview(file: string, kind: PreviewKind, data: Buffer): FilePreview {
   if (kind === 'image') return { path: file, kind, size: data.length, dataUrl: `data:${MIME[path.extname(file).slice(1).toLowerCase()]};base64,${data.toString('base64')}` };
+  if (kind === 'pdf' || kind === 'document') return { path: file, kind, size: data.length, data };
   return { path: file, kind, size: data.length, text: data.toString('utf8') };
 }
 
