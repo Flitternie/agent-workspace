@@ -4303,3 +4303,147 @@ button.subtask-row:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---------------------------------------------------------------- preview rendering */
+/* Source: one row per line, its number in a gutter that stays put while long lines scroll sideways. */
+.preview-code {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  overflow: hidden;
+}
+.preview-lines {
+  padding: 6px 0 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  color: #24292e;
+}
+.preview-lines .pl {
+  display: flex;
+  min-width: max-content;
+  white-space: pre;
+}
+.preview-lines .ln {
+  flex: none;
+  position: sticky;
+  left: 0;
+  width: calc(var(--gutter, 2ch) + 1ch);
+  padding: 0 12px 0 10px;
+  box-sizing: content-box;
+  text-align: right;
+  color: #a0a7b2;
+  background: #fff;
+  user-select: none;
+}
+.preview-lines .lc {
+  padding-right: 16px;
+}
+
+/* Documents read like documents: generous type, tables and quotes that stand out. */
+.preview-doc {
+  padding: 18px 22px 28px;
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+.preview-doc .md h1,
+.preview-doc .md h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.preview-doc .md h1 {
+  font-size: 1.6em;
+  margin: 0 0 0.6em;
+}
+.preview-doc .md h2 {
+  font-size: 1.3em;
+  margin: 1.4em 0 0.6em;
+}
+.preview-doc .md h3 {
+  font-size: 1.1em;
+  margin: 1.2em 0 0.4em;
+}
+.preview-doc .md p,
+.preview-doc .md ul,
+.preview-doc .md ol {
+  margin: 0 0 0.85em;
+}
+.preview-doc .md li + li {
+  margin-top: 0.25em;
+}
+.preview-doc .md blockquote {
+  margin: 0 0 0.9em;
+  padding: 0.2em 1em;
+  border-left: 3px solid var(--accent-soft);
+  border-left-color: #c7d2fe;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border-radius: 0 6px 6px 0;
+}
+.preview-doc .md table {
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.preview-doc .md th {
+  background: var(--panel-2);
+  font-weight: 600;
+}
+.preview-doc .md th,
+.preview-doc .md td {
+  padding: 6px 12px;
+}
+.preview-doc .md tbody tr:nth-child(even) td {
+  background: #fafbfc;
+}
+
+/* PDF (Chromium's viewer) and converted documents take the column's height. */
+.preview-frame.preview-pdf,
+.preview-frame.preview-document {
+  min-height: calc(100vh - 110px);
+}
+.preview-frame.preview-pdf {
+  border: 0;
+  border-radius: 0;
+}
+
+/* CSV / TSV: a table with a header that stays on top and row numbers. */
+.preview-table-wrap {
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.preview-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  min-width: 100%;
+}
+.preview-table th,
+.preview-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  text-align: left;
+}
+.preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  font-weight: 600;
+}
+.preview-table .rn {
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.preview-table tbody tr:hover td {
+  background: var(--hover);
+}
+.preview-table-more {
+  padding: 8px 10px;
+}

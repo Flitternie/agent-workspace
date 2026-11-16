@@ -647,4 +647,5 @@ export const zh: Record<string, string> = {
   'Terminals': '终端',
   'Files': '文件',
   'Remove {name}?': '移除 {name}？',
+  'First {n} of {total} rows': '前 {n} 行（共 {total} 行）',
 };
