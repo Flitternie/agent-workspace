@@ -44,6 +44,8 @@ describe('width follows the window', () => {
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForSelector('.app');
+    // Not about the first-run guide: skip it, as a returning user has.
+    await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
     const p = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: repo('shop'), name: 'shop' });
     const tasks: Task[] = [];
     for (let i = 1; i <= 6; i++)
@@ -72,17 +74,24 @@ describe('width follows the window', () => {
           return e ? e.getBoundingClientRect() : null;
         };
         const pane = r('.focus-thread')!;
-        return { pane: pane.width, text: r('.transcript-inner'), composer: r('.composer') };
+        // The transcript's room, without its scrollbar gutters (always-visible scrollbars).
+        const room = document.querySelector('.transcript')!.clientWidth;
+        return { pane: pane.width, room, text: r('.transcript-inner'), composer: r('.composer') };
       });
     for (const width of [1440, 1180, 1000]) {
       await page.setViewportSize({ width, height: 900 });
       await page.locator(`[data-testid="rail-item"][data-alias="${tasks[0].alias}"]`).click();
       await expect.poll(async () => (await column()).text?.width ?? 0).toBeGreaterThan(0);
       const c = await column();
-      const expected = Math.min(1160, Math.max(908, c.pane * 0.8), c.pane);
-      expect(Math.abs(c.text!.width - expected)).toBeLessThanOrEqual(2);
-      expect(Math.abs(c.composer!.width - c.text!.width)).toBeLessThanOrEqual(2);
-      expect(Math.abs(c.composer!.left - c.text!.left)).toBeLessThanOrEqual(2);
+      const col = Math.min(1160, Math.max(908, c.pane * 0.8));
+      expect(Math.abs(c.text!.width - Math.min(col, c.room))).toBeLessThanOrEqual(2);
+      expect(Math.abs(c.composer!.width - Math.min(col, c.pane))).toBeLessThanOrEqual(2);
+      // Where the column fits, text and composer are the same width on the same left edge, even
+      // when the transcript scrolls with a visible scrollbar.
+      if (col <= c.room) {
+        expect(Math.abs(c.composer!.width - c.text!.width)).toBeLessThanOrEqual(2);
+        expect(Math.abs(c.composer!.left - c.text!.left)).toBeLessThanOrEqual(2);
+      }
       await page.screenshot({ path: join(shots, `adaptive-03-conversation-${width}.png`) });
     }
   }, 120_000);

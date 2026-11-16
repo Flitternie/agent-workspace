@@ -35,6 +35,10 @@ interface Outputs {
   'ssh:hosts': Array<{ host: string; hostName?: string; user?: string }>;
   'ssh:setEnabled': void;
   'ssh:check': RemoteHostStatus;
+  'ssh:install': { ok: boolean; error?: string };
+  'ssh:login': { url?: string; code?: string };
+  'ssh:loginCode': void;
+  'ssh:loginCancel': void;
   'ssh:connect': RemoteHostStatus;
   'ssh:terminal': void;
   'task:create': Task;
@@ -70,6 +74,10 @@ interface Outputs {
   'memory:promote': MemoryRecord;
   'settings:update': void;
   'capabilities:refresh': void;
+  'provider:login': { url?: string; code?: string };
+  'provider:loginCancel': void;
+  'provider:loginApiKey': { ok: boolean; error?: string };
+  'apps:detect': { claude: boolean; chatgpt: boolean };
   'models:list': string[];
   'openai:setKey': { ok: boolean; error?: string; overriddenByEnv?: boolean };
   'openai:clearKey': void;

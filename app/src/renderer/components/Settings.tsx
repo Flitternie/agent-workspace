@@ -4,13 +4,183 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } from '../voice/shortcut';
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
+import { INSTALL_SCRIPT } from '../../shared/install';
 
-const LANGUAGES: Array<{ id: Language; label: string }> = [
+export const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
   { id: 'zh', label: '中文' },
 ];
 
 const SIGN_IN: Record<string, string> = { claude: 'claude  →  /login', codex: 'codex login' };
+/** On a machine without a browser: Claude prints a link to open here; Codex signs in with a device code. */
+const REMOTE_SIGN_IN: Record<string, string> = { claude: 'claude auth login', codex: 'codex login --device-auth' };
+/** How to install each CLI (also shown in the first-run guide): the official installers, no Node.js needed. */
+export const INSTALL_COMMAND: Record<'claude' | 'codex', string> = INSTALL_SCRIPT;
+
+/**
+ * Getting an agent going on an SSH host, from the app: install it there (after showing the exact
+ * command) and sign in without a browser on that machine. Codex shows its device code here; Claude
+ * Code gives a link whose page shows a code to paste back. The terminal stays as a fallback.
+ */
+function HostAgentSetup({ host, provider, state }: { host: string; provider: 'claude' | 'codex'; state: 'missing' | 'signed_out' }) {
+  type Phase = 'idle' | 'confirm' | 'installing' | 'signing' | 'sent';
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [error, setError] = useState('');
+  const [link, setLink] = useState<{ url?: string; code?: string }>({});
+  const [paste, setPaste] = useState('');
+  const [manual, setManual] = useState(false);
+  const name = PROVIDER_LABEL[provider];
+  const install = () => {
+    setPhase('installing');
+    setError('');
+    call('ssh:install', { host, provider })
+      .then((r) => {
+        setPhase('idle');
+        if (!r.ok) setError(r.error ?? t('The installer failed.'));
+      })
+      .catch((e) => {
+        setPhase('idle');
+        setError(errorText(e));
+      });
+  };
+  const signIn = () => {
+    setError('');
+    setLink({});
+    setPhase('signing');
+    call('ssh:login', { host, provider })
+      .then((l) => {
+        setLink(l);
+        if (!l.url) setError(t('{host} did not give a sign-in link. Try in its terminal:', { host }));
+      })
+      .catch((e) => {
+        setPhase('idle');
+        setError(errorText(e));
+      });
+  };
+  const cancel = () => {
+    setPhase('idle');
+    setLink({});
+    void call('ssh:loginCancel', { host, provider }).catch(() => {});
+  };
+  const sendCode = () => {
+    if (!paste.trim()) return;
+    call('ssh:loginCode', { host, provider, code: paste.trim() })
+      .then(() => setPhase('sent'))
+      .catch((e) => setError(errorText(e)));
+  };
+  return (
+    <div className="host-setup" data-testid={state === 'missing' ? 'host-install' : 'host-signin'} data-provider={provider} data-phase={phase}>
+      {state === 'missing' ? (
+        phase === 'installing' ? (
+          <span className="host-setup-line">
+            <span className="spinner" aria-hidden /> {t('Installing {provider} on {host}… (usually a minute or two)', { provider: name, host })}
+          </span>
+        ) : phase === 'confirm' ? (
+          <div className="host-setup-confirm">
+            <span>{t('This runs on {host} (installs to ~/.local/bin, no sudo):', { host })}</span>
+            <CopyCommand command={INSTALL_COMMAND[provider]} />
+            <span className="row">
+              <button className="btn btn-sm btn-primary" onClick={install} data-testid="host-install-confirm">
+                {t('Install')}
+              </button>
+              <button className="btn btn-sm btn-ghost" onClick={() => setPhase('idle')}>
+                {t('Cancel')}
+              </button>
+            </span>
+          </div>
+        ) : (
+          <span className="host-setup-line">
+            {t('{provider} is not on {host} yet.', { provider: name, host })}
+            <button className="btn btn-sm btn-primary" onClick={() => setPhase('confirm')} data-testid="host-install-start">
+              {t('Install on {host}', { host })}
+            </button>
+            <button className="link small" onClick={() => setManual((m) => !m)}>
+              {t('Install it myself')}
+            </button>
+          </span>
+        )
+      ) : phase === 'signing' || phase === 'sent' ? (
+        <div className="host-setup-confirm" data-testid="host-signing">
+          {provider === 'codex' && link.code ? (
+            <>
+              <span>{t('Open the link on this computer and enter the code:')}</span>
+              <code className="device-code" data-testid="host-device-code">
+                {link.code}
+              </code>
+            </>
+          ) : null}
+          {link.url ? (
+            <a className="link small" href={link.url} target="_blank" rel="noreferrer" data-testid="host-signin-link">
+              {t('Open the sign-in page')}
+            </a>
+          ) : !error ? (
+            <span className="host-setup-line">
+              <span className="spinner" aria-hidden /> {t('Starting the sign-in on {host}…', { host })}
+            </span>
+          ) : null}
+          {provider === 'claude' && link.url ? (
+            phase === 'sent' ? (
+              <span className="muted small">{t('Code sent; this updates once {host} confirms.', { host })}</span>
+            ) : (
+              <form
+                className="row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  sendCode();
+                }}
+              >
+                <input className="input" placeholder={t('Paste the code the page shows')} value={paste} onChange={(e) => setPaste(e.target.value)} data-testid="host-signin-code" />
+                <button className="btn btn-sm btn-primary" type="submit" disabled={!paste.trim()}>
+                  {t('Send')}
+                </button>
+              </form>
+            )
+          ) : null}
+          {provider === 'codex' ? <span className="muted small">{t('If it says device-code sign-in is off, turn it on in ChatGPT settings → Security.')}</span> : null}
+          <button className="link small" onClick={cancel}>
+            {t('Cancel')}
+          </button>
+        </div>
+      ) : (
+        <span className="host-setup-line">
+          {t('{provider} on {host} is not signed in.', { provider: name, host })}
+          <button className="btn btn-sm btn-primary" onClick={signIn} data-testid="host-signin-start">
+            {t('Sign in')}
+          </button>
+          <button className="link small" onClick={() => setManual((m) => !m)}>
+            {t('Sign in myself')}
+          </button>
+        </span>
+      )}
+      {manual || error ? (
+        <div className="muted small host-hint">
+          {t('In a terminal on {host} (“Open in Terminal”):', { host })} <CopyCommand command={state === 'missing' ? INSTALL_COMMAND[provider] : REMOTE_SIGN_IN[provider]} />
+        </div>
+      ) : null}
+      {error ? <div className="error-text small">{error}</div> : null}
+    </div>
+  );
+}
+
+/** A command with a copy button. */
+export function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="copy-command">
+      <code>{command}</code>
+      <button
+        className="btn btn-sm"
+        onClick={() => {
+          void navigator.clipboard.writeText(command);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? t('Copied') : t('Copy')}
+      </button>
+    </span>
+  );
+}
 
 type Readiness = 'ready' | 'signed_out' | 'missing' | 'checking';
 
@@ -370,8 +540,22 @@ const address = (e?: HostEntry) => (e?.hostName ? `${e.user ? `${e.user}@` : ''}
  * Machines added from ~/.ssh/config, one line each; the rest stay behind "Add machine"
  * (a searchable list), so a long config does not fill the page.
  */
-function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: WorkspaceSnapshot; autoRecheck?: boolean }) {
   const [hosts, setHosts] = useState<HostEntry[] | null>(null);
+  // While a connected machine still lacks an agent (installing or signing in over there), look again
+  // now and then so it ticks off by itself (first-run guide).
+  const incomplete = snapshot.remoteHosts
+    .filter((h) => h.ssh === 'ok' && !(['claude', 'codex'] as const).some((p) => readiness(h.capabilities.find((x) => x.provider === p)) === 'ready'))
+    .map((h) => h.host)
+    .join(',');
+  useEffect(() => {
+    if (!autoRecheck || !incomplete) return;
+    const id = setInterval(() => {
+      // Quiet: the row keeps showing the last result while it looks (no "Checking…" flicker).
+      for (const host of incomplete.split(',')) void call('ssh:check', { host, quiet: true }).catch(() => {});
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [autoRecheck, incomplete]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<{ host: string; text: string } | null>(null);
   const [picking, setPicking] = useState(false);
@@ -412,6 +596,9 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         const state = SSH_STATE[status.ssh];
         const addr = address(hosts.find((e) => e.host === host));
         const signedOut = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'signed_out') : [];
+        const missing = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'missing') : [];
+        // Nothing usable there yet: say how to install, and offer a terminal on that machine.
+        const noAgent = status.ssh === 'ok' && !(['claude', 'codex'] as const).some((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'ready');
         return (
           <div key={host} className="settings-row" data-testid={`host-${host}`}>
             <div className="settings-row-main">
@@ -442,7 +629,7 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                     {busy === host ? t('Waiting for you…') : t(state.action)}
                   </button>
                 ) : null}
-                {status.ssh !== 'ok' && status.ssh !== 'checking' ? (
+                {(status.ssh !== 'ok' && status.ssh !== 'checking') || noAgent || signedOut.length ? (
                   <button className="btn btn-sm" onClick={() => void act(host, () => call('ssh:terminal', { host }))} title={t('Opens Terminal with ssh {host}, for anything the app cannot handle', { host })}>
                     {t('Open in Terminal')}
                   </button>
@@ -456,10 +643,9 @@ function RemoteHosts({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               </span>
             </div>
             {signedOut.map((p) => (
-              <div key={p} className="muted small">
-                {t('Sign in on {host}:', { host })} <code>{SIGN_IN[p]}</code>
-              </div>
+              <HostAgentSetup key={p} host={host} provider={p} state="signed_out" />
             ))}
+            {noAgent ? missing.map((p) => <HostAgentSetup key={p} host={host} provider={p} state="missing" />) : null}
             {state.hint ? <div className="muted small">{t(state.hint)}</div> : null}
             {status.ssh === 'unreachable' && status.error ? <div className="muted small">{status.error}</div> : null}
             {error?.host === host ? <div className="error-text small">{error.text}</div> : null}
@@ -660,9 +846,22 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
         id="agents"
         query={query}
         actions={
-          <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
-            {checking ? t('Checking…') : t('Recheck')}
-          </button>
+          <div className="row">
+            {/* The first-run guide again: installing, signing in, bringing work in. */}
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                void call('settings:update', { onboarding: { ...s.onboarding, started: true, dismissed: false } });
+                onClose();
+              }}
+              data-testid="reopen-onboarding"
+            >
+              {t('Setup guide')}
+            </button>
+            <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
+              {checking ? t('Checking…') : t('Recheck')}
+            </button>
+          </div>
         }
       >
         <p className="muted small">

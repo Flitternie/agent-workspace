@@ -13,6 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
+import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
 
 // All app state lives in one app-owned directory (default: <app>/.data) so the
 // prototype never touches other apps' or the user's global configuration.
@@ -119,7 +120,16 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
-  'ssh:check': (i: { host: string }) => workspace.checkHost(i.host),
+  'ssh:check': (i: { host: string; quiet?: boolean }) => workspace.checkHost(i.host, { quiet: i.quiet }),
+  // Installing and signing in on a host, when the user asks (they see the command first).
+  'ssh:install': async (i: { host: string; provider: 'claude' | 'codex' }) => {
+    const r = await installOnHost(i.host, i.provider);
+    await workspace.checkHost(i.host, { quiet: true });
+    return r;
+  },
+  'ssh:login': (i: { host: string; provider: 'claude' | 'codex' }) => startHostLogin(i.host, i.provider, () => void workspace.checkHost(i.host, { quiet: true })),
+  'ssh:loginCode': (i: { host: string; provider: 'claude' | 'codex'; code: string }) => sendHostLoginCode(i.host, i.provider, i.code),
+  'ssh:loginCancel': (i: { host: string; provider: 'claude' | 'codex' }) => cancelHostLogin(i.host, i.provider),
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
@@ -173,7 +183,16 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
-  'capabilities:refresh': () => workspace.refreshCapabilities(),
+  'capabilities:refresh': (i: { localOnly?: boolean }) => workspace.refreshCapabilities({ localOnly: i?.localOnly }),
+  // Sign-in runs the CLI's own login (it opens the browser); the capability check notices success.
+  'provider:login': (i: { provider: 'claude' | 'codex'; method?: LoginMethod }) => startLogin(i.provider, i.method, () => void workspace.refreshCapabilities()),
+  'provider:loginCancel': (i: { provider: 'claude' | 'codex' }) => cancelLogin(i.provider),
+  'provider:loginApiKey': async (i: { key: string }) => {
+    const r = await loginWithApiKey(i.key);
+    await workspace.refreshCapabilities();
+    return r;
+  },
+  'apps:detect': () => desktopApps(),
   'models:list': async () => workspace.openAi()?.listModels() ?? [],
   'openai:setKey': async (i: { key: string }) => {
     if (process.env.AMW_NO_OPENAI === '1') return { ok: false, error: 'OpenAI is disabled for this run (AMW_NO_OPENAI=1).' };

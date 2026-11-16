@@ -40,6 +40,8 @@ describe.runIf(enabled)('fork a real Claude Code conversation', () => {
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
     await page.waitForSelector('.app');
+    // Not about the first-run guide: skip it, as a returning user has.
+    await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
 
     const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
     const task = async (id: string) => (await snap()).tasks.find((t) => t.taskId === id)!;
@@ -89,6 +91,8 @@ describe.runIf(enabled)('fork a real Claude Code conversation', () => {
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
     await page.waitForSelector('.app');
+    // Not about the first-run guide: skip it, as a returning user has.
+    await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
 
     const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
     const task = async (id: string) => (await snap()).tasks.find((t) => t.taskId === id)!;

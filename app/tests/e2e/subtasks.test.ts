@@ -44,6 +44,8 @@ describe('sub-agents (mock agents)', () => {
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
     await page.waitForSelector('.app');
+    // Not about the first-run guide: skip it, as a returning user has.
+    await page.evaluate(() => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke('settings:update', { onboarding: { dismissed: true } }));
     await invoke(page, 'settings:update', { language: 'zh' });
 
     const shop = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: repo('shop'), name: 'shop' });

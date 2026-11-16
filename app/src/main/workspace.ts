@@ -261,7 +261,12 @@ export class Workspace {
     this.store.save();
   }
 
-  async refreshCapabilities(): Promise<void> {
+  /**
+   * Looks at the CLIs on this Mac again, and (unless `localOnly`) at the SSH hosts, quietly: their
+   * rows keep the last result meanwhile. The first-run guide polls with `localOnly` while the user
+   * installs or signs in here; hosts have their own slower recheck.
+   */
+  async refreshCapabilities(opts: { localOnly?: boolean } = {}): Promise<void> {
     const caps: ProviderCapabilities[] = [];
     for (const a of Object.values(this.opts.adapters)) {
       if (!a) continue;
@@ -274,7 +279,7 @@ export class Workspace {
     this.capabilities = caps;
     this.syncMainAgent();
     this.changed();
-    void this.refreshHosts();
+    if (!opts.localOnly) void this.refreshHosts({ quiet: true });
     // The CLIs are known now: stale labels from older versions can be rewritten.
     this.relabelStale();
   }
@@ -292,18 +297,25 @@ export class Workspace {
   }
 
   /** Background check of every enabled host (keys saved in the Keychain are reloaded first). */
-  async refreshHosts(): Promise<void> {
+  async refreshHosts(opts: { quiet?: boolean } = {}): Promise<void> {
     const hosts = this.enabledHosts();
     if (!hosts.length) return;
     await loadKeychainKeys();
-    await Promise.all(hosts.map((h) => this.checkHost(h).catch((error) => this.log('host check failed', h, error))));
+    await Promise.all(hosts.map((h) => this.checkHost(h, opts).catch((error) => this.log('host check failed', h, error))));
   }
 
   /** Whether `host` is reachable without prompting, and Claude Code / Codex there. Never prompts. */
-  async checkHost(host: string): Promise<RemoteHostStatus> {
+  /**
+   * Probes a host. `quiet` (a background look, e.g. while the user installs an agent there): the
+   * last result stays on screen meanwhile and the UI hears only of a change, so nothing flickers.
+   */
+  async checkHost(host: string, opts: { quiet?: boolean } = {}): Promise<RemoteHostStatus> {
     const prev = this.hostStatus.get(host);
-    this.hostStatus.set(host, { host, ssh: 'checking', capabilities: prev?.capabilities ?? [] });
-    this.changed();
+    const quiet = !!opts.quiet && !!prev && prev.ssh !== 'checking';
+    if (!quiet) {
+      this.hostStatus.set(host, { host, ssh: 'checking', capabilities: prev?.capabilities ?? [] });
+      this.changed();
+    }
     const probe = await sshProbe(host);
     const capabilities =
       probe.state === 'ok'
@@ -314,8 +326,9 @@ export class Workspace {
           )
         : [];
     const status: RemoteHostStatus = { host, ssh: probe.state, error: probe.error, capabilities, checkedAt: now() };
+    const same = (a?: RemoteHostStatus) => !!a && JSON.stringify({ ...a, checkedAt: undefined }) === JSON.stringify({ ...status, checkedAt: undefined });
     if (this.enabledHosts().includes(host)) this.hostStatus.set(host, status);
-    this.changed();
+    if (!quiet || !same(prev)) this.changed();
     return status;
   }
 

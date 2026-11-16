@@ -31,6 +31,17 @@ afterAll(async () => {
 describe('real entry: first run, settings, language', () => {
   it('starts empty, shows readiness, switches to Chinese and remembers it', async () => {
     let page = await launch();
+    // A fresh workspace opens on the first-run guide; each CLI settles (never stuck checking).
+    await expect.poll(() => page.getByTestId('onboarding').count(), { timeout: 30_000 }).toBe(1);
+    const settling = async () => {
+      // Connected already (the step folds), or each row shows ready / signed out / missing.
+      if ((await page.getByTestId('onboarding-step-1').getAttribute('data-done')) === 'true') return false;
+      const rows = page.locator('[data-testid="onboarding-claude"], [data-testid="onboarding-codex"]');
+      return (await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-state')))).includes('checking');
+    };
+    await expect.poll(settling, { timeout: 30_000 }).toBe(false);
+    // Skipped, it gives way to the empty Overview.
+    await page.getByTestId('onboarding-skip').click();
     await expect.poll(() => page.getByTestId('setup-check').count()).toBe(1);
     expect(await page.getByTestId('load-demo').count()).toBe(0);
     // Each CLI ends up ready, signed out or missing — never stuck checking.

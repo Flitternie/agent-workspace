@@ -8,7 +8,7 @@
 :root {
   /* The conversation column (text, requests, plan, composer: one width, one left edge). It follows
      the window: 80% of the room, no narrower than 908px when there is room, at most 1160px. */
-  --chat-w: min(1160px, max(908px, 80%));
+  --chat-w: min(1160px, max(908px, 80cqw));
   --bg: #f4f5f7;
   --sidebar: #eceef2;
   --panel: #ffffff;
@@ -1336,6 +1336,9 @@ body.resizing .sidebar-resizer {
   display: flex;
   flex-direction: column;
   background: var(--panel);
+  /* The conversation column's width (--chat-w, in cqw) is measured on this pane, so the
+     transcript's scrollbar does not make the text narrower than the composer below it. */
+  container-type: inline-size;
 }
 .focus-attention {
   flex: none;
@@ -1367,6 +1370,8 @@ body.resizing .sidebar-resizer {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* With always-visible scrollbars, keep the column centred like the composer below. */
+  scrollbar-gutter: stable both-edges;
   /* Messages fade out above the reply box instead of being cut off by it. */
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
@@ -3697,6 +3702,271 @@ button.subtask-row:hover {
   background: currentColor;
   vertical-align: 1px;
 }
+
+/* First-run guide: steps in the main area, each ticking itself off. */
+.onboarding {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.onboarding-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 28px 48px;
+}
+.onboarding h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+.onboarding-inner > p.muted {
+  margin: 0 0 22px;
+}
+.ob-step {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.ob-step.locked {
+  opacity: 0.55;
+}
+.ob-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+}
+.ob-step-head:disabled {
+  cursor: default;
+}
+.ob-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.ob-step.done .ob-step-mark {
+  background: var(--ok);
+  color: #fff;
+}
+.ob-step-title {
+  flex: 1;
+}
+.ob-step-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.ob-step-body {
+  padding: 0 14px 14px 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ob-step-body p {
+  margin: 0;
+}
+.ob-provider {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ob-provider.state-ready {
+  border-color: transparent;
+  background: var(--hover);
+}
+.ob-provider-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ob-provider-state {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ob-provider.state-ready .ob-provider-state {
+  color: var(--ok);
+}
+.ob-actions,
+.ob-signing,
+.ob-install,
+.ob-apikey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.ob-apikey .input {
+  width: 260px;
+}
+.ob-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.ob-command code {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
+}
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ob-main-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ob-folder {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.ob-folder-head,
+.ob-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ob-folder-head strong {
+  flex: none;
+}
+.ob-folder-head .truncate {
+  flex: 1;
+  min-width: 0;
+}
+.ob-session {
+  padding: 3px 0 3px 24px;
+  font-size: 13px;
+}
+.ob-session .truncate {
+  flex: 1;
+  min-width: 0;
+}
+.ob-session-meta {
+  flex: none;
+}
+.ob-more {
+  margin-left: 24px;
+}
+.ob-first textarea {
+  width: 100%;
+}
+.onboarding-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.ob-found {
+  margin-top: -4px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.ob-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Clicking a button that gives way to another (sign in → "signing in") must not select the page. */
+.onboarding {
+  user-select: none;
+}
+.onboarding code,
+.onboarding input,
+.onboarding textarea,
+.onboarding p,
+.ob-found {
+  user-select: text;
+}
+
+.copy-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.copy-command code {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
+  user-select: text;
+}
+.host-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.ob-remote {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.ob-remote-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.host-setup {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.host-setup-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--text-2);
+}
+.host-setup-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--hover);
+}
+.device-code {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  user-select: all;
 
 /* The model an agent runs on, in its header; a click switches. */
 .model-picker {
