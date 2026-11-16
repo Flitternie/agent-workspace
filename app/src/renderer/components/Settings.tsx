@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } from '../voice/shortcut';
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
+import { ConfirmDialog } from './Dialogs';
 import { INSTALL_SCRIPT } from '../../shared/install';
 
 export const LANGUAGES: Array<{ id: Language; label: string }> = [
@@ -336,6 +337,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
   const available = useOpenAiModels(v.cloudAvailable);
   const [moreStt, setMoreStt] = useState(false);
   const [moreRouter, setMoreRouter] = useState(false);
+  const [deleting, setDeleting] = useState<{ id: string; label: string } | null>(null);
   const current = v.sttModel ?? '';
   const inUseLocal = /^local:(.+)$/.exec(current)?.[1];
   // Only offer what this key can use, once we know.
@@ -345,6 +347,15 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
 
   return (
     <div className="model-picks">
+      {deleting ? (
+        <ConfirmDialog
+          title={t('Delete {name} from this Mac?', { name: deleting.label })}
+          confirmLabel={t('Delete')}
+          danger
+          onConfirm={() => void call('stt:delete', { id: deleting.id })}
+          onClose={() => setDeleting(null)}
+        />
+      ) : null}
       <div className="model-pick-head">
         <span>
           <strong>{t('Speech recognition model')}</strong>
@@ -374,7 +385,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
                 <button
                   className="btn btn-sm btn-ghost"
                   onClick={() => {
-                    if (window.confirm(t('Delete {name} from this Mac?', { name: m.label }))) void call('stt:delete', { id: m.id });
+                    setDeleting({ id: m.id, label: m.label });
                   }}
                 >
                   {t('Delete')}

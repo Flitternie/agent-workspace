@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { codeLanguage, openableKind, dirnamePosix, resolvePosix } from '../../shared/preview';
 import type { FilePreview, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
@@ -6,14 +6,50 @@ import { t } from '../i18n';
 import { Icon } from './bits';
 import { touchedPaths } from './Content';
 import { Markdown } from './Markdown';
+import { OpenInApp } from './OpenInApp';
 
 /**
  * A file the agent wrote, in the Focus view's side column. Reading goes through the
  * main process (which only serves files inside the task's folders); the file is read
  * again whenever a later tool call in the conversation touches it.
  */
-export function FilePreviewPanel({ task, path, transcript, width, maximized, onToggleMax, onClose, onOpenExternal }: { task: Task; path: string; transcript: TranscriptItem[]; width?: number; maximized?: boolean; onToggleMax?: () => void; onClose: () => void; onOpenExternal?: () => void }) {
+/** Where each preview was scrolled to when its panel unmounted (taskId + path). */
+const scrollKept = new Map<string, number>();
+
+export function FilePreviewPanel({
+  task,
+  path,
+  line,
+  nonce = 0,
+  again = false,
+  transcript,
+  width,
+  maximized,
+  onToggleMax,
+  onClose,
+  onOpenExternal,
+}: {
+  task: Task;
+  path: string;
+  /** Show this line (scrolled to, briefly highlighted). */
+  line?: number;
+  /** Bumped on every request to show this preview: a repeated request jumps and flashes again. */
+  nonce?: number;
+  /** The file was already shown when asked for again. */
+  again?: boolean;
+  transcript: TranscriptItem[];
+  width?: number;
+  maximized?: boolean;
+  onToggleMax?: () => void;
+  onClose: () => void;
+  onOpenExternal?: () => void;
+}) {
+  const panel = useRef<HTMLElement>(null);
+  const bodyBox = useRef<HTMLDivElement>(null);
+  const [flash, setFlash] = useState<{ top: number; height: number; key: number } | null>(null);
   const [file, setFile] = useState<FilePreview | null>(null);
+  // The path `file` was read for: a jump waits for the new file, not the one still on screen.
+  const [loadedFor, setLoadedFor] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [scripts, setScripts] = useState(false);
@@ -32,7 +68,7 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
     let live = true;
     setLoading(true);
     call('file:preview', { taskId: task.taskId, path, allowOutside: outsideOk || undefined })
-      .then((f) => live && (setFile(f), setError('')))
+      .then((f) => live && (setFile(f), setLoadedFor(path), setError('')))
       .catch((e) => live && (setFile(null), setError(errorText(e))))
       .finally(() => live && setLoading(false));
     return () => {
@@ -43,11 +79,87 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
     setScripts(false);
     setOutsideOk(false);
   }, [path]);
+  // Changed on disk by anything (a command, the user's editor), not only by the agent's file tools:
+  // read again. A cheap stat every two seconds, on this Mac.
+  useEffect(() => {
+    if (task.host || !file) return;
+    let seen: string | null = null;
+    let live = true;
+    const look = () =>
+      call('file:stat', { taskId: task.taskId, path, allowOutside: outsideOk || undefined })
+        .then((st) => {
+          if (!live || !st) return;
+          const sig = `${st.mtimeMs}:${st.size}`;
+          if (seen && sig !== seen) setManual((n) => n + 1);
+          seen = sig;
+        })
+        .catch(() => {});
+    void look();
+    const id = setInterval(look, 2000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [task.host, task.taskId, path, outsideOk, !!file]);
+  // Asked for again while shown: the panel flashes, as DeepSeek Harness's does.
+  const [pulse, setPulse] = useState(0);
+  useEffect(() => {
+    if (!again) return;
+    setPulse(nonce);
+    panel.current?.animate([{ boxShadow: 'inset 0 0 0 2px var(--accent)' }, { boxShadow: 'inset 0 0 0 2px transparent' }], { duration: 600, easing: 'ease-out' });
+  }, [again, nonce]);
+  // The line highlight fades out and goes (it must not linger over a file that changed under it).
+  useEffect(() => {
+    if (!flash) return;
+    const id = setTimeout(() => setFlash(null), 2200);
+    return () => clearTimeout(id);
+  }, [flash]);
+  useEffect(() => setFlash(null), [path]);
+  // A line to show: once the file is on screen, scroll it into view and highlight it briefly.
+  // Once per request (a reload while open keeps the reader where they are).
+  const jumped = useRef(-1);
+  // Moving between the side column and the maximized place remounts the panel: keep the reader's place.
+  useEffect(() => {
+    const el = panel.current;
+    const key = `${task.taskId}\n${path}`;
+    return () => {
+      if (el) scrollKept.set(key, el.scrollTop);
+    };
+  }, [task.taskId, path]);
+  useEffect(() => {
+    const key = `${task.taskId}\n${path}`;
+    const top = scrollKept.get(key);
+    if (top === undefined || !file || loadedFor !== path || (line && jumped.current !== nonce)) return;
+    scrollKept.delete(key);
+    requestAnimationFrame(() => panel.current && (panel.current.scrollTop = top));
+  }, [file, loadedFor, path, task.taskId, line, nonce]);
+  useEffect(() => {
+    if (!file || loadedFor !== path || !line || jumped.current === nonce) return;
+    const id = requestAnimationFrame(() => {
+      const box = bodyBox.current;
+      const scroller = panel.current;
+      const at = box && lineBox(box, line);
+      if (!box || !scroller || !at) return;
+      jumped.current = nonce;
+      const offset = box.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTop = Math.max(0, offset + at.top - scroller.clientHeight / 3);
+      setFlash({ ...at, key: nonce });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [file, loadedFor, path, line, nonce]);
   const outside = /outside the agent/.test(error);
 
   const name = path.split('/').pop() ?? path;
   return (
-    <aside className={`memory preview${maximized ? ' maximized' : ''}`} aria-label={t('File preview')} data-testid="file-preview" style={width && !maximized ? { width } : undefined}>
+    <aside
+      ref={panel}
+      className={`memory preview${maximized ? ' maximized' : ''}`}
+      data-pulse={pulse || undefined}
+      aria-label={t('File preview')}
+      data-testid="file-preview"
+      data-path={path}
+      style={width && !maximized ? { width } : undefined}
+    >
       {/* Stays on top while the file scrolls, so it can be closed from anywhere. */}
       <div className="preview-top">
       <div className="preview-head">
@@ -65,10 +177,20 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
         <button className="icon-btn" title={t('Refresh')} aria-label={t('Refresh')} data-testid="preview-refresh" onClick={() => setManual((n) => n + 1)}>
           <Icon name="refresh" size={13} />
         </button>
-        {onOpenExternal && !task.host && openableKind(path) ? (
-          <button className="icon-btn" title={t('Open in default app')} aria-label={t('Open in default app')} onClick={() => (outsideOk ? void call('file:open', { taskId: task.taskId, path, allowOutside: true }).catch((e) => setError(errorText(e))) : onOpenExternal())}>
-            <Icon name="external" size={13} />
-          </button>
+        {/* In the user's own editor (at this line where it can), Finder, or the default app for documents. */}
+        {!task.host ? (
+          <OpenInApp
+            taskId={task.taskId}
+            path={path}
+            line={line}
+            allowOutside={outsideOk}
+            compact
+            extra={
+              onOpenExternal && openableKind(path)
+                ? [{ label: t('Open in default app'), run: () => (outsideOk ? void call('file:open', { taskId: task.taskId, path, allowOutside: true }).catch((e) => setError(errorText(e))) : onOpenExternal()) }]
+                : undefined
+            }
+          />
         ) : null}
         {onToggleMax ? (
           <button className="icon-btn" title={maximized ? t('Back to the side (Esc)') : t('Maximize')} aria-label={maximized ? t('Back to the side (Esc)') : t('Maximize')} data-testid="preview-maximize" onClick={onToggleMax}>
@@ -96,7 +218,12 @@ export function FilePreviewPanel({ task, path, transcript, width, maximized, onT
         <div className="error-text">{error}</div>
       ) : null}
       {!file && loading ? <div className="muted small">{t('Loading…')}</div> : null}
-      {file ? <PreviewBody task={task} file={file} scripts={scripts} version={stamp + manual} outsideOk={outsideOk} /> : null}
+      {file ? (
+        <div className="preview-body" ref={bodyBox}>
+          <PreviewBody task={task} file={file} scripts={scripts} version={stamp + manual} outsideOk={outsideOk} />
+          {flash ? <div key={flash.key} className="line-flash" style={{ top: flash.top, height: flash.height }} data-testid="line-flash" /> : null}
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -119,7 +246,61 @@ function PreviewBody({ task, file, scripts, version, outsideOk }: { task: Task; 
   // Source and structured text get colours (as code blocks in chat do); very large files stay plain.
   const lang = codeLanguage(file.path);
   if (lang && (file.text?.length ?? 0) <= HIGHLIGHT_MAX) return <CodeView text={file.text ?? ''} lang={lang} />;
-  return <pre className="preview-text">{file.text}</pre>;
+  // Plain text one line per row (so a line can be found even where rows wrap); huge files stay one block.
+  const text = file.text ?? '';
+  if (text.length <= HIGHLIGHT_MAX)
+    return (
+      <pre className="preview-text" data-testid="preview-text">
+        {text.split('\n').map((l, i) => (
+          <div key={i} data-line={i + 1}>
+            {l || '\u200b'}
+          </div>
+        ))}
+      </pre>
+    );
+  return <pre className="preview-text">{text}</pre>;
+}
+
+/** Where a line sits inside the preview body: a row that names it, or the line's text in a code block. */
+function lineBox(box: HTMLElement, line: number): { top: number; height: number } | null {
+  const origin = box.getBoundingClientRect().top;
+  const row = box.querySelector<HTMLElement>(`[data-line="${line}"]`);
+  if (row) {
+    const r = row.getBoundingClientRect();
+    return { top: r.top - origin, height: r.height };
+  }
+  const code = box.querySelector<HTMLElement>('.preview-code pre code') ?? box.querySelector<HTMLElement>('.preview-code pre');
+  if (!code) return null;
+  // Walk the text to the start of the line (past line-1 newlines) and measure a one-character range there.
+  const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+  let left = line - 1;
+  let last: Text | null = null;
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    last = n;
+    let from = 0;
+    while (left > 0) {
+      const k = n.data.indexOf('\n', from);
+      if (k < 0) break;
+      left--;
+      from = k + 1;
+    }
+    if (left === 0 && from < n.data.length) {
+      const range = document.createRange();
+      range.setStart(n, from);
+      range.setEnd(n, Math.min(from + 1, n.data.length));
+      const r = range.getBoundingClientRect();
+      const lh = parseFloat(getComputedStyle(code).lineHeight) || r.height;
+      return { top: r.top + r.height / 2 - lh / 2 - origin, height: lh };
+    }
+    if (left === 0) continue; // the line starts in the next text node
+  }
+  // Past the end: the last line.
+  if (!last) return null;
+  const range = document.createRange();
+  range.selectNodeContents(last);
+  const rects = range.getClientRects();
+  const r = rects[rects.length - 1];
+  return r ? { top: r.top - origin, height: r.height } : null;
 }
 
 const HIGHLIGHT_MAX = 200_000;

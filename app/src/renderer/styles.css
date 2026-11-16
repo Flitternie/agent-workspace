@@ -656,10 +656,47 @@ body.resizing .sidebar-resizer {
 
 .stage {
   display: flex;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+/* Everything but the side column: the view, then the voice bar. */
+.stage-main {
+  flex: 1;
+  display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   position: relative;
+}
+/* The agent's preview or memory, full height on the right; empty, it takes no room. */
+.stage-side {
+  flex: none;
+  display: flex;
+  min-height: 0;
+  max-width: 70%;
+}
+.stage-side:empty {
+  display: none;
+}
+.stage-side > .memory,
+.stage-side > .memory.preview {
+  border-left: 1px solid var(--border);
+  /* Its width comes from the agent view (dragged, within the room rules), not from this column. */
+  max-width: none;
+  height: 100%;
+}
+.stage-side > .panel-resizer + .memory.preview {
+  border-left: 0;
+}
+/* Its header lines up with the agent's header across the top, and moves the window like it. */
+.stage-side .preview-top {
+  min-height: 65px;
+  justify-content: center;
+  -webkit-app-region: drag;
+}
+.stage-side .preview-top :is(button, input, select, a, label, .open-in-menu) {
+  -webkit-app-region: no-drag;
 }
 .stage-head {
   height: 52px;
@@ -1284,19 +1321,22 @@ body.resizing .sidebar-resizer {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  container: focus-main / inline-size;
 }
 .focus-head {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   min-height: 64px;
   padding: 10px 16px 10px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
 .focus-ident {
-  flex: 1;
+  /* Room for the name and its chips; when the actions don't fit beside it they take the next row. */
+  flex: 1 1 240px;
   min-width: 0;
 }
 .focus-name {
@@ -1323,7 +1363,11 @@ body.resizing .sidebar-resizer {
 .focus-actions {
   display: flex;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
 }
 .focus-body {
   flex: 1;
@@ -3967,6 +4011,7 @@ button.subtask-row:hover {
   font-size: 18px;
   letter-spacing: 0.12em;
   user-select: all;
+}
 
 /* The model an agent runs on, in its header; a click switches. */
 .model-picker {
@@ -3976,6 +4021,7 @@ button.subtask-row:hover {
 .model-chip {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   gap: 4px;
   padding: 1px 6px 1px 8px;
   border: 1px solid var(--border);
@@ -4061,4 +4107,199 @@ button.subtask-row:hover {
   border-radius: 0 0 6px 6px;
   margin-top: 2px;
   color: var(--text-2);
+}
+
+/* Preview: the line asked for, highlighted briefly (the panel's flash when asked again is a Web Animation). */
+.preview-body {
+  position: relative;
+}
+/* The stuck header sits on a fractional pixel: cover the sliver above it so no scrolled row shows through. */
+.preview-top {
+  box-shadow: 0 -4px 0 var(--panel-2);
+}
+.line-flash {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  background: rgba(250, 204, 21, 0.35);
+  border-radius: 3px;
+  animation: line-flash 2s ease-out forwards;
+}
+@keyframes line-flash {
+  0%,
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* "Open with…": a split button; the main part opens in the app used last, the arrow lists the rest. */
+.open-in {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.open-in-main,
+.open-in-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.open-in-main:hover,
+.open-in-more:hover {
+  background: var(--hover);
+}
+.open-in-more {
+  padding: 4px 6px;
+  border-left: 1px solid var(--border);
+}
+.open-in-more .icon {
+  transform: rotate(90deg);
+}
+.open-in.compact {
+  border-color: transparent;
+  background: transparent;
+}
+.open-in.compact .open-in-main,
+.open-in.compact .open-in-more {
+  padding: 3px 4px;
+  border-left: none;
+}
+.open-in-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.open-in-group + .open-in-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.open-in-group-label {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.open-in-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.open-in-item:hover,
+.open-in-item.on {
+  background: var(--hover);
+}
+.open-in-item .muted {
+  margin-left: auto;
+}
+.open-in-noicon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.open-in-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  white-space: nowrap;
+}
+.preview-text > div {
+  min-height: 1lh;
+}
+.step-text.link-step {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.step-text.link-step:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+/* The agent header's actions are icons; their names are in the tooltips. */
+.btn.btn-icon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.btn.btn-icon[data-testid='remove-task']:hover {
+  color: var(--risk);
+  border-color: currentColor;
+}
+.focus-head .open-in {
+  height: 30px;
+  border-color: var(--border-strong);
+}
+.focus-head .open-in-main {
+  padding: 0 7px;
+}
+.focus-head .open-in-main img {
+  width: 18px;
+  height: 18px;
+}
+
+/* The app's own confirm dialog. */
+.modal:has(.confirm) {
+  width: min(420px, calc(100vw - 48px));
+}
+.confirm-message {
+  margin: 0 0 4px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.btn-danger {
+  background: var(--risk);
+  border-color: var(--risk);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #a51f25;
+}
+
+/* A narrower agent column (the side panel open): the status keeps only its dot, so the header stays one row in line with the side panel's header. */
+@container focus-main (max-width: 860px) {
+  .focus-name .status-text {
+    display: none;
+  }
+}
+/* A narrower voice bar (the side panel open): its hint stays one line. */
+.dock-input textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

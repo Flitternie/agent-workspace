@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -9,8 +11,10 @@ import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, 
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
-import { ForkDialog } from './Dialogs';
+import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { t } from '../i18n';
+import { OpenInApp } from './OpenInApp';
+import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
@@ -31,7 +35,30 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setShowMemoryState(on);
   };
   // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
-  const [preview, setPreview] = useState<string | null>(null);
+  // Kept per agent: back on this agent, its file is shown again. `nonce` marks each request, so
+  // asking for the file already shown jumps to the line and flashes instead of reloading it.
+  const [preview, setPreviewState] = useState<ShownPreview | null>(() => restored(task.taskId));
+  const setPreview = (path: string | null, opts: { line?: number } = {}) =>
+    setPreviewState((cur) => {
+      if (!path) {
+        savePreview(task.taskId, null);
+        return null;
+      }
+      savePreview(task.taskId, { path, ...(opts.line ? { line: opts.line } : {}) });
+      return { path, line: opts.line, nonce: (cur?.nonce ?? 0) + 1, again: cur?.path === path };
+    });
+  // The side panels go in the stage's full-height right column; the stage's width is the room the
+  // conversation and the preview share, and decides the preview's width and whether it covers.
+  const side = useContext(SideSlot);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyW, setBodyW] = useState(0);
+  useEffect(() => {
+    const el = side?.parentElement ?? bodyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBodyW(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [side]);
   // The preview column's width: dragged by the user, kept for next time.
   const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
   // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
@@ -53,8 +80,13 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setPreviewWidthState(w);
     localStorage.setItem('amw.previewWidth', String(Math.round(w)));
   };
-  useEffect(() => setPreview(null), [task.taskId]);
+  useEffect(() => setPreviewState(restored(task.taskId)), [task.taskId]);
+  // Too narrow for both (the conversation keeps 400px, the preview 300px): the preview covers it.
+  const narrow = bodyW > 0 && bodyW < PREVIEW_MIN + CONVERSATION_MIN;
+  const covering = !!preview && (previewMax || narrow);
+  const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
   const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
   const [error, setError] = useState('');
@@ -65,6 +97,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // "Open in default app" only for files on this Mac.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
+  const previewPanel = preview ? (
+    <FilePreviewPanel
+                task={task}
+                path={preview.path}
+                line={preview.line}
+                nonce={preview.nonce}
+                again={preview.again}
+                transcript={transcript}
+                width={shownWidth}
+                maximized={covering}
+                onToggleMax={narrow ? undefined : () => setPreviewMax(!previewMax)}
+                onClose={() => setPreview(null)}
+                onOpenExternal={openExternal && (() => openExternal(preview.path))}
+              />
+  ) : null;
   return (
     <div className="focus">
       <section className="focus-main">
@@ -124,36 +171,46 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </select>
             )}
             {task.status === 'running' && connected ? (
-              <button className="btn" onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
-                <Icon name="pause" /> {t('Interrupt')}
+              <button className="btn btn-icon" title={t('Interrupt')} aria-label={t('Interrupt')} onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
+                <Icon name="pause" />
               </button>
             ) : null}
             {!connected ? (
-              <button className="btn" onClick={() => run(() => call('task:resume', { taskId: task.taskId }))} title={t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}>
-                <Icon name="play" /> {session?.nativeSessionId ? t('Resume session') : t('Start session')}
+              <button
+                className="btn btn-icon"
+                onClick={() => run(() => call('task:resume', { taskId: task.taskId }))}
+                aria-label={session?.nativeSessionId ? t('Resume session') : t('Start session')}
+                title={`${session?.nativeSessionId ? t('Resume session') : t('Start session')} — ${t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}`}
+              >
+                <Icon name="play" />
               </button>
             ) : (
-              <button className="btn" onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
-                <Icon name="power" /> {t('Stop')}
+              <button className="btn btn-icon" title={t('Stop')} aria-label={t('Stop')} onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
+                <Icon name="power" />
               </button>
             )}
+            {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
+            {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
             {canFork ? (
               <button
-                className="btn"
+                className="btn btn-icon"
+                aria-label={t('Fork')}
                 data-testid="fork-task"
                 disabled={task.status === 'running' || task.status === 'starting'}
                 onClick={() => setForking(true)}
                 title={
                   task.status === 'running' || task.status === 'starting'
-                    ? t('Fork once this turn ends.')
-                    : t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')
+                    ? `${t('Fork')} — ${t('Fork once this turn ends.')}`
+                    : `${t('Fork')} — ${t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')}`
                 }
               >
-                <Icon name="branch" /> {t('Fork')}
+                <Icon name="branch" />
               </button>
             ) : null}
             <button
-              className={`btn${showMemory && !preview ? ' btn-pressed' : ''}`}
+              className={`btn btn-icon${showMemory && !preview ? ' btn-pressed' : ''}`}
+              title={t('Memory')}
+              aria-label={t('Memory')}
               onClick={() => {
                 if (preview) setShowMemory(true);
                 else setShowMemory(!showMemory);
@@ -161,18 +218,19 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               }}
               aria-pressed={showMemory && !preview}
             >
-              <Icon name="note" /> {t('Memory')}
+              <Icon name="note" />
             </button>
             {isMainAgent(task) ? null : (
             <button
-              className="btn"
+              className="btn btn-icon"
               data-testid="remove-task"
-              title={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
+              aria-label={t('Remove')}
+              title={`${t('Remove')} — ${t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}`}
               onClick={() => {
-                if (window.confirm(t('Remove {name}? A worktree with uncommitted changes is kept on disk.', { name: displayName(task) }))) run(() => call('task:remove', { taskId: task.taskId }));
+                setRemoving(true);
               }}
             >
-              {t('Remove')}
+              <Icon name="trash" />
             </button>
             )}
           </div>
@@ -183,11 +241,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
         ) : null}
         {error ? <div className="error-text pad">{error}</div> : null}
+        {removing ? (
+          <ConfirmDialog
+            title={t('Remove {name}?', { name: displayName(task) })}
+            message={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
+            confirmLabel={t('Remove')}
+            danger
+            onConfirm={() => run(() => call('task:remove', { taskId: task.taskId }))}
+            onClose={() => setRemoving(false)}
+          />
+        ) : null}
         {forking ? <ForkDialog snapshot={snapshot} task={task} onClose={() => setForking(false)} onForked={(id) => onOpen?.(id)} /> : null}
 
-        <div className="focus-body">
+        <div className="focus-body" ref={bodyRef}>
           {/* Kept mounted while the preview is maximized, so the conversation keeps its place. */}
-          <div className="focus-thread" hidden={!!preview && previewMax}>
+          <div className="focus-thread" hidden={covering}>
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
               <Transcript items={transcript} main={isMainAgent(task)} />
@@ -208,33 +276,47 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             <Composer task={task} />
           </div>
-          {preview ? (
-            <>
-              {previewMax ? null : <PanelResizer width={previewWidth} onChange={setPreviewWidth} />}
-              <FilePreviewPanel
-                task={task}
-                path={preview}
-                transcript={transcript}
-                width={previewWidth}
-                maximized={previewMax}
-                onToggleMax={() => setPreviewMax(!previewMax)}
-                onClose={() => setPreview(null)}
-                onOpenExternal={openExternal && (() => openExternal(preview))}
-              />
-            </>
-          ) : showMemory ? (
-            <MemoryPanel snapshot={snapshot} task={task} />
-          ) : null}
+          {/* Maximized or too narrow, the preview takes the conversation's place under the header;
+              beside it, it is a full-height column on the right (the side slot). */}
+          {preview && covering ? previewPanel : null}
         </div>
       </section>
+      {(() => {
+        const panel = preview && !covering ? (
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
+            {previewPanel}
+          </>
+        ) : !preview && showMemory ? (
+          <MemoryPanel snapshot={snapshot} task={task} />
+        ) : null;
+        if (!panel) return null;
+        return side ? createPortal(panel, side) : panel;
+      })()}
     </div>
   );
 }
 
 const PREVIEW_WIDTH = 460;
+/** The preview never narrower than this; the conversation keeps at least CONVERSATION_MIN. */
+const PREVIEW_MIN = 300;
+const CONVERSATION_MIN = 400;
+/** Widest the preview may be beside the conversation: 70% of the room, leaving the conversation its minimum. */
+const previewMaxWidth = (room: number) => (room ? Math.max(PREVIEW_MIN, Math.min(room * 0.7, room - CONVERSATION_MIN)) : Infinity);
+
+interface ShownPreview extends PreviewState {
+  nonce: number;
+  /** Asked for while already shown: jump and flash rather than reload. */
+  again: boolean;
+}
+
+function restored(taskId: string): ShownPreview | null {
+  const saved = savedPreview(taskId);
+  return saved ? { ...saved, nonce: 1, again: false } : null;
+}
 
 /** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
-function PanelResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
   return (
     <div
       className="panel-resizer"
@@ -246,15 +328,13 @@ function PanelResizer({ width, onChange }: { width: number; onChange: (w: number
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}
       onPointerDown={(e) => {
         const bar = e.currentTarget;
-        const body = bar.parentElement!.getBoundingClientRect();
         const startX = e.clientX;
         const startW = width;
         bar.setPointerCapture(e.pointerId);
         document.body.classList.add('resizing');
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
-          const max = Math.max(320, body.width - 380);
-          onChange(Math.min(max, Math.max(280, startW + (startX - ev.clientX))));
+          onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
         };
         const up = () => {
           bar.removeEventListener('pointermove', move);

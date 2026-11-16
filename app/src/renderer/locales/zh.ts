@@ -639,4 +639,12 @@ export const zh: Record<string, string> = {
   'Allow scripts': '允许脚本',
   'Runs the page’s own scripts, still isolated from the app and the network.': '运行页面自带的脚本，仍与应用和网络隔离。',
   'Not an image': '不是图片',
+  'Open in {app}': '用 {app} 打开',
+  'Open with…': '打开方式…',
+  'Show in Finder': '在访达中显示',
+  'line {n}': '第 {n} 行',
+  'Editors': '编辑器',
+  'Terminals': '终端',
+  'Files': '文件',
+  'Remove {name}?': '移除 {name}？',
 };
