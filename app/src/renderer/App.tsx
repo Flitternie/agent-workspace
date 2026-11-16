@@ -181,6 +181,11 @@ export function App() {
     if (id && snapshot?.tasks.some((t) => t.taskId === id)) void call('task:viewed', { taskId: id }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, selectedId]);
+  // Finishing while you are looking at it: already seen.
+  const focusedUnread = snapshot?.tasks.find((t) => t.taskId === focusId)?.unread;
+  useEffect(() => {
+    if (focusId && focusedUnread) void call('task:viewed', { taskId: focusId }).catch(() => {});
+  }, [focusId, focusedUnread]);
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);

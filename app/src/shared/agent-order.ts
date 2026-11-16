@@ -29,6 +29,11 @@ export function activeAt(t: Task): number {
   return Math.max(userActiveAt(t), ms(t.updatedAt));
 }
 
+/** Set aside by the user and nothing has happened since that needs them or is under way. */
+export function isSetAside(t: Task, open: AttentionItem[]): boolean {
+  return !!t.setAside && tierOf(t, open) >= 2;
+}
+
 export function tierOf(t: Task, open: AttentionItem[]): Tier {
   const mine = open.filter((a) => a.taskId === t.taskId && a.state === 'open');
   if (mine.some((a) => a.kind !== 'completion')) return 0;
@@ -83,7 +88,7 @@ export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' |
       open,
     );
     if (!all.length) continue;
-    const busy = (t: Task) => tierOf(t, open) <= 2 || now - activeAt(t) < IDLE_AFTER_MS;
+    const busy = (t: Task) => !isSetAside(t, open) && (tierOf(t, open) <= 2 || now - activeAt(t) < IDLE_AFTER_MS);
     const members = all.filter(busy);
     out.push({
       project,
@@ -110,7 +115,7 @@ export function visibleOrder(list: Team[], expanded: (team: Team) => boolean): T
 
 /** Agents the Overview may show: waiting, working, unread or failed, or active within RECENT_MS; most urgent first. */
 export function overviewCandidates(tasks: Task[], open: AttentionItem[], now: number): Task[] {
-  return rank(tasks, open).filter((t) => tierOf(t, open) <= 2 || now - activeAt(t) < RECENT_MS);
+  return rank(tasks, open).filter((t) => !isSetAside(t, open) && (tierOf(t, open) <= 2 || now - activeAt(t) < RECENT_MS));
 }
 
 /**

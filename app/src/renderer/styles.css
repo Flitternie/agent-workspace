@@ -398,6 +398,16 @@ pre code {
 .status-done .dot {
   background: var(--ok);
 }
+/* Finished, and you have looked: still listed, no longer new. The row itself may carry the
+   agent's real status class, so the dot's own status wins (.status.status-*). */
+.status.status-seen .dot {
+  background: var(--text-3);
+  opacity: 0.55;
+}
+.status.status-idle .dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
 .status-waiting_for_user .dot {
   background: var(--needs-dot);
 }

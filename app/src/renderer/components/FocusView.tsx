@@ -277,6 +277,23 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             >
               <Icon name="note" />
             </button>
+            {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
+            {isMainAgent(task) ? null : (
+              <button
+                className={`btn btn-icon${task.setAside ? ' btn-pressed' : ''}`}
+                aria-pressed={!!task.setAside}
+                aria-label={task.setAside ? t('Set aside (click to bring back)') : t('Set aside')}
+                title={
+                  task.setAside
+                    ? t('Set aside: out of the Overview and folded under idle. Click to bring it back; it also comes back by itself when it works, asks or you message it.')
+                    : t('Set aside: take it out of the Overview and fold it under idle. It keeps running, and comes back by itself when it works, asks or you message it.')
+                }
+                data-testid="set-aside"
+                onClick={() => run(() => call('task:setAside', { taskId: task.taskId, on: !task.setAside }))}
+              >
+                <Icon name="moon" />
+              </button>
+            )}
             {isMainAgent(task) ? null : (
             <button
               className="btn btn-icon"
