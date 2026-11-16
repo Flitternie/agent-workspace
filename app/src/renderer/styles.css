@@ -4373,6 +4373,8 @@ button.subtask-row:hover {
 .remote-actions a.btn {
   color: inherit;
   text-decoration: none;
+}
+
 /* ---------------------------------------------------------------- preview rendering */
 /* Source: one row per line, its number in a gutter that stays put while long lines scroll sideways. */
 .preview-code {
