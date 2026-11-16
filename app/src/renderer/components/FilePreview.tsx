@@ -5,7 +5,8 @@ import type { FilePreview, Task, TranscriptItem } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { Icon } from './bits';
-import { touchedPaths } from './Content';
+import { DiffStat, DiffView, touchedPaths } from './Content';
+import type { FileDiff } from '../../shared/content';
 import { Markdown } from './Markdown';
 import { OpenInApp } from './OpenInApp';
 
@@ -29,6 +30,9 @@ export function FilePreviewPanel({
   onToggleMax,
   onClose,
   onOpenExternal,
+  diffs,
+  showDiff,
+  onToggleDiff,
 }: {
   task: Task;
   path: string;
@@ -44,6 +48,10 @@ export function FilePreviewPanel({
   onToggleMax?: () => void;
   onClose: () => void;
   onOpenExternal?: () => void;
+  /** This file's changes in the agent's latest turn: offers File / Changes. */
+  diffs?: FileDiff[];
+  showDiff?: boolean;
+  onToggleDiff?: (on: boolean) => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const bodyBox = useRef<HTMLDivElement>(null);
@@ -219,7 +227,23 @@ export function FilePreviewPanel({
         <div className="error-text">{error}</div>
       ) : null}
       {!file && loading ? <div className="muted small">{t('Loading…')}</div> : null}
-      {file ? (
+      {diffs?.length && onToggleDiff ? (
+        <div className="seg preview-seg" role="tablist">
+          <button role="tab" aria-selected={!showDiff} className={showDiff ? '' : 'on'} onClick={() => onToggleDiff(false)} data-testid="show-file">
+            {t('File')}
+          </button>
+          <button role="tab" aria-selected={!!showDiff} className={showDiff ? 'on' : ''} onClick={() => onToggleDiff(true)} data-testid="show-diff">
+            {t('Changes')} <DiffStat added={diffs.reduce((n, d) => n + d.added, 0)} removed={diffs.reduce((n, d) => n + d.removed, 0)} />
+          </button>
+        </div>
+      ) : null}
+      {showDiff && diffs?.length ? (
+        <div className="preview-diffs" data-testid="preview-diffs">
+          {diffs.map((d, i) => (
+            <DiffView key={i} diff={d} />
+          ))}
+        </div>
+      ) : file ? (
         <div className="preview-body" ref={bodyBox}>
           <PreviewBody task={task} file={file} scripts={scripts} version={stamp + manual} outsideOk={outsideOk} />
           {flash ? <div key={flash.key} className="line-flash" style={{ top: flash.top, height: flash.height }} data-testid="line-flash" /> : null}

@@ -1336,7 +1336,7 @@ body.resizing .sidebar-resizer {
 }
 .focus-ident {
   /* Room for the name and its chips; when the actions don't fit beside it they take the next row. */
-  flex: 1 1 240px;
+  flex: 1 1 200px;
   min-width: 0;
 }
 .focus-name {
@@ -4293,8 +4293,12 @@ button.subtask-row:hover {
 
 /* A narrower agent column (the side panel open): the status keeps only its dot, so the header stays one row in line with the side panel's header. */
 @container focus-main (max-width: 860px) {
-  .focus-name .status-text {
+  .focus-name .status-text,
+  .focus-name .tag[class*="provider-"] {
     display: none;
+  }
+  .focus-actions {
+    gap: 4px;
   }
 }
 /* A narrower voice bar (the side panel open): its hint stays one line. */
@@ -4446,4 +4450,110 @@ button.subtask-row:hover {
 }
 .preview-table-more {
   padding: 8px 10px;
+}
+
+/* Changed this turn: the header button's count, the list in the side column, File / Changes in the preview. */
+.btn.btn-badged {
+  position: relative;
+}
+.btn-badged .badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.changes-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.changes-item:hover {
+  background: var(--hover);
+}
+.changes-name {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.changes-dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.follow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--hover);
+}
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+.preview-diffs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.memory.changes {
+  width: 360px;
+  gap: 10px;
+}
+.changes-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
 }

@@ -648,4 +648,11 @@ export const zh: Record<string, string> = {
   'Files': '文件',
   'Remove {name}?': '移除 {name}？',
   'First {n} of {total} rows': '前 {n} 行（共 {total} 行）',
+  'Changes': '改动',
+  'Changed this turn': '本轮改动',
+  'Changed last turn': '上一轮改动',
+  'Show each file in the preview as the agent changes it': 'Agent 改到哪个文件，预览就跟到哪个文件',
+  'Follow': '跟随',
+  'File': '文件',
+  'No file changes yet. With Follow on, each file the agent changes opens here.': '还没有文件改动。开启「跟随」后，Agent 改到的每个文件都会在这里打开。',
 };
