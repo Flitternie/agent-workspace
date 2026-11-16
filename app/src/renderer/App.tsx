@@ -3,6 +3,7 @@ import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visible
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { savePreview } from './preview-store';
+import { SideSlot } from './side-slot';
 import { Icon } from './components/bits';
 import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
@@ -117,6 +118,7 @@ function columnsFor(n: number): number {
 }
 
 export function App() {
+  const [sideEl, setSideEl] = useState<HTMLDivElement | null>(null);
   const snapshot = useWorkspace();
   const { transcripts, load } = useTranscripts();
   // Every launch starts in Overview (spec 02).
@@ -279,6 +281,8 @@ export function App() {
       />
 
       <div className="stage">
+        <SideSlot.Provider value={sideEl}>
+        <div className="stage-main">
         {subView && !settingsOpen && snapshot.tasks.some((x) => x.taskId === subView.taskId) ? (
           <SubtaskView
             task={snapshot.tasks.find((x) => x.taskId === subView.taskId)!}
@@ -426,6 +430,10 @@ export function App() {
         )}
 
         <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} mainTranscript={snapshot.main ? (transcripts[snapshot.main.taskId] ?? []) : []} />
+        </div>
+        </SideSlot.Provider>
+        {/* The agent view's preview and memory panels, full height on the right. */}
+        <div className="stage-side" ref={setSideEl} data-testid="stage-side" />
       </div>
 
       <div className="toasts" aria-live="polite">

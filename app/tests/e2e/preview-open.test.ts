@@ -121,6 +121,12 @@ describe('preview and open with…', () => {
       }, text);
     await expect.poll(() => visible('v200')).toEqual({ inView: true, onLine: true });
     await page.screenshot({ path: join(shots, 'open-in-02-line-jump.png') });
+    // Full height on the right, beside the agent's header and the voice bar; both headers share one top row.
+    const box = (sel: string) => page.evaluate((q) => { const r = document.querySelector(q)!.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height, left: r.left }; }, sel);
+    expect((await box('[data-testid="file-preview"]')).top).toBe(0);
+    expect((await box('[data-testid="file-preview"]')).bottom).toBe(900);
+    expect(Math.abs((await box('.preview-top')).height - (await box('.focus-head')).height)).toBeLessThanOrEqual(1);
+    expect((await box('.dock')).left).toBeLessThan((await box('[data-testid="file-preview"]')).left);
 
     // The same file at its line in Cursor: the editor's own CLI with file:line.
     await page.getByTestId('file-preview').getByTestId('open-in-more').click();
@@ -170,6 +176,18 @@ describe('preview and open with…', () => {
     await page.screenshot({ path: join(shots, 'open-in-03-narrow-cover.png') });
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect.poll(async () => (await widths()).thread).toBeGreaterThanOrEqual(400);
+
+    // Maximized: the preview takes the conversation's place under the agent's header, then goes back to the side.
+    await page.getByTestId('preview-maximize').click();
+    await expect.poll(() => page.getByTestId('file-preview').getAttribute('class')).toContain('maximized');
+    expect(await page.getByTestId('stage-side').evaluate((e) => e.childElementCount)).toBe(0);
+    await page.screenshot({ path: join(shots, 'open-in-05-maximized.png') });
+    await page.getByTestId('preview-maximize').click();
+    await expect.poll(() => page.getByTestId('stage-side').evaluate((e) => e.childElementCount)).toBeGreaterThan(0);
+    // Memory takes the same full-height column.
+    await page.getByRole('button', { name: 'Memory' }).click();
+    await expect.poll(() => page.locator('[data-testid="stage-side"] > .memory').count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'open-in-06-memory.png') });
 
     // Remove asks in the app's own dialog (not the system's): Cancel keeps the agent, Remove removes it.
     await row('Orders').click();

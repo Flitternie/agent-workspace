@@ -13,6 +13,9 @@ import { OpenInApp } from './OpenInApp';
  * main process (which only serves files inside the task's folders); the file is read
  * again whenever a later tool call in the conversation touches it.
  */
+/** Where each preview was scrolled to when its panel unmounted (taskId + path). */
+const scrollKept = new Map<string, number>();
+
 export function FilePreviewPanel({
   task,
   path,
@@ -115,6 +118,21 @@ export function FilePreviewPanel({
   // A line to show: once the file is on screen, scroll it into view and highlight it briefly.
   // Once per request (a reload while open keeps the reader where they are).
   const jumped = useRef(-1);
+  // Moving between the side column and the maximized place remounts the panel: keep the reader's place.
+  useEffect(() => {
+    const el = panel.current;
+    const key = `${task.taskId}\n${path}`;
+    return () => {
+      if (el) scrollKept.set(key, el.scrollTop);
+    };
+  }, [task.taskId, path]);
+  useEffect(() => {
+    const key = `${task.taskId}\n${path}`;
+    const top = scrollKept.get(key);
+    if (top === undefined || !file || loadedFor !== path || (line && jumped.current !== nonce)) return;
+    scrollKept.delete(key);
+    requestAnimationFrame(() => panel.current && (panel.current.scrollTop = top));
+  }, [file, loadedFor, path, task.taskId, line, nonce]);
   useEffect(() => {
     if (!file || loadedFor !== path || !line || jumped.current === nonce) return;
     const id = requestAnimationFrame(() => {

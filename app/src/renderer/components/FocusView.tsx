@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -45,16 +47,18 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       savePreview(task.taskId, { path, ...(opts.line ? { line: opts.line } : {}) });
       return { path, line: opts.line, nonce: (cur?.nonce ?? 0) + 1, again: cur?.path === path };
     });
-  // The room beside the conversation decides the preview's width and whether it covers it.
+  // The side panels go in the stage's full-height right column; the stage's width is the room the
+  // conversation and the preview share, and decides the preview's width and whether it covers.
+  const side = useContext(SideSlot);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodyW, setBodyW] = useState(0);
   useEffect(() => {
-    const el = bodyRef.current;
+    const el = side?.parentElement ?? bodyRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setBodyW(e.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [side]);
   // The preview column's width: dragged by the user, kept for next time.
   const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
   // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
@@ -93,6 +97,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // "Open in default app" only for files on this Mac.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
+  const previewPanel = preview ? (
+    <FilePreviewPanel
+                task={task}
+                path={preview.path}
+                line={preview.line}
+                nonce={preview.nonce}
+                again={preview.again}
+                transcript={transcript}
+                width={shownWidth}
+                maximized={covering}
+                onToggleMax={narrow ? undefined : () => setPreviewMax(!previewMax)}
+                onClose={() => setPreview(null)}
+                onOpenExternal={openExternal && (() => openExternal(preview.path))}
+              />
+  ) : null;
   return (
     <div className="focus">
       <section className="focus-main">
@@ -257,28 +276,23 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             <Composer task={task} />
           </div>
-          {preview ? (
-            <>
-              {covering ? null : <PanelResizer width={shownWidth} onChange={setPreviewWidth} />}
-              <FilePreviewPanel
-                task={task}
-                path={preview.path}
-                line={preview.line}
-                nonce={preview.nonce}
-                again={preview.again}
-                transcript={transcript}
-                width={shownWidth}
-                maximized={covering}
-                onToggleMax={narrow ? undefined : () => setPreviewMax(!previewMax)}
-                onClose={() => setPreview(null)}
-                onOpenExternal={openExternal && (() => openExternal(preview.path))}
-              />
-            </>
-          ) : showMemory ? (
-            <MemoryPanel snapshot={snapshot} task={task} />
-          ) : null}
+          {/* Maximized or too narrow, the preview takes the conversation's place under the header;
+              beside it, it is a full-height column on the right (the side slot). */}
+          {preview && covering ? previewPanel : null}
         </div>
       </section>
+      {(() => {
+        const panel = preview && !covering ? (
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
+            {previewPanel}
+          </>
+        ) : !preview && showMemory ? (
+          <MemoryPanel snapshot={snapshot} task={task} />
+        ) : null;
+        if (!panel) return null;
+        return side ? createPortal(panel, side) : panel;
+      })()}
     </div>
   );
 }
@@ -302,7 +316,7 @@ function restored(taskId: string): ShownPreview | null {
 }
 
 /** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
-function PanelResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
   return (
     <div
       className="panel-resizer"
@@ -314,14 +328,13 @@ function PanelResizer({ width, onChange }: { width: number; onChange: (w: number
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}
       onPointerDown={(e) => {
         const bar = e.currentTarget;
-        const body = bar.parentElement!.getBoundingClientRect();
         const startX = e.clientX;
         const startW = width;
         bar.setPointerCapture(e.pointerId);
         document.body.classList.add('resizing');
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
-          onChange(Math.min(previewMaxWidth(body.width), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
+          onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
         };
         const up = () => {
           bar.removeEventListener('pointermove', move);

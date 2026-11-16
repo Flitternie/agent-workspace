@@ -656,10 +656,47 @@ body.resizing .sidebar-resizer {
 
 .stage {
   display: flex;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+/* Everything but the side column: the view, then the voice bar. */
+.stage-main {
+  flex: 1;
+  display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   position: relative;
+}
+/* The agent's preview or memory, full height on the right; empty, it takes no room. */
+.stage-side {
+  flex: none;
+  display: flex;
+  min-height: 0;
+  max-width: 70%;
+}
+.stage-side:empty {
+  display: none;
+}
+.stage-side > .memory,
+.stage-side > .memory.preview {
+  border-left: 1px solid var(--border);
+  /* Its width comes from the agent view (dragged, within the room rules), not from this column. */
+  max-width: none;
+  height: 100%;
+}
+.stage-side > .panel-resizer + .memory.preview {
+  border-left: 0;
+}
+/* Its header lines up with the agent's header across the top, and moves the window like it. */
+.stage-side .preview-top {
+  min-height: 65px;
+  justify-content: center;
+  -webkit-app-region: drag;
+}
+.stage-side .preview-top :is(button, input, select, a, label, .open-in-menu) {
+  -webkit-app-region: no-drag;
 }
 .stage-head {
   height: 52px;
@@ -1284,6 +1321,7 @@ body.resizing .sidebar-resizer {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  container: focus-main / inline-size;
 }
 .focus-head {
   flex: none;
@@ -1298,7 +1336,7 @@ body.resizing .sidebar-resizer {
 }
 .focus-ident {
   /* Room for the name and its chips; when the actions don't fit beside it they take the next row. */
-  flex: 1 1 340px;
+  flex: 1 1 240px;
   min-width: 0;
 }
 .focus-name {
@@ -4251,4 +4289,17 @@ button.subtask-row:hover {
 }
 .btn-danger:hover:not(:disabled) {
   background: #a51f25;
+}
+
+/* A narrower agent column (the side panel open): the status keeps only its dot, so the header stays one row in line with the side panel's header. */
+@container focus-main (max-width: 860px) {
+  .focus-name .status-text {
+    display: none;
+  }
+}
+/* A narrower voice bar (the side panel open): its hint stays one line. */
+.dock-input textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
