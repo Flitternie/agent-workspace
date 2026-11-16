@@ -4234,3 +4234,21 @@ button.subtask-row:hover {
   width: 18px;
   height: 18px;
 }
+
+/* The app's own confirm dialog. */
+.modal:has(.confirm) {
+  width: min(420px, calc(100vw - 48px));
+}
+.confirm-message {
+  margin: 0 0 4px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.btn-danger {
+  background: var(--risk);
+  border-color: var(--risk);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #a51f25;
+}

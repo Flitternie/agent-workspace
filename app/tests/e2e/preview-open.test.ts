@@ -170,7 +170,21 @@ describe('preview and open with…', () => {
     await page.screenshot({ path: join(shots, 'open-in-03-narrow-cover.png') });
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect.poll(async () => (await widths()).thread).toBeGreaterThanOrEqual(400);
+
+    // Remove asks in the app's own dialog (not the system's): Cancel keeps the agent, Remove removes it.
+    await row('Orders').click();
+    await page.getByTestId('remove-task').click();
+    await expect.poll(() => page.getByTestId('confirm-dialog').count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'open-in-04-remove-confirm.png') });
+    await page.getByTestId('confirm-cancel').click();
+    expect(await page.getByTestId('confirm-dialog').count()).toBe(0);
+    expect((await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.some((t) => t.taskId === b.taskId)).toBe(true);
+    await page.getByTestId('remove-task').click();
+    await page.keyboard.press('Escape');
+    expect(await page.getByTestId('confirm-dialog').count()).toBe(0);
+    await page.getByTestId('remove-task').click();
+    await page.getByTestId('confirm-ok').click();
+    await expect.poll(async () => (await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.some((t) => t.taskId === b.taskId)).toBe(false);
     void a;
-    void b;
   }, 120_000);
 });

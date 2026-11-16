@@ -7,9 +7,15 @@ import { t } from '../i18n';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+    // Esc closes the dialog and only the dialog: caught first, so the app's own Esc (back to Overview) never sees it.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
   }, [onClose]);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -24,6 +30,47 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         <div className="modal-body">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** The app's own "are you sure?" (not the system dialog): Enter confirms, Esc or Cancel backs out. */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  danger,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  message?: ReactNode;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="confirm" data-testid="confirm-dialog">
+        {message ? <p className="confirm-message">{message}</p> : null}
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose} data-testid="confirm-cancel">
+            {t('Cancel')}
+          </button>
+          <button
+            className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`}
+            autoFocus
+            onClick={() => {
+              onClose();
+              onConfirm();
+            }}
+            data-testid="confirm-ok"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

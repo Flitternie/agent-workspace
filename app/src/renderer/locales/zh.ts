@@ -646,4 +646,5 @@ export const zh: Record<string, string> = {
   'Editors': '编辑器',
   'Terminals': '终端',
   'Files': '文件',
+  'Remove {name}?': '移除 {name}？',
 };

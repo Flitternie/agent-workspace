@@ -9,7 +9,7 @@ import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, 
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
-import { ForkDialog } from './Dialogs';
+import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { t } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
@@ -82,6 +82,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const covering = !!preview && (previewMax || narrow);
   const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
   const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
   const [error, setError] = useState('');
@@ -207,7 +208,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               aria-label={t('Remove')}
               title={`${t('Remove')} — ${t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}`}
               onClick={() => {
-                if (window.confirm(t('Remove {name}? A worktree with uncommitted changes is kept on disk.', { name: displayName(task) }))) run(() => call('task:remove', { taskId: task.taskId }));
+                setRemoving(true);
               }}
             >
               <Icon name="trash" />
@@ -221,6 +222,16 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
         ) : null}
         {error ? <div className="error-text pad">{error}</div> : null}
+        {removing ? (
+          <ConfirmDialog
+            title={t('Remove {name}?', { name: displayName(task) })}
+            message={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
+            confirmLabel={t('Remove')}
+            danger
+            onConfirm={() => run(() => call('task:remove', { taskId: task.taskId }))}
+            onClose={() => setRemoving(false)}
+          />
+        ) : null}
         {forking ? <ForkDialog snapshot={snapshot} task={task} onClose={() => setForking(false)} onForked={(id) => onOpen?.(id)} /> : null}
 
         <div className="focus-body" ref={bodyRef}>
