@@ -2,6 +2,8 @@
 // and back finds it where it was (as DeepSeek Harness keeps a right Sidebar per session).
 
 export interface PreviewState {
+  /** Showing the file's changes from the agent's latest turn rather than the file. */
+  diff?: boolean;
   path: string;
   line?: number;
 }

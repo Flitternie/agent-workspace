@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
@@ -12,6 +12,9 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
+import { ChangesPanel } from './Changes';
+import { turnChanges } from '../turn-changes';
+import { resolvePosix } from '../../shared/preview';
 import { t } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
@@ -34,18 +37,31 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     localStorage.setItem('amw.showMemory', on ? '1' : '0');
     setShowMemoryState(on);
   };
+  // The files the agent changed in its latest turn; their list shares the side column (closing a
+  // file previewed from it brings the list back). Follow: each file it changes opens as it changes.
+  const changes = useMemo(() => turnChanges(transcript), [transcript]);
+  const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
+  const setShowChanges = (on: boolean) => {
+    localStorage.setItem('amw.showChanges', on ? '1' : '0');
+    setShowChangesState(on);
+  };
+  const [follow, setFollowState] = useState(() => localStorage.getItem('amw.follow') === '1');
+  const setFollow = (on: boolean) => {
+    localStorage.setItem('amw.follow', on ? '1' : '0');
+    setFollowState(on);
+  };
   // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
   // Kept per agent: back on this agent, its file is shown again. `nonce` marks each request, so
   // asking for the file already shown jumps to the line and flashes instead of reloading it.
   const [preview, setPreviewState] = useState<ShownPreview | null>(() => restored(task.taskId));
-  const setPreview = (path: string | null, opts: { line?: number } = {}) =>
+  const setPreview = (path: string | null, opts: { line?: number; diff?: boolean } = {}) =>
     setPreviewState((cur) => {
       if (!path) {
         savePreview(task.taskId, null);
         return null;
       }
-      savePreview(task.taskId, { path, ...(opts.line ? { line: opts.line } : {}) });
-      return { path, line: opts.line, nonce: (cur?.nonce ?? 0) + 1, again: cur?.path === path };
+      savePreview(task.taskId, { path, ...(opts.line ? { line: opts.line } : {}), ...(opts.diff ? { diff: true } : {}) });
+      return { path, line: opts.line, diff: opts.diff, nonce: (cur?.nonce ?? 0) + 1, again: cur?.path === path };
     });
   // The side panels go in the stage's full-height right column; the stage's width is the room the
   // conversation and the preview share, and decides the preview's width and whether it covers.
@@ -97,6 +113,23 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // "Open in default app" only for files on this Mac.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
+  // Follow: a change the agent makes after this view opened shows in the preview, as its diff.
+  const seenChange = useRef<string | null>(null);
+  const latest = changes.which === 'current' ? changes.files.at(-1) : undefined;
+  useEffect(() => {
+    seenChange.current = null;
+  }, [task.taskId]);
+  useEffect(() => {
+    const id = latest?.lastItemId ?? '';
+    if (seenChange.current === null) {
+      seenChange.current = id;
+      return;
+    }
+    if (!follow || !latest || id === seenChange.current) return;
+    seenChange.current = id;
+    setPreview(latest.path, { line: latest.line, diff: true });
+  }, [latest?.lastItemId, follow]);
+  const previewDiffs = preview ? changes.files.find((f) => f.path === preview.path || resolvePosix(task.cwd, f.path) === resolvePosix(task.cwd, preview.path))?.diffs : undefined;
   const previewPanel = preview ? (
     <FilePreviewPanel
                 task={task}
@@ -110,6 +143,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 onToggleMax={narrow ? undefined : () => setPreviewMax(!previewMax)}
                 onClose={() => setPreview(null)}
                 onOpenExternal={openExternal && (() => openExternal(preview.path))}
+                diffs={previewDiffs}
+                showDiff={!!preview.diff && !!previewDiffs?.length}
+                onToggleDiff={(on) => {
+                  savePreview(task.taskId, { path: preview.path, ...(preview.line ? { line: preview.line } : {}), ...(on ? { diff: true } : {}) });
+                  setPreviewState((cur) => (cur ? { ...cur, diff: on } : cur));
+                }}
               />
   ) : null;
   return (
@@ -207,16 +246,34 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="branch" />
               </button>
             ) : null}
+            {/* The files changed in the latest turn (a count while there are some). */}
             <button
-              className={`btn btn-icon${showMemory && !preview ? ' btn-pressed' : ''}`}
+              className={`btn btn-icon btn-badged${showChanges && !preview ? ' btn-pressed' : ''}`}
+              title={t('Changed this turn')}
+              aria-label={t('Changed this turn')}
+              aria-pressed={showChanges && !preview}
+              data-testid="show-changes"
+              onClick={() => {
+                const on = preview ? true : !showChanges;
+                setShowChanges(on);
+                if (on) setShowMemory(false);
+                setPreview(null);
+              }}
+            >
+              <Icon name="diff" />
+              {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
+            </button>
+            <button
+              className={`btn btn-icon${showMemory && !preview && !showChanges ? ' btn-pressed' : ''}`}
               title={t('Memory')}
               aria-label={t('Memory')}
               onClick={() => {
-                if (preview) setShowMemory(true);
-                else setShowMemory(!showMemory);
+                const on = preview || showChanges ? true : !showMemory;
+                setShowMemory(on);
+                if (on) setShowChanges(false);
                 setPreview(null);
               }}
-              aria-pressed={showMemory && !preview}
+              aria-pressed={showMemory && !preview && !showChanges}
             >
               <Icon name="note" />
             </button>
@@ -287,6 +344,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
             {previewPanel}
           </>
+        ) : !preview && showChanges ? (
+          <ChangesPanel task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
         ) : !preview && showMemory ? (
           <MemoryPanel snapshot={snapshot} task={task} />
         ) : null;
