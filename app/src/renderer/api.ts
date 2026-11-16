@@ -81,6 +81,7 @@ export interface Outputs {
   'apps:installed': Array<{ id: string; name: string; kind: 'editor' | 'git' | 'terminal' | 'files'; lines: boolean; icon?: string }>;
   'apps:open': void;
   'task:setAside': void;
+  'task:remoteControl': string | undefined;
   'file:stat': { mtimeMs: number; size: number } | null;
   'models:list': string[];
   'openai:setKey': { ok: boolean; error?: string; overriddenByEnv?: boolean };

@@ -136,6 +136,11 @@ export interface ProviderSession {
   setModel?(model: string | undefined): Promise<void>;
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
+  /**
+   * Remote Control (Claude Code): this live session also shows in the Claude app and at claude.ai/code,
+   * driven from the phone while it keeps running here. Resolves with the session's link when on.
+   */
+  setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string }>;
   close(): Promise<void>;
 }
 

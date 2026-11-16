@@ -12,6 +12,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
+import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
@@ -193,21 +194,26 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
           </div>
           <div className="focus-actions">
+            {/* Permissions: a menu with its mode's name; in a narrow agent column the same menu behind a shield icon. */}
             {isMainAgent(task) ? null : (
-            <select
-              className="input select perm-select"
-              value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
-              title={t('Permissions')}
-              aria-label={t('Permissions')}
-              data-testid="task-permission"
-              onChange={(e) => run(() => call('task:setPermissionMode', { taskId: task.taskId, mode: e.target.value as PermissionMode }))}
-            >
-              {PERMISSION_MODES.map((m) => (
-                <option key={m.id} value={m.id} title={t(m.detail)}>
-                  {t(m.label)}
-                </option>
-              ))}
-            </select>
+              <span className="perm" title={`${t('Permissions')}: ${t(PERMISSION_MODES.find((m) => m.id === (task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'))?.label ?? '')}`}>
+                <span className="perm-icon btn btn-icon" aria-hidden>
+                  <Icon name="shield" />
+                </span>
+                <select
+                  className="input select perm-select"
+                  value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
+                  aria-label={t('Permissions')}
+                  data-testid="task-permission"
+                  onChange={(e) => run(() => call('task:setPermissionMode', { taskId: task.taskId, mode: e.target.value as PermissionMode }))}
+                >
+                  {PERMISSION_MODES.map((m) => (
+                    <option key={m.id} value={m.id} title={t(m.detail)}>
+                      {t(m.label)}
+                    </option>
+                  ))}
+                </select>
+              </span>
             )}
             {task.status === 'running' && connected ? (
               <button className="btn btn-icon" title={t('Interrupt')} aria-label={t('Interrupt')} onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
@@ -230,6 +236,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             )}
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
             {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
+            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
+            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
             {canFork ? (
               <button
                 className="btn btn-icon"

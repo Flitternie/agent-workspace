@@ -395,6 +395,8 @@ export interface WorkspaceSnapshot {
   dataDir: string;
   /** Tasks with a live provider session right now (others resume on demand). */
   connectedTaskIds: string[];
+  /** Live Claude sessions with Remote Control on: taskId → the session's link (claude.ai/code, the Claude app). */
+  remoteControl: Record<string, string>;
 }
 
 export interface DispatchResult {

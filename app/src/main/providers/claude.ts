@@ -504,6 +504,15 @@ class ClaudeSession implements ProviderSession {
     if (model) this.emit({ type: 'model', model });
   }
 
+  async setRemoteControl(on: boolean, name?: string): Promise<{ url?: string }> {
+    if (this.closed || !this.query) throw new Error('Claude session is not connected.');
+    // The SDK's control request (what the VS Code extension's /remote-control uses); not in its public types yet.
+    const q = this.query as unknown as { enableRemoteControl?: (enabled: boolean, name?: string) => Promise<Record<string, unknown>> };
+    if (typeof q.enableRemoteControl !== 'function') throw new Error('This Claude Code SDK cannot turn on Remote Control.');
+    const res = await q.enableRemoteControl(on, on ? name : undefined);
+    return { url: on ? str(res?.session_url) || undefined : undefined };
+  }
+
   async interrupt(): Promise<void> {
     if (!this.query || !this.active) return;
     this.interruptRequested = true;

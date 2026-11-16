@@ -4301,8 +4301,22 @@ button.subtask-row:hover {
   background: #a51f25;
 }
 
-/* A narrower agent column (the side panel open): the status keeps only its dot, so the header stays one row in line with the side panel's header. */
+/* A narrower agent column (the side panel open): the status keeps only its dot and the provider tag goes (the model names it), so the header stays one row in line with the side panel's header. */
 @container focus-main (max-width: 860px) {
+  /* The permission menu shrinks to its icon; the select stays on top (invisible) so a click opens it. */
+  .focus-actions .perm {
+    width: 30px;
+  }
+  .focus-actions .perm .perm-icon {
+    display: inline-flex;
+  }
+  .focus-actions .perm .perm-select {
+    position: absolute;
+    inset: 0;
+    width: 30px;
+    opacity: 0;
+    cursor: pointer;
+  }
   .focus-name .status-text,
   .focus-name .tag[class*="provider-"] {
     display: none;
@@ -4316,6 +4330,73 @@ button.subtask-row:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Remote Control: the phone button in the agent header, a green dot while on, and its popover. */
+.remote-control {
+  position: relative;
+  display: inline-flex;
+}
+.remote-control .btn {
+  position: relative;
+}
+.remote-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live);
+}
+.remote-control .btn .remote-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.remote-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 320px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+.remote-pop p {
+  margin: 0;
+  line-height: 1.5;
+}
+.remote-pop-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.remote-link {
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.remote-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.remote-actions a.btn {
+  color: inherit;
+  text-decoration: none;
 }
 
 /* ---------------------------------------------------------------- preview rendering */
@@ -4566,4 +4647,14 @@ button.subtask-row:hover {
   align-items: center;
   gap: 8px;
   margin-top: 2px;
+}
+
+/* The permission menu (see the narrow agent column rule for its icon form). */
+.perm {
+  position: relative;
+  display: inline-flex;
+}
+.perm .perm-icon {
+  display: none;
+  pointer-events: none;
 }

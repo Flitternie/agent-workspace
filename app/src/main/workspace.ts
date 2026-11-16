@@ -98,6 +98,8 @@ export interface WorkspaceOptions {
 export class Workspace {
   readonly store: JsonStore;
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
+  /** Remote Control links, for the live session that turned it on (gone with that session). */
+  private remote = new Map<string, { localId: string; url: string }>();
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
@@ -428,6 +430,7 @@ export class Workspace {
       main: d.mainAgent,
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
+      remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
     };
   }
 
@@ -1239,6 +1242,26 @@ export class Workspace {
    * The model for this agent from its next turn (unset: the CLI's default). Kept on the
    * task, so a resumed session runs on it too; a running turn keeps its model.
    */
+  /**
+   * Remote Control for a local Claude agent: on connects its session (starting it if needed) so the
+   * Claude app and claude.ai/code can drive it; off disconnects them, the session keeps running here.
+   */
+  async setRemoteControl(taskId: string, on: boolean): Promise<string | undefined> {
+    const task = this.task(taskId);
+    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this Mac.');
+    let live = this.live.get(taskId);
+    if (!live) {
+      if (!on) return undefined;
+      live = await this.connect(taskId);
+    }
+    if (!live.session.setRemoteControl) throw new Error('This session cannot turn on Remote Control.');
+    const res = await live.session.setRemoteControl(on, task.name);
+    if (on) this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
+    else this.remote.delete(taskId);
+    this.changed();
+    return res.url;
+  }
+
   async setModel(taskId: string, model: string | undefined): Promise<void> {
     const task = this.task(taskId);
     task.model = model;
