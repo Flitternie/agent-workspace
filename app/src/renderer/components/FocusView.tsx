@@ -7,6 +7,7 @@ import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup 
 import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
+import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
 import { ForkDialog } from './Dialogs';
 import { t } from '../i18n';
@@ -77,7 +78,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           )}
           <div className="focus-ident">
             <div className="focus-name">
-              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <StatusDot status={task.status} connected={connected} />
+              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
               <span className="truncate" title={task.title}>

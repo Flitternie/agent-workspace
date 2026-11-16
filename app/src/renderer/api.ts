@@ -1,5 +1,6 @@
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type {
+  ModelOption,
   AttentionItem,
   DispatchResult,
   FilePreview,
@@ -43,6 +44,8 @@ interface Outputs {
   'task:create': Task;
   'task:send': DispatchResult;
   'task:interrupt': void;
+  'task:models': ModelOption[];
+  'task:setModel': void;
   'task:shell': { ok: boolean; error?: string };
   'task:forkPoints': ForkPoint[];
   'task:fork': Task;

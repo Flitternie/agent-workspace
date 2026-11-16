@@ -9,6 +9,7 @@ import type {
   AttentionQuestion,
   NativeSessionInfo,
   PermissionMode,
+  ModelOption,
   ProviderCapabilities,
   RetryKind,
   TranscriptRole,
@@ -78,6 +79,8 @@ export type ProviderEvent =
   | { type: 'progress'; text: string }
   /** A predicted next message from the user (Claude Code prompt suggestions, Codex predictions). */
   | { type: 'suggestion'; text: string }
+  /** The model the session runs on (at start, and after a switch). */
+  | { type: 'model'; model: string }
   | { type: 'sessionFailed'; error: string }
   | { type: 'sessionDisconnected'; reason: string };
 
@@ -91,6 +94,8 @@ export interface StartArgs {
   developerInstructions?: string;
   /** Mock only. */
   mockScript?: string;
+  /** The model to run on; unset = the CLI's default. */
+  model?: string;
   permissionMode?: PermissionMode;
   /** Main agent only: workspace tools it may call; the session is limited to these plus read-only tools. */
   tools?: WorkspaceTool[];
@@ -127,6 +132,8 @@ export interface ProviderSession {
    * over with the next message.
    */
   shell?(command: string): Promise<void>;
+  /** Runs the following turns on `model` (unset: the CLI's default). */
+  setModel?(model: string | undefined): Promise<void>;
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
   close(): Promise<void>;
@@ -141,6 +148,8 @@ export interface ProviderAdapter {
   discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]>;
   /** Read a saved session's transcript without starting or resuming it (history events only). */
   readHistory?(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]>;
+  /** The models the CLI offers (on `host` when given), for the model picker. */
+  listModels?(host?: string): Promise<ModelOption[]>;
   /** The CLI as installed and signed in on `host` (reached without prompts). */
   hostCapabilities?(host: string): Promise<ProviderCapabilities>;
   createSession(args: StartArgs, onEvent: (event: ProviderEvent) => void): ProviderSession;

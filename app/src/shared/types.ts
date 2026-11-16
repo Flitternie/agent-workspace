@@ -76,6 +76,10 @@ export interface Task {
   forkedFrom?: { taskId: string; alias: string };
   /** A failed model request that will be tried again by itself (model at capacity, rate limited…). */
   retry?: RetryState;
+  /** The model the user picked for this agent (unset: the CLI's own default). Applies from its next turn and on resume. */
+  model?: string;
+  /** The model the agent reports it is running on. */
+  activeModel?: string;
   /** The agent's guess at what the user will say next; cleared when the user sends. */
   suggestion?: string;
   createdAt: string;
@@ -393,4 +397,15 @@ export interface DispatchResult {
   error?: string;
   /** turn: started work; steer: added to the running turn; interrupt: stopped it and started over. */
   delivery?: 'turn' | 'steer' | 'interrupt';
+}
+
+/** A model an agent's CLI offers (Claude Code's supportedModels, Codex's model/list). */
+export interface ModelOption {
+  id: string;
+  label: string;
+  description?: string;
+  /** The CLI's default when none is picked. */
+  isDefault?: boolean;
+  /** The full model id an alias stands for (Claude Code's `opus` → `claude-opus-…`), to recognise the running model. */
+  resolves?: string;
 }

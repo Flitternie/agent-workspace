@@ -22,11 +22,9 @@ export function RetryNotice({ retry }: { retry: RetryState }) {
 /** Under a turn that failed because the model was busy: what else the user can do besides Retry. */
 export function SwitchModelHint({ provider }: { provider: AgentProvider }) {
   const text =
-    provider === 'codex'
-      ? t('The model is busy or rate limited. Retry in a moment, or switch to a different Codex model: set `model` in ~/.codex/config.toml, then click Stop and Resume session.')
-      : provider === 'claude'
-        ? t('The model is busy or rate limited. Retry in a moment, or switch to a different Claude model: set `model` in ~/.claude/settings.json, then click Stop and Resume session.')
-        : t('The model is busy or rate limited. Retry in a moment.');
+    provider === 'codex' || provider === 'claude'
+      ? t('The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name (from its next turn).')
+      : t('The model is busy or rate limited. Retry in a moment.');
   return (
     <div className="retry-hint">
       <Markdown text={text} />

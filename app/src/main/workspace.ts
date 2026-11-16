@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, posix, resolve, sep } from 'node:path';
-import type {
+import type { ModelOption,
   AgentProvider,
   AttentionItem,
   CoordinatorEntry,
@@ -786,6 +786,7 @@ export class Workspace {
         // The main agent gets its role and the workspace tools; it never edits code itself.
         developerInstructions: isMain ? [MAIN_AGENT_PROMPT, instructionsFor(task, injected)].filter(Boolean).join('\n\n') : instructionsFor(task, injected),
         mockScript: task.mockScript,
+        model: task.model,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
       },
@@ -1199,6 +1200,38 @@ export class Workspace {
     return { ok: true };
   }
 
+  /** Each CLI's model list (per machine), asked once: it changes with the CLI or the account, rarely. */
+  private modelLists = new Map<string, Promise<ModelOption[]>>();
+
+  /** The models this agent's CLI offers, for the picker in its header. */
+  listModels(taskId: string): Promise<ModelOption[]> {
+    const task = this.task(taskId);
+    const adapter = this.opts.adapters[task.provider];
+    if (!adapter?.listModels) return Promise.resolve([]);
+    const key = `${task.provider}|${task.host ?? ''}`;
+    let list = this.modelLists.get(key);
+    if (!list) {
+      list = adapter.listModels(task.host);
+      this.modelLists.set(key, list);
+      list.catch(() => this.modelLists.delete(key)); // a failure is not cached
+    }
+    return list;
+  }
+
+  /**
+   * The model for this agent from its next turn (unset: the CLI's default). Kept on the
+   * task, so a resumed session runs on it too; a running turn keeps its model.
+   */
+  async setModel(taskId: string, model: string | undefined): Promise<void> {
+    const task = this.task(taskId);
+    task.model = model;
+    if (!model) task.activeModel = undefined;
+    task.updatedAt = now();
+    const live = this.live.get(taskId);
+    if (live?.session.setModel) await live.session.setModel(model);
+    this.changed();
+  }
+
   // ---------------------------------------------------------------- provider events
 
   handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
@@ -1243,6 +1276,9 @@ export class Workspace {
         this.emitTranscript(taskId, item);
         return;
       }
+      case 'model':
+        task.activeModel = event.model;
+        break;
       case 'suggestion':
         task.suggestion = clip(event.text, 500);
         break;
