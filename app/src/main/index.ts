@@ -159,6 +159,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
+  'task:remoteControl': (i: { taskId: string; on: boolean }) => workspace.setRemoteControl(i.taskId, i.on),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
   'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),

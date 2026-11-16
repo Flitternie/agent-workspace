@@ -340,6 +340,12 @@ class MockSession implements ProviderSession {
     }
   }
 
+  /** Stands in for Claude Code's Remote Control in tests: `rc-fail` in the script refuses, as a key login would. */
+  async setRemoteControl(on: boolean): Promise<{ url?: string }> {
+    if (on && (this.args.mockScript ?? '').includes('rc-fail')) throw new Error('Remote Control requires a claude.ai subscription; API keys are not supported.');
+    return { url: on ? `https://claude.ai/code/session_mock${this.args.title ? '_' + this.args.title.replace(/\W+/g, '') : ''}` : undefined };
+  }
+
   async setModel(model: string | undefined): Promise<void> {
     this.args.model = model;
     this.emit({ type: 'model', model: model ?? MOCK_MODELS[0].id });

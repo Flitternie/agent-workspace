@@ -12,6 +12,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
+import { RemoteControlButton } from './RemoteControl';
 import { t } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
@@ -191,6 +192,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             )}
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
             {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
+            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
+            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
             {canFork ? (
               <button
                 className="btn btn-icon"

@@ -142,6 +142,8 @@ const ICONS = {
   external: 'M14 4h6v6 M20 4l-9 9 M18 14v6H4V6h6',
   refresh: 'M20 12a8 8 0 1 1-2.3-5.7 M20 4v5h-5',
   tool: 'M14 6a4 4 0 0 0 5 5l-9 9a2 2 0 0 1-3-3l9-9a4 4 0 0 0-2-2Z',
+  phone: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M11 18h2',
+  copy: 'M9 9h11v11H9z M5 15H4V4h11v1',
 } as const;
 
 export type IconName = keyof typeof ICONS;
