@@ -3,8 +3,9 @@
 // shown only when its app is actually there; launched with `open -a`, or with the editor's own
 // command-line tool from inside its bundle when a line should be shown (no PATH setup needed).
 
-import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -94,4 +95,29 @@ export function launch(command: { cmd: string; args: string[] }): void {
   const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' });
   child.on('error', () => {});
   child.unref();
+}
+
+const run = promisify(execFile);
+
+/**
+ * An app's own icon as a PNG data URL: the bundle's .icns (Info.plist CFBundleIconFile), converted with
+ * the system's sips and cached on disk by bundle path and change time. Undefined when there is none.
+ */
+export async function bundleIcon(appPath: string, cacheDir: string): Promise<string | undefined> {
+  if (process.platform !== 'darwin') return undefined;
+  try {
+    const plist = join(appPath, 'Contents', 'Info.plist');
+    let name = (await run('/usr/bin/plutil', ['-extract', 'CFBundleIconFile', 'raw', plist])).stdout.trim();
+    if (!name) return undefined;
+    if (!/\.icns$/i.test(name)) name += '.icns';
+    const icns = join(appPath, 'Contents', 'Resources', name);
+    if (!existsSync(icns)) return undefined;
+    mkdirSync(cacheDir, { recursive: true });
+    const key = `${appPath}:${statSync(icns).mtimeMs}`.replace(/[^\w.-]+/g, '_').slice(-180);
+    const png = join(cacheDir, `${key}.png`);
+    if (!existsSync(png)) await run('/usr/bin/sips', ['-s', 'format', 'png', '-Z', '64', icns, '--out', png]);
+    return `data:image/png;base64,${readFileSync(png).toString('base64')}`;
+  } catch {
+    return undefined;
+  }
 }

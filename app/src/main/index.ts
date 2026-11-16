@@ -13,7 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
-import { installedApps, launch, launchCommand } from './open-in-app';
+import { bundleIcon, installedApps, launch, launchCommand } from './open-in-app';
 import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
 
 // All app state lives in one app-owned directory (default: <app>/.data) so the
@@ -35,8 +35,11 @@ const appIcons = new Map<string, string>();
 async function appIcon(path: string): Promise<string | undefined> {
   if (appIcons.has(path)) return appIcons.get(path);
   try {
-    const url = (await app.getFileIcon(path, { size: 'normal' })).toDataURL();
-    appIcons.set(path, url);
+    // The bundle's own icon; Electron's file icon (often a blank document for an .app) only as a fallback.
+    const own = await bundleIcon(path, join(app.getPath('userData'), 'app-icons'));
+    const fallback = own ? undefined : await app.getFileIcon(path, { size: 'normal' });
+    const url = own ?? (fallback && !fallback.isEmpty() ? fallback.toDataURL() : undefined);
+    if (url) appIcons.set(path, url);
     return url;
   } catch {
     return undefined;

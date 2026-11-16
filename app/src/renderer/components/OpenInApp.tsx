@@ -21,7 +21,25 @@ const GROUPS: Array<{ kind: App['kind']; label: string }> = [
  * an app the user has. The main part opens it in the app used last time; the arrow lists the rest.
  * A file opens in editors (at its line where the editor can) or is shown in Finder.
  */
-export function OpenInApp({ taskId, path, line, allowOutside, compact, extra }: { taskId: string; path?: string; line?: number; allowOutside?: boolean; compact?: boolean; extra?: Array<{ label: string; run: () => void }> }) {
+export function OpenInApp({
+  taskId,
+  path,
+  line,
+  allowOutside,
+  compact,
+  iconOnly,
+  extra,
+}: {
+  taskId: string;
+  path?: string;
+  line?: number;
+  allowOutside?: boolean;
+  /** Small, borderless (the preview header). */
+  compact?: boolean;
+  /** The app's icon without its name (the agent header); the name is in the tooltip. */
+  iconOnly?: boolean;
+  extra?: Array<{ label: string; run: () => void }>;
+}) {
   const [apps, setApps] = useState<App[] | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
@@ -50,7 +68,8 @@ export function OpenInApp({ taskId, path, line, allowOutside, compact, extra }: 
   // A file: editors, and Finder to show it; a folder: everything.
   const usable = (apps ?? []).filter((a) => !path || a.kind === 'editor' || a.kind === 'files');
   if (!usable.length && !extra?.length) return null;
-  const main = usable.find((a) => a.id === last) ?? usable.find((a) => a.kind === 'editor') ?? usable[0];
+  // Until the user picks one: Finder (open the folder, or show the file in it).
+  const main = usable.find((a) => a.id === last) ?? usable.find((a) => a.kind === 'files') ?? usable[0];
   const run = (a: App) => {
     setOpen(false);
     setError('');
@@ -64,7 +83,7 @@ export function OpenInApp({ taskId, path, line, allowOutside, compact, extra }: 
       {main ? (
         <button className="open-in-main" onClick={() => run(main)} title={label(main)} aria-label={label(main)} data-testid="open-in-main" data-app={main.id}>
           {main.icon ? <img src={main.icon} alt="" width={16} height={16} /> : <Icon name="external" size={13} />}
-          {compact ? null : <span className="open-in-label">{label(main)}</span>}
+          {compact || iconOnly ? null : <span className="open-in-label">{label(main)}</span>}
         </button>
       ) : null}
       <button className="open-in-more" aria-label={t('Open with…')} title={t('Open with…')} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="open-in-more">

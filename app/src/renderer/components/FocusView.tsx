@@ -151,38 +151,46 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </select>
             )}
             {task.status === 'running' && connected ? (
-              <button className="btn" onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
-                <Icon name="pause" /> {t('Interrupt')}
+              <button className="btn btn-icon" title={t('Interrupt')} aria-label={t('Interrupt')} onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
+                <Icon name="pause" />
               </button>
             ) : null}
             {!connected ? (
-              <button className="btn" onClick={() => run(() => call('task:resume', { taskId: task.taskId }))} title={t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}>
-                <Icon name="play" /> {session?.nativeSessionId ? t('Resume session') : t('Start session')}
+              <button
+                className="btn btn-icon"
+                onClick={() => run(() => call('task:resume', { taskId: task.taskId }))}
+                aria-label={session?.nativeSessionId ? t('Resume session') : t('Start session')}
+                title={`${session?.nativeSessionId ? t('Resume session') : t('Start session')} — ${t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}`}
+              >
+                <Icon name="play" />
               </button>
             ) : (
-              <button className="btn" onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
-                <Icon name="power" /> {t('Stop')}
+              <button className="btn btn-icon" title={t('Stop')} aria-label={t('Stop')} onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
+                <Icon name="power" />
               </button>
             )}
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
-            {!task.host ? <OpenInApp taskId={task.taskId} /> : null}
+            {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
             {canFork ? (
               <button
-                className="btn"
+                className="btn btn-icon"
+                aria-label={t('Fork')}
                 data-testid="fork-task"
                 disabled={task.status === 'running' || task.status === 'starting'}
                 onClick={() => setForking(true)}
                 title={
                   task.status === 'running' || task.status === 'starting'
-                    ? t('Fork once this turn ends.')
-                    : t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')
+                    ? `${t('Fork')} — ${t('Fork once this turn ends.')}`
+                    : `${t('Fork')} — ${t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')}`
                 }
               >
-                <Icon name="branch" /> {t('Fork')}
+                <Icon name="branch" />
               </button>
             ) : null}
             <button
-              className={`btn${showMemory && !preview ? ' btn-pressed' : ''}`}
+              className={`btn btn-icon${showMemory && !preview ? ' btn-pressed' : ''}`}
+              title={t('Memory')}
+              aria-label={t('Memory')}
               onClick={() => {
                 if (preview) setShowMemory(true);
                 else setShowMemory(!showMemory);
@@ -190,18 +198,19 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               }}
               aria-pressed={showMemory && !preview}
             >
-              <Icon name="note" /> {t('Memory')}
+              <Icon name="note" />
             </button>
             {isMainAgent(task) ? null : (
             <button
-              className="btn"
+              className="btn btn-icon"
               data-testid="remove-task"
-              title={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
+              aria-label={t('Remove')}
+              title={`${t('Remove')} — ${t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}`}
               onClick={() => {
                 if (window.confirm(t('Remove {name}? A worktree with uncommitted changes is kept on disk.', { name: displayName(task) }))) run(() => call('task:remove', { taskId: task.taskId }));
               }}
             >
-              {t('Remove')}
+              <Icon name="trash" />
             </button>
             )}
           </div>

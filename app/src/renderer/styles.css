@@ -4213,9 +4213,24 @@ button.subtask-row:hover {
   color: var(--accent);
   text-decoration: underline;
 }
-/* A narrow header keeps "Open with…" to its icon. */
-@media (max-width: 1180px) {
-  .focus-head .open-in-label {
-    display: none;
-  }
+/* The agent header's actions are icons; their names are in the tooltips. */
+.btn.btn-icon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.btn.btn-icon[data-testid='remove-task']:hover {
+  color: var(--risk);
+  border-color: currentColor;
+}
+.focus-head .open-in {
+  height: 30px;
+  border-color: var(--border-strong);
+}
+.focus-head .open-in-main {
+  padding: 0 7px;
+}
+.focus-head .open-in-main img {
+  width: 18px;
+  height: 18px;
 }
