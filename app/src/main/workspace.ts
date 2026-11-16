@@ -43,6 +43,7 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
+import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
 import { MemoryWriteback, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1271,6 +1272,64 @@ export class Workspace {
     this.changed();
   }
 
+  /**
+   * A memory note drafted from one of the user's own messages, read with the conversation
+   * around it (the user asked: "Remember" on that message). Only a draft: the user edits,
+   * picks user or project memory and saves. Without a CLI to ask (or if it fails), the
+   * draft is the message itself, marked so.
+   */
+  async distillMemory(taskId: string, itemId: string): Promise<{ title: string; body: string; scope: 'global' | 'project'; worth: boolean; reason: string; similar?: { id: string; title: string; body: string }; fallback?: string }> {
+    const task = this.task(taskId);
+    const items = this.store.transcript(taskId);
+    const at = items.findIndex((i) => i.id === itemId);
+    if (at === -1 || items[at].role !== 'user') throw new Error('That message is no longer in the conversation.');
+    const message = items[at].text;
+    const talk = (i: TranscriptItem) => (i.role === 'user' || i.role === 'assistant') && !!i.text.trim();
+    const before = items.slice(0, at).filter(talk).slice(-6);
+    const after = items.slice(at + 1).filter(talk).slice(0, 2);
+    const project = this.store.data.projects.find((p) => p.projectId === task.projectId);
+    const existing = this.store.data.memory
+      .filter((m) => !m.sourceRemoved && (m.scope === 'global' || (m.scope === 'project' && m.scopeId === task.projectId)))
+      .slice(-40)
+      .map((m) => ({ id: m.id, scope: (m.scope === 'global' ? 'user' : 'project') as 'user' | 'project', title: m.title || m.body.split('\n')[0].slice(0, 80), text: m.body }));
+    const raw = { title: message.split('\n')[0].slice(0, 60), body: message.trim(), scope: 'global' as const, worth: true, reason: '' };
+    // The demo asks no model: a canned draft shows the shape of a real one.
+    if (this.opts.demo)
+      return {
+        title: raw.title.replace(/\.$/, ''),
+        body: `${message.trim()}\n\n**Why:** said while correcting the agent's work in this conversation.\n**How to apply:** follow it whenever this kind of change comes up again.`,
+        scope: task.projectId && task !== this.store.data.mainAgent ? 'project' : 'global',
+        worth: true,
+        reason: 'A convention for this project (demo draft, no model asked).',
+      };
+    const ask = this.backgroundAsk();
+    if (!ask) return { ...raw, fallback: 'No Claude Code or Codex is signed in to draft the note; here is your message to edit.' };
+    try {
+      const answer = await ask(
+        DISTILL_SYSTEM,
+        distillPrompt({
+          message,
+          around: [...before.map((i) => ({ role: i.role as 'user' | 'assistant', text: i.text })), { role: 'user', text: message, isTarget: true }, ...after.map((i) => ({ role: i.role as 'user' | 'assistant', text: i.text }))],
+          existing,
+          projectName: project?.name,
+        }),
+      );
+      const r = parseDistill(answer, existing.map((e) => e.id));
+      const similar = r.similarId ? this.store.data.memory.find((m) => m.id === r.similarId) : undefined;
+      return {
+        title: r.title || raw.title,
+        body: r.body || raw.body,
+        scope: r.scope === 'project' && task.projectId && task !== this.store.data.mainAgent ? 'project' : 'global',
+        worth: r.worth,
+        reason: r.reason,
+        ...(similar ? { similar: { id: similar.id, title: similar.title || similar.body.split('\n')[0], body: similar.body } } : {}),
+      };
+    } catch (error) {
+      this.log('distill failed', error);
+      return { ...raw, fallback: `Could not draft the note (${(error as Error).message}); here is your message to edit.` };
+    }
+  }
+
   // ---------------------------------------------------------------- provider events
 
   handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
@@ -1749,10 +1808,11 @@ export class Workspace {
     return rec;
   }
 
-  updateMemory(id: string, patch: { body?: string; approvedForReuse?: boolean }): void {
+  updateMemory(id: string, patch: { body?: string; title?: string; approvedForReuse?: boolean }): void {
     const m = this.store.data.memory.find((x) => x.id === id);
     if (!m) throw new Error('Unknown memory record.');
     if (patch.body !== undefined) m.body = patch.body;
+    if (patch.title !== undefined) m.title = patch.title;
     if (patch.approvedForReuse !== undefined) m.approvedForReuse = patch.approvedForReuse;
     m.updatedAt = now();
     this.changed();

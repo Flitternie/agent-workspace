@@ -8,7 +8,7 @@ import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup 
 import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
-import { AgentMemoryPanel, MemoryChip, RememberButton } from './SessionMemory';
+import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
 import { RetryNotice } from './Retry';
 import { ForkDialog } from './Dialogs';
 import { t } from '../i18n';
@@ -174,7 +174,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           <div className="focus-thread" hidden={!!side && sideMax}>
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
-              <Transcript items={transcript} main={isMainAgent(task)} task={task} />
+              <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
             </PreviewContext.Provider>
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length || task.retry ? (
@@ -339,8 +339,11 @@ function TaskName({ task }: { task: Task }) {
   );
 }
 
-function Transcript({ items, main, task }: { items: TranscriptItem[]; main?: boolean; task: Task }) {
+function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; main?: boolean; task: Task; snapshot: WorkspaceSnapshot }) {
   const ref = useRef<HTMLDivElement>(null);
+  // "Keep as memory" on one of the user's messages: the dialog, and the right-click menu that opens it.
+  const [remember, setRemember] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -393,14 +396,28 @@ function Transcript({ items, main, task }: { items: TranscriptItem[]; main?: boo
               </div>
             );
           return (
-            <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
+            <div
+              key={item.id}
+              className={`msg ${item.role}`}
+              data-role={item.role}
+              onContextMenu={
+                item.role === 'user' && item.via !== 'main'
+                  ? (e) => {
+                      // Selected text keeps the system menu (copy); otherwise ours.
+                      if (window.getSelection()?.toString()) return;
+                      e.preventDefault();
+                      setMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+                    }
+                  : undefined
+              }
+            >
               {item.role === 'user' ? <div className="msg-via">
                   {item.via === 'main' ? t('Main agent') : t('You')}
                   {item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : item.via === 'main' ? ` · ${t('on your behalf')}` : ''}
                   {item.delivery === 'steer' ? <span className="delivery-tag">{t('added mid-turn')}</span> : null}
                   {item.delivery === 'interrupt' ? <span className="delivery-tag interrupt">{t('stopped the turn')}</span> : null}
                   {/* What the user said themselves can become memory (not what the main agent relayed). */}
-                  {item.via !== 'main' ? <RememberButton text={item.text} task={task} /> : null}
+                  {item.via !== 'main' ? <RememberButton onClick={() => setRemember(item.id)} /> : null}
                 </div> : null}
               {item.role === 'system' ? <div className="msg-system">{systemText(item.text)}</div> : <Markdown text={item.text} streaming={item.streaming} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
@@ -408,6 +425,8 @@ function Transcript({ items, main, task }: { items: TranscriptItem[]; main?: boo
           );
         })}
       </div>
+      {menu ? <RememberMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onRemember={() => (setRemember(menu.itemId), setMenu(null))} /> : null}
+      {remember ? <RememberDialog task={task} itemId={remember} snapshot={snapshot} onClose={() => setRemember(null)} /> : null}
     </div>
   );
 }

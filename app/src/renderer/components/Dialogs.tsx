@@ -7,9 +7,14 @@ import { t } from '../i18n';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+    // Esc closes the dialog only (first, before the app's Esc, which would also leave the view).
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
   }, [onClose]);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

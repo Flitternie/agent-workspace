@@ -103,8 +103,10 @@ export const ipcSchemas = {
     originTaskId: id.optional(),
     approvedForReuse: z.boolean(),
   }),
+  'memory:distill': z.object({ taskId: id, itemId: id }),
   'memory:update': z.object({
     id,
+    title: z.string().max(200).optional(),
     body: z.string().min(1).max(10_000).optional(),
     approvedForReuse: z.boolean().optional(),
   }),

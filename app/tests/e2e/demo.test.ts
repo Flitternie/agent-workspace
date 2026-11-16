@@ -125,7 +125,7 @@ describe('end-to-end demo script (mock agents)', () => {
     // 8. Typed text in B's composer goes to B.
     await input.fill('Use the shared Button component.');
     await input.press('Enter');
-    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('Use the shared Button component.');
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('Use the shared Button component');
 
     // 11. Memory: save a project convention via the coordinator.
     await dock.fill('记住：这个项目总是先跑集成测试');
@@ -141,10 +141,15 @@ describe('end-to-end demo script (mock agents)', () => {
     // "Remember" on the user's own message keeps it as project memory.
     await page.locator('.msg.user').filter({ hasText: 'Use the shared Button component.' }).last().hover();
     await page.locator('.msg.user').filter({ hasText: 'Use the shared Button component.' }).last().getByTestId('remember').click();
-    await page.getByTestId('remember-project').click();
-    await expect.poll(() => page.getByTestId('remember-done').count()).toBe(1);
+    // A drafted note (not the raw message) to review: scope, title and body, then save.
+    await expect.poll(() => page.getByTestId('remember-title').count()).toBe(1);
+    await expect.poll(() => page.getByTestId('remember-scope-project').getAttribute('aria-checked')).toBe('true');
+    expect(await page.getByTestId('remember-preview').innerText()).toContain('How to apply');
+    await shot(page, '05b-remember-dialog');
+    await page.getByTestId('remember-save').click();
+    await expect.poll(() => page.getByTestId('remember-title').count()).toBe(0);
     await page.getByTestId('memory-chip').click();
-    await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('Use the shared Button component.');
+    await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('Use the shared Button component');
     await page.getByTestId('side-close').click();
 
     // 9. Quit and relaunch: overview, cards, sessions and pending items restored.
