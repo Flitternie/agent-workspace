@@ -5,7 +5,7 @@ import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { t } from '../i18n';
 import { Icon } from './bits';
-import { FILE_SCHEME, PreviewContext, remarkFilePaths } from './filePaths';
+import { FILE_SCHEME, parseFileHref, PreviewContext, remarkFilePaths } from './filePaths';
 
 // Agent text is untrusted Markdown (GFM: tables, task lists, strikethrough).
 // Safety rules follow Parallel Code's chat renderer (MIT): raw HTML stays text
@@ -18,11 +18,11 @@ const SAFE_URL = /^(https?:|mailto:)/i;
 const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) ? url : '');
 
 /** A path in a message: a button that opens the preview (in the agent view), else just the text. */
-function FileLink({ path, children }: { path: string; children: ReactNode }) {
+function FileLink({ path, line, children }: { path: string; line?: number; children: ReactNode }) {
   const ctx = useContext(PreviewContext);
   if (!ctx) return <>{children}</>;
   return (
-    <button type="button" className="md-file" title={t('Preview {name}', { name: path })} data-testid="md-file" data-path={path} onClick={() => ctx.preview(path)}>
+    <button type="button" className="md-file" title={t('Preview {name}', { name: line ? `${path}:${line}` : path })} data-testid="md-file" data-path={path} data-line={line} onClick={() => ctx.preview(path, { line })}>
       {children}
     </button>
   );
@@ -58,7 +58,7 @@ const components: Components = {
   pre: CodeBlock,
   a: ({ href, children }) =>
     href?.startsWith(FILE_SCHEME) ? (
-      <FileLink path={decodeURIComponent(href.slice(FILE_SCHEME.length))}>{children}</FileLink>
+      <FileLink {...parseFileHref(href)}>{children}</FileLink>
     ) : href ? (
       <a href={href} target="_blank" rel="noreferrer" title={href}>
         {children}

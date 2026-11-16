@@ -4,7 +4,7 @@ import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
-import { DiffStat, KIND_ICON, PlanChecklist } from './Content';
+import { DiffStat, KIND_ICON, PlanChecklist, touchedPaths } from './Content';
 import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread, warningText } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
@@ -15,6 +15,7 @@ export function AgentCard({
   project,
   items,
   activity,
+  onPreview,
   connected,
   flash,
   selected,
@@ -27,6 +28,8 @@ export function AgentCard({
   project?: Project;
   items: AttentionItem[];
   activity: TranscriptItem[];
+  /** Open this agent with a file it touched in the preview column. */
+  onPreview?: (path: string, line?: number) => void;
   connected: boolean;
   flash: boolean;
   selected: boolean;
@@ -145,7 +148,24 @@ export function AgentCard({
                     ) : (
                       <span className="step-dot" aria-hidden />
                     )}
-                    <span className="step-text truncate">{stepText(a)}</span>
+                    {(() => {
+                      const file = onPreview ? touchedPaths(a)[0] : undefined;
+                      if (!file) return <span className="step-text truncate">{stepText(a)}</span>;
+                      const line = a.tool?.locations.find((l) => l.path === file)?.line;
+                      return (
+                        <button
+                          className="step-text truncate link-step"
+                          title={t('Preview {name}', { name: file })}
+                          data-testid="card-preview-file"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPreview?.(file, line);
+                          }}
+                        >
+                          {stepText(a)}
+                        </button>
+                      );
+                    })()}
                     {stat ? <DiffStat added={stat.added} removed={stat.removed} /> : <span className="step-time">{timeAgo(a.createdAt, now)}</span>}
                   </li>
                 );

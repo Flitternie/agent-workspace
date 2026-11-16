@@ -2010,6 +2010,13 @@ export class Workspace {
   }
 
   /** The checked local path to hand to the default app (this Mac only). */
+  /** The folder "Open with…" opens for an agent: its worktree or folder (the main agent's own too). On this Mac only. */
+  agentFolder(taskId: string): string {
+    const t = this.task(taskId);
+    if (t.host) throw new Error(`${t.alias} works on ${t.host}; its folder is there.`);
+    return t.cwd;
+  }
+
   previewLocalPath(taskId: string, path: string, allowOutside?: boolean): string {
     const t = this.task(taskId);
     if (t.host) throw new Error(`The file is on ${t.host}; it can only be previewed here.`);

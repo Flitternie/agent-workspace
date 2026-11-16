@@ -27,7 +27,7 @@ declare global {
   }
 }
 
-interface Outputs {
+export interface Outputs {
   'workspace:snapshot': WorkspaceSnapshot;
   'transcript:get': TranscriptItem[];
   'project:pickDirectory': string | null;
@@ -78,6 +78,9 @@ interface Outputs {
   'provider:loginCancel': void;
   'provider:loginApiKey': { ok: boolean; error?: string };
   'apps:detect': { claude: boolean; chatgpt: boolean };
+  'apps:installed': Array<{ id: string; name: string; kind: 'editor' | 'git' | 'terminal' | 'files'; lines: boolean; icon?: string }>;
+  'apps:open': void;
+  'file:stat': { mtimeMs: number; size: number } | null;
   'models:list': string[];
   'openai:setKey': { ok: boolean; error?: string; overriddenByEnv?: boolean };
   'openai:clearKey': void;

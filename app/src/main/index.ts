@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
@@ -13,6 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
+import { installedApps, launch, launchCommand } from './open-in-app';
 import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
 
 // All app state lives in one app-owned directory (default: <app>/.data) so the
@@ -28,6 +29,19 @@ const dataDir = process.env.AMW_DATA_DIR ?? join(userBase, app.isPackaged ? (dem
 mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', join(dataDir, 'electron'));
 app.setName('Agent Workspace');
+
+const appIcons = new Map<string, string>();
+/** An app's icon as a data URL (Electron reads it from the bundle), cached. */
+async function appIcon(path: string): Promise<string | undefined> {
+  if (appIcons.has(path)) return appIcons.get(path);
+  try {
+    const url = (await app.getFileIcon(path, { size: 'normal' })).toDataURL();
+    appIcons.set(path, url);
+    return url;
+  } catch {
+    return undefined;
+  }
+}
 
 const log = (...args: unknown[]) => {
   if (process.env.AMW_DEBUG) console.log('[amw]', ...args);
@@ -169,6 +183,27 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'file:preview': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
     const p = await workspace.previewFile(i.taskId, i.path, i.allowOutside);
     return p.kind === 'html' ? { ...p, frameUrl: addPreviewDoc(p.text ?? '') } : p;
+  },
+  // A cheap look for the preview's live refresh: changed since it was read? (This Mac only.)
+  'file:stat': (i: { taskId: string; path: string; allowOutside?: boolean }) => {
+    try {
+      const s = statSync(workspace.previewLocalPath(i.taskId, i.path, i.allowOutside));
+      return { mtimeMs: s.mtimeMs, size: s.size };
+    } catch {
+      return null;
+    }
+  },
+  // "Open with…": installed apps from a fixed catalog, with their icons (cached).
+  'apps:installed': async () => {
+    const apps = installedApps();
+    return Promise.all(apps.map(async (a) => ({ id: a.id, name: a.name, kind: a.kind, lines: a.lines, icon: await appIcon(a.path) })));
+  },
+  // An agent's folder (no path) or one of its files, in that app; the file goes through the preview's checks.
+  'apps:open': (i: { appId: string; taskId: string; path?: string; line?: number; allowOutside?: boolean }) => {
+    const target = installedApps().find((a) => a.id === i.appId);
+    if (!target) throw new Error('That app is not installed here.');
+    const file = i.path ? workspace.previewLocalPath(i.taskId, i.path, i.allowOutside) : undefined;
+    launch(launchCommand(target, file ?? workspace.agentFolder(i.taskId), { isFile: !!file, line: i.line }));
   },
   'file:open': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
     const file = workspace.previewLocalPath(i.taskId, i.path, i.allowOutside);

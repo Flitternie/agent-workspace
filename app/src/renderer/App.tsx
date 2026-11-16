@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
+import { savePreview } from './preview-store';
 import { Icon } from './components/bits';
 import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
@@ -404,6 +405,10 @@ export function App() {
                     selected={selectedId === t.taskId}
                     onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
                     onOpen={() => setFocusId(t.taskId)}
+                    onPreview={(path, line) => {
+                      savePreview(t.taskId, { path, line });
+                      setFocusId(t.taskId);
+                    }}
                     onOpenSubtask={(taskId, subtaskId) => setSubView({ taskId, subtaskId })}
                     now={now}
                   />
