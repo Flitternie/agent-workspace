@@ -13,6 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
+import { documentToHtml } from './documents';
 import { bundleIcon, installedApps, launch, launchCommand } from './open-in-app';
 import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
 
@@ -107,21 +108,23 @@ function ensureDemoRepo(): string {
 // sandbox never grants same-origin, so a page cannot reach the app.
 const PREVIEW_SCHEME = 'amw-preview';
 const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline' data:; img-src data:; font-src data:; script-src 'unsafe-inline'";
-const previewDocs = new Map<string, string>();
+// Documents (Word, via textutil) get no scripts at all; PDFs open in Chromium's own viewer.
+const DOCUMENT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+const previewDocs = new Map<string, { body: string | Uint8Array; type: string; csp?: string }>();
 protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true } }]);
 
 function servePreviews(): void {
   protocol.handle(PREVIEW_SCHEME, (req) => {
-    const html = previewDocs.get(new URL(req.url).pathname.slice(1));
-    if (html === undefined) return new Response('Preview expired. Refresh it.', { status: 404 });
-    return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': PREVIEW_CSP } });
+    const doc = previewDocs.get(new URL(req.url).pathname.slice(1));
+    if (doc === undefined) return new Response('Preview expired. Refresh it.', { status: 404 });
+    return new Response(doc.body as BodyInit, { headers: { 'content-type': doc.type, ...(doc.csp ? { 'content-security-policy': doc.csp } : {}) } });
   });
 }
 
 /** Keeps the latest few documents (one per refresh); older frames show "expired". */
-function addPreviewDoc(html: string): string {
+function addPreviewDoc(body: string | Uint8Array, type = 'text/html; charset=utf-8', csp: string | undefined = PREVIEW_CSP): string {
   const key = randomUUID();
-  previewDocs.set(key, html);
+  previewDocs.set(key, { body, type, csp });
   for (const k of previewDocs.keys()) if (previewDocs.size > 8) previewDocs.delete(k);
   return `${PREVIEW_SCHEME}://doc/${key}`;
 }
@@ -186,7 +189,11 @@ const handlers: { [C in IpcChannel]: Handler } = {
     workspace.dispatch(i.utterance, i.target, i.focusedTaskId, { interrupt: i.interrupt, typed: i.typed }),
   'file:preview': async (i: { taskId: string; path: string; allowOutside?: boolean }) => {
     const p = await workspace.previewFile(i.taskId, i.path, i.allowOutside);
-    return p.kind === 'html' ? { ...p, frameUrl: addPreviewDoc(p.text ?? '') } : p;
+    if (p.kind === 'html') return { ...p, frameUrl: addPreviewDoc(p.text ?? '') };
+    const { data, ...rest } = p;
+    if (p.kind === 'pdf') return { ...rest, frameUrl: addPreviewDoc(data ?? new Uint8Array(), 'application/pdf', undefined) };
+    if (p.kind === 'document') return { ...rest, frameUrl: addPreviewDoc(await documentToHtml(data ?? new Uint8Array(), p.path), 'text/html; charset=utf-8', DOCUMENT_CSP) };
+    return rest;
   },
   // A cheap look for the preview's live refresh: changed since it was read? (This Mac only.)
   'file:stat': (i: { taskId: string; path: string; allowOutside?: boolean }) => {
@@ -318,6 +325,8 @@ function createWindow(): void {
       // The mic opens at launch (meeting-style), before any click; without this
       // Chromium keeps the AudioContext suspended and the level stays at zero.
       autoplayPolicy: 'no-user-gesture-required',
+      // Chromium's built-in PDF viewer, for PDF previews (no PDF library bundled).
+      plugins: true,
     },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {

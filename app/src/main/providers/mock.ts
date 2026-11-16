@@ -302,6 +302,23 @@ class MockSession implements ProviderSession {
           '```',
         ].join('\n');
       } else {
+        // "edit <path>": an applied edit of that file (tests of the changes list and Follow).
+        const edit = /^edit (\S+)/.exec(text.trim());
+        if (edit)
+          this.emit({
+            type: 'transcriptItem',
+            itemId: `${randomUUID()}:edit`,
+            role: 'tool',
+            text: '',
+            toolStatus: 'completed',
+            tool: {
+              name: 'Edit',
+              kind: 'edit',
+              title: `Edit ${edit[1]}`,
+              locations: [{ path: edit[1], line: 2 }],
+              content: [{ type: 'diff', diff: makeDiff({ path: edit[1], operation: 'modify', phase: 'applied', hunks: parseUnifiedHunks(`@@ -1,1 +1,2 @@\n # ${edit[1]}\n+Edited in request ${userTurns + 1}.\n`) }) }],
+            },
+          });
         // A short, plausible report. The request number comes from the saved history,
         // so after a resume it shows the mock really kept its earlier conversation.
         const said = text.length > 120 ? `${text.slice(0, 117)}…` : text;

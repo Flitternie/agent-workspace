@@ -44,6 +44,7 @@
     "playwright-core": "1.58.2",
     "react": "19.2.9",
     "react-dom": "19.2.9",
+    "shiki": "4.6.0",
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "4.1.12"
