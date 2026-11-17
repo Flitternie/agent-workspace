@@ -331,7 +331,7 @@ export function App() {
                   ))}
                 </div>
                 <button className="btn btn-primary" onClick={() => setDialog('new')} data-testid="new-task">
-                  <Icon name="plus" /> {t('New task')}
+                  <Icon name="plus" /> {t('New agent')}
                 </button>
               </div>
             </header>
@@ -375,7 +375,7 @@ export function App() {
                   </ol>
                   <div className="row center">
                     <button className="btn btn-primary" onClick={() => setDialog('new')}>
-                      <Icon name="plus" /> {t('New task')}
+                      <Icon name="plus" /> {t('New agent')}
                     </button>
                     {snapshot.demo ? (
                       <button className="btn" data-testid="load-demo" onClick={() => void loadDemo()}>
@@ -454,7 +454,7 @@ export function App() {
         ))}
       </div>
 
-      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => toast(t('Task created'), id)} /> : null}
+      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} /> : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
     </div>
   );

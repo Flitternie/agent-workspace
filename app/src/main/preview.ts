@@ -64,7 +64,7 @@ export function workDirs(items: TranscriptItem[], cwd: string, p: Pick<typeof pa
   return out.slice(0, max);
 }
 
-/** Error text the UI recognizes to offer "Show anyway" (see FilePreview). */
+/** Error for a file outside the agent's folder and project when the caller did not allow those. */
 export const OUTSIDE = 'This file is outside the agent’s folder and project.';
 
 /** Credentials and keys: never previewed, confirmed or not. */

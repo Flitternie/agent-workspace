@@ -63,8 +63,9 @@ export function FilePreviewPanel({
   const [loading, setLoading] = useState(false);
   const [scripts, setScripts] = useState(false);
   const [manual, setManual] = useState(0);
-  // Confirmed for this file: it is outside the agent's folder and project.
-  const [outsideOk, setOutsideOk] = useState(false);
+  // A file outside the agent's folder and project is shown as well, without asking: it is shown only
+  // to the user, here. Keys and credentials stay refused in the main process whatever is passed.
+  const outsideOk = true;
   // The file as found (an agent's relative path may resolve below a folder it cd-ed into).
   const target = file?.path ?? resolvePosix(task.cwd, path);
   // Changes whenever a finished tool call writes this file (new call, or an existing one completing).
@@ -86,7 +87,6 @@ export function FilePreviewPanel({
   }, [task.taskId, path, stamp, manual, outsideOk]);
   useEffect(() => {
     setScripts(false);
-    setOutsideOk(false);
   }, [path]);
   // Changed on disk by anything (a command, the user's editor), not only by the agent's file tools:
   // read again. A cheap stat every two seconds, on this Mac.
@@ -156,7 +156,6 @@ export function FilePreviewPanel({
     });
     return () => cancelAnimationFrame(id);
   }, [file, loadedFor, path, line, nonce]);
-  const outside = /outside the agent/.test(error);
 
   const name = path.split('/').pop() ?? path;
   return (
@@ -216,14 +215,7 @@ export function FilePreviewPanel({
         </label>
       ) : null}
       </div>
-      {outside ? (
-        <div className="preview-outside" data-testid="preview-outside">
-          <div className="small">{t('This file is outside the agent’s folder and project. Show it anyway?')}</div>
-          <button className="btn btn-sm" onClick={() => setOutsideOk(true)} data-testid="preview-show-anyway">
-            {t('Show anyway')}
-          </button>
-        </div>
-      ) : error ? (
+      {error ? (
         <div className="error-text">{error}</div>
       ) : null}
       {!file && loading ? <div className="muted small">{t('Loading…')}</div> : null}
@@ -256,7 +248,7 @@ export function FilePreviewPanel({
 function PreviewBody({ task, file, scripts, version, outsideOk }: { task: Task; file: FilePreview; scripts: boolean; version: string; outsideOk: boolean }) {
   const dir = dirnamePosix(file.path);
   // Relative images load through the same checked reader, as data URLs. `version` reloads them on refresh.
-  // A document the user chose to show from outside the agent's folder may show its own images too.
+  // A document from outside the agent's folder shows its own images too (keys and credentials never).
   const image = useCallback((src: string, alt: string) => <MdImage key={`${src}@${version}`} taskId={task.taskId} dir={dir} src={src} alt={alt} outsideOk={outsideOk} />, [task.taskId, dir, version, outsideOk]);
   if (file.kind === 'image') return <img className="preview-image" src={file.dataUrl} alt={file.path} />;
   if (file.kind === 'markdown')

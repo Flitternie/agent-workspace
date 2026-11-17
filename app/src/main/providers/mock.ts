@@ -164,7 +164,9 @@ class MockSession implements ProviderSession {
     this.emit({ type: 'turnStarted' });
     const script = this.args.mockScript ?? 'work';
     const first = userTurns === 0;
-    this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${this.args.title}”的上下文…` : `Reading ${this.args.title} context…` }), 0.3);
+    // What the work is: the task's title, or (an agent started without one) this message.
+    const topic = this.args.title || text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${topic}”的上下文…` : `Reading ${topic} context…` }), 0.3);
     if (this.capacityFailures < Number(/^capacity:(\d+)$/.exec(script)?.[1] ?? 0)) {
       this.capacityFailures++;
       this.later(() => {
@@ -258,13 +260,13 @@ class MockSession implements ProviderSession {
             .join('\n')}\n\n`
         : '';
       if (first && script.startsWith('ask:')) {
-        reply = this.zh ? `我看了一下“${this.args.title}”。\n\n${script.slice('ask:'.length)}` : `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
+        reply = this.zh ? `我看了一下“${topic}”。\n\n${script.slice('ask:'.length)}` : `I looked into "${topic}".\n\n${script.slice('ask:'.length)}`;
       } else if (first) {
         this.emitDemoWork();
         // Rich Markdown, as real agents write it: heading, list, task list, table, code.
         reply = this.zh
           ? [
-              `“${this.args.title}”第一轮完成：5 个组件做好了 3 个，继续推进。`,
+              `“${topic}”第一轮完成：5 个组件做好了 3 个，继续推进。`,
               '',
               '### 改了什么',
               '- `OrderCard` 和 `OrderList` 已改用 **v2** 字段',
@@ -283,7 +285,7 @@ class MockSession implements ProviderSession {
               '```',
             ].join('\n')
           : [
-          `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`,
+          `Done with the first pass on "${topic}". Components 3/5 built; continuing.`,
           '',
           '### What changed',
           '- `OrderCard` and `OrderList` now render the **v2** fields',

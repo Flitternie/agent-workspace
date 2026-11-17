@@ -156,8 +156,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
   const [projectId, setProjectId] = useState(snapshot.projects[0]?.projectId ?? '');
   const [provider, setProvider] = useState<AgentProvider>(firstAvailable);
-  const [name, setName] = useState('');
-  const [title, setTitle] = useState('');
+  // No title or name to make up: the agent's label comes from what it is asked to do (here, or its first message).
   const [instruction, setInstruction] = useState('');
   const [isolate, setIsolate] = useState(true);
   const [mockScript, setMockScript] = useState('ask:Should I keep backwards compatibility?');
@@ -184,8 +183,6 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
       const t = await call('task:create', {
         projectId,
         provider,
-        title: title.trim() || instruction.trim().slice(0, 80),
-        name: name.trim() || undefined,
         instruction: instruction.trim() || undefined,
         isolate: isolate && !project?.host,
         mockScript: provider === 'mock' ? mockScript : undefined,
@@ -200,7 +197,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
   };
 
   return (
-    <Modal title={t('New task')} onClose={onClose}>
+    <Modal title={t('New agent')} onClose={onClose}>
       <ProjectPicker snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
         <label>{t('Agent')}</label>
@@ -233,19 +230,10 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
           </div>
         ) : null}
       </div>
-      <div className="row">
-        <div className="field grow">
-          <label>{t('Label (optional)')}</label>
-          <input className="input" placeholder={t('e.g. Order API migration — written for you if left empty')} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="field grow2">
-          <label>{t('Task title')}</label>
-          <input className="input" placeholder={t('e.g. Schema migration for orders')} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </div>
-      </div>
       <div className="field">
         <label>{t('First instruction (optional)')}</label>
-        <textarea className="input" rows={4} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the agent do?')} />
+        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the agent do? Or leave it empty and tell it in the conversation.')} data-testid="new-instruction" />
+        <div className="muted small">{t('Its name comes from what you ask it to do.')}</div>
       </div>
       {provider === 'mock' ? (
         <div className="field">
@@ -268,8 +256,8 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
         <button className="btn" onClick={onClose}>
           {t('Cancel')}
         </button>
-        <button className="btn btn-primary" disabled={busy || !projectId || !(title.trim() || instruction.trim())} onClick={() => void create()}>
-          {busy ? t('Starting…') : t('Create task')}
+        <button className="btn btn-primary" disabled={busy || !projectId} onClick={() => void create()} data-testid="create-agent">
+          {busy ? t('Starting…') : t('Create agent')}
         </button>
       </div>
     </Modal>

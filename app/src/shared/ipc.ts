@@ -26,7 +26,8 @@ export const ipcSchemas = {
   'task:create': z.object({
     projectId: id,
     provider: z.enum(['claude', 'codex', 'mock']),
-    title: z.string().min(1).max(500),
+    /** Optional: without one (and no instruction), the first message the user sends describes the task. */
+    title: z.string().max(500).optional(),
     name: z.string().max(100).optional(),
     instruction: text.optional(),
     isolate: z.boolean(),

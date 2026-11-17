@@ -70,8 +70,6 @@ export const zh: Record<string, string> = {
   'The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name (from its next turn).': '模型繁忙或触发了限流。稍后重试，或点 agent 名字旁边的模型名切换到其他模型（从下一轮开始生效）。',
   Maximize: '最大化',
   'Back to the side (Esc)': '还原到侧边（Esc）',
-  'This file is outside the agent’s folder and project. Show it anyway?': '这个文件不在 agent 的目录和项目里，仍要显示吗？',
-  'Show anyway': '仍要显示',
   'Resize the preview': '调整预览宽度',
   'Drag to resize; double-click to reset': '拖动调整宽度，双击恢复默认',
   // `!command` and suggested replies
@@ -677,4 +675,9 @@ export const zh: Record<string, string> = {
   'Voice off': '语音未启用',
   'Set up': '去设置',
   'Choose a speech model in Settings to talk to your agents. Typing works without one.': '在设置里选择语音模型后就能对 Agent 说话；不设置也可以直接打字。',
+  'What should the agent do? Or leave it empty and tell it in the conversation.': '要它做什么？也可以先空着，创建后在对话里说。',
+  'Its name comes from what you ask it to do.': '名字会根据你交代的任务自动生成。',
+  'Create agent': '创建 Agent',
+  'New agent': '新建 Agent',
+  'Agent created': '已创建 Agent',
 };

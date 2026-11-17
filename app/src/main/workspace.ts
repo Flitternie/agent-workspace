@@ -514,7 +514,8 @@ export class Workspace {
   async createTask(args: {
     projectId: string;
     provider: AgentProvider;
-    title: string;
+    /** What the task is; empty when the user starts an agent without saying yet (its first message says). */
+    title?: string;
     /** Who chose `name` (default: the user, who typed it). */
     nameSource?: 'auto' | 'user';
     name?: string;
@@ -535,7 +536,7 @@ export class Workspace {
       sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
     } else if (args.isolate && project.isGitRepo) {
       try {
-        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`);
+        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`);
         cwd = worktree.path;
       } catch (error) {
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
@@ -552,7 +553,7 @@ export class Workspace {
       name: args.name?.trim() || alias,
       nameSource: args.name?.trim() ? (args.nameSource ?? 'user') : 'auto',
       projectId: project.projectId,
-      title: args.title.trim(),
+      title: (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80),
       provider: args.provider,
       status: 'idle',
       summary: 'Not started yet.',
@@ -565,7 +566,7 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
-    if (!args.name?.trim()) this.autoLabel(task, args.title, args.instruction);
+    if (!args.name?.trim() && task.title) this.autoLabel(task, args.title ?? '', args.instruction);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -1168,6 +1169,11 @@ export class Workspace {
       task.updatedAt = now();
       // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
       this.touched(task);
+      // Started without saying what for: this first message is what the task is, and what its label describes.
+      if (!task.title.trim() && delivery !== 'steer') {
+        task.title = clip(text.replace(/\s+/g, ' ').trim(), 80);
+        if (task.nameSource !== 'user') this.autoLabel(task, task.title, text);
+      }
       // The first instruction is what the first label describes; later messages may change the work.
       if (via !== 'initial') task.saidSinceLabel = (task.saidSinceLabel ?? 0) + 1;
       this.changed();
