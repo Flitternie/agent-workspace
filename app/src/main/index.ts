@@ -171,6 +171,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
+  // Typing a folder path in the project chooser: its subfolders, here or on a machine.
+  'fs:listDirs': (i: { dir: string; host?: string }) => workspace.listDirs(i.dir, i.host),
   'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),
   'task:importSession': (i: Parameters<Workspace['importSession']>[0]) => workspace.importSession(i),
   'attention:respond': (i: { attentionId: string; decision?: string; answers?: Record<string, string> }) =>

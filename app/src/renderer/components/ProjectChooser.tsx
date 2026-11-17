@@ -5,12 +5,13 @@ import { t } from '../i18n';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL } from './bits';
 
-// Where a new agent works, picked the way VS Code's "Open Recent" and Zed's project picker do it: the
-// folder shows as a button (the one used last, most of the time the right one). Opening it asks first
-// where: this Mac or one of the SSH machines (tabs). For that place, one searchable list: the projects
-// already added there (most recently used first), the folders where Claude Code or Codex sessions
-// already ran there, and a way to add any other folder (a folder dialog here, a path on a machine).
-// Keyboard throughout.
+// Where a new agent works, in two steps, the way VS Code's "Open Recent" and Zed's project picker
+// feel: the project shows as a button (the one used last, most of the time the right one). Opening it
+// asks first where: this Mac or one of the machines turned on in Settings › Remote machines (a
+// searchable list, however many there are). Then, for that place, the folder: its projects (most
+// recently used first), the folders where Claude Code or Codex sessions already ran there, or any
+// folder by typing its path (~/… or /…) with completion, listed on that machine over SSH as typed.
+// Keyboard throughout; Backspace in an empty box goes back to the places.
 
 const ms = (iso?: string) => (iso ? Date.parse(iso) || 0 : 0);
 const base = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p;
@@ -31,6 +32,14 @@ export function defaultProject(snapshot: WorkspaceSnapshot): string {
 /** Every word of the query somewhere in the text (case-insensitive). */
 const matches = (q: string, text: string) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w));
 
+/** A typed path (~… or /…): the folder to list and the start of the name being typed. */
+export function splitTyped(q: string): { parent: string; prefix: string } | null {
+  if (!/^[~/]/.test(q)) return null;
+  if (q === '~') return { parent: '~/', prefix: '' };
+  const cut = q.lastIndexOf('/') + 1;
+  return { parent: q.slice(0, cut), prefix: q.slice(cut) };
+}
+
 interface Found {
   cwd: string;
   sessions: number;
@@ -38,31 +47,79 @@ interface Found {
   updatedAt: number;
 }
 
-type Item = { kind: 'project'; project: Project } | { kind: 'found'; found: Found } | { kind: 'browse' };
+type Item =
+  | { kind: 'place'; key: string }
+  | { kind: 'project'; project: Project }
+  | { kind: 'found'; found: Found }
+  | { kind: 'browse' }
+  | { kind: 'dir'; path: string; name: string }
+  | { kind: 'use'; path: string };
 
 export function ProjectChooser({ snapshot, value, onChange }: { snapshot: WorkspaceSnapshot; value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
+  const [stage, setStage] = useState<'place' | 'folder'>('place');
   /** Where: '' = this Mac, else an SSH host. */
   const [place, setPlace] = useState('');
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
   /** Folders where sessions ran, per place (null while being read). */
   const [found, setFound] = useState<Record<string, Found[] | null>>({});
-  /** A path typed for the current machine. */
-  const [remotePath, setRemotePath] = useState('');
+  /** Subfolder names per listed folder ("place\nfolder"), null while being read. */
+  const [dirs, setDirs] = useState<Record<string, string[] | null>>({});
+  const [dirError, setDirError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const box = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const now = Date.now();
   const selected = snapshot.projects.find((p) => p.projectId === value);
   const agentsIn = (p: Project) => snapshot.tasks.filter((t) => t.projectId === p.projectId).length;
+  const hostOf = (key: string) => snapshot.remoteHosts.find((h) => h.host === key);
+  const reachable = !place || hostOf(place)?.ssh === 'ok';
+  const placeLabel = (key: string) => key || t('This Mac');
+  const typed = stage === 'folder' ? splitTyped(query) : null;
+  const dirKey = typed ? `${place}\n${typed.parent}` : '';
 
-  const hostInfo = snapshot.remoteHosts.find((h) => h.host === place);
-  const reachable = !place || hostInfo?.ssh === 'ok';
+  // Opened or closed: reset right away (typing straight after opening never lands on the old search).
+  // A project chosen already: straight to its place's folders; none: the places first.
+  const toggle = (next: boolean) => {
+    setQuery('');
+    setError('');
+    setDirError('');
+    if (next) {
+      setPlace(selected?.host ?? '');
+      setStage(selected ? 'folder' : 'place');
+    }
+    setOpen(next);
+  };
+  /**
+   * The box keeps what is typed itself (React only reads it): a re-render while typing (a folder
+   * listing arriving) can then never write an older value back over a keystroke. Changed here only
+   * when the app rewrites it (a completion, a fresh search).
+   */
+  const setText = (v: string) => {
+    setQuery(v);
+    if (input.current) input.current.value = v;
+  };
+  const goTo = (key: string) => {
+    setPlace(key);
+    setStage('folder');
+    setText('');
+    setError('');
+    setDirError('');
+    input.current?.focus();
+  };
+  const back = () => {
+    setStage('place');
+    setText('');
+    setError('');
+    input.current?.focus();
+  };
+
   // Folders where sessions already ran in this place, read the first time it is shown.
   useEffect(() => {
-    if (!open || place in found || !reachable) return;
+    if (!open || stage !== 'folder' || place in found || !reachable) return;
     setFound((f) => ({ ...f, [place]: null }));
     const read = place ? call('sessions:discoverHost', { host: place }) : call('sessions:discoverAll', {});
     void read
@@ -79,7 +136,28 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
         setFound((f) => ({ ...f, [place]: [...by.values()].sort((a, b) => b.updatedAt - a.updatedAt) }));
       })
       .catch(() => setFound((f) => ({ ...f, [place]: [] })));
-  }, [open, place, found, reachable]);
+  }, [open, stage, place, found, reachable]);
+
+  // A typed path: list its folder (here, or on the machine over SSH), once per folder, shortly after typing.
+  useEffect(() => {
+    if (!typed || !reachable || dirKey in dirs) return;
+    const parent = typed.parent;
+    const key = dirKey;
+    const id = setTimeout(() => {
+      setDirs((d) => ({ ...d, [key]: null }));
+      call('fs:listDirs', { dir: parent, ...(place ? { host: place } : {}) })
+        .then((r) => {
+          setDirError('');
+          setDirs((d) => ({ ...d, [key]: r.names }));
+        })
+        .catch((e) => {
+          setDirError(errorText(e));
+          setDirs((d) => ({ ...d, [key]: [] }));
+        });
+    }, 120);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirKey, reachable]);
 
   // Close on a click outside.
   useEffect(() => {
@@ -87,59 +165,49 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
     const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && toggle(false);
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
-  }, [open]);
+  });
 
   const items = useMemo<Item[]>(() => {
+    if (stage === 'place') {
+      const keys = ['', ...snapshot.remoteHosts.map((h) => h.host)];
+      return keys.filter((k) => matches(query, placeLabel(k))).map((key) => ({ kind: 'place' as const, key }));
+    }
+    if (typed) {
+      const names = dirs[dirKey] ?? [];
+      const want = typed.prefix.toLowerCase();
+      const completions = names
+        .filter((n) => n.toLowerCase().startsWith(want) && (want.startsWith('.') || !n.startsWith('.')))
+        .slice(0, 60)
+        .map((name) => ({ kind: 'dir' as const, name, path: `${typed.parent}${name}/` }));
+      const use = query.length > 1 ? query.replace(/\/+$/, '') : query;
+      return [{ kind: 'use' as const, path: use }, ...completions];
+    }
     const here = snapshot.projects.filter((p) => (p.host ?? '') === place);
     const known = new Set(here.map((p) => p.rootPath));
     // Agents' own worktrees are not projects to start from.
     const inWorktree = (cwd: string) => snapshot.tasks.some((t) => t.worktree && (cwd === t.worktree.path || cwd.startsWith(`${t.worktree.path}/`)));
     const projects = [...here]
       .sort((a, b) => lastUsed(snapshot, b) - lastUsed(snapshot, a))
-      .filter((p) => matches(query, `${p.name} ${p.host ?? ''} ${p.rootPath}`))
+      .filter((p) => matches(query, `${p.name} ${p.rootPath}`))
       .map((project) => ({ kind: 'project' as const, project }));
     const folders = (found[place] ?? [])
       .filter((f) => !known.has(f.cwd) && !inWorktree(f.cwd) && matches(query, f.cwd))
       .slice(0, 12)
       .map((f) => ({ kind: 'found' as const, found: f }));
-    // Any other folder: a folder dialog on this Mac; on a machine, the path box under the list.
     return [...projects, ...folders, ...(place ? [] : [{ kind: 'browse' as const }])];
-  }, [snapshot, found, query, place]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, stage, place, query, found, dirs, dirKey]);
 
-  useEffect(() => setActive(0), [query, open]);
-  // Opened or closed: a fresh search and no half-typed remote path next time (reset right away, so
-  // typing straight after opening is never appended to the previous search).
-  const toggle = (next: boolean) => {
-    setQuery('');
-    setRemotePath('');
-    setError('');
-    // Opens on the place of the project chosen now.
-    if (next) setPlace(selected?.host ?? '');
-    setOpen(next);
-  };
-  const goTo = (p: string) => {
-    setPlace(p);
-    setQuery('');
-    setRemotePath('');
-    setError('');
-  };
+  // Highlight: the first completion while a name is being typed, else the first item.
+  useEffect(() => setActive(typed && typed.prefix && items.length > 1 ? 1 : 0), [query, stage, place, items.length]);
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
-  const choose = async (it: Item) => {
-    setError('');
+  const add = async (rootPath: string) => {
+    setBusy(true);
     try {
-      if (it.kind === 'project') onChange(it.project.projectId);
-      else if (it.kind === 'found') {
-        setBusy(true);
-        onChange((await call('project:add', { rootPath: it.found.cwd, ...(place ? { host: place } : {}) })).projectId);
-      } else {
-        const dir = await call('project:pickDirectory', {});
-        if (!dir) return;
-        setBusy(true);
-        onChange((await call('project:add', { rootPath: dir })).projectId);
-      }
+      onChange((await call('project:add', { rootPath, ...(place ? { host: place } : {}) })).projectId);
       toggle(false);
     } catch (e) {
       setError(errorText(e));
@@ -147,37 +215,51 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
       setBusy(false);
     }
   };
-  const addRemote = async () => {
-    if (!place || !remotePath.trim()) return;
+  const choose = async (it: Item | undefined) => {
+    if (!it) return;
     setError('');
-    setBusy(true);
+    if (it.kind === 'place') return goTo(it.key);
+    if (it.kind === 'dir') {
+      // Already typed in full (Enter right after Tab): that folder is the one.
+      if ((input.current?.value ?? query) === it.path) return add(it.path.replace(/\/+$/, ''));
+      setText(it.path);
+      input.current?.focus();
+      return;
+    }
+    if (it.kind === 'project') {
+      onChange(it.project.projectId);
+      return toggle(false);
+    }
+    if (it.kind === 'found') return add(it.found.cwd);
+    // The path in the box now (a key pressed before the list caught up still means what is typed).
+    if (it.kind === 'use') return add((input.current?.value || it.path).replace(/(.)\/+$/, '$1'));
     try {
-      onChange((await call('project:add', { rootPath: remotePath.trim(), host: place })).projectId);
-      toggle(false);
+      const dir = await call('project:pickDirectory', {});
+      if (dir) await add(dir);
     } catch (e) {
       setError(errorText(e));
-    } finally {
-      setBusy(false);
     }
   };
 
-  const places = [{ key: '', label: t('This Mac') }, ...snapshot.remoteHosts.map((h) => ({ key: h.host, label: h.host }))];
   const keys = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') setActive((i) => Math.min(items.length - 1, i + 1));
     else if (e.key === 'ArrowUp') setActive((i) => Math.max(0, i - 1));
     else if (e.key === 'Enter') void choose(items[active]);
+    // Tab completes a folder and goes into it: the highlighted one, else the first that matches (as in a shell).
+    else if (e.key === 'Tab' && typed && items.some((i) => i.kind === 'dir')) void choose(items[active]?.kind === 'dir' ? items[active] : items.find((i) => i.kind === 'dir'));
+    else if (e.key === 'Backspace' && !query && stage === 'folder') back();
     else if (e.key === 'Escape') toggle(false);
-    // Tab moves between this Mac and the machines.
-    else if (e.key === 'Tab' && places.length > 1) {
-      const i = places.findIndex((p) => p.key === place);
-      goTo(places[(i + (e.shiftKey ? places.length - 1 : 1)) % places.length].key);
-    } else return;
+    else return;
     e.preventDefault();
   };
 
   const firstFound = items.findIndex((i) => i.kind === 'found');
   const firstAction = items.findIndex((i) => i.kind === 'browse');
+  const firstDir = items.findIndex((i) => i.kind === 'dir');
   const where = (p: Project) => `${p.host ? `${p.host}:` : ''}${tilde(p.rootPath)}`;
+  const listing = !!typed && dirs[dirKey] === null;
+  const keyOf = (it: Item) =>
+    it.kind === 'place' ? `p:${it.key}` : it.kind === 'project' ? it.project.projectId : it.kind === 'found' ? `f:${it.found.cwd}` : it.kind === 'dir' ? `d:${it.path}` : it.kind;
 
   return (
     <div className="field project-chooser" ref={box}>
@@ -192,54 +274,69 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
         ) : (
           <span className="muted">{t('Choose a project…')}</span>
         )}
-        {selected ? <span className="tag">{selected.host ?? t('This Mac')}</span> : null}
+        {selected ? <span className="tag">{placeLabel(selected.host ?? '')}</span> : null}
         <Icon name="chevron" size={11} />
       </button>
       {open ? (
         // Esc here closes this list, not the dialog around it.
-        <div className="project-pop" data-own-esc data-testid="project-pop">
-          {/* First: where. This Mac, or a machine turned on in Settings › Remote machines. */}
-          {places.length > 1 ? (
-            <div className="seg project-places" role="tablist">
-              {places.map((pl) => {
-                const h = snapshot.remoteHosts.find((x) => x.host === pl.key);
-                return (
-                  <button key={pl.key || 'local'} role="tab" type="button" aria-selected={place === pl.key} className={place === pl.key ? 'on' : ''} onClick={() => goTo(pl.key)} data-testid="project-place" data-place={pl.key || 'local'}>
-                    <Icon name={pl.key ? 'globe' : 'folder'} size={12} /> {pl.label}
-                    {h && h.ssh !== 'ok' ? <span className="dot-warn" aria-hidden /> : null}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="project-pop" data-own-esc data-testid="project-pop" data-stage={stage}>
+          {stage === 'folder' ? (
+            <button type="button" className="project-back" onClick={back} title={t('Choose another place')} data-testid="project-back">
+              <Icon name="chevron" size={11} />
+              <Icon name={place ? 'globe' : 'folder'} size={12} />
+              <span>{placeLabel(place)}</span>
+            </button>
           ) : null}
-          <input className="input project-search" autoFocus placeholder={place ? t('Search projects and folders on {host}…', { host: place }) : t('Search projects and folders…')} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={keys} data-testid="project-search" />
-          {place && !reachable ? <div className="warn-text small">{t('{host} is not connected. Check it in Settings › Remote machines.', { host: place })}</div> : null}
+          <input
+            ref={input}
+            className="input project-search"
+            autoFocus
+            spellCheck={false}
+            placeholder={stage === 'place' ? t('Where? This Mac or a machine…') : place ? t('Search, or type a path on {host} (~/… or /…)', { host: place }) : t('Search, or type a path (~/… or /…)')}
+            defaultValue=""
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={keys}
+            data-testid="project-search"
+          />
+          {stage === 'folder' && place && !reachable ? <div className="warn-text small">{t('{host} is not connected. Check it in Settings › Remote machines.', { host: place })}</div> : null}
           <div className="project-list" ref={list} role="listbox">
             {items.map((it, i) => (
-              <div key={it.kind === 'project' ? it.project.projectId : it.kind === 'found' ? it.found.cwd : 'browse'}>
+              <div key={keyOf(it)}>
+                {i === 0 && it.kind === 'place' ? <div className="project-group">{t('Where')}</div> : null}
                 {i === 0 && it.kind === 'project' ? <div className="project-group">{t('Recent')}</div> : null}
                 {i === firstFound ? <div className="project-group">{place ? t('Found on {host} (Claude Code / Codex sessions)', { host: place }) : t('Found on this Mac (Claude Code / Codex sessions)')}</div> : null}
                 {i === firstAction ? <div className="project-group">{t('Other folders')}</div> : null}
+                {i === firstDir ? <div className="project-group">{t('Folders in {dir}', { dir: typed?.parent ?? '' })}</div> : null}
                 <button
                   type="button"
                   role="option"
                   aria-selected={i === active}
-                  className={`project-item${i === active ? ' active' : ''}${it.kind === 'project' && it.project.projectId === value ? ' current' : ''}`}
+                  className={`project-item${i === active ? ' active' : ''}`}
                   data-index={i}
                   data-kind={it.kind}
                   data-testid="project-item"
                   onMouseEnter={() => setActive(i)}
                   onClick={() => void choose(it)}
-                  disabled={busy}
+                  disabled={busy || (it.kind !== 'place' && !reachable)}
                 >
-                  {it.kind === 'project' ? (
+                  {it.kind === 'place' ? (
+                    <>
+                      <Icon name={it.key ? 'globe' : 'folder'} />
+                      <span className="project-item-text">
+                        <span className="project-item-name">{placeLabel(it.key)}</span>
+                        <span className="project-item-path">
+                          {it.key ? (hostOf(it.key)?.ssh === 'ok' ? t('Connected') : hostOf(it.key)?.ssh === 'checking' ? t('Checking…') : t('Not connected')) : t('Folders on this computer')}
+                        </span>
+                      </span>
+                      <span className="muted small">{t('{n} projects', { n: snapshot.projects.filter((p) => (p.host ?? '') === it.key).length })}</span>
+                      {it.key && hostOf(it.key)?.ssh !== 'ok' ? <span className="dot-warn" aria-hidden /> : null}
+                    </>
+                  ) : it.kind === 'project' ? (
                     <>
                       <Icon name="folder" />
                       <span className="project-item-text">
-                        <span className="project-item-name">
-                          {it.project.name}
-                        </span>
-                        <span className="project-item-path mono truncate">{where(it.project)}</span>
+                        <span className="project-item-name">{it.project.name}</span>
+                        <span className="project-item-path mono truncate">{tilde(it.project.rootPath)}</span>
                       </span>
                       <span className="muted small">{agentsIn(it.project) === 1 ? t('1 agent') : t('{n} agents', { n: agentsIn(it.project) })}</span>
                       {it.project.projectId === value ? <Icon name="check" size={12} /> : null}
@@ -256,6 +353,20 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
                         {it.found.updatedAt ? ` · ${timeAgo(new Date(it.found.updatedAt).toISOString(), now)}` : ''}
                       </span>
                     </>
+                  ) : it.kind === 'dir' ? (
+                    <>
+                      <Icon name="folder" />
+                      <span className="project-item-name mono">{it.name}/</span>
+                      <span className="muted small project-item-hint">{t('Tab to open')}</span>
+                    </>
+                  ) : it.kind === 'use' ? (
+                    <>
+                      <Icon name="plus" />
+                      <span className="project-item-text">
+                        <span className="project-item-name">{t('Use this folder')}</span>
+                        <span className="project-item-path mono truncate">{place ? `${place}:${it.path}` : it.path}</span>
+                      </span>
+                    </>
                   ) : (
                     <>
                       <Icon name="plus" />
@@ -265,31 +376,12 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
                 </button>
               </div>
             ))}
-            {reachable && found[place] === null ? <div className="muted small project-loading">{t('Looking for folders with past sessions…')}</div> : null}
-            {place && reachable && !items.length && found[place] ? <div className="muted small project-loading">{t('Nothing here yet: type a path below.')}</div> : null}
+            {stage === 'folder' && !typed && reachable && found[place] === null ? <div className="muted small project-loading">{t('Looking for folders with past sessions…')}</div> : null}
+            {listing ? <div className="muted small project-loading">{place ? t('Listing folders on {host}…', { host: place }) : t('Listing folders…')}</div> : null}
+            {stage === 'folder' && !typed && !items.length && found[place] ? <div className="muted small project-loading">{t('Nothing here yet: type a path (~/… or /…).')}</div> : null}
+            {stage === 'place' && !snapshot.remoteHosts.length ? <div className="muted small project-loading">{t('Machines turned on in Settings › Remote machines show here.')}</div> : null}
           </div>
-          {place && reachable ? (
-            <div className="row project-remote">
-              <span className="mono">{place}:</span>
-              <input
-                className="input grow mono"
-                placeholder="~/projects/repo"
-                value={remotePath}
-                onChange={(e) => setRemotePath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void addRemote();
-                  }
-                  if (e.key === 'Escape') toggle(false);
-                }}
-                data-testid="remote-path"
-              />
-              <button className="btn btn-sm" disabled={!remotePath.trim() || busy} onClick={() => void addRemote()} data-testid="remote-add">
-                {busy ? t('Connecting…') : t('Add')}
-              </button>
-            </div>
-          ) : null}
+          {dirError ? <div className="error-text small">{dirError}</div> : null}
           {error ? <div className="error-text small">{error}</div> : null}
         </div>
       ) : null}

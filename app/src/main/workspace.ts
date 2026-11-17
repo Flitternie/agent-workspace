@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, posix, resolve, sep } from 'node:path';
 import type { ModelOption,
   AgentProvider,
@@ -919,6 +919,35 @@ export class Workspace {
    * Recent Claude Code and Codex sessions saved on an SSH host (including those the
    * Claude and ChatGPT desktop apps created there through their SSH connections).
    */
+  /**
+   * The folders inside `dir` on this Mac or on `host` (for typing a path with completion). `~` is the
+   * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
+   * the caller decides). A path that is not a folder gives no names.
+   */
+  async listDirs(dir: string, host?: string): Promise<{ dir: string; names: string[] }> {
+    if (!host) {
+      const home = homedir();
+      const abs = resolve(dir === '~' || dir.startsWith('~/') ? home + dir.slice(1) : dir);
+      try {
+        const names = readdirSync(abs, { withFileTypes: true })
+          .filter((e) => e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(abs, e.name)).isDirectory(); } catch { return false; } })()))
+          .map((e) => e.name)
+          .sort((a, b) => a.localeCompare(b));
+        return { dir: abs, names: names.slice(0, 500) };
+      } catch {
+        return { dir: abs, names: [] };
+      }
+    }
+    this.requireHost(host);
+    // On the machine: expand ~, list the subfolders (names ending in /), first line the folder as resolved.
+    const script = `d=${shq(dir)}; case "$d" in "~"|"~/"*) d="$HOME\${d#\~}";; esac; cd -- "$d" 2>/dev/null || exit 3; pwd; ls -1Ap | grep '/$' | head -500`;
+    const r = await sshRun(host, `sh -c ${shq(script)}`, 15_000);
+    if (r.code === 3) return { dir, names: [] };
+    if (r.code !== 0) throw new Error(sshError(host, r.stderr));
+    const [resolved, ...rest] = r.stdout.split('\n');
+    return { dir: resolved.trim() || dir, names: rest.map((l) => l.replace(/\/$/, '')).filter(Boolean) };
+  }
+
   async discoverHostSessions(host: string): Promise<NativeSessionInfo[]> {
     this.requireHost(host);
     // Tests: the fixture's sessions on this host (see discoverAllSessions).

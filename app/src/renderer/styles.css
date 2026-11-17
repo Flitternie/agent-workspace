@@ -4903,3 +4903,31 @@ button.subtask-row:hover {
   border-radius: 50%;
   background: var(--needs-dot);
 }
+/* Back to the places, from a place's folders. */
+.project-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.project-back > .icon:first-child {
+  transform: rotate(180deg);
+}
+.project-back:hover {
+  color: var(--text);
+}
+.project-item-hint {
+  margin-left: auto;
+  opacity: 0;
+}
+.project-item.active .project-item-hint {
+  opacity: 1;
+}

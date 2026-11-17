@@ -37,6 +37,9 @@ describe('new agent', () => {
     const train = join(scratch, 'gpu', 'train');
     mkdirSync(remoteHome);
     mkdirSync(train, { recursive: true });
+    const localLib = join(scratch, 'local-lib');
+    mkdirSync(localLib);
+    execFileSync('git', ['init', '-q'], { cwd: localLib });
     const bin = join(scratch, 'bin');
     mkdirSync(bin);
     writeFileSync(join(bin, 'ssh'), `#!/bin/bash\nfor a in "$@"; do [ "$a" = -G ] && { echo "hostname 10.0.0.5"; echo "user dev"; exit 0; }; done\nHOME="${remoteHome}" PATH=/usr/bin:/bin exec bash -c "\${@: -1}"\n`, { mode: 0o755 });
@@ -74,22 +77,24 @@ describe('new agent', () => {
     await expect.poll(async () => (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).remoteHosts.find((h) => h.host === 'devbox')?.ssh, { timeout: 30_000 }).toBe('ok');
     await page.getByTestId('new-task').first().click();
     const dialog = page.getByRole('dialog');
-    // The project: the one used last, shown as a button.
-    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('demo-shop');
-    // Opened: a searchable list of the projects added (recent first), then folders where sessions ran
-    // (automated ones left out), then the other ways to add a folder.
-    await page.getByTestId('project-current').click();
-    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('project-search');
     const kinds = () => page.getByTestId('project-item').evaluateAll((els) => els.map((e) => `${e.getAttribute('data-kind')}:${e.textContent?.trim().slice(0, 40)}`));
+    const stage = () => page.getByTestId('project-pop').getAttribute('data-stage');
+    // The project: the one used last, shown as a button that names its place.
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('demo-shop');
+    expect(await page.getByTestId('project-current').innerText()).toContain('This Mac');
+
+    // Opened with a project chosen: straight to that place's folders (a way back to the places on top).
+    await page.getByTestId('project-current').click();
+    expect(await stage()).toBe('folder');
+    expect(await page.getByTestId('project-back').innerText()).toContain('This Mac');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('project-search');
+    // This Mac: its projects, the folders where sessions ran here (automated ones left out), a folder dialog.
     await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('found:')).length).toBe(2);
     const listed = await kinds();
     expect(listed[0]).toMatch(/^project:demo-shop/);
-    const foundNames = listed.filter((k) => k.startsWith('found:'));
-    expect(foundNames[0]).toMatch(/^found:billing-service/);
-    expect(foundNames[1]).toMatch(/^found:ml-notes/);
-    expect(listed.some((k) => k.includes('bot'))).toBe(false);
+    expect(listed.filter((k) => k.startsWith('found:'))[0]).toMatch(/^found:billing-service/);
+    expect(listed.some((k) => k.includes('bot') || k.includes('train'))).toBe(false);
     expect(listed.at(-1)).toMatch(/^browse:/);
-    expect(await page.getByTestId('project-pop').innerText()).toContain('2 sessions');
     await page.screenshot({ path: join(shots, 'new-agent-00-projects.png') });
     // Search narrows it; Esc closes the list, not the dialog.
     await page.keyboard.type('billing');
@@ -97,6 +102,14 @@ describe('new agent', () => {
     await page.keyboard.press('Escape');
     await expect.poll(() => page.getByTestId('project-pop').count()).toBe(0);
     expect(await dialog.count()).toBe(1);
+    // Typed fast while folder listings arrive and re-render the list: not one keystroke lost.
+    const longPath = `${scratch}/gpu/train/`;
+    for (let round = 0; round < 3; round++) {
+      await page.getByTestId('project-current').click();
+      await page.keyboard.type(longPath);
+      expect(await page.getByTestId('project-search').inputValue()).toBe(longPath);
+      await page.keyboard.press('Escape');
+    }
     // A found folder, picked with the keyboard, becomes the project.
     await page.getByTestId('project-current').click();
     await page.keyboard.type('billing');
@@ -104,31 +117,48 @@ describe('new agent', () => {
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('billing-service');
     expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.rootPath === shop)).toBe(true);
 
-    // This Mac and the machine are separate from the first step: tabs, opened on the chosen project's place.
+    // First the place: Backspace in the empty box goes back to the places (a searchable list, however many).
     await page.getByTestId('project-current').click();
-    const placeOn = () => page.locator('[data-testid="project-place"][aria-selected="true"]').getAttribute('data-place');
-    expect(await page.getByTestId('project-place').evaluateAll((els) => els.map((e) => e.getAttribute('data-place')))).toEqual(['local', 'devbox']);
-    expect(await placeOn()).toBe('local');
-    expect((await kinds()).some((k) => k.includes('train'))).toBe(false);
-    // Tab: the machine. Only its projects and the folders where sessions ran there; a path box for others.
+    await page.keyboard.press('Backspace');
+    await expect.poll(stage).toBe('place');
+    expect(await kinds()).toEqual([expect.stringMatching(/^place:This Mac/), expect.stringMatching(/^place:devbox/)]);
+    await page.keyboard.type('dev');
+    await expect.poll(async () => (await kinds()).length).toBe(1);
+    await page.screenshot({ path: join(shots, 'new-agent-00a-places.png') });
+    await page.keyboard.press('Enter');
+    await expect.poll(stage).toBe('folder');
+    expect(await page.getByTestId('project-back').innerText()).toContain('devbox');
+    // The machine: only the folders where sessions ran there.
+    await expect.poll(async () => (await kinds()).map((k) => k.slice(0, 11))).toEqual(['found:train']);
+    // Any folder on it by typing a path, completed from that machine (over ssh) as typed; Tab goes in.
+    await page.keyboard.type(`${scratch}/g`);
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:gpu/Tab to open']);
+    await page.screenshot({ path: join(shots, 'new-agent-00b-machine-path.png') });
     await page.keyboard.press('Tab');
-    await expect.poll(placeOn).toBe('devbox');
-    await expect.poll(async () => (await kinds()).map((k) => k.split(':')[0] + ':' + k.split(':')[1]?.slice(0, 5))).toEqual(['found:train']);
-    expect(await page.getByTestId('project-pop').innerText()).toMatch(/found on devbox/i);
-    expect(await page.getByTestId('remote-path').count()).toBe(1);
-    await page.screenshot({ path: join(shots, 'new-agent-00b-machine.png') });
+    await expect.poll(() => page.getByTestId('project-search').inputValue()).toBe(`${scratch}/gpu/`);
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:train/Tab to open']);
+    await page.keyboard.press('Tab');
+    await expect.poll(() => page.getByTestId('project-search').inputValue()).toBe(`${scratch}/gpu/train/`);
+    // Enter on "Use this folder" (highlighted once inside it): a project on the machine.
+    await expect.poll(async () => (await kinds())[0]).toMatch(/^use:Use this folderdevbox:/);
     await page.keyboard.press('Enter');
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('train');
     expect(await page.getByTestId('project-current').innerText()).toContain('devbox');
     expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.host === 'devbox' && p.rootPath === train)).toBe(true);
-    // Opened again, it starts on the machine; back on this Mac, the local project for the mock agent below.
+
+    // This Mac, by path too: completion from this Mac's folders.
     await page.getByTestId('project-current').click();
-    expect(await placeOn()).toBe('devbox');
-    await page.keyboard.press('Tab');
-    await expect.poll(placeOn).toBe('local');
-    await page.keyboard.type('billing');
+    expect(await page.getByTestId('project-back').innerText()).toContain('devbox');
+    await page.getByTestId('project-back').click();
     await page.keyboard.press('Enter');
-    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('billing-service');
+    await expect.poll(() => page.getByTestId('project-back').innerText()).toContain('This Mac');
+    await page.keyboard.type(`${scratch}/lo`);
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:local-lib/Tab to open']);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('local-lib');
+    expect(await page.getByTestId('project-current').innerText()).toContain('This Mac');
+
     // Nothing to name: no label or title fields; the instruction is optional.
     expect(await dialog.locator('input.input').count()).toBe(0);
     await dialog.locator('label.radio').filter({ hasText: 'Mock' }).click();

@@ -31,3 +31,15 @@ describe('preview rendering helpers', () => {
     expect(shikiLang('notes.unknown')).toBeUndefined();
   });
 });
+
+import { splitTyped } from '../../src/renderer/components/ProjectChooser';
+
+describe('typed folder paths', () => {
+  it('splits a typed path into the folder to list and the name being typed', () => {
+    expect(splitTyped('~')).toEqual({ parent: '~/', prefix: '' });
+    expect(splitTyped('~/pro')).toEqual({ parent: '~/', prefix: 'pro' });
+    expect(splitTyped('/srv/data/')).toEqual({ parent: '/srv/data/', prefix: '' });
+    expect(splitTyped('/srv/da')).toEqual({ parent: '/srv/', prefix: 'da' });
+    expect(splitTyped('billing')).toBeNull();
+  });
+});
