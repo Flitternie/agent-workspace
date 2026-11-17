@@ -52,7 +52,9 @@ export function Sidebar({
   const micMode = snapshot.settings.micMode ?? 'open';
   const openAll = snapshot.attention.filter((a) => a.state === 'open');
   const open = openAll.filter((a) => a.kind !== 'completion');
-  const needYou = new Set(open.map((a) => a.taskId)).size;
+  // Agents set aside are not counted: whatever they were waiting on is hidden with them.
+  const asideIds = new Set(snapshot.tasks.filter((t) => t.setAside).map((t) => t.taskId));
+  const needYou = new Set(open.filter((a) => !asideIds.has(a.taskId)).map((a) => a.taskId)).size;
   const [showIdle, setShowIdle] = useState<Record<string, boolean>>({});
   // Agents whose sub-agents are unfolded (folded by default; the marks go when the turn ends).
   const [subOpen, setSubOpen] = useState<Set<string>>(new Set());
