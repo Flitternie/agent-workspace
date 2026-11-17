@@ -172,29 +172,39 @@ const hashBody = (body: string) => createHash('sha256').update(body.replace(/\s+
 /**
  * The notes shared with a file's CLI: approved, active user memory, minus notes that
  * came from that CLI's own file on that machine and were not changed in the app (the CLI
- * already reads them there).
+ * already reads them there). Over the size limit, the ones the user wrote or changed in
+ * the app go first, then the newest; the rest are left out (`left`) and the app gives
+ * them to its own agents instead. Shared notes keep their order.
  */
-export function notesFor(host: string, ownFile: string, records: MemoryRecord[]): { notes: Note[]; dropped: number } {
+export function notesFor(host: string, ownFile: string, records: MemoryRecord[]): { notes: Note[]; dropped: number; covered: Set<string>; left: string[] } {
   const fromThere = (key: string) => {
     const [source, h, file] = key.split('|');
     return source === 'instructions' && (h ?? LOCAL) === host && file === ownFile;
   };
-  const notes: Note[] = [];
-  let size = 0;
-  let dropped = 0;
+  const covered = new Set<string>();
+  const want: MemoryRecord[] = [];
   for (const r of records) {
     if (r.scope !== 'global' || !r.approvedForReuse || r.sourceRemoved) continue;
-    if (!edited(r) && (r.importKeys ?? []).some(fromThere)) continue;
-    const body = r.body.trim();
-    if (!body) continue;
-    if (size + body.length > MAX_NOTES_CHARS) {
-      dropped++;
+    if (!edited(r) && (r.importKeys ?? []).some(fromThere)) {
+      covered.add(r.id);
       continue;
     }
-    size += body.length;
-    notes.push({ title: r.title, body });
+    if (r.body.trim()) want.push(r);
   }
-  return { notes, dropped };
+  const tier = (r: MemoryRecord) => (!r.importKeys?.length ? 0 : edited(r) ? 1 : 2);
+  const ranked = [...want].sort((a, b) => tier(a) - tier(b) || b.updatedAt.localeCompare(a.updatedAt));
+  const keep = new Set<string>();
+  let size = 0;
+  for (const r of ranked) {
+    const n = r.body.trim().length;
+    if (size + n > MAX_NOTES_CHARS) continue;
+    size += n;
+    keep.add(r.id);
+  }
+  const notes = want.filter((r) => keep.has(r.id)).map((r) => ({ title: r.title, body: r.body.trim() }));
+  for (const id of keep) covered.add(id);
+  const left = want.filter((r) => !keep.has(r.id)).map((r) => r.id);
+  return { notes, dropped: left.length, covered, left };
 }
 
 /** What each of a machine's files should become (null: leave it as it is). */
@@ -446,6 +456,9 @@ export class MemoryWriteback {
       }
     }
     this.store(i);
+    // Over the limit: say which notes the CLIs' files leave out (the app's agents still get them).
+    const over = notesFor(host, files.find((f) => f.kind === 'codex-md')?.file ?? '', records).dropped;
+    if (over) res.notices.push(`${over} note(s) are not in the CLIs' files on ${host === LOCAL ? 'this Mac' : host}: user memory is over ${MAX_NOTES_CHARS.toLocaleString('en-US')} characters. Agents started by the app still get them; terminal sessions do not.`);
     return res;
   }
 

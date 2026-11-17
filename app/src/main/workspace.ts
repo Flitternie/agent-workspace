@@ -44,7 +44,7 @@ import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
-import { MemoryWriteback, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
+import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -815,7 +815,9 @@ export class Workspace {
     const machine = task.host ?? LOCAL;
     const link = this.store.data.settings.memoryLinks?.[machine];
     const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
-    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(viaFiles && m.scope === 'global'));
+    // Only the notes that fit in those files: the rest (over the size limit) are given here.
+    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
+    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
     task.injectedMemoryIds = injected.map((m) => m.id);
     this.changed();
 

@@ -82,6 +82,22 @@ describe('what is shared', () => {
     expect(notesFor('local', '~/.codex/AGENTS.md', records).notes.map((n) => n.body)).toEqual(['Reply in Chinese.', 'From my AGENTS.md']);
     expect(notesFor('neptune', '~/.codex/AGENTS.md', records).notes.map((n) => n.body)).toEqual(['Reply in Chinese.', 'From my AGENTS.md', 'Also from it']);
   });
+
+  it('over the size limit: notes written in the app first, then the newest; the rest are named, not lost', () => {
+    const big = (c: string) => c.repeat(9000);
+    const records = [
+      note(big('a'), { importKeys: ['claude-memory|local|~/.claude/projects/x/memory/old.md'], updatedAt: '2026-01-01T00:00:00Z' }),
+      note(big('b'), { importKeys: ['claude-memory|local|~/.claude/projects/x/memory/new.md'], updatedAt: '2026-06-01T00:00:00Z' }),
+      note(big('c'), { importKeys: ['claude-memory|local|~/.claude/projects/x/memory/mid.md'], updatedAt: '2026-03-01T00:00:00Z' }),
+      note('Written in the app, last.', { updatedAt: '2026-01-02T00:00:00Z' }),
+    ];
+    const r = notesFor('local', '~/.codex/AGENTS.md', records);
+    // In their own order: the app's note and the newest import fit; the oldest import is left out.
+    expect(r.notes.map((n) => n.body[0])).toEqual(['b', 'W']);
+    expect(r.dropped).toBe(2);
+    expect(r.left).toEqual([records[0].id, records[2].id]);
+    expect([...r.covered].sort()).toEqual([records[1].id, records[3].id].sort());
+  });
 });
 
 function wbHash(body: string): string {
