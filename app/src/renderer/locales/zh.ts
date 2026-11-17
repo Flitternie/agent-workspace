@@ -687,8 +687,10 @@ export const zh: Record<string, string> = {
   'Other folders': '其他文件夹',
   '{n} sessions': '{n} 个会话',
   'Open a folder…': '打开文件夹…',
-  'A folder on {host}…': '{host} 上的文件夹…',
   'Looking for folders with past sessions…': '正在查找跑过会话的目录…',
   '1 agent': '1 个 Agent',
   '1 session': '1 个会话',
+  'Search projects and folders on {host}…': '搜索 {host} 上的项目和文件夹…',
+  'Found on {host} (Claude Code / Codex sessions)': '{host} 上发现的（用 Claude Code / Codex 跑过会话的目录）',
+  'Nothing here yet: type a path below.': '这里还没有项目：在下面输入路径。',
 };

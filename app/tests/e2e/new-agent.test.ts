@@ -28,6 +28,18 @@ describe('new agent', () => {
     const shop = join(scratch, 'billing-service');
     mkdirSync(shop);
     execFileSync('git', ['init', '-q'], { cwd: shop });
+    // A machine "devbox" reached through a fake `ssh` that runs its commands here (another HOME);
+    // the app's own HOME lists it in ~/.ssh/config.
+    const home = join(scratch, 'home');
+    mkdirSync(join(home, '.ssh'), { recursive: true });
+    writeFileSync(join(home, '.ssh', 'config'), 'Host devbox\n  HostName 10.0.0.5\n  User dev\n');
+    const remoteHome = join(scratch, 'remote-home');
+    const train = join(scratch, 'gpu', 'train');
+    mkdirSync(remoteHome);
+    mkdirSync(train, { recursive: true });
+    const bin = join(scratch, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'ssh'), `#!/bin/bash\nfor a in "$@"; do [ "$a" = -G ] && { echo "hostname 10.0.0.5"; echo "user dev"; exit 0; }; done\nHOME="${remoteHome}" PATH=/usr/bin:/bin exec bash -c "\${@: -1}"\n`, { mode: 0o755 });
     const fixture = join(scratch, 'sessions.json');
     writeFileSync(
       fixture,
@@ -36,10 +48,11 @@ describe('new agent', () => {
         { provider: 'codex', nativeSessionId: 's2', cwd: shop, title: 'Add refunds', updatedAt: new Date().toISOString() },
         { provider: 'claude', nativeSessionId: 's3', cwd: join(scratch, 'ml-notes'), title: 'Read papers', updatedAt: new Date(Date.now() - 86400_000).toISOString() },
         { provider: 'claude', nativeSessionId: 's4', cwd: join(scratch, 'bot'), title: 'sub-agent', automated: true },
+        { provider: 'codex', nativeSessionId: 's5', cwd: train, host: 'devbox', title: 'Train the model', updatedAt: new Date().toISOString() },
       ]),
     );
     // The demo entry offers mock agents in the dialog.
-    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture } });
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture, HOME: home, PATH: `${bin}:${env.PATH}` } });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForSelector('.app');
@@ -57,6 +70,8 @@ describe('new agent', () => {
       .toBe(true);
     const before = (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).tasks.map((t) => t.taskId);
 
+    await invoke(page, 'ssh:setEnabled', { host: 'devbox', enabled: true });
+    await expect.poll(async () => (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).remoteHosts.find((h) => h.host === 'devbox')?.ssh, { timeout: 30_000 }).toBe('ok');
     await page.getByTestId('new-task').first().click();
     const dialog = page.getByRole('dialog');
     // The project: the one used last, shown as a button.
@@ -88,6 +103,32 @@ describe('new agent', () => {
     await page.keyboard.press('Enter');
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('billing-service');
     expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.rootPath === shop)).toBe(true);
+
+    // This Mac and the machine are separate from the first step: tabs, opened on the chosen project's place.
+    await page.getByTestId('project-current').click();
+    const placeOn = () => page.locator('[data-testid="project-place"][aria-selected="true"]').getAttribute('data-place');
+    expect(await page.getByTestId('project-place').evaluateAll((els) => els.map((e) => e.getAttribute('data-place')))).toEqual(['local', 'devbox']);
+    expect(await placeOn()).toBe('local');
+    expect((await kinds()).some((k) => k.includes('train'))).toBe(false);
+    // Tab: the machine. Only its projects and the folders where sessions ran there; a path box for others.
+    await page.keyboard.press('Tab');
+    await expect.poll(placeOn).toBe('devbox');
+    await expect.poll(async () => (await kinds()).map((k) => k.split(':')[0] + ':' + k.split(':')[1]?.slice(0, 5))).toEqual(['found:train']);
+    expect(await page.getByTestId('project-pop').innerText()).toMatch(/found on devbox/i);
+    expect(await page.getByTestId('remote-path').count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'new-agent-00b-machine.png') });
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('train');
+    expect(await page.getByTestId('project-current').innerText()).toContain('devbox');
+    expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.host === 'devbox' && p.rootPath === train)).toBe(true);
+    // Opened again, it starts on the machine; back on this Mac, the local project for the mock agent below.
+    await page.getByTestId('project-current').click();
+    expect(await placeOn()).toBe('devbox');
+    await page.keyboard.press('Tab');
+    await expect.poll(placeOn).toBe('local');
+    await page.keyboard.type('billing');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('billing-service');
     // Nothing to name: no label or title fields; the instruction is optional.
     expect(await dialog.locator('input.input').count()).toBe(0);
     await dialog.locator('label.radio').filter({ hasText: 'Mock' }).click();

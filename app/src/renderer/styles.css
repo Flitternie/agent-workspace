@@ -4889,3 +4889,17 @@ button.subtask-row:hover {
 .project-remote {
   padding: 6px 8px;
 }
+.project-places {
+  align-self: stretch;
+  flex-wrap: wrap;
+}
+.project-places button {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.dot-warn {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--needs-dot);
+}

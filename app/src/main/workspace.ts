@@ -921,6 +921,8 @@ export class Workspace {
    */
   async discoverHostSessions(host: string): Promise<NativeSessionInfo[]> {
     this.requireHost(host);
+    // Tests: the fixture's sessions on this host (see discoverAllSessions).
+    if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => s.host === host);
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
     const caps = this.hostStatus.get(host)?.capabilities;
     const adapters = Object.values(this.opts.adapters).filter((a): a is ProviderAdapter => !!a?.remote && caps?.find((c) => c.provider === a.provider)?.available !== false);
@@ -939,7 +941,7 @@ export class Workspace {
    */
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
     // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
-    if (process.env.AMW_DISCOVER_FIXTURE) return JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[];
+    if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => !s.host);
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
