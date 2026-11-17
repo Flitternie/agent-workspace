@@ -2086,7 +2086,7 @@ export class Workspace {
     this.changed();
   }
 
-  /** Notes on a machine that linking would bring in: its Claude auto-memory (user, feedback) and its own instruction files. */
+  /** Notes on a machine that linking would bring in: its user-level instruction files (Claude Code memory is project memory: not brought in). */
   private async incoming(host: string): Promise<MemoryCandidate[]> {
     const found = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
     return markCandidates(found, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
@@ -2108,7 +2108,7 @@ export class Workspace {
 
   /**
    * The first sync with a machine: its notes join the shared user memory (instruction
-   * files once, as notes the app then owns; Claude auto-memory stays in sync), its files
+   * files once, as notes the app then owns), its files
    * are backed up and the shared memory is written there.
    */
   linkMachine(host: string): Promise<{ added: number } & WriteResult> {

@@ -6,6 +6,7 @@ import { stripAppText } from './memory-writeback';
 // here writes to ~/.claude, ~/.codex, ~/AGENTS.md or a repo). Two sources:
 //  - Claude Code auto-memory: <claude dir>/projects/<encoded cwd>/memory/*.md, one
 //    note per file with YAML frontmatter (name, description, type or metadata.type).
+//    Always project memory (Claude Code loads it only in its folder).
 //  - User instruction files: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md,
 //    split into one note per top-level section so the user can pick.
 // Each note has a stable key `source|host|file|section` (host 'local' = this Mac).
@@ -65,9 +66,14 @@ export function parseFrontmatter(text: string): { meta: Record<string, string>; 
   return { meta, body: text.slice(m[0].length) };
 }
 
-/** user/feedback are about the person; project/reference belong to the folder. Untyped notes stay with their folder. */
-export function scopeForType(type: string | undefined): 'global' | 'project' {
-  return type === 'user' || type === 'feedback' ? 'global' : 'project';
+/**
+ * Claude Code keeps its memory per project folder and loads it only there, whatever the
+ * note's type (user, feedback, project, reference): so it is project memory here too.
+ * User memory comes from the user-level instruction files, notes written in the app, and
+ * notes the user promotes.
+ */
+export function scopeForType(_type: string | undefined): 'global' | 'project' {
+  return 'project';
 }
 
 const slug = (s: string) =>
@@ -265,12 +271,11 @@ export function importCandidates(state: MemoryState, picks: Array<{ candidate: M
 }
 
 /**
- * Automatic sync of user memory, from Claude Code auto-memory only: one file is one note
- * and its key, so additions, edits and deletions on a machine are unambiguous. (The
- * user's own CLAUDE.md / AGENTS.md text is imported once, when a machine is linked or by
- * hand, and then belongs to the app: no section matching.) Nothing is ever deleted or
- * overwritten here:
- * - a new file becomes a note, unless its text is already in memory or the user deleted it;
+ * Keeps notes imported from Claude Code memory in step with their files (one file is one
+ * note and its key, so edits and deletions on a machine are unambiguous). Nothing new is
+ * brought in here: Claude Code memory belongs to its project and is imported by the user.
+ * (The user's own CLAUDE.md / AGENTS.md text is imported once, when a machine is linked or
+ * by hand, and then belongs to the app.) Nothing is ever deleted or overwritten:
  * - a changed file updates its note, unless the note was edited in the app: then the
  *   file's text is kept beside it (`sourceBody`) for the user to choose;
  * - a file gone from a machine that was read retires its note (`sourceRemoved`: no longer
@@ -279,21 +284,12 @@ export function importCandidates(state: MemoryState, picks: Array<{ candidate: M
  */
 export function syncUserMemory(state: MemoryState, candidates: MemoryCandidate[], scanned: string[]): { added: number; updated: number; removed: number } {
   const counts = { added: 0, updated: 0, removed: 0 };
-  const dead = new Set(state.memoryTombstones ?? []);
-  const notes = candidates.filter((c) => c.source === 'claude-memory' && c.suggestedScope === 'global');
+  const notes = candidates.filter((c) => c.source === 'claude-memory');
   const byKey = (key: string) => state.memory.find((r) => r.importKeys?.includes(key));
   for (const c of notes) {
-    const hash = bodyHash(c.body);
     const r = byKey(c.key);
-    if (!r) {
-      if (dead.has(c.key) || dead.has(`hash:${hash}`)) continue;
-      // The same text already in memory (any scope, e.g. imported by hand as project memory): not again.
-      if (state.memory.some((m) => !m.sourceRemoved && (m.importedHash === hash || bodyHash(m.body) === hash))) continue;
-      state.memory.push(newRecord({ title: c.title, body: c.body, keys: [c.key] }, 'global', 'global'));
-      counts.added++;
-      continue;
-    }
-    if (r.scope !== 'global') continue; // imported by hand into a project: the user manages it
+    if (!r) continue;
+    const hash = bodyHash(c.body);
     if (r.sourceRemoved) {
       r.sourceRemoved = false;
       r.updatedAt = now();
@@ -314,7 +310,7 @@ export function syncUserMemory(state: MemoryState, candidates: MemoryCandidate[]
   const found = new Set(notes.map((c) => c.key));
   const seen = new Set(scanned);
   for (const r of state.memory) {
-    if (r.scope !== 'global' || r.sourceRemoved) continue;
+    if (r.sourceRemoved) continue;
     const keys = (r.importKeys ?? []).filter((k) => k.startsWith('claude-memory|'));
     if (keys.length && keys.every((k) => seen.has(keyHost(k)) && !found.has(k))) {
       r.sourceRemoved = true;

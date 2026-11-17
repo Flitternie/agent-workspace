@@ -101,14 +101,14 @@ export const zh: Record<string, string> = {
   'User memory: all projects, Claude Code and Codex, every machine': '用户记忆：所有项目、Claude Code 和 Codex、每台机器',
   // Settings › Memory › sharing with the CLIs
   '{n} notes from there joined your user memory.': '那里的 {n} 条笔记已加入你的 user memory。',
-  'Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the notes already there. After that, new notes Claude Code saves there come in by themselves. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.': '已接入的机器会把你的 user memory 写进 Claude Code 和 Codex 自己的文件，你在终端里开的 agent 也能用上。接入时会先备份这些文件，并导入那里已有的笔记；之后 Claude Code 在那里新记下的笔记会自动同步进来。这些文件里你自己写的内容不会被改动，两边都不会有任何内容被删除或覆盖。',
+  'Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the user-level notes already there (CLAUDE.md, AGENTS.md). Claude Code’s own memory belongs to its project and stays there; import it under Import… if you want it here. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.': '已接入的机器会把你的 user memory 写进 Claude Code 和 Codex 自己的文件，你在终端里开的 agent 也能用上。接入时会先备份这些文件，并导入那里已有的 user 级笔记（CLAUDE.md、AGENTS.md）。Claude Code 自己的记忆属于各自的项目，留在项目里；想在这里用，可以在「导入…」里导入。这些文件里你自己写的内容不会被改动，两边都不会有任何内容被删除或覆盖。',
+  'Notes from CLAUDE.md / AGENTS.md are copied in once, then belong to the app.': 'CLAUDE.md / AGENTS.md 里的笔记只导入一次，之后由 app 管理。',
   'Unlinking: cleaned up when it connects': '断开中：连接后清理',
   'Keep those edits (add them to user memory)': '保留这些修改（加入 user memory）',
   'Put it back': '重新加上',
   'Replace with the app’s version (backed up first)': '用 app 的版本替换（先备份）',
   'Resume sharing': '恢复同步',
   'Restore this backup?': '恢复这个备份？',
-  'Notes from CLAUDE.md / AGENTS.md are copied in once. Claude Code memory notes stay in sync: edited there, they update here; deleted there, they are retired here (not deleted).': 'CLAUDE.md / AGENTS.md 里的笔记只导入一次。Claude Code 的记忆笔记会保持同步：在那里修改，这里跟着更新；在那里删除，这里会停用（不会删除）。',
   '{file} is kept in sync by another Agent Workspace; it will not be touched.': '{file} 由另一个 Agent Workspace 同步管理，不会被改动。',
   'Before anything changes, each file is backed up in the app and next to it on that machine (~/.agent-workspace/backups). Your own text in these files is never changed; unlinking takes out only what the app added.': '修改之前，每个文件都会先备份：app 里存一份，那台机器的 ~/.agent-workspace/backups 里也存一份。这些文件里你自己写的内容不会被改动；断开时只移除 app 添加的部分。',
   'The CLIs there stop getting your user memory. Only what the app added is taken out (its line in CLAUDE.md, its section in AGENTS.md, its own user.md), each file backed up first. Your own text there stays, and the notes stay in the app.': '那里的 CLI 将不再获得你的 user memory。只会移除 app 添加的内容（CLAUDE.md 里的那一行、AGENTS.md 里的那一段、app 自己的 user.md），每个文件都先备份。你自己写的内容保留不动，笔记也仍保留在 app 中。',
@@ -359,8 +359,6 @@ export const zh: Record<string, string> = {
   'Notes the app gives to every agent it starts, with Claude Code or Codex, here or over SSH. They load when a session starts or resumes.':
     'app 启动的每个 agent 都会收到这些笔记，Claude Code 和 Codex、本机和 SSH 远程都一样。笔记在会话启动或恢复时载入。',
   'Keep user memory in sync': '自动同步用户记忆',
-  'on every linked machine (below): new user-level notes there (Claude Code memory of type user or feedback, ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md) come in, and your user memory goes out to the CLIs there. At start, when a machine connects, every 10 minutes, and right after you change a note. Your edits and deletions here are kept.':
-    '在每台已接入的机器（见下方）上同步：那里新出现的 user 级笔记（Claude Code 中 user、feedback 类型的记忆，以及 ~/.claude/CLAUDE.md、~/.codex/AGENTS.md、~/AGENTS.md）会同步进来，你的 user memory 也会写到那里的 CLI。启动时、机器连接时、每 10 分钟以及你修改笔记后都会同步。你在这里做的修改和删除会保留。',
   'Syncing…': '同步中…',
   'Last synced {time} · {machines}': '上次同步 {time} · {machines}',
   'no machine': '无机器',

@@ -70,7 +70,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     <div className="memory-share" data-testid="memory-share">
       <div className="section-label">{t('Share with the CLIs on each machine')}</div>
       <p className="muted small">
-        {t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the notes already there. After that, new notes Claude Code saves there come in by themselves. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}
+        {t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the user-level notes already there (CLAUDE.md, AGENTS.md). Claude Code’s own memory belongs to its project and stays there; import it under Import… if you want it here. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}
       </p>
       {machines.map((h) => {
         const link = snapshot.memoryShare[h];
@@ -156,7 +156,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               ) : (
                 <div className="muted small">{t('None: everything there is already in your user memory.')}</div>
               )}
-              <div className="muted small">{t('Notes from CLAUDE.md / AGENTS.md are copied in once. Claude Code memory notes stay in sync: edited there, they update here; deleted there, they are retired here (not deleted).')}</div>
+              <div className="muted small">{t('Notes from CLAUDE.md / AGENTS.md are copied in once, then belong to the app.')}</div>
               {preview.data.blocked.map((f) => (
                 <div key={f} className="warn-text small">
                   <Icon name="alert" size={12} /> {t('{file} is kept in sync by another Agent Workspace; it will not be touched.', { file: f })}

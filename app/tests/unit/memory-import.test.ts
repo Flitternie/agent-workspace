@@ -58,8 +58,8 @@ describe('parsing', () => {
     expect(parseFrontmatter('no frontmatter').meta).toEqual({});
   });
 
-  it('maps memory types to user or project memory', () => {
-    expect(['user', 'feedback', 'project', 'reference', undefined].map(scopeForType)).toEqual(['global', 'global', 'project', 'project', 'project']);
+  it('Claude Code memory is project memory, whatever its type (Claude Code loads it only in its folder)', () => {
+    expect(['user', 'feedback', 'project', 'reference', undefined].map(scopeForType)).toEqual(['project', 'project', 'project', 'project', 'project']);
   });
 
   it('encodes a folder the way Claude Code names its project dir', () => {
@@ -98,7 +98,7 @@ describe('parsing', () => {
     expect(c.map((x) => [x.file, x.suggestedScope, x.projectId, x.folderHint])).toEqual([
       ['~/.claude/projects/-Users-me-projects-agent-workspace/memory/style.md', 'project', 'p1', undefined],
       ['~/.claude/projects/-home-me-aw/memory/remote.md', 'project', undefined, '-home-me-aw'], // p2 is on devbox, not this Mac
-      ['~/.claude/projects/-Users-me-other/memory/chinese.md', 'global', undefined, undefined],
+      ['~/.claude/projects/-Users-me-other/memory/chinese.md', 'project', undefined, '-Users-me-other'], // feedback too: it belongs to that folder
       ['~/AGENTS.md', 'global', undefined, undefined],
     ]);
     expect(c[2]).toMatchObject({ key: 'claude-memory|local|~/.claude/projects/-Users-me-other/memory/chinese.md|', title: 'chinese', body: 'About chinese\n\nReply in Chinese.', memoryType: 'feedback' });
@@ -132,32 +132,36 @@ describe('import and sync', () => {
   const M2 = memoryKey('claude-memory', undefined, '~/.claude/projects/q/memory/style.md');
   const mem = (key: string, body: string, type = 'feedback') => ({ ...cand(key, body), source: 'claude-memory' as const, memoryType: type });
 
-  it('syncs Claude Code memory notes only: instruction files are imported once, by hand or when linking', () => {
+  const imported = (key = M, body = 'Reply in Chinese.', scope: 'global' | 'project' = 'project') => {
     const s = state();
-    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.'), cand(A, 'Use tabs.'), { ...mem(M2, 'Run make.'), suggestedScope: 'project' as const }], ['devbox', 'local'])).toEqual({ added: 1, updated: 0, removed: 0 });
-    expect(s.memory.map((m) => m.body)).toEqual(['Reply in Chinese.']);
-    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox'])).toEqual({ added: 0, updated: 0, removed: 0 });
+    importCandidates(s, [{ candidate: mem(key, body), scope, scopeId: scope === 'global' ? 'global' : 'p1' }]);
+    return s;
+  };
+
+  it('never brings in Claude Code memory by itself (it belongs to its project), nor instruction files', () => {
+    const s = state();
+    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.'), cand(A, 'Use tabs.'), mem(M2, 'Run make.')], ['devbox', 'local'])).toEqual({ added: 0, updated: 0, removed: 0 });
+    expect(s.memory).toEqual([]);
   });
 
-  it('follows an edit at the source', () => {
-    const s = state();
-    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
-    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese; code in English.')], ['devbox'])).toEqual({ added: 0, updated: 1, removed: 0 });
-    expect(s.memory).toHaveLength(1);
-    expect(s.memory[0].body).toBe('Reply in Chinese; code in English.');
+  it('follows an edit at the source, for project and user notes alike', () => {
+    for (const scope of ['project', 'global'] as const) {
+      const s = imported(M, 'Reply in Chinese.', scope);
+      expect(syncUserMemory(s, [mem(M, 'Reply in Chinese; code in English.')], ['devbox'])).toEqual({ added: 0, updated: 1, removed: 0 });
+      expect(s.memory).toHaveLength(1);
+      expect(s.memory[0]).toMatchObject({ body: 'Reply in Chinese; code in English.', scope });
+    }
   });
 
   it('never overwrites a note edited in the app: the source’s new text waits beside it', () => {
-    const s = state();
-    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    const s = imported();
     s.memory[0].body = 'Reply in Chinese, briefly.';
     syncUserMemory(s, [mem(M, 'Reply in Chinese; code in English.')], ['devbox']);
     expect(s.memory[0]).toMatchObject({ body: 'Reply in Chinese, briefly.', sourceBody: 'Reply in Chinese; code in English.' });
   });
 
   it('retires a note whose file is gone (never deletes it), only for machines that were read; it returns with the file', () => {
-    const s = state();
-    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
+    const s = imported();
     expect(syncUserMemory(s, [], ['local'])).toEqual({ added: 0, updated: 0, removed: 0 }); // devbox not read this time
     expect(s.memory[0].sourceRemoved).toBeFalsy();
     expect(syncUserMemory(s, [], ['devbox'])).toEqual({ added: 0, updated: 0, removed: 1 });
@@ -167,17 +171,6 @@ describe('import and sync', () => {
     expect(s.memory[0].sourceRemoved).toBe(false);
   });
 
-  it('never re-imports a note the user deleted, nor text already in memory (any scope)', () => {
-    const s = state();
-    syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']);
-    tombstone(s, s.memory[0]);
-    s.memory = [];
-    expect(syncUserMemory(s, [mem(M, 'Reply in Chinese.')], ['devbox']).added).toBe(0);
-    const t = state();
-    importCandidates(t, [{ candidate: cand(A, 'Run make.'), scope: 'project', scopeId: 'p1' }]);
-    expect(syncUserMemory(t, [mem(M2, 'Run make.')], ['local']).added).toBe(0);
-    expect(t.memory).toHaveLength(1);
-  });
 });
 
 describe('workspace scan over SSH (local sh, temp HOME)', () => {
@@ -206,19 +199,22 @@ describe('workspace scan over SSH (local sh, temp HOME)', () => {
           ['devbox', '~/AGENTS.md', 'Remote', 'global', undefined],
           ['devbox', '~/AGENTS.md', 'Tests', 'global', undefined],
           ['local', `~/.claude/projects/${encodeClaudeCwd(repo)}/memory/build.md`, 'build', 'project', project.projectId],
-          ['local', `~/.claude/projects/${encodeClaudeCwd(repo)}/memory/lang.md`, 'lang', 'global', undefined],
+          ['local', `~/.claude/projects/${encodeClaudeCwd(repo)}/memory/lang.md`, 'lang', 'project', project.projectId],
           ['local', '~/.codex/AGENTS.md', 'Tests', 'global', undefined],
         ].sort(),
       );
 
-      // Only linked machines sync, and only Claude Code memory (instruction files come in when linking).
+      // Sync brings nothing in by itself: Claude Code memory is the project's, imported by the user.
       ws.updateSettings({ memoryLinks: { local: { linkedAt: 'earlier' }, devbox: { linkedAt: 'earlier' } } });
       const status = await ws.syncMemory(true);
-      expect(status).toMatchObject({ added: 1, updated: 0, removed: 0, errors: [] });
-      expect(ws.snapshot().memory.map((m) => m.title)).toEqual(['lang']);
+      expect(status).toMatchObject({ added: 0, updated: 0, removed: 0, errors: [] });
+      expect(ws.snapshot().memory).toEqual([]);
 
-      const build = (await ws.scanMemoryImports()).candidates.find((c) => c.title === 'build')!;
-      expect(ws.importMemory([{ key: build.key, scope: 'project', projectId: project.projectId }])).toBe(1);
+      const found = (await ws.scanMemoryImports()).candidates;
+      const build = found.find((c) => c.title === 'build')!;
+      const langC = found.find((c) => c.title === 'lang')!;
+      // The user may still keep one as user memory, on purpose.
+      expect(ws.importMemory([{ key: build.key, scope: 'project', projectId: project.projectId }, { key: langC.key, scope: 'global' }])).toBe(2);
 
       const task = { taskId: 't1', projectId: project.projectId } as Parameters<typeof memoryForTask>[0];
       const text = instructionsFor(task, memoryForTask(task, ws.snapshot().memory))!;

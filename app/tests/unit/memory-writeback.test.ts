@@ -264,7 +264,7 @@ describe('on an SSH host', () => {
 });
 
 describe('linking a machine from the workspace', () => {
-  it('brings its notes in, gives app agents user memory once, follows Claude memory, never deletes', async () => {
+  it('brings its user-level notes in (not Claude Code’s project memory), gives app agents user memory once, follows an imported Claude note, never deletes', async () => {
     const { Workspace } = await import('../../src/main/workspace');
     const { memoryForTask } = await import('../../src/main/memory');
     const memFile = '.claude/projects/-w-proj/memory/lang.md';
@@ -274,11 +274,17 @@ describe('linking a machine from the workspace', () => {
     const ws = new Workspace({ dataDir: data(), adapters: {}, home: h });
     try {
       const preview = await ws.linkPreview('local');
-      expect(preview.incoming.map((c) => c.title).sort()).toEqual(['My notes', 'Style', 'lang']);
+      // A feedback note in a project's Claude memory stays with that project.
+      expect(preview.incoming.map((c) => c.title).sort()).toEqual(['My notes', 'Style']);
       expect(read(h, '.claude/CLAUDE.md')).toBe(MINE); // preview changes nothing
 
       const r = await ws.linkMachine('local');
-      expect(r).toMatchObject({ added: 3, errors: [] });
+      expect(r).toMatchObject({ added: 2, errors: [] });
+      expect(read(h, '.agent-workspace/memory/user.md')).not.toContain('User-facing replies in Chinese');
+      // The user keeps that note as user memory on purpose: from then on it is shared and followed.
+      const lang = (await ws.scanMemoryImports()).candidates.find((c) => c.title === 'lang')!;
+      expect(ws.importMemory([{ key: lang.key, scope: 'global' }])).toBe(1);
+      await ws.pushMemory();
       const userMd = read(h, '.agent-workspace/memory/user.md');
       expect(userMd).toContain('Short replies.'); // from AGENTS.md, for Claude
       expect(userMd).not.toContain('Prefer short answers'); // Claude reads its own CLAUDE.md
