@@ -48,6 +48,10 @@ export interface Task {
   saidSinceLabel?: number;
   /** When the user last messaged, opened, answered or renamed this agent (orders the sidebar). */
   lastUserActivityAt?: string;
+  /** Set aside by the user: out of the Overview and folded into its team's idle row, dot hollow, until it works, asks, fails or is messaged again. Its session keeps running. */
+  setAside?: boolean;
+  /** Finished a turn the user has not looked at since (a green dot); opening the agent clears it. */
+  unread?: boolean;
   /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */
   subtasks?: SubtaskInfo[];
   projectId: string;
@@ -391,6 +395,8 @@ export interface WorkspaceSnapshot {
   dataDir: string;
   /** Tasks with a live provider session right now (others resume on demand). */
   connectedTaskIds: string[];
+  /** Live Claude sessions with Remote Control on: taskId → the session's link (claude.ai/code, the Claude app). */
+  remoteControl: Record<string, string>;
 }
 
 export interface DispatchResult {

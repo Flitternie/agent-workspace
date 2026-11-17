@@ -181,6 +181,11 @@ export function App() {
     if (id && snapshot?.tasks.some((t) => t.taskId === id)) void call('task:viewed', { taskId: id }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, selectedId]);
+  // Finishing while you are looking at it: already seen.
+  const focusedUnread = snapshot?.tasks.find((t) => t.taskId === focusId)?.unread;
+  useEffect(() => {
+    if (focusId && focusedUnread) void call('task:viewed', { taskId: focusId }).catch(() => {});
+  }, [focusId, focusedUnread]);
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);
@@ -429,7 +434,7 @@ export function App() {
           </>
         )}
 
-        <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} mainTranscript={snapshot.main ? (transcripts[snapshot.main.taskId] ?? []) : []} />
+        <VoiceDock snapshot={snapshot} focusedTaskId={settingsOpen ? null : focusTask ? focusId : selectedId} onDispatched={flashTile} onView={setFocusId} mainTranscript={snapshot.main ? (transcripts[snapshot.main.taskId] ?? []) : []} onSettings={() => setSettingsOpen(true)} />
         </div>
         </SideSlot.Provider>
         {/* The agent view's preview and memory panels, full height on the right. */}

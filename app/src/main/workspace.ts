@@ -98,6 +98,8 @@ export interface WorkspaceOptions {
 export class Workspace {
   readonly store: JsonStore;
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
+  /** Remote Control links, for the live session that turned it on (gone with that session). */
+  private remote = new Map<string, { localId: string; url: string }>();
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
@@ -428,6 +430,7 @@ export class Workspace {
       main: d.mainAgent,
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
+      remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
     };
   }
 
@@ -690,9 +693,10 @@ export class Workspace {
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
   }
 
-  /** The user did something with this agent: it moves up in the sidebar. */
+  /** The user did something with this agent: it moves up in the sidebar (and is no longer set aside). */
   private touched(t: Task): void {
     t.lastUserActivityAt = now();
+    t.setAside = undefined;
     // An old role name: label the work now that it is in use again.
     if (t.labelStale) this.relabelFromHistory(t);
   }
@@ -701,9 +705,25 @@ export class Workspace {
    * The user opened this agent's view. Looking is not working with it, so the order stays as it is
    * (a click must not reshuffle the list under the pointer); an old name is relabelled now, though.
    */
+  /**
+   * Set aside (or back): out of the Overview and folded into its team's idle row until it works,
+   * asks, fails or is messaged. Nothing is stopped; it is about what the user is paying attention to.
+   */
+  setAside(taskId: string, on: boolean): void {
+    const t = this.task(taskId);
+    if (this.store.data.mainAgent?.taskId === taskId) throw new Error('The main agent cannot be set aside.');
+    t.setAside = on || undefined;
+    this.changed();
+  }
+
   markViewed(taskId: string): void {
     const t = this.findTask(taskId);
     if (t?.labelStale) this.relabelFromHistory(t);
+    // Seen: its result is no longer new (the dot turns grey). It stays where it is; seeing is not setting aside.
+    if (t?.unread) {
+      t.unread = undefined;
+      this.changed();
+    }
   }
 
   rename(taskId: string, name: string): void {
@@ -1222,6 +1242,26 @@ export class Workspace {
    * The model for this agent from its next turn (unset: the CLI's default). Kept on the
    * task, so a resumed session runs on it too; a running turn keeps its model.
    */
+  /**
+   * Remote Control for a local Claude agent: on connects its session (starting it if needed) so the
+   * Claude app and claude.ai/code can drive it; off disconnects them, the session keeps running here.
+   */
+  async setRemoteControl(taskId: string, on: boolean): Promise<string | undefined> {
+    const task = this.task(taskId);
+    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this Mac.');
+    let live = this.live.get(taskId);
+    if (!live) {
+      if (!on) return undefined;
+      live = await this.connect(taskId);
+    }
+    if (!live.session.setRemoteControl) throw new Error('This session cannot turn on Remote Control.');
+    const res = await live.session.setRemoteControl(on, task.name);
+    if (on) this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
+    else this.remote.delete(taskId);
+    this.changed();
+    return res.url;
+  }
+
   async setModel(taskId: string, model: string | undefined): Promise<void> {
     const task = this.task(taskId);
     task.model = model;
@@ -1283,6 +1323,8 @@ export class Workspace {
         task.suggestion = clip(event.text, 500);
         break;
       case 'turnStarted':
+        // Working again: back among the active.
+        task.setAside = undefined;
         task.suggestion = undefined;
         task.subtasks = undefined;
         live.turnActive = true;
@@ -1383,6 +1425,7 @@ export class Workspace {
         const text = event.finalText?.trim() ?? '';
         if (task === this.store.data.mainAgent) {
           task.status = 'done';
+          task.unread = true;
           task.summary = text ? summaryFor(text) : 'Finished.';
           break;
         }
@@ -1395,6 +1438,7 @@ export class Workspace {
           this.addAttention({ taskId, kind: 'question', headline: headlineFor(text), details: text });
         } else {
           task.status = this.hasOpenNative(taskId) ? 'waiting_for_user' : 'done';
+          task.unread = true;
           task.summary = text ? summaryFor(text) : 'Finished the turn.';
           this.addAttention({ taskId, kind: 'completion', headline: text ? headlineFor(text) : 'Finished the turn.', details: text });
         }
@@ -1498,6 +1542,9 @@ export class Workspace {
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
     this.store.data.attention.push(item);
+    // Anything but a finished report needs the user: an agent they set aside comes back.
+    const target = this.findTask(a.taskId);
+    if (target && a.kind !== 'completion') target.setAside = undefined;
     // The main agent's conversation lists what workers need from the user (a note, not a model turn).
     const main = this.store.data.mainAgent;
     const worker = this.store.data.tasks.find((t) => t.taskId === a.taskId);

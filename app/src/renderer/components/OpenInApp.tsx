@@ -81,12 +81,12 @@ export function OpenInApp({
   return (
     <span className={`open-in${compact ? ' compact' : ''}`} ref={box} data-testid={path ? 'open-file-in' : 'open-folder-in'}>
       {main ? (
-        <button className="open-in-main" onClick={() => run(main)} title={label(main)} aria-label={label(main)} data-testid="open-in-main" data-app={main.id}>
+        <button className="open-in-main" onClick={() => run(main)} title={iconOnly ? undefined : label(main)} data-tip={iconOnly ? t('Open') : undefined} aria-label={label(main)} data-testid="open-in-main" data-app={main.id}>
           {main.icon ? <img src={main.icon} alt="" width={16} height={16} /> : <Icon name="external" size={13} />}
           {compact || iconOnly ? null : <span className="open-in-label">{label(main)}</span>}
         </button>
       ) : null}
-      <button className="open-in-more" aria-label={t('Open with…')} title={t('Open with…')} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="open-in-more">
+      <button className="open-in-more" aria-label={t('Open with…')} title={iconOnly ? undefined : t('Open with…')} data-tip={iconOnly ? t('Open with…') : undefined} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="open-in-more">
         <Icon name="chevron" size={11} />
       </button>
       {open ? (

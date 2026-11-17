@@ -12,6 +12,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
+import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
@@ -193,24 +194,29 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
           </div>
           <div className="focus-actions">
+            {/* Permissions: a menu with its mode's name; in a narrow agent column the same menu behind a shield icon. */}
             {isMainAgent(task) ? null : (
-            <select
-              className="input select perm-select"
-              value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
-              title={t('Permissions')}
-              aria-label={t('Permissions')}
-              data-testid="task-permission"
-              onChange={(e) => run(() => call('task:setPermissionMode', { taskId: task.taskId, mode: e.target.value as PermissionMode }))}
-            >
-              {PERMISSION_MODES.map((m) => (
-                <option key={m.id} value={m.id} title={t(m.detail)}>
-                  {t(m.label)}
-                </option>
-              ))}
-            </select>
+              <span className="perm" data-tip={t('Permissions')}>
+                <span className="perm-icon btn btn-icon" aria-hidden>
+                  <Icon name="shield" />
+                </span>
+                <select
+                  className="input select perm-select"
+                  value={task.permissionMode ?? snapshot.settings.permissionMode ?? 'auto'}
+                  aria-label={t('Permissions')}
+                  data-testid="task-permission"
+                  onChange={(e) => run(() => call('task:setPermissionMode', { taskId: task.taskId, mode: e.target.value as PermissionMode }))}
+                >
+                  {PERMISSION_MODES.map((m) => (
+                    <option key={m.id} value={m.id} title={t(m.detail)}>
+                      {t(m.label)}
+                    </option>
+                  ))}
+                </select>
+              </span>
             )}
             {task.status === 'running' && connected ? (
-              <button className="btn btn-icon" title={t('Interrupt')} aria-label={t('Interrupt')} onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
+              <button className="btn btn-icon" data-tip={t('Interrupt')} aria-label={t('Interrupt')} onClick={() => run(() => call('task:interrupt', { taskId: task.taskId }))}>
                 <Icon name="pause" />
               </button>
             ) : null}
@@ -219,17 +225,19 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 className="btn btn-icon"
                 onClick={() => run(() => call('task:resume', { taskId: task.taskId }))}
                 aria-label={session?.nativeSessionId ? t('Resume session') : t('Start session')}
-                title={`${session?.nativeSessionId ? t('Resume session') : t('Start session')} — ${t('Re-enter the provider-persisted conversation. This does not attach to a process running elsewhere.')}`}
+                data-tip={session?.nativeSessionId ? t('Resume') : t('Start')}
               >
                 <Icon name="play" />
               </button>
             ) : (
-              <button className="btn btn-icon" title={t('Stop')} aria-label={t('Stop')} onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
+              <button className="btn btn-icon" data-tip={t('Stop')} aria-label={t('Stop')} onClick={() => run(() => call('task:stop', { taskId: task.taskId }))}>
                 <Icon name="power" />
               </button>
             )}
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
             {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
+            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
+            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
             {canFork ? (
               <button
                 className="btn btn-icon"
@@ -237,11 +245,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 data-testid="fork-task"
                 disabled={task.status === 'running' || task.status === 'starting'}
                 onClick={() => setForking(true)}
-                title={
-                  task.status === 'running' || task.status === 'starting'
-                    ? `${t('Fork')} — ${t('Fork once this turn ends.')}`
-                    : `${t('Fork')} — ${t('Start a new agent from a copy of this conversation, now or from an earlier prompt.')}`
-                }
+                data-tip={task.status === 'running' || task.status === 'starting' ? t('Fork after this turn') : t('Fork')}
               >
                 <Icon name="branch" />
               </button>
@@ -249,7 +253,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {/* The files changed in the latest turn (a count while there are some). */}
             <button
               className={`btn btn-icon btn-badged${showChanges && !preview ? ' btn-pressed' : ''}`}
-              title={t('Changed this turn')}
+              data-tip={t('Changes')}
               aria-label={t('Changed this turn')}
               aria-pressed={showChanges && !preview}
               data-testid="show-changes"
@@ -265,7 +269,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </button>
             <button
               className={`btn btn-icon${showMemory && !preview && !showChanges ? ' btn-pressed' : ''}`}
-              title={t('Memory')}
+              data-tip={t('Memory')}
               aria-label={t('Memory')}
               onClick={() => {
                 const on = preview || showChanges ? true : !showMemory;
@@ -277,12 +281,25 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             >
               <Icon name="note" />
             </button>
+            {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
+            {isMainAgent(task) ? null : (
+              <button
+                className={`btn btn-icon${task.setAside ? ' btn-pressed' : ''}`}
+                aria-pressed={!!task.setAside}
+                aria-label={task.setAside ? t('Set aside (click to bring back)') : t('Set aside')}
+                data-tip={task.setAside ? t('Bring back') : t('Set aside')}
+                data-testid="set-aside"
+                onClick={() => run(() => call('task:setAside', { taskId: task.taskId, on: !task.setAside }))}
+              >
+                <Icon name="moon" />
+              </button>
+            )}
             {isMainAgent(task) ? null : (
             <button
               className="btn btn-icon"
               data-testid="remove-task"
               aria-label={t('Remove')}
-              title={`${t('Remove')} — ${t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}`}
+              data-tip={t('Remove')}
               onClick={() => {
                 setRemoving(true);
               }}

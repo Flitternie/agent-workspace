@@ -398,6 +398,16 @@ pre code {
 .status-done .dot {
   background: var(--ok);
 }
+/* Finished, and you have looked: still listed, no longer new. The row itself may carry the
+   agent's real status class, so the dot's own status wins (.status.status-*). */
+.status.status-seen .dot {
+  background: var(--text-3);
+  opacity: 0.55;
+}
+.status.status-idle .dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
 .status-waiting_for_user .dot {
   background: var(--needs-dot);
 }
@@ -1326,7 +1336,8 @@ body.resizing .sidebar-resizer {
 .focus-head {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
+  /* One row; a narrow agent column switches to two (see the container rule below). */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 12px;
   min-height: 64px;
@@ -1335,16 +1346,31 @@ body.resizing .sidebar-resizer {
   background: var(--panel);
 }
 .focus-ident {
-  /* Room for the name and its chips; when the actions don't fit beside it they take the next row. */
-  flex: 1 1 200px;
+  /* Whatever the actions leave; the name shortens (ellipsis) rather than run under them. */
+  flex: 1 1 0;
   min-width: 0;
 }
 .focus-name {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 15px;
   font-weight: 650;
+}
+.focus-name > * {
+  flex: none;
+}
+.focus-name > .task-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-meta {
+  min-width: 0;
+  overflow: hidden;
 }
 .focus-meta {
   display: flex;
@@ -1775,6 +1801,7 @@ body.resizing iframe {
 .dock {
   flex: none;
   position: relative;
+  container: dock / inline-size;
   border-top: 1px solid var(--border);
   background: var(--panel);
   padding: 10px 16px;
@@ -1818,8 +1845,10 @@ body.resizing iframe {
   box-shadow: 0 0 0 1.5px var(--panel-2);
 }
 .mic-state {
-  width: 250px;
-  flex: none;
+  /* As wide as its (short) status, up to 250px; gives way to the text box when the bar is narrow. */
+  flex: 0 1 auto;
+  max-width: 250px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1836,6 +1865,19 @@ body.resizing iframe {
 .mic-label.state-denied {
   color: var(--muted-mic);
   font-weight: 500;
+}
+/* Voice simply not set up yet: quiet grey, not an alarm. */
+.mic-label.unset {
+  color: var(--text-3);
+}
+.mic-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mic-setup {
+  flex: none;
 }
 .live-dot {
   width: 8px;
@@ -1863,7 +1905,8 @@ body.resizing iframe {
   background: var(--live);
 }
 .dock-input {
-  flex: 1;
+  /* Claims its width before the status beside it does. */
+  flex: 1 1 200px;
   position: relative;
   min-width: 0;
 }
@@ -2593,9 +2636,6 @@ details[open] > summary .tool-more {
 @media (max-width: 1180px) {
   .memory {
     width: 240px;
-  }
-  .mic-state {
-    width: 180px;
   }
 }
 
@@ -4291,8 +4331,22 @@ button.subtask-row:hover {
   background: #a51f25;
 }
 
-/* A narrower agent column (the side panel open): the status keeps only its dot, so the header stays one row in line with the side panel's header. */
+/* A narrower agent column (the side panel open): the status keeps only its dot and the provider tag goes (the model names it), so the header stays one row in line with the side panel's header. */
 @container focus-main (max-width: 860px) {
+  /* The permission menu shrinks to its icon; the select stays on top (invisible) so a click opens it. */
+  .focus-actions .perm {
+    width: 30px;
+  }
+  .focus-actions .perm .perm-icon {
+    display: inline-flex;
+  }
+  .focus-actions .perm .perm-select {
+    position: absolute;
+    inset: 0;
+    width: 30px;
+    opacity: 0;
+    cursor: pointer;
+  }
   .focus-name .status-text,
   .focus-name .tag[class*="provider-"] {
     display: none;
@@ -4306,6 +4360,84 @@ button.subtask-row:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Remote Control: the phone button in the agent header, a green dot while on, and its popover. */
+.remote-control {
+  position: relative;
+  display: inline-flex;
+}
+.remote-control .btn {
+  position: relative;
+}
+.remote-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live);
+}
+.remote-control .btn .remote-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.remote-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 320px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+.remote-pop p {
+  margin: 0;
+  line-height: 1.5;
+}
+.remote-pop-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.remote-pop-title {
+  padding-right: 22px;
+}
+.remote-off:hover:not(:disabled) {
+  color: var(--risk);
+}
+.remote-pop-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.remote-link {
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.remote-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.remote-actions a.btn {
+  color: inherit;
+  text-decoration: none;
 }
 
 /* ---------------------------------------------------------------- preview rendering */
@@ -4556,4 +4688,103 @@ button.subtask-row:hover {
   align-items: center;
   gap: 8px;
   margin-top: 2px;
+}
+
+/* The permission menu (see the narrow agent column rule for its icon form). */
+.perm {
+  position: relative;
+  display: inline-flex;
+}
+.perm .perm-icon {
+  display: none;
+  pointer-events: none;
+}
+
+/* One-word hover labels on the agent header's buttons: quick (not the system's one-second title),
+   under the button; the rightmost ones open leftwards so they stay in the window. */
+.focus-actions [data-tip] {
+  position: relative;
+}
+.focus-actions [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.focus-actions [data-tip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.25s;
+}
+.focus-actions > :nth-last-child(-n + 2)[data-tip]::after,
+.focus-actions > :nth-last-child(-n + 2) [data-tip]::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+/* Not over an open menu or popover. */
+.focus-actions :is(.remote-control, .open-in):has(.remote-pop, .open-in-menu) [data-tip]::after {
+  display: none;
+}
+
+/* Too narrow for the name and the buttons side by side: the buttons become a second row, under the
+   name and lined up with it (the avatar is 40px, then the 12px gap). */
+@container focus-main (max-width: 610px) {
+  .focus-head {
+    flex-wrap: wrap;
+  }
+  .focus-ident {
+    flex-basis: calc(100% - 52px);
+  }
+  .focus-actions {
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    margin-left: 52px;
+    gap: 3px;
+  }
+  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview). */
+  .focus-actions .btn.btn-icon,
+  .focus-actions .perm,
+  .focus-actions .perm .perm-select {
+    width: 28px;
+  }
+  .focus-actions .open-in-main {
+    padding: 0 5px;
+  }
+  .focus-actions .open-in-more {
+    padding: 0 3px;
+  }
+  .focus-actions > :nth-last-child(-n + 2)[data-tip]::after,
+  .focus-actions > :nth-last-child(-n + 2) [data-tip]::after {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
+
+/* A narrow voice bar (beside a preview in a small window): the status keeps only its "Set up" link
+   (the mic's slash already says it is off) and the side button only its icon. */
+@container dock (max-width: 560px) {
+  .mic-label.unset .mic-label-text {
+    display: none;
+  }
+  .dock-side .btn-text {
+    display: none;
+  }
+  .dock-bar {
+    gap: 8px;
+  }
 }

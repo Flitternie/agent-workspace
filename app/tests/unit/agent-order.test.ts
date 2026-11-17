@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fillSlots, IDLE_AFTER_MS, needsYou, overviewCandidates, rank, RECENT_MS, slotsFor, teams, tierOf, visibleOrder } from '../../src/shared/agent-order';
+import { fillSlots, IDLE_AFTER_MS, isSetAside, needsYou, overviewCandidates, rank, RECENT_MS, slotsFor, teams, tierOf, visibleOrder } from '../../src/shared/agent-order';
 import type { AttentionItem, Task } from '../../src/shared/types';
 
 const NOW = Date.parse('2026-11-14T12:00:00Z');
@@ -102,5 +102,20 @@ describe('agent order', () => {
     expect(fillSlots(['r1', 'asking'], rank([r2, asking], open), open, 2)).toEqual(['r2', 'asking']);
     // A smaller layout drops the least urgent tiles.
     expect(fillSlots(['r1', 'r2', 'asking'], rank([r1, r2, asking], open), open, 1)).toEqual(['asking']);
+  });
+
+  it('set aside: folded under idle and out of the Overview until it works or needs you', () => {
+    const fresh = { updatedAt: ago(10 * 60_000), lastUserActivityAt: ago(10 * 60_000) };
+    const tasks = [task('aside', { status: 'done', setAside: true, ...fresh }), task('kept', { status: 'done', ...fresh }), task('asking', { status: 'waiting_for_user', setAside: true, ...fresh }), task('working', { status: 'running', setAside: true, ...fresh })];
+    const open = [ask('aside', 'completion', 5), ask('asking', 'question', 2)];
+    const [team] = teams(tasks, [{ projectId: 'p1', name: 'shop' }], open, NOW);
+    expect(team.idle.map((t) => t.taskId)).toEqual(['aside']);
+    expect(team.members.map((t) => t.taskId).sort()).toEqual(['asking', 'kept', 'working']);
+    expect(overviewCandidates(tasks, open, NOW).map((t) => t.taskId)).not.toContain('aside');
+    // Asking you or working outranks the user's "set aside".
+    expect(isSetAside(tasks[2], open)).toBe(false);
+    expect(isSetAside(tasks[3], open)).toBe(false);
+    // Seeing a result is not setting aside: a seen, recent agent stays listed.
+    expect(team.members.map((t) => t.taskId)).toContain('kept');
   });
 });

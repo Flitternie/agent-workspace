@@ -66,6 +66,7 @@ export function VoiceDock({
   onDispatched,
   onView,
   mainTranscript,
+  onSettings,
 }: {
   snapshot: WorkspaceSnapshot;
   focusedTaskId: string | null;
@@ -73,6 +74,8 @@ export function VoiceDock({
   onView: (taskId: string) => void;
   /** The main agent's conversation, for the reply panel above the bar. */
   mainTranscript: TranscriptItem[];
+  /** Opens Settings (where a speech model is chosen). */
+  onSettings?: () => void;
 }) {
   const [mic, setMic] = useState<MicState>('off');
   const now = useTick(2000);
@@ -512,7 +515,7 @@ export function VoiceDock({
           : mic === 'denied'
             ? tr('Microphone blocked — allow it in System Settings › Privacy › Microphone')
             : !stt
-              ? tr('Voice off — choose a speech model in Settings; typing still works')
+              ? tr('Voice off')
               : mode === 'hold'
                 ? tr('Hold {keys} to talk', { keys })
                 : mode === 'toggle'
@@ -666,9 +669,15 @@ export function VoiceDock({
           {!live ? <span className="mic-slash" aria-hidden /> : null}
         </button>
         <div className="mic-state">
-          <div className={`mic-label state-${mic}`}>
+          <div className={`mic-label state-${mic}${!stt && !hint ? ' unset' : ''}`} title={!stt && !hint ? tr('Choose a speech model in Settings to talk to your agents. Typing works without one.') : undefined} data-testid="mic-label">
             {live ? <span className="live-dot" aria-hidden /> : null}
-            {micLabel}
+            <span className="mic-label-text">{micLabel}</span>
+            {/* Not set up yet (not an error): one click to where it is set up. */}
+            {!stt && !hint && onSettings ? (
+              <button className="link small mic-setup" onClick={onSettings} data-testid="voice-setup">
+                {tr('Set up')}
+              </button>
+            ) : null}
           </div>
           {live ? (
             <div className="meter" aria-hidden>
@@ -709,12 +718,12 @@ export function VoiceDock({
           </span>
         </div>
         {snapshot.main ? (
-          <button className={`btn${showMain ? ' btn-pressed' : ''}`} onClick={() => setShowMain(!showMain)} data-testid="main-toggle">
-            <Icon name="spark" /> {tr('Main agent')}
+          <button className={`btn dock-side${showMain ? ' btn-pressed' : ''}`} onClick={() => setShowMain(!showMain)} title={tr('Main agent')} data-testid="main-toggle">
+            <Icon name="spark" /> <span className="btn-text">{tr('Main agent')}</span>
           </button>
         ) : (
-          <button className={`btn${showLog ? ' btn-pressed' : ''}`} onClick={() => setShowLog(!showLog)} disabled={!snapshot.coordinator.length}>
-            <Icon name="spark" /> {tr('Coordinator')}
+          <button className={`btn dock-side${showLog ? ' btn-pressed' : ''}`} onClick={() => setShowLog(!showLog)} title={tr('Coordinator')} disabled={!snapshot.coordinator.length}>
+            <Icon name="spark" /> <span className="btn-text">{tr('Coordinator')}</span>
           </button>
         )}
       </div>

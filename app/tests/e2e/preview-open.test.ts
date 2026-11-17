@@ -92,7 +92,7 @@ describe('preview and open with…', () => {
     expect(launches()[0].args[1]).toMatch(/Cursor\.app$/);
     expect(launches()[0].args[2]).toBe(root);
     // Remembered: the main button now opens in Cursor in one click.
-    await expect.poll(() => page.getByTestId('open-folder-in').getByTestId('open-in-main').getAttribute('title')).toContain('Cursor');
+    await expect.poll(() => page.getByTestId('open-folder-in').getByTestId('open-in-main').getAttribute('aria-label')).toContain('Cursor');
 
     // Agent A: a path:line in its message previews at that line, highlighted.
     await row('Paths').click();
@@ -126,6 +126,10 @@ describe('preview and open with…', () => {
     expect((await box('[data-testid="file-preview"]')).top).toBe(0);
     expect((await box('[data-testid="file-preview"]')).bottom).toBe(900);
     expect(Math.abs((await box('.preview-top')).height - (await box('.focus-head')).height)).toBeLessThanOrEqual(1);
+    // In the narrow agent column the permission menu is its shield icon, and still a working menu.
+    expect(Math.round((await box('.perm')).height)).toBe(30);
+    await page.getByTestId('task-permission').selectOption('ask');
+    await expect.poll(async () => (await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)?.permissionMode).toBe('ask');
     expect((await box('.dock')).left).toBeLessThan((await box('[data-testid="file-preview"]')).left);
 
     // The same file at its line in Cursor: the editor's own CLI with file:line.

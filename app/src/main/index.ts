@@ -162,6 +162,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
+  'task:setAside': (i: { taskId: string; on: boolean }) => workspace.setAside(i.taskId, i.on),
+  'task:remoteControl': (i: { taskId: string; on: boolean }) => workspace.setRemoteControl(i.taskId, i.on),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
   'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),
@@ -305,10 +307,19 @@ function wireEvents(): void {
   });
 }
 
+/**
+ * Automated tests run the app in the background (AMW_BACKGROUND=1): no window on screen, no Dock icon,
+ * never the frontmost app, so a test run does not take the keyboard from whoever is typing. The page
+ * still renders and runs its timers as if shown.
+ */
+const background = process.env.AMW_BACKGROUND === '1';
+if (background && process.platform === 'darwin') app.setActivationPolicy('accessory');
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
     height: 920,
+    ...(background ? { show: false, paintWhenInitiallyHidden: true } : {}),
     minWidth: 900,
     minHeight: 600,
     title: demoMode ? 'Agent Workspace — Demo' : 'Agent Workspace',
@@ -326,6 +337,8 @@ function createWindow(): void {
       autoplayPolicy: 'no-user-gesture-required',
       // Chromium's built-in PDF viewer, for PDF previews (no PDF library bundled).
       plugins: true,
+      // Hidden in the background mode, it must keep rendering and running timers as if on screen.
+      ...(background ? { backgroundThrottling: false } : {}),
     },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {

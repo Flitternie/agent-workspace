@@ -10,6 +10,16 @@ import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
  * Always-visible participant list. In Focus it doubles as the rail that keeps
  * every other agent's pending request in view.
  */
+/**
+ * The row's dot: green only for a result you have not looked at (grey once seen; it stays listed),
+ * hollow for an agent you set aside, as for one that is stopped.
+ */
+function dotStatus(t: Task): string {
+  if (t.setAside && (t.status === 'done' || t.status === 'idle')) return 'idle';
+  if (t.status === 'done' && !t.unread) return 'seen';
+  return t.status;
+}
+
 export function Sidebar({
   snapshot,
   focusId,
@@ -86,7 +96,7 @@ export function Sidebar({
           <span className="agent-row-name">
             <AgentName task={t} />
             {n ? <span className="kbd-hint">⌘{n}</span> : null}
-            <span className={`status status-${t.status}`}>
+            <span className={`status status-${dotStatus(t)}`} data-testid="row-dot" data-dot={dotStatus(t)}>
               <span className="dot" aria-label={tr(STATUS_LABEL[t.status])} />
             </span>
           </span>

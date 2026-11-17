@@ -131,6 +131,10 @@ describe('preview rendering', () => {
       // Coloured by Shiki, one row per line with its number.
       await expect.poll(() => page.locator('[data-testid="preview-code"] [data-line]').count()).toBe(CODE.replace(/\n$/, '').split('\n').length);
       await expect.poll(() => page.locator('[data-testid="preview-code"] [data-line="13"] span[style*="color"]').count()).toBeGreaterThan(0);
+      // Its styles apply (a lost brace in styles.css once nested them away): monospace rows, a gutter apart from the code.
+      const look = await page.locator('[data-testid="preview-code"] [data-line="1"]').evaluate((row) => ({ font: getComputedStyle(row).fontFamily, flex: getComputedStyle(row).display, gutter: getComputedStyle(row.querySelector('.ln')!).position }));
+      expect(look.font).toMatch(/mono|Menlo|Monaco|Courier/i);
+      expect(look).toMatchObject({ flex: 'flex', gutter: 'sticky' });
     }
     await show('notes.md');
     await shot('markdown');
