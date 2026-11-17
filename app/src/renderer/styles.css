@@ -1336,7 +1336,8 @@ body.resizing .sidebar-resizer {
 .focus-head {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
+  /* One row; a narrow agent column switches to two (see the container rule below). */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 12px;
   min-height: 64px;
@@ -1345,16 +1346,31 @@ body.resizing .sidebar-resizer {
   background: var(--panel);
 }
 .focus-ident {
-  /* Room for the name and its chips; when the actions don't fit beside it they take the next row. */
-  flex: 1 1 200px;
+  /* Whatever the actions leave; the name shortens (ellipsis) rather than run under them. */
+  flex: 1 1 0;
   min-width: 0;
 }
 .focus-name {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 15px;
   font-weight: 650;
+}
+.focus-name > * {
+  flex: none;
+}
+.focus-name > .task-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-meta {
+  min-width: 0;
+  overflow: hidden;
 }
 .focus-meta {
   display: flex;
@@ -4707,4 +4723,40 @@ button.subtask-row:hover {
 /* Not over an open menu or popover. */
 .focus-actions :is(.remote-control, .open-in):has(.remote-pop, .open-in-menu) [data-tip]::after {
   display: none;
+}
+
+/* Too narrow for the name and the buttons side by side: the buttons become a second row, under the
+   name and lined up with it (the avatar is 40px, then the 12px gap). */
+@container focus-main (max-width: 610px) {
+  .focus-head {
+    flex-wrap: wrap;
+  }
+  .focus-ident {
+    flex-basis: calc(100% - 52px);
+  }
+  .focus-actions {
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    margin-left: 52px;
+    gap: 3px;
+  }
+  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview). */
+  .focus-actions .btn.btn-icon,
+  .focus-actions .perm,
+  .focus-actions .perm .perm-select {
+    width: 28px;
+  }
+  .focus-actions .open-in-main {
+    padding: 0 5px;
+  }
+  .focus-actions .open-in-more {
+    padding: 0 3px;
+  }
+  .focus-actions > :nth-last-child(-n + 2)[data-tip]::after,
+  .focus-actions > :nth-last-child(-n + 2) [data-tip]::after {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
 }
