@@ -1,5 +1,6 @@
 // New agent: no title or name to make up; created empty, its first message says what it is for.
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
@@ -22,8 +23,23 @@ describe('new agent', () => {
   it('creates an agent with nothing filled in; its first message names it', async () => {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+    // Folders where sessions "ran" (a fixture, never this Mac's real sessions): one to pick, one inside nothing.
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'amw-found-')));
+    const shop = join(scratch, 'billing-service');
+    mkdirSync(shop);
+    execFileSync('git', ['init', '-q'], { cwd: shop });
+    const fixture = join(scratch, 'sessions.json');
+    writeFileSync(
+      fixture,
+      JSON.stringify([
+        { provider: 'claude', nativeSessionId: 's1', cwd: shop, title: 'Fix invoices', updatedAt: new Date().toISOString() },
+        { provider: 'codex', nativeSessionId: 's2', cwd: shop, title: 'Add refunds', updatedAt: new Date().toISOString() },
+        { provider: 'claude', nativeSessionId: 's3', cwd: join(scratch, 'ml-notes'), title: 'Read papers', updatedAt: new Date(Date.now() - 86400_000).toISOString() },
+        { provider: 'claude', nativeSessionId: 's4', cwd: join(scratch, 'bot'), title: 'sub-agent', automated: true },
+      ]),
+    );
     // The demo entry offers mock agents in the dialog.
-    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' } });
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture } });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForSelector('.app');
@@ -43,6 +59,35 @@ describe('new agent', () => {
 
     await page.getByTestId('new-task').first().click();
     const dialog = page.getByRole('dialog');
+    // The project: the one used last, shown as a button.
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('demo-shop');
+    // Opened: a searchable list of the projects added (recent first), then folders where sessions ran
+    // (automated ones left out), then the other ways to add a folder.
+    await page.getByTestId('project-current').click();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('project-search');
+    const kinds = () => page.getByTestId('project-item').evaluateAll((els) => els.map((e) => `${e.getAttribute('data-kind')}:${e.textContent?.trim().slice(0, 40)}`));
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('found:')).length).toBe(2);
+    const listed = await kinds();
+    expect(listed[0]).toMatch(/^project:demo-shop/);
+    const foundNames = listed.filter((k) => k.startsWith('found:'));
+    expect(foundNames[0]).toMatch(/^found:billing-service/);
+    expect(foundNames[1]).toMatch(/^found:ml-notes/);
+    expect(listed.some((k) => k.includes('bot'))).toBe(false);
+    expect(listed.at(-1)).toMatch(/^browse:/);
+    expect(await page.getByTestId('project-pop').innerText()).toContain('2 sessions');
+    await page.screenshot({ path: join(shots, 'new-agent-00-projects.png') });
+    // Search narrows it; Esc closes the list, not the dialog.
+    await page.keyboard.type('billing');
+    await expect.poll(async () => (await kinds()).filter((k) => !k.startsWith('browse')).map((k) => k.split(':')[0])).toEqual(['found']);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByTestId('project-pop').count()).toBe(0);
+    expect(await dialog.count()).toBe(1);
+    // A found folder, picked with the keyboard, becomes the project.
+    await page.getByTestId('project-current').click();
+    await page.keyboard.type('billing');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('billing-service');
+    expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.rootPath === shop)).toBe(true);
     // Nothing to name: no label or title fields; the instruction is optional.
     expect(await dialog.locator('input.input').count()).toBe(0);
     await dialog.locator('label.radio').filter({ hasText: 'Mock' }).click();

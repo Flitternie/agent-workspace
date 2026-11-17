@@ -4,12 +4,15 @@ import { call, errorText } from '../api';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
 import { t } from '../i18n';
+import { defaultProject, ProjectChooser } from './ProjectChooser';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     // Esc closes the dialog and only the dialog: caught first, so the app's own Esc (back to Overview) never sees it.
     const esc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // A list open inside the dialog closes itself first.
+      if ((e.target as Element | null)?.closest?.('[data-own-esc]')) return;
       e.stopImmediatePropagation();
       e.preventDefault();
       onClose();
@@ -74,87 +77,11 @@ export function ConfirmDialog({
   );
 }
 
-export function ProjectPicker({ snapshot, value, onChange }: { snapshot: WorkspaceSnapshot; value: string; onChange: (id: string) => void }) {
-  const [error, setError] = useState('');
-  // Machines turned on in Settings › Remote machines.
-  const hosts = snapshot.remoteHosts.map((h) => h.host);
-  /** Host whose folder is being entered; '' = none. */
-  const [host, setHost] = useState('');
-  const [path, setPath] = useState('');
-  const [adding, setAdding] = useState(false);
-  const addRemote = async () => {
-    setError('');
-    setAdding(true);
-    try {
-      const p = await call('project:add', { rootPath: path.trim(), host });
-      onChange(p.projectId);
-      setHost('');
-      setPath('');
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setAdding(false);
-    }
-  };
-  const add = async () => {
-    setError('');
-    try {
-      const dir = await call('project:pickDirectory', {});
-      if (!dir) return;
-      const p = await call('project:add', { rootPath: dir });
-      onChange(p.projectId);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  };
-  return (
-    <div className="field">
-      <label>{t('Project')}</label>
-      <div className="row">
-        <select className="input" value={value} onChange={(e) => onChange(e.target.value)} data-testid="project-select">
-          <option value="">{t('Choose…')}</option>
-          {snapshot.projects.map((p) => (
-            <option key={p.projectId} value={p.projectId}>
-              {p.name} — {p.host ? `${p.host}:` : ''}
-              {p.rootPath}
-            </option>
-          ))}
-        </select>
-        <button className="btn" onClick={() => void add()}>
-          {t('Add folder…')}
-        </button>
-        {hosts.length ? (
-          <select className="input select" value="" onChange={(e) => setHost(e.target.value)} title={t('A folder on a machine turned on in Settings › Remote machines')} data-testid="ssh-host-select">
-            <option value="">{t('Remote folder…')}</option>
-            {hosts.map((h) => (
-              <option key={h} value={h}>
-                {h}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-      {host ? (
-        <div className="row">
-          <span className="mono">{host}:</span>
-          <input className="input grow mono" autoFocus placeholder="~/projects/repo" value={path} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && path.trim() && void addRemote()} data-testid="remote-path" />
-          <button className="btn" disabled={!path.trim() || adding} onClick={() => void addRemote()}>
-            {adding ? t('Connecting…') : t('Add')}
-          </button>
-          <button className="icon-btn" aria-label={t('Cancel')} onClick={() => setHost('')}>
-            <Icon name="x" />
-          </button>
-        </div>
-      ) : null}
-      {error ? <div className="error-text">{error}</div> : null}
-    </div>
-  );
-}
-
 export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void }) {
   const providers = snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const);
   const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
-  const [projectId, setProjectId] = useState(snapshot.projects[0]?.projectId ?? '');
+  // The project used most recently (most of the time the right one); the chooser lists the rest.
+  const [projectId, setProjectId] = useState(() => defaultProject(snapshot));
   const [provider, setProvider] = useState<AgentProvider>(firstAvailable);
   // No title or name to make up: the agent's label comes from what it is asked to do (here, or its first message).
   const [instruction, setInstruction] = useState('');
@@ -198,7 +125,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
 
   return (
     <Modal title={t('New agent')} onClose={onClose}>
-      <ProjectPicker snapshot={snapshot} value={projectId} onChange={setProjectId} />
+      <ProjectChooser snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
         <label>{t('Agent')}</label>
         <div className="row">

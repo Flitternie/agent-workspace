@@ -4788,3 +4788,104 @@ button.subtask-row:hover {
     gap: 8px;
   }
 }
+
+/* Project chooser (new agent): the chosen folder as a button; a searchable list under it. */
+.project-chooser {
+  position: relative;
+}
+.project-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.project-current:hover,
+.project-current.open {
+  border-color: var(--accent);
+}
+.project-current > .icon:last-child {
+  margin-left: auto;
+  transform: rotate(90deg);
+  color: var(--text-3);
+}
+.project-current-text,
+.project-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.project-current-name,
+.project-item-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.project-current-path,
+.project-item-path {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+/* Opens inside the dialog (pushing what follows down) so the dialog's own scrolling never clips it. */
+.project-pop {
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.project-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+.project-group {
+  padding: 8px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.project-item.active {
+  background: var(--hover);
+}
+.project-item > .muted {
+  flex: none;
+  white-space: nowrap;
+}
+.project-item .icon {
+  flex: none;
+  color: var(--text-2);
+}
+.project-loading,
+.project-remote {
+  padding: 6px 8px;
+}

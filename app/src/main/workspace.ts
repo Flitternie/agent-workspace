@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, posix, resolve, sep } from 'node:path';
 import type { ModelOption,
@@ -938,6 +938,8 @@ export class Workspace {
    * newest first, minus ones already imported and the app's own scratch dirs.
    */
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
+    // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
+    if (process.env.AMW_DISCOVER_FIXTURE) return JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[];
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
