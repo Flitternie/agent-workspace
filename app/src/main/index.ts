@@ -158,6 +158,20 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:models': (i: { taskId: string }) => workspace.listModels(i.taskId),
   'task:setModel': (i: { taskId: string; model: string | null }) => workspace.setModel(i.taskId, i.model ?? undefined),
   'task:shell': (i: { taskId: string; command: string }) => workspace.runShell(i.taskId, i.command),
+  'memory:linkPreview': (i: { host: string }) => workspace.linkPreview(i.host),
+  'memory:link': (i: { host: string }) => workspace.linkMachine(i.host),
+  'memory:unlink': (i: { host: string }) => workspace.unlinkMachine(i.host),
+  'memory:resolveShare': (i: { host: string; kind: 'claude-md' | 'claude-user' | 'codex-md'; how: 'resume' | 'adopt' }) => workspace.resolveShare(i.host, i.kind, i.how),
+  'memory:resolveConflict': (i: { id: string; take: 'source' | 'mine' }) => workspace.resolveConflict(i.id, i.take),
+  'memory:restoreNote': (i: { id: string }) => workspace.restoreNote(i.id),
+  'memory:backups': (i: { host?: string }) => workspace.memoryBackups(i.host),
+  'memory:backupContent': (i: { id: string }) => workspace.memoryBackupContent(i.id),
+  'memory:restoreBackup': (i: { id: string }) => workspace.restoreMemoryBackup(i.id),
+  'skills:list': () => workspace.skills.list(),
+  'skills:scan': () => workspace.scanSkills(),
+  'skills:import': (i: { key: string }) => workspace.importSkill(i.key),
+  'skills:setEnabled': (i: { name: string; enabled: boolean }) => workspace.setSkillEnabled(i.name, i.enabled),
+  'skills:remove': (i: { name: string }) => workspace.removeSkill(i.name),
   'task:forkPoints': (i: { taskId: string }) => workspace.forkPoints(i.taskId),
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
@@ -224,11 +238,15 @@ const handlers: { [C in IpcChannel]: Handler } = {
     const problem = await shell.openPath(file);
     if (problem) throw new Error(problem);
   },
-  'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; originTaskId?: string; approvedForReuse: boolean }) =>
+  'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; title?: string; originTaskId?: string; approvedForReuse: boolean }) =>
     workspace.addMemory({ ...i, source: 'user' }),
-  'memory:update': (i: { id: string; body?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
+  'memory:distill': (i: { taskId: string; itemId: string }) => workspace.distillMemory(i.taskId, i.itemId),
+  'memory:update': (i: { id: string; body?: string; title?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
+  'memory:scanImports': () => workspace.scanMemoryImports(),
+  'memory:import': (i: { items: Parameters<Workspace['importMemory']>[0] }) => workspace.importMemory(i.items),
+  'memory:syncNow': () => workspace.syncMemory(true),
   'settings:update': (i: Partial<Settings>) => workspace.updateSettings(i),
   'capabilities:refresh': (i: { localOnly?: boolean }) => workspace.refreshCapabilities({ localOnly: i?.localOnly }),
   // Sign-in runs the CLI's own login (it opens the browser); the capability check notices success.
@@ -370,6 +388,8 @@ app.whenReady().then(() => {
   wireEvents();
   createWindow();
   void workspace.refreshCapabilities();
+  // Demo runs (and the tests built on them) leave the real native memory alone unless asked.
+  if (!demoMode || process.env.AMW_MEMORY_SYNC === '1') workspace.startMemorySync();
   if (demoMode && workspace.snapshot().tasks.length === 0) void workspace.seedDemo(ensureDemoRepo());
 });
 

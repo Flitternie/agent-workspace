@@ -111,6 +111,7 @@ export function Kbd({ children }: { children: ReactNode }) {
 const ICONS = {
   mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z M5 11a7 7 0 0 0 14 0 M12 18v3',
   stop: 'M7 7h10v10H7z',
+  remember: 'M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1Z M12 7.5v6 M9 10.5h6',
   send: 'M12 19V5 M6 11l6-6 6 6',
   plus: 'M12 5v14 M5 12h14',
   expand: 'M15 4h5v5 M9 20H4v-5 M20 4l-6 6 M4 20l6-6',

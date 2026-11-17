@@ -1,11 +1,15 @@
 import type { IpcChannel, IpcInput } from '../shared/ipc';
+import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
   ModelOption,
   AttentionItem,
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryBackup,
+  MemoryCandidate,
   MemoryRecord,
+  MemorySyncStatus,
   NativeSessionInfo,
   Project,
   RemoteHostStatus,
@@ -47,6 +51,20 @@ export interface Outputs {
   'task:models': ModelOption[];
   'task:setModel': void;
   'task:shell': { ok: boolean; error?: string };
+  'memory:linkPreview': { incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }>; blocked: string[] };
+  'memory:link': { added: number; written: string[]; notices: string[]; errors: string[] };
+  'memory:unlink': { pending: boolean; notices: string[] };
+  'memory:resolveShare': number;
+  'memory:resolveConflict': void;
+  'memory:restoreNote': void;
+  'memory:backups': MemoryBackup[];
+  'memory:backupContent': string;
+  'memory:restoreBackup': void;
+  'skills:list': LibrarySkill[];
+  'skills:scan': { found: FoundSkill[]; errors: Array<{ host: string; error: string }> };
+  'skills:import': void;
+  'skills:setEnabled': void;
+  'skills:remove': void;
   'task:forkPoints': ForkPoint[];
   'task:fork': Task;
   'task:retry': void;
@@ -69,9 +87,13 @@ export interface Outputs {
   'file:preview': FilePreview;
   'file:open': void;
   'memory:add': MemoryRecord;
+  'memory:distill': { title: string; body: string; scope: 'global' | 'project'; worth: boolean; reason: string; similar?: { id: string; title: string; body: string }; fallback?: string };
   'memory:update': void;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
+  'memory:scanImports': { candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> };
+  'memory:import': number;
+  'memory:syncNow': MemorySyncStatus | undefined;
   'settings:update': void;
   'capabilities:refresh': void;
   'provider:login': { url?: string; code?: string };

@@ -8,7 +8,7 @@ import type { MemoryRecord, Task } from '../shared/types';
 /** Records eligible for injection into `task` at session start. */
 export function memoryForTask(task: Task, all: MemoryRecord[]): MemoryRecord[] {
   return all.filter((m) => {
-    if (m.scope === 'global') return m.approvedForReuse;
+    if (m.scope === 'global') return m.approvedForReuse && !m.sourceRemoved;
     if (m.scope === 'project') return m.scopeId === task.projectId && (m.approvedForReuse || m.originTaskId === task.taskId);
     if (m.scope === 'task') return m.scopeId === task.taskId;
     return false; // native session memory is owned by the provider

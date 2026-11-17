@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
+import { memorySourceText } from './MemorySettings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
@@ -10,6 +11,7 @@ import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
+import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
 import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
@@ -168,6 +170,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
+              <MemoryChip
+                snapshot={snapshot}
+                task={task}
+                open={showMemory && !preview && !showChanges}
+                onToggle={() => {
+                  const on = preview || showChanges ? true : !showMemory;
+                  setShowMemory(on);
+                  if (on) setShowChanges(false);
+                  setPreview(null);
+                }}
+              />
               <span className="truncate" title={task.title}>
                 {task.title}
               </span>
@@ -190,7 +203,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   <Icon name="branch" size={12} /> {t('forked from {name}', { name: task.forkedFrom.alias })}
                 </span>
               ) : null}
-              {task.injectedMemoryIds?.length ? <span>{t('{n} memory note(s) loaded', { n: task.injectedMemoryIds.length })}</span> : null}
             </div>
           </div>
           <div className="focus-actions">
@@ -267,20 +279,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <Icon name="diff" />
               {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
             </button>
-            <button
-              className={`btn btn-icon${showMemory && !preview && !showChanges ? ' btn-pressed' : ''}`}
-              data-tip={t('Memory')}
-              aria-label={t('Memory')}
-              onClick={() => {
-                const on = preview || showChanges ? true : !showMemory;
-                setShowMemory(on);
-                if (on) setShowChanges(false);
-                setPreview(null);
-              }}
-              aria-pressed={showMemory && !preview && !showChanges}
-            >
-              <Icon name="note" />
-            </button>
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
             {isMainAgent(task) ? null : (
               <button
@@ -332,7 +330,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           <div className="focus-thread" hidden={covering}>
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
-              <Transcript items={transcript} main={isMainAgent(task)} />
+              <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
             </PreviewContext.Provider>
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
             {items.length || task.retry ? (
@@ -364,7 +362,10 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         ) : !preview && showChanges ? (
           <ChangesPanel task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
         ) : !preview && showMemory ? (
-          <MemoryPanel snapshot={snapshot} task={task} />
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
+            <AgentMemoryPanel snapshot={snapshot} task={task} frame={{ width: shownWidth, onClose: () => setShowMemory(false) }} />
+          </>
         ) : null;
         if (!panel) return null;
         return side ? createPortal(panel, side) : panel;
@@ -510,8 +511,11 @@ function TaskName({ task }: { task: Task }) {
   );
 }
 
-function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }) {
+function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; main?: boolean; task: Task; snapshot: WorkspaceSnapshot }) {
   const ref = useRef<HTMLDivElement>(null);
+  // "Keep as memory" on one of the user's messages: the dialog, and the right-click menu that opens it.
+  const [remember, setRemember] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -564,12 +568,28 @@ function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }
               </div>
             );
           return (
-            <div key={item.id} className={`msg ${item.role}`} data-role={item.role}>
+            <div
+              key={item.id}
+              className={`msg ${item.role}`}
+              data-role={item.role}
+              onContextMenu={
+                item.role === 'user' && item.via !== 'main'
+                  ? (e) => {
+                      // Selected text keeps the system menu (copy); otherwise ours.
+                      if (window.getSelection()?.toString()) return;
+                      e.preventDefault();
+                      setMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+                    }
+                  : undefined
+              }
+            >
               {item.role === 'user' ? <div className="msg-via">
                   {item.via === 'main' ? t('Main agent') : t('You')}
                   {item.via === 'voice' ? ` · ${t('voice')}` : item.via === 'card' ? ` · ${t('from tile')}` : item.via === 'main' ? ` · ${t('on your behalf')}` : ''}
                   {item.delivery === 'steer' ? <span className="delivery-tag">{t('added mid-turn')}</span> : null}
                   {item.delivery === 'interrupt' ? <span className="delivery-tag interrupt">{t('stopped the turn')}</span> : null}
+                  {/* What the user said themselves can become memory (not what the main agent relayed). */}
+                  {item.via !== 'main' ? <RememberButton onClick={() => setRemember(item.id)} /> : null}
                 </div> : null}
               {item.role === 'system' ? <div className="msg-system">{systemText(item.text)}</div> : <Markdown text={item.text} streaming={item.streaming} />}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
@@ -577,6 +597,8 @@ function Transcript({ items, main }: { items: TranscriptItem[]; main?: boolean }
           );
         })}
       </div>
+      {menu ? <RememberMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onRemember={() => (setRemember(menu.itemId), setMenu(null))} /> : null}
+      {remember ? <RememberDialog task={task} itemId={remember} snapshot={snapshot} onClose={() => setRemember(null)} /> : null}
     </div>
   );
 }
@@ -740,79 +762,3 @@ function Composer({ task }: { task: Task }) {
   );
 }
 
-function MemoryPanel({ snapshot, task }: { snapshot: WorkspaceSnapshot; task: Task }) {
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState('');
-  const project = snapshot.projects.find((p) => p.projectId === task.projectId);
-  const mem = snapshot.memory;
-  const groups: Array<{ title: string; records: MemoryRecord[]; hint: string }> = [
-    { title: t('This task'), records: mem.filter((m) => m.scope === 'task' && m.scopeId === task.taskId), hint: t('Private to {alias}.', { alias: task.alias }) },
-    { title: `${t('Project')} · ${project?.name ?? ''}`, records: mem.filter((m) => m.scope === 'project' && m.scopeId === task.projectId), hint: t('Approved notes load into new sessions here.') },
-    { title: t('Global'), records: mem.filter((m) => m.scope === 'global'), hint: t('Approved notes load into every new session.') },
-  ];
-  const run = (fn: () => Promise<unknown>) => {
-    setError('');
-    fn().catch((e) => setError(errorText(e)));
-  };
-  return (
-    <aside className="memory" aria-label={t('Scoped memory')} data-testid="memory-panel">
-      <div className="panel-title">{t('Memory')}</div>
-      <p className="muted small">{t('App-owned notes. They never rewrite a running session.')}</p>
-      <div className="memory-add">
-        <textarea className="input" rows={2} placeholder={t('Add a note for this task…')} value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <button
-          className="btn"
-          disabled={!draft.trim()}
-          onClick={() =>
-            run(async () => {
-              await call('memory:add', { scope: 'task', scopeId: task.taskId, body: draft.trim(), originTaskId: task.taskId, approvedForReuse: false });
-              setDraft('');
-            })
-          }
-        >
-          {t('Add note')}
-        </button>
-      </div>
-      {error ? <div className="error-text">{error}</div> : null}
-      {groups.map((g) => (
-        <div key={g.title} className="memory-group">
-          <div className="section-label" title={g.hint}>
-            {g.title}
-            <span className="count-muted">{g.records.length}</span>
-          </div>
-          {g.records.length === 0 ? <div className="muted small">{g.hint}</div> : null}
-          {g.records.map((m) => (
-            <div key={m.id} className="memory-record" data-testid="memory-record" data-scope={m.scope}>
-              <div className="memory-body">{m.body}</div>
-              <div className="memory-meta">
-                {m.source}
-                {m.originTaskId ? ` · ${t('from {alias}', { alias: snapshot.tasks.find((x) => x.taskId === m.originTaskId)?.alias ?? t('removed task') })}` : ''}
-                {task.injectedMemoryIds?.includes(m.id) ? ` · ${t('loaded in this session')}` : ''}
-              </div>
-              <div className="memory-actions">
-                {m.scope !== 'task' ? (
-                  <label className="small check">
-                    <input type="checkbox" checked={m.approvedForReuse} onChange={(e) => run(() => call('memory:update', { id: m.id, approvedForReuse: e.target.checked }))} /> {t('approved for reuse')}
-                  </label>
-                ) : null}
-                {m.scope === 'task' ? (
-                  <button className="link" onClick={() => run(() => call('memory:promote', { id: m.id, scope: 'project' }))}>
-                    {t('Share with project')}
-                  </button>
-                ) : null}
-                {m.scope !== 'global' ? (
-                  <button className="link" onClick={() => run(() => call('memory:promote', { id: m.id, scope: 'global' }))}>
-                    {t('Save as global')}
-                  </button>
-                ) : null}
-                <button className="link danger" onClick={() => run(() => call('memory:delete', { id: m.id }))}>
-                  {t('Delete')}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-    </aside>
-  );
-}
