@@ -11,6 +11,8 @@ export ELECTRON_BUILDER_CACHE="$PWD/.cache/electron-builder"
 # No Apple Developer ID here: build unsigned (ad-hoc on Apple Silicon) unless CSC_* is provided.
 export CSC_IDENTITY_AUTO_DISCOVERY="${CSC_IDENTITY_AUTO_DISCOVERY:-false}"
 npm run build
+# The DMG window's size and position from package.json (electron-builder ignores them with a background).
+node scripts/patch-dmg-builder.cjs
 ./node_modules/.bin/electron-builder "$@"
 
 # The mounted volume already shows the app icon (.VolumeIcon.icns); also give the .dmg file
