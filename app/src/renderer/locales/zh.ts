@@ -231,7 +231,6 @@ export const zh: Record<string, string> = {
   'Turning on the microphone…': '正在开麦…',
   'Microphone blocked — allow it in System Settings › Privacy › Microphone': '麦克风被禁用，请到“系统设置 › 隐私与安全性 › 麦克风”开启',
   Muted: '已静音',
-  'Voice off — choose a speech model in Settings; typing still works': '语音未启用（请在设置里选择语音模型），可以打字',
   Coordinator: '调度',
   'Hide coordinator': '收起调度',
   'Transcribing…': '识别中…',
@@ -675,4 +674,7 @@ export const zh: Record<string, string> = {
   'Bring back': '恢复活跃',
   'Remote': '远程控制',
   'Remote on': '远程控制中',
+  'Voice off': '语音未启用',
+  'Set up': '去设置',
+  'Choose a speech model in Settings to talk to your agents. Typing works without one.': '在设置里选择语音模型后就能对 Agent 说话；不设置也可以直接打字。',
 };

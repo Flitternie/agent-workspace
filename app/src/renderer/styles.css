@@ -1801,6 +1801,7 @@ body.resizing iframe {
 .dock {
   flex: none;
   position: relative;
+  container: dock / inline-size;
   border-top: 1px solid var(--border);
   background: var(--panel);
   padding: 10px 16px;
@@ -1844,8 +1845,10 @@ body.resizing iframe {
   box-shadow: 0 0 0 1.5px var(--panel-2);
 }
 .mic-state {
-  width: 250px;
-  flex: none;
+  /* As wide as its (short) status, up to 250px; gives way to the text box when the bar is narrow. */
+  flex: 0 1 auto;
+  max-width: 250px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1862,6 +1865,19 @@ body.resizing iframe {
 .mic-label.state-denied {
   color: var(--muted-mic);
   font-weight: 500;
+}
+/* Voice simply not set up yet: quiet grey, not an alarm. */
+.mic-label.unset {
+  color: var(--text-3);
+}
+.mic-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mic-setup {
+  flex: none;
 }
 .live-dot {
   width: 8px;
@@ -1889,7 +1905,8 @@ body.resizing iframe {
   background: var(--live);
 }
 .dock-input {
-  flex: 1;
+  /* Claims its width before the status beside it does. */
+  flex: 1 1 200px;
   position: relative;
   min-width: 0;
 }
@@ -2619,9 +2636,6 @@ details[open] > summary .tool-more {
 @media (max-width: 1180px) {
   .memory {
     width: 240px;
-  }
-  .mic-state {
-    width: 180px;
   }
 }
 
@@ -4758,5 +4772,19 @@ button.subtask-row:hover {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
+  }
+}
+
+/* A narrow voice bar (beside a preview in a small window): the status keeps only its "Set up" link
+   (the mic's slash already says it is off) and the side button only its icon. */
+@container dock (max-width: 560px) {
+  .mic-label.unset .mic-label-text {
+    display: none;
+  }
+  .dock-side .btn-text {
+    display: none;
+  }
+  .dock-bar {
+    gap: 8px;
   }
 }
