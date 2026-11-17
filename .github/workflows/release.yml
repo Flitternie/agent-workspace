@@ -95,11 +95,20 @@ jobs:
         if: runner.os == 'macOS'
         run: npm run typecheck && npm test
 
-      # Uploads go to a draft release for the tag; it is published below once every platform is in.
       - name: Build installer
-        run: bash scripts/dist.sh ${{ matrix.target }} --publish ${{ needs.tag.outputs.publish == 'true' && 'always' || 'never' }}
+        run: bash scripts/dist.sh ${{ matrix.target }}
+
+      # Only the installers go to the draft release; it is published below once every platform is in.
+      # The app has no in-app updater, so electron-builder's update files (latest*.yml, .blockmap)
+      # are turned off in package.json.
+      - name: Upload to the draft release
+        if: needs.tag.outputs.publish == 'true'
+        run: |
+          shopt -s nullglob
+          gh release upload "$TAG" release/*.dmg release/*.exe --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.tag.outputs.tag }}
 
       - uses: actions/upload-artifact@v4
         with:
