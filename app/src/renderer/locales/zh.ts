@@ -656,7 +656,7 @@ export const zh: Record<string, string> = {
   'Open the Claude app on your phone, go to Code, and pick “{name}”. It keeps running on this Mac.': '在手机上打开 Claude App，进入 Code，选择「{name}」。它仍在这台 Mac 上运行。',
   'Copy link': '复制链接',
   'Open in browser': '在浏览器中打开',
-  'Turn off': '关闭',
+  'Turn off Remote Control': '关闭远程控制',
   'First {n} of {total} rows': '前 {n} 行（共 {total} 行）',
   'Changes': '改动',
   'Changed this turn': '本轮改动',

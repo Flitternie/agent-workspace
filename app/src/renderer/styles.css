@@ -4349,6 +4349,17 @@ button.subtask-row:hover {
   margin: 0;
   line-height: 1.5;
 }
+.remote-pop-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.remote-pop-title {
+  padding-right: 22px;
+}
+.remote-off:hover:not(:disabled) {
+  color: var(--risk);
+}
 .remote-pop-title {
   display: flex;
   align-items: center;

@@ -55,6 +55,10 @@ export function RemoteControlButton({ task, url }: { task: Task; url?: string })
       </button>
       {open ? (
         <div className="remote-pop" role="dialog" aria-label={label} data-testid="remote-pop">
+          {/* Closes this popover only; Remote Control stays as it is. */}
+          <button className="icon-btn remote-pop-close" aria-label={t('Close')} title={t('Close')} onClick={() => setOpen(false)} data-testid="remote-pop-close">
+            <Icon name="x" size={12} />
+          </button>
           {error ? (
             <>
               <div className="remote-pop-title">{t('Remote Control did not start')}</div>
@@ -86,8 +90,8 @@ export function RemoteControlButton({ task, url }: { task: Task; url?: string })
                 <a className="btn btn-sm" href={url} target="_blank" rel="noreferrer">
                   <Icon name="external" size={12} /> {t('Open in browser')}
                 </a>
-                <button className="btn btn-sm btn-ghost" onClick={() => set(false)} disabled={busy} data-testid="remote-off">
-                  {t('Turn off')}
+                <button className="btn btn-sm btn-ghost remote-off" onClick={() => set(false)} disabled={busy} data-testid="remote-off">
+                  {t('Turn off Remote Control')}
                 </button>
               </div>
             </>
