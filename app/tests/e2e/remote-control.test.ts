@@ -57,6 +57,20 @@ describe('remote control', () => {
     await expect.poll(() => page.getByTestId('remote-pop').innerText()).toContain('https://claude.ai/code/session_mock_Orders');
     expect((await links())[a.taskId]).toBe('https://claude.ai/code/session_mock_Orders');
     await page.screenshot({ path: join(shots, 'remote-01-on.png') });
+    // Closing the popover (a click elsewhere, or Esc) leaves the button lit: Remote Control is still on.
+    await page.locator('.focus-thread').click({ position: { x: 20, y: 200 } });
+    await expect.poll(() => page.getByTestId('remote-pop').count()).toBe(0);
+    const lit = () => page.getByTestId('remote-control').evaluate((b) => ({ pressed: b.getAttribute('aria-pressed'), dot: !!b.querySelector('.remote-dot'), visible: (() => { const d = b.querySelector('.remote-dot'); if (!d) return false; const r = d.getBoundingClientRect(); return r.width > 0 && getComputedStyle(d).visibility !== 'hidden' && getComputedStyle(d).display !== 'none'; })() }));
+    expect(await lit()).toEqual({ pressed: 'true', dot: true, visible: true });
+    await page.screenshot({ path: join(shots, 'remote-01b-closed.png') });
+    // Its × closes it too, and Remote Control stays on; only "Turn off Remote Control" turns it off.
+    await page.getByTestId('remote-control').click();
+    await page.getByTestId('remote-pop-close').click();
+    await expect.poll(() => page.getByTestId('remote-pop').count()).toBe(0);
+    expect(await lit()).toEqual({ pressed: 'true', dot: true, visible: true });
+    expect((await links())[a.taskId]).toBeTruthy();
+    await page.getByTestId('remote-control').click();
+    expect(await page.getByTestId('remote-off').innerText()).toBe('Turn off Remote Control');
     // Off from the popover: the session keeps running here.
     await page.getByTestId('remote-off').click();
     await expect.poll(() => page.getByTestId('remote-control').getAttribute('aria-pressed')).toBe('false');
