@@ -307,10 +307,19 @@ function wireEvents(): void {
   });
 }
 
+/**
+ * Automated tests run the app in the background (AMW_BACKGROUND=1): no window on screen, no Dock icon,
+ * never the frontmost app, so a test run does not take the keyboard from whoever is typing. The page
+ * still renders and runs its timers as if shown.
+ */
+const background = process.env.AMW_BACKGROUND === '1';
+if (background && process.platform === 'darwin') app.setActivationPolicy('accessory');
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
     height: 920,
+    ...(background ? { show: false, paintWhenInitiallyHidden: true } : {}),
     minWidth: 900,
     minHeight: 600,
     title: demoMode ? 'Agent Workspace — Demo' : 'Agent Workspace',
@@ -328,6 +337,8 @@ function createWindow(): void {
       autoplayPolicy: 'no-user-gesture-required',
       // Chromium's built-in PDF viewer, for PDF previews (no PDF library bundled).
       plugins: true,
+      // Hidden in the background mode, it must keep rendering and running timers as if on screen.
+      ...(background ? { backgroundThrottling: false } : {}),
     },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {

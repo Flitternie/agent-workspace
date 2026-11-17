@@ -6,6 +6,10 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 120_000,
     hookTimeout: 60_000,
-    fileParallelism: false,
+    // Each file runs its own app with its own temp data: a few at once.
+    fileParallelism: true,
+    maxWorkers: 4,
+    // The app under test stays in the background: no window on screen, never takes the keyboard.
+    env: { AMW_BACKGROUND: '1' },
   },
 });
