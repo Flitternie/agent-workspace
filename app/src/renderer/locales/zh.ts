@@ -669,4 +669,10 @@ export const zh: Record<string, string> = {
   'Set aside (click to bring back)': '已设为不活跃（点击恢复）',
   'Set aside: out of the Overview and folded under idle. Click to bring it back; it also comes back by itself when it works, asks or you message it.': '已设为不活跃：不在概览里显示，折叠在「空闲」下。点击恢复；它开始干活、向你提问或你给它发消息时，也会自动回来。',
   'Set aside: take it out of the Overview and fold it under idle. It keeps running, and comes back by itself when it works, asks or you message it.': '设为不活跃：从概览移走，折叠到「空闲」下。它会继续运行；开始干活、向你提问或你给它发消息时，会自动回来。',
+  'Resume': '继续',
+  'Start': '启动',
+  'Fork after this turn': '本轮结束后可分叉',
+  'Bring back': '恢复活跃',
+  'Remote': '远程控制',
+  'Remote on': '远程控制中',
 };

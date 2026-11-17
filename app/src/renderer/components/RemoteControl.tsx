@@ -43,7 +43,7 @@ export function RemoteControlButton({ task, url }: { task: Task; url?: string })
     <span className="remote-control" ref={box}>
       <button
         className={`btn btn-icon${on ? ' btn-pressed remote-on' : ''}`}
-        title={on ? t('Remote Control on: drive this agent from the Claude app or claude.ai/code') : t('Remote Control: drive this agent from the Claude app on your phone')}
+        data-tip={on ? t('Remote on') : t('Remote')}
         aria-label={label}
         aria-pressed={on}
         disabled={busy}

@@ -65,6 +65,17 @@ describe('seen and set aside', () => {
 
     // Set aside from its header: folded under idle (hollow dot there) and off the Overview; still running.
     await row('Orders').click();
+    // Every button in the header row has a one-word label that shows on hover (not a slow title).
+    const tips = await page.locator('.focus-actions').evaluate((bar) =>
+      [...bar.querySelectorAll('button, .perm')].filter((b) => !b.closest('.remote-pop, .open-in-menu') && !b.matches('.perm select') && (b as HTMLElement).offsetParent).map((b) => b.getAttribute('data-tip') ?? b.closest('[data-tip]')?.getAttribute('data-tip') ?? null),
+    );
+    expect(tips.length).toBeGreaterThan(6);
+    expect(tips.filter((x) => !x)).toEqual([]);
+    expect(tips.every((x) => x!.split(' ').length <= 3)).toBe(true);
+    await page.getByTestId('set-aside').hover();
+    await expect.poll(() => page.getByTestId('set-aside').evaluate((b) => getComputedStyle(b, '::after').opacity)).toBe('1');
+    expect(await page.getByTestId('set-aside').evaluate((b) => getComputedStyle(b, '::after').content)).toBe('"Set aside"');
+    await page.screenshot({ path: join(shots, 'aside-00-tip.png') });
     await page.getByTestId('set-aside').click();
     await expect.poll(() => page.getByTestId('set-aside').getAttribute('aria-pressed')).toBe('true');
     await page.getByRole('button', { name: /^Overview/ }).click();

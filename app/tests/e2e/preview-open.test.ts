@@ -92,7 +92,7 @@ describe('preview and open with…', () => {
     expect(launches()[0].args[1]).toMatch(/Cursor\.app$/);
     expect(launches()[0].args[2]).toBe(root);
     // Remembered: the main button now opens in Cursor in one click.
-    await expect.poll(() => page.getByTestId('open-folder-in').getByTestId('open-in-main').getAttribute('title')).toContain('Cursor');
+    await expect.poll(() => page.getByTestId('open-folder-in').getByTestId('open-in-main').getAttribute('aria-label')).toContain('Cursor');
 
     // Agent A: a path:line in its message previews at that line, highlighted.
     await row('Paths').click();
