@@ -42,8 +42,12 @@ describe('side questions', () => {
     const status = async () => (await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)!.status;
     await expect.poll(status).toBe('running');
 
-    // ⌥↵ in the same box: a side question. The side column opens with it and its answer.
     const box = page.getByTestId('composer-input');
+    // Nothing asked yet, nothing typed: the bubble opens no empty column, it says how in the box.
+    await page.getByTestId('btw-send').click();
+    expect(await page.getByTestId('btw-panel').count()).toBe(0);
+    expect(await box.getAttribute('placeholder')).toBe('Type a side question, then ⌥↵');
+    // ⌥↵ in the same box: a side question. The side column opens with it and its answer.
     await box.click();
     await box.fill('Which file holds the totals?');
     await box.press('Alt+Enter');
@@ -78,9 +82,9 @@ describe('side questions', () => {
     expect(await page.getByTestId('btw-panel').count()).toBe(0);
     await page.getByTestId('btw-send').click();
     await expect.poll(() => page.getByTestId('btw-exchange').count()).toBe(3);
-    // Cleared: gone.
+    // Cleared: gone, and the column with it.
     await page.getByTestId('btw-clear').click();
-    await expect.poll(() => page.getByTestId('btw-exchange').count()).toBe(0);
+    await expect.poll(() => page.getByTestId('btw-panel').count()).toBe(0);
     expect(await invoke<unknown[]>(page, 'btw:list', { taskId: a.taskId })).toEqual([]);
     expect(errors).toEqual([]);
   }, 120_000);

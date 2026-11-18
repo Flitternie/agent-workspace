@@ -714,5 +714,5 @@ export const zh: Record<string, string> = {
   'About my side question “{q}”:': '关于我的旁支提问「{q}」：',
   'Bring into the conversation': '带回主对话',
   'Answering…': '正在回答…',
-  'Ask in the box below with ⌥↵.': '在下方输入框里提问，按 ⌥↵ 发送。',
+  'Type a side question, then ⌥↵': '输入旁支问题后按 ⌥↵',
 };

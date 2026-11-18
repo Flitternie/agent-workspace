@@ -77,9 +77,7 @@ export function BtwPanel({ task, entries, onClear, onBring, onClose }: { task: T
           ))}
           <div ref={end} />
         </div>
-      ) : (
-        <p className="muted small">{t('Ask in the box below with ⌥↵.')}</p>
-      )}
+      ) : null}
     </aside>
   );
 }

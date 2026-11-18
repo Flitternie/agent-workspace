@@ -378,7 +378,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <PlanChecklist plan={task.plan} />
               </div>
             ) : null}
-            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} inject={inject} />
+            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -391,13 +391,14 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
             {previewPanel}
           </>
-        ) : !preview && showBtw ? (
+        ) : !preview && showBtw && btw.length ? (
           <BtwPanel
             task={task}
             entries={btw}
             onClose={() => setShowBtw(false)}
             onClear={() => {
               setBtw([]);
+              setShowBtw(false);
               void call('btw:clear', { taskId: task.taskId }).catch(() => {});
             }}
             onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
@@ -670,8 +671,11 @@ function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
   );
 }
 
-function Composer({ task, onBtw, inject }: { task: Task; onBtw?: (question: string) => void; inject?: { text: string; n: number } }) {
+function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (question: string) => void; btwCount?: number; inject?: { text: string; n: number } }) {
   const [draft, setDraft] = useState('');
+  const box = useRef<HTMLTextAreaElement>(null);
+  /** The bubble pressed with nothing typed and nothing asked yet: say how, in the box, for a moment. */
+  const [btwHint, setBtwHint] = useState(false);
   // Text handed back from elsewhere (a side answer brought into the conversation): into the box to edit.
   useEffect(() => {
     if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
@@ -692,6 +696,13 @@ function Composer({ task, onBtw, inject }: { task: Task; onBtw?: (question: stri
   const btw = () => {
     if (!onBtw) return;
     const text = draft.trim().replace(/^\/btw\b\s*/i, '');
+    // Nothing to ask and nothing asked before: no empty side column, a hint in the box instead.
+    if (!text && !btwCount) {
+      setBtwHint(true);
+      box.current?.focus();
+      setTimeout(() => setBtwHint(false), 3000);
+      return;
+    }
     onBtw(text);
     if (text) setDraft('');
   };
@@ -725,12 +736,13 @@ function Composer({ task, onBtw, inject }: { task: Task; onBtw?: (question: stri
     <div className="composer">
       <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
         <textarea
+          ref={box}
           className="composer-input"
           rows={3}
           // A new agent with nothing asked yet: ready for its first message.
           autoFocus={!task.title.trim()}
           value={draft}
-          placeholder={suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
+          placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
