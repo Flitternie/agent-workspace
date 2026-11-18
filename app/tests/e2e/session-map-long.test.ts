@@ -67,6 +67,12 @@ describe('session map, long session', () => {
     // Taller than its room, it scrolls inside its own box.
     const box = page.getByTestId('session-map-beside');
     expect(await box.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+    // It runs down to the reply box's bottom edge (the room right of the box is free).
+    const ends = await page.evaluate(() => ({
+      map: document.querySelector('[data-testid="session-map-beside"]')!.getBoundingClientRect().bottom,
+      box: document.querySelector('.composer-box')!.getBoundingClientRect().bottom,
+    }));
+    expect(Math.abs(ends.map - ends.box)).toBeLessThan(20);
     /** Whether the task being read is within the map's box. */
     const currentShown = (sel: string, item: string) =>
       page.evaluate(([sel, item]) => {

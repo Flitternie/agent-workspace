@@ -5658,7 +5658,7 @@ button.subtask-row:hover {
   flex-direction: column;
   align-items: center;
   width: 26px;
-  max-height: calc(100% - 210px);
+  max-height: calc(100% - 24px);
   overflow-y: auto;
   scrollbar-width: none;
   padding: 10px 0 22px;
@@ -5749,7 +5749,8 @@ button.subtask-row:hover {
   mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 22px), transparent);
   /* Clear of the conversation's scrollbar, with a margin of its own before the window's edge. */
   right: 30px;
-  bottom: 190px;
+  /* Down to the reply box's bottom edge: the room right of it is the map's too (the column moved left). */
+  bottom: 2px;
   z-index: 2;
   overflow-y: auto;
   scrollbar-width: none;
