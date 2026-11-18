@@ -109,12 +109,16 @@ describe('agent order', () => {
     const tasks = [task('aside', { status: 'done', setAside: true, ...fresh }), task('kept', { status: 'done', ...fresh }), task('asking', { status: 'waiting_for_user', setAside: true, ...fresh }), task('working', { status: 'running', setAside: true, ...fresh })];
     const open = [ask('aside', 'completion', 5), ask('asking', 'question', 2)];
     const [team] = teams(tasks, [{ projectId: 'p1', name: 'shop' }], open, NOW);
-    expect(team.idle.map((t) => t.taskId)).toEqual(['aside']);
-    expect(team.members.map((t) => t.taskId).sort()).toEqual(['asking', 'kept', 'working']);
-    expect(overviewCandidates(tasks, open, NOW).map((t) => t.taskId)).not.toContain('aside');
-    // Asking you or working outranks the user's "set aside".
-    expect(isSetAside(tasks[2], open)).toBe(false);
-    expect(isSetAside(tasks[3], open)).toBe(false);
+    // Set aside means hidden, even with a question it ended on (asked before it was set aside):
+    // not in "Needs you", not among the members, not on the Overview. The main process clears the
+    // flag when something new happens, which is what brings an agent back.
+    expect(team.idle.map((t) => t.taskId).sort()).toEqual(['aside', 'asking', 'working']);
+    expect(team.members.map((t) => t.taskId)).toEqual(['kept']);
+    expect(overviewCandidates(tasks, open, NOW).map((t) => t.taskId)).toEqual(['kept']);
+    expect(needsYou(tasks, open).map((t) => t.taskId)).toEqual([]);
+    expect(isSetAside(tasks[2], open)).toBe(true);
+    // Not set aside: the same question puts it in "Needs you".
+    expect(needsYou([{ ...tasks[2], setAside: undefined }], open).map((t) => t.taskId)).toEqual(['asking']);
     // Seeing a result is not setting aside: a seen, recent agent stays listed.
     expect(team.members.map((t) => t.taskId)).toContain('kept');
   });

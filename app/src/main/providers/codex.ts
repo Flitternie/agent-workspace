@@ -638,8 +638,52 @@ class CodexSession implements ProviderSession {
     this.emit({ type: 'progress', text: `Codex requested an unsupported interaction (${method}); it was refused.` });
   }
 
+  /**
+   * A side question, as Codex's /side does it: the conversation forked into an ephemeral, read-only
+   * side thread (once per session; later questions continue it), answered there while the main thread
+   * goes on undisturbed.
+   */
+  private side?: { threadId: string; pending?: { resolve: (text: string) => void; reject: (e: Error) => void; text: string; timer: NodeJS.Timeout } };
+
+  async askSide(question: string): Promise<string> {
+    if (!this.server || !this.threadId) throw new Error('Codex session is not connected.');
+    if (!this.side) {
+      const forked = rec(rec(await this.server.rpc('thread/fork', { threadId: this.threadId, ephemeral: true, sandbox: 'read-only', approvalPolicy: 'never', excludeTurns: true })).thread);
+      if (!str(forked.id)) throw new Error('Codex did not open a side thread.');
+      this.side = { threadId: str(forked.id) };
+    }
+    const side = this.side;
+    if (side.pending) throw new Error('Still answering the previous side question.');
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        side.pending = undefined;
+        reject(new Error('Codex did not answer the side question in time.'));
+      }, 180_000);
+      side.pending = { resolve, reject, text: '', timer };
+      this.server!.rpc('turn/start', { threadId: side.threadId, input: [{ type: 'text', text: question, text_elements: [] }] }).catch((e: Error) => {
+        clearTimeout(timer);
+        side.pending = undefined;
+        reject(e);
+      });
+    });
+  }
+
+  /** The side thread's own events: its answer, never the main conversation's. */
+  private sideNotification(method: string, p: Rec): void {
+    const pending = this.side?.pending;
+    if (!pending) return;
+    if (method === 'item/completed' && rec(p.item).type === 'agentMessage') pending.text = str(rec(p.item).text);
+    if (method !== 'turn/completed') return;
+    clearTimeout(pending.timer);
+    this.side!.pending = undefined;
+    const turn = rec(p.turn);
+    if (str(turn.status) === 'failed') pending.reject(new Error(str(rec(turn.error).message) || 'Codex could not answer.'));
+    else pending.resolve(pending.text.trim() || '(no answer)');
+  }
+
   private notification(method: string, p: Rec): void {
     if (process.env.AMW_DEBUG_CODEX) console.error('[codex]', method, method.includes('plan') ? JSON.stringify(p).slice(0, 300) : '');
+    if (this.side && p.threadId === this.side.threadId) return this.sideNotification(method, p);
     if (p.threadId && this.threadId && p.threadId !== this.threadId) return;
     switch (method) {
       case 'turn/started':

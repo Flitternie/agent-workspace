@@ -29,9 +29,13 @@ export function activeAt(t: Task): number {
   return Math.max(userActiveAt(t), ms(t.updatedAt));
 }
 
-/** Set aside by the user and nothing has happened since that needs them or is under way. */
-export function isSetAside(t: Task, open: AttentionItem[]): boolean {
-  return !!t.setAside && tierOf(t, open) >= 2;
+/**
+ * Set aside by the user. Whatever was already waiting when they did (a closing question, a report)
+ * stays hidden with it; anything new clears the flag in the main process (a new request or error,
+ * a new turn, a message from the user), which brings the agent back.
+ */
+export function isSetAside(t: Task, _open?: AttentionItem[]): boolean {
+  return !!t.setAside;
 }
 
 export function tierOf(t: Task, open: AttentionItem[]): Tier {
@@ -65,7 +69,7 @@ export function rank(tasks: Task[], open: AttentionItem[]): Task[] {
 
 /** Agents waiting on the user, across every team: the sidebar's "Needs you" strip. */
 export function needsYou(tasks: Task[], open: AttentionItem[]): Task[] {
-  return rank(tasks, open).filter((t) => tierOf(t, open) === 0);
+  return rank(tasks, open).filter((t) => tierOf(t, open) === 0 && !isSetAside(t));
 }
 
 export interface Team {
@@ -95,7 +99,7 @@ export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' |
       members,
       idle: all.filter((t) => !busy(t)),
       counts: {
-        waiting: all.filter((t) => tierOf(t, open) === 0).length,
+        waiting: all.filter((t) => tierOf(t, open) === 0 && !isSetAside(t)).length,
         running: all.filter((t) => t.status === 'running' || t.status === 'starting').length,
         failed: all.filter((t) => t.status === 'failed').length,
       },

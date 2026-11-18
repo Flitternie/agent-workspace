@@ -148,6 +148,7 @@ const ICONS = {
   diff: 'M6 3h9l4 4v14H6z M9 10h6 M12 7v6 M9 17h6',
   moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z',
   shield: 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z',
+  btw: 'M4 5h16v11H9l-5 4z M8 9h8 M8 12h5',
 } as const;
 
 export type IconName = keyof typeof ICONS;

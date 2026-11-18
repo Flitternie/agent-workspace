@@ -515,6 +515,17 @@ class ClaudeSession implements ProviderSession {
     return { url: on ? str(res?.session_url) || undefined : undefined };
   }
 
+  /** Claude Code's side question (/btw): from the conversation so far, no tools, never entering it. */
+  async askSide(question: string, history: Array<{ question: string; response: string }>): Promise<string> {
+    if (this.closed || !this.query) throw new Error('Claude session is not connected.');
+    // The SDK's control request (what /btw uses); not in its public types yet.
+    const q = this.query as unknown as { askSideQuestion?: (question: string, opts?: { history?: Array<{ question: string; response: string }> }) => Promise<{ response: string } | null> };
+    if (typeof q.askSideQuestion !== 'function') throw new Error('This Claude Code SDK cannot answer side questions.');
+    const res = await q.askSideQuestion(question, history.length ? { history: history.slice(-20) } : undefined);
+    if (!res?.response) throw new Error('Claude Code had nothing to answer from yet: say something to the agent first.');
+    return res.response;
+  }
+
   async interrupt(): Promise<void> {
     if (!this.query || !this.active) return;
     this.interruptRequested = true;

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, posix, resolve, sep } from 'node:path';
 import type { ModelOption,
   AgentProvider,
@@ -25,8 +25,7 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot,
-} from '../shared/types';
+  WorkspaceSnapshot, BtwEntry } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
@@ -266,6 +265,9 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
+    // A side question still unanswered when the app quit will not be answered now.
+    for (const list of Object.values(d.btw ?? {}))
+      for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';
     // Native approvals/questions die with the provider process: never show them as still answerable.
     for (const a of d.attention) {
       if (a.state === 'open' && a.providerRequestId) {
@@ -534,7 +536,8 @@ export class Workspace {
   async createTask(args: {
     projectId: string;
     provider: AgentProvider;
-    title: string;
+    /** What the task is; empty when the user starts an agent without saying yet (its first message says). */
+    title?: string;
     /** Who chose `name` (default: the user, who typed it). */
     nameSource?: 'auto' | 'user';
     name?: string;
@@ -555,7 +558,7 @@ export class Workspace {
       sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
     } else if (args.isolate && project.isGitRepo) {
       try {
-        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title)}-${taskId.slice(2)}`);
+        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`);
         cwd = worktree.path;
       } catch (error) {
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
@@ -572,7 +575,7 @@ export class Workspace {
       name: args.name?.trim() || alias,
       nameSource: args.name?.trim() ? (args.nameSource ?? 'user') : 'auto',
       projectId: project.projectId,
-      title: args.title.trim(),
+      title: (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80),
       provider: args.provider,
       status: 'idle',
       summary: 'Not started yet.',
@@ -585,7 +588,7 @@ export class Workspace {
       updatedAt: now(),
     };
     d.tasks.push(task);
-    if (!args.name?.trim()) this.autoLabel(task, args.title, args.instruction);
+    if (!args.name?.trim() && task.title) this.autoLabel(task, args.title ?? '', args.instruction);
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -711,6 +714,44 @@ export class Workspace {
     t.updatedAt = now();
     this.changed();
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
+  }
+
+  // ---------------------------------------------------------------- side questions ("btw")
+
+  /** This agent's side questions, oldest first. */
+  btwList(taskId: string): BtwEntry[] {
+    return this.store.data.btw?.[taskId] ?? [];
+  }
+
+  /**
+   * Asks the agent a side question: answered from its conversation so far (Claude Code's side
+   * questions; a read-only side thread in Codex), never entering that conversation or interrupting a
+   * turn under way. Starts its session if needed. Resolves with the entry, answered or failed.
+   */
+  async askBtw(taskId: string, question: string): Promise<BtwEntry> {
+    const task = this.task(taskId);
+    const all = (this.store.data.btw ??= {});
+    const list = (all[taskId] ??= []);
+    const entry: BtwEntry = { id: `b-${randomUUID().slice(0, 8)}`, question: question.trim(), askedAt: now() };
+    const history = list.filter((e) => e.answer).map((e) => ({ question: e.question, response: e.answer! }));
+    list.push(entry);
+    all[taskId] = list.slice(-20);
+    this.store.save();
+    try {
+      const live = this.live.get(taskId) ?? (await this.connect(taskId));
+      if (!live.session.askSide) throw new Error(`${task.provider} does not take side questions.`);
+      entry.answer = await live.session.askSide(entry.question, history);
+    } catch (error) {
+      entry.error = (error as Error).message;
+    }
+    entry.answeredAt = now();
+    this.store.save();
+    return entry;
+  }
+
+  clearBtw(taskId: string): void {
+    if (this.store.data.btw) delete this.store.data.btw[taskId];
+    this.store.save();
   }
 
   /** The user did something with this agent: it moves up in the sidebar (and is no longer set aside). */
@@ -947,8 +988,39 @@ export class Workspace {
    * Recent Claude Code and Codex sessions saved on an SSH host (including those the
    * Claude and ChatGPT desktop apps created there through their SSH connections).
    */
+  /**
+   * The folders inside `dir` on this Mac or on `host` (for typing a path with completion). `~` is the
+   * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
+   * the caller decides). A path that is not a folder gives no names.
+   */
+  async listDirs(dir: string, host?: string): Promise<{ dir: string; names: string[] }> {
+    if (!host) {
+      const home = homedir();
+      const abs = resolve(dir === '~' || dir.startsWith('~/') ? home + dir.slice(1) : dir);
+      try {
+        const names = readdirSync(abs, { withFileTypes: true })
+          .filter((e) => e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(abs, e.name)).isDirectory(); } catch { return false; } })()))
+          .map((e) => e.name)
+          .sort((a, b) => a.localeCompare(b));
+        return { dir: abs, names: names.slice(0, 500) };
+      } catch {
+        return { dir: abs, names: [] };
+      }
+    }
+    this.requireHost(host);
+    // On the machine: expand ~, list the subfolders (names ending in /), first line the folder as resolved.
+    const script = `d=${shq(dir)}; case "$d" in "~"|"~/"*) d="$HOME\${d#?}";; esac; cd -- "$d" 2>/dev/null || exit 3; pwd; ls -1Ap | grep '/$' | head -500`;
+    const r = await sshRun(host, `sh -c ${shq(script)}`, 15_000);
+    if (r.code === 3) return { dir, names: [] };
+    if (r.code !== 0) throw new Error(sshError(host, r.stderr));
+    const [resolved, ...rest] = r.stdout.split('\n');
+    return { dir: resolved.trim() || dir, names: rest.map((l) => l.replace(/\/$/, '')).filter(Boolean) };
+  }
+
   async discoverHostSessions(host: string): Promise<NativeSessionInfo[]> {
     this.requireHost(host);
+    // Tests: the fixture's sessions on this host (see discoverAllSessions).
+    if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => s.host === host);
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
     const caps = this.hostStatus.get(host)?.capabilities;
     const adapters = Object.values(this.opts.adapters).filter((a): a is ProviderAdapter => !!a?.remote && caps?.find((c) => c.provider === a.provider)?.available !== false);
@@ -966,6 +1038,8 @@ export class Workspace {
    * newest first, minus ones already imported and the app's own scratch dirs.
    */
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
+    // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
+    if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => !s.host);
     const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
@@ -1197,6 +1271,11 @@ export class Workspace {
       task.updatedAt = now();
       // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
       this.touched(task);
+      // Started without saying what for: this first message is what the task is, and what its label describes.
+      if (!task.title.trim() && delivery !== 'steer') {
+        task.title = clip(text.replace(/\s+/g, ' ').trim(), 80);
+        if (task.nameSource !== 'user') this.autoLabel(task, task.title, text);
+      }
       // The first instruction is what the first label describes; later messages may change the work.
       if (via !== 'initial') task.saidSinceLabel = (task.saidSinceLabel ?? 0) + 1;
       this.changed();

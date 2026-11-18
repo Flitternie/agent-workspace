@@ -164,7 +164,9 @@ class MockSession implements ProviderSession {
     this.emit({ type: 'turnStarted' });
     const script = this.args.mockScript ?? 'work';
     const first = userTurns === 0;
-    this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${this.args.title}”的上下文…` : `Reading ${this.args.title} context…` }), 0.3);
+    // What the work is: the task's title, or (an agent started without one) this message.
+    const topic = this.args.title || text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    this.later(() => this.emit({ type: 'progress', text: this.zh ? `正在了解“${topic}”的上下文…` : `Reading ${topic} context…` }), 0.3);
     if (this.capacityFailures < Number(/^capacity:(\d+)$/.exec(script)?.[1] ?? 0)) {
       this.capacityFailures++;
       this.later(() => {
@@ -258,13 +260,13 @@ class MockSession implements ProviderSession {
             .join('\n')}\n\n`
         : '';
       if (first && script.startsWith('ask:')) {
-        reply = this.zh ? `我看了一下“${this.args.title}”。\n\n${script.slice('ask:'.length)}` : `I looked into "${this.args.title}".\n\n${script.slice('ask:'.length)}`;
+        reply = this.zh ? `我看了一下“${topic}”。\n\n${script.slice('ask:'.length)}` : `I looked into "${topic}".\n\n${script.slice('ask:'.length)}`;
       } else if (first) {
         this.emitDemoWork();
         // Rich Markdown, as real agents write it: heading, list, task list, table, code.
         reply = this.zh
           ? [
-              `“${this.args.title}”第一轮完成：5 个组件做好了 3 个，继续推进。`,
+              `“${topic}”第一轮完成：5 个组件做好了 3 个，继续推进。`,
               '',
               '### 改了什么',
               '- `OrderCard` 和 `OrderList` 已改用 **v2** 字段',
@@ -283,7 +285,7 @@ class MockSession implements ProviderSession {
               '```',
             ].join('\n')
           : [
-          `Done with the first pass on "${this.args.title}". Components 3/5 built; continuing.`,
+          `Done with the first pass on "${topic}". Components 3/5 built; continuing.`,
           '',
           '### What changed',
           '- `OrderCard` and `OrderList` now render the **v2** fields',
@@ -361,6 +363,13 @@ class MockSession implements ProviderSession {
   async setRemoteControl(on: boolean): Promise<{ url?: string }> {
     if (on && (this.args.mockScript ?? '').includes('rc-fail')) throw new Error('Remote Control requires a claude.ai subscription; API keys are not supported.');
     return { url: on ? `https://claude.ai/code/session_mock${this.args.title ? '_' + this.args.title.replace(/\W+/g, '') : ''}` : undefined };
+  }
+
+  /** Side questions in tests: an answer that shows the question and how many earlier ones it saw. */
+  async askSide(question: string, history: Array<{ question: string; response: string }>): Promise<string> {
+    await new Promise((r) => setTimeout(r, Math.min(400, Number(process.env.AMW_MOCK_DELAY_MS ?? 200) * 2)));
+    if (question.includes('fail')) throw new Error('The side question could not be answered.');
+    return `Side answer to "${question}" (saw ${history.length} earlier side question${history.length === 1 ? '' : 's'}; main turn ${this.busy ? 'still running' : 'idle'}).`;
   }
 
   async setModel(model: string | undefined): Promise<void> {
