@@ -75,7 +75,7 @@ describe('router decision matrix', () => {
 
   it('ambiguous reference asks instead of guessing', () => {
     const two = [task('A', 'Backend API v2 endpoints'), task('D', 'Backend API rate limiting'), task('B', 'Frontend dashboard')];
-    const d = decideDeterministic(ctx('fix that API', 't-B', two));
+    const d = decideDeterministic(ctx('fix that API', null, two));
     expect(d).toMatchObject({ kind: 'clarify' });
     expect(d && d.kind === 'clarify' && d.candidateTaskIds.sort()).toEqual(['t-A', 't-D']);
   });
@@ -99,9 +99,23 @@ describe('router decision matrix', () => {
     expect(d).toMatchObject({ kind: 'existing', taskId: 't-C', confidence: 'medium' });
   });
 
-  it('unreferenced speech falls back to focused task at medium confidence (no LLM)', async () => {
+  it('unnamed speech goes to the agent on screen', async () => {
     const d = await decideRoute(ctx('sounds good, go ahead', 't-B'));
-    expect(d).toMatchObject({ kind: 'existing', taskId: 't-B', confidence: 'medium' });
+    expect(d).toMatchObject({ kind: 'existing', taskId: 't-B', confidence: 'high' });
+  });
+
+  it('words that overlap another agent’s title do not take a message away from the agent on screen', async () => {
+    const ts = [task('Ann', 'Orders page'), task('Bob', 'Run the integration tests'), task('Cat', 'Database schema')];
+    // On Ann, "run the tests" is for Ann, even though Bob's title is about tests.
+    expect(decideDeterministic(ctx('run the tests again', 't-Ann', ts))).toMatchObject({ kind: 'existing', taskId: 't-Ann' });
+    expect(decideDeterministic(ctx('再跑一下集成测试', 't-Ann', ts))).toMatchObject({ kind: 'existing', taskId: 't-Ann' });
+    // The model is not asked either: it could pick another agent.
+    let asked = false;
+    expect(await decideRoute(ctx('hmm, try another way', 't-Ann', ts), async () => ((asked = true), { target: 'Cat', candidates: [], reason: 'x' }))).toMatchObject({ taskId: 't-Ann' });
+    expect(asked).toBe(false);
+    // Naming switches; so does pointing at another agent by what it does.
+    expect(decideDeterministic(ctx('Bob, run the tests again', 't-Ann', ts))).toMatchObject({ taskId: 't-Bob' });
+    expect(decideDeterministic(ctx('tell the integration tests agent to stop', 't-Ann', ts))).toMatchObject({ taskId: 't-Bob' });
   });
 
   it('unreferenced speech in overview asks for a target', async () => {
@@ -117,10 +131,10 @@ describe('router decision matrix', () => {
   });
 
   it('LLM failure falls back safely', async () => {
-    const d = await decideRoute(ctx('hmm', 't-A'), async () => {
+    const d = await decideRoute(ctx('hmm', null), async () => {
       throw new Error('offline');
     });
-    expect(d).toMatchObject({ kind: 'existing', taskId: 't-A', confidence: 'medium' });
+    expect(d).toMatchObject({ kind: 'clarify' });
   });
 });
 
