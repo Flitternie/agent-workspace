@@ -506,16 +506,16 @@ export function VoiceDock({
       ? tr('Hearing you…')
       : mic === 'listening'
         ? mode === 'open'
-          ? tr('Listening — just say “Alice, …”')
+          ? tr('Listening')
           : holding
-            ? tr('Listening — let go to send')
-            : tr('Listening — press {keys} again to send', { keys })
+            ? tr('Let go to send')
+            : tr('Press {keys} again to send', { keys })
         : mic === 'starting'
           ? tr('Turning on the microphone…')
           : mic === 'denied'
             ? tr('Microphone blocked — allow it in System Settings › Privacy › Microphone')
             : !stt
-              ? tr('Voice off')
+              ? ''
               : mode === 'hold'
                 ? tr('Hold {keys} to talk', { keys })
                 : mode === 'toggle'
@@ -524,7 +524,7 @@ export function VoiceDock({
                     ? tr('Press or hold {keys} to talk', { keys })
                     : tr('Muted');
   const micTitle = !stt
-    ? tr('Speech-to-text is not configured')
+    ? tr('Set up voice')
     : mode === 'open'
       ? `${live ? tr('Mute') : tr('Unmute')} (${keys})`
       : `${live ? tr('Send') : tr('Talk')} (${keys})`;
@@ -657,8 +657,8 @@ export function VoiceDock({
       <div className="dock-bar">
         <button
           className={`mic mic-${mic}`}
-          disabled={!stt}
-          onClick={toggleMic}
+          disabled={!stt && !onSettings}
+          onClick={!stt ? onSettings : toggleMic}
           aria-pressed={live}
           aria-label={mode !== 'open' ? (live ? tr('Send') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
           title={micTitle}
@@ -669,16 +669,12 @@ export function VoiceDock({
           {!live ? <span className="mic-slash" aria-hidden /> : null}
         </button>
         <div className="mic-state">
-          <div className={`mic-label state-${mic}${!stt && !hint ? ' unset' : ''}`} title={!stt && !hint ? tr('Set up a speech model to talk to your agents') : undefined} data-testid="mic-label">
-            {live ? <span className="live-dot" aria-hidden /> : null}
-            <span className="mic-label-text">{micLabel}</span>
-            {/* Not set up yet (not an error): one click to where it is set up. */}
-            {!stt && !hint && onSettings ? (
-              <button className="link small mic-setup" onClick={onSettings} data-testid="voice-setup">
-                {tr('Set up')}
-              </button>
-            ) : null}
-          </div>
+          {micLabel ? (
+            <div className={`mic-label state-${mic}`} data-testid="mic-label">
+              {live ? <span className="live-dot" aria-hidden /> : null}
+              <span className="mic-label-text">{micLabel}</span>
+            </div>
+          ) : null}
           {live ? (
             <div className="meter" aria-hidden>
               {[0.08, 0.18, 0.3, 0.45, 0.62].map((t) => (

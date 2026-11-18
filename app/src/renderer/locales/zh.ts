@@ -966,4 +966,7 @@ export const zh: Record<string, string> = {
   'No file changes yet.': '还没有文件改动。',
   'No messages yet.': '还没有消息。',
   'Set up a speech model to talk to your agents': '设置语音识别模型，就能和 agent 说话',
+  'Listening': '正在听',
+  'Let go to send': '松开发送',
+  'Press {keys} again to send': '再按 {keys} 发送',
 };

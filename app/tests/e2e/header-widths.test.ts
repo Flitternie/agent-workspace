@@ -35,7 +35,7 @@ describe('agent header across widths', () => {
         out.push(await page.evaluate(([w, preview]) => {
           const r = (q: string) => { const e = document.querySelector(q); if (!e) return null; const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
           const acts = [...document.querySelectorAll('.focus-actions > *')].map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.right)]; });
-          const lab = document.querySelector('[data-testid="mic-label"]')!.getBoundingClientRect();
+          const lab = document.querySelector('[data-testid="mic-label"]')?.getBoundingClientRect() ?? { height: 0 };
           return { w, preview, micLabelH: Math.round(lab.height), dockInput: r('.dock-input'), head: r('.focus-head'), ident: r('.focus-ident'), name: r('.focus-name'), nameScroll: (document.querySelector('.focus-name') as HTMLElement).scrollWidth, actions: r('.focus-actions'), acts, sidebar: r('.sidebar') ?? r('aside'), stage: r('.stage'), win: innerWidth };
         }, [w, preview] as const));
       }
@@ -60,12 +60,11 @@ describe('agent header across widths', () => {
     }    await page.setViewportSize({ width: 1100, height: 800 });
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(appDir, 'test-results', 'widths-dock-narrow.png') });
-    // "Set up" in the voice bar opens Settings.
+    // Voice not set up: no words, the slashed mic is the way in (it opens Settings).
     await page.setViewportSize({ width: 1280, height: 800 });
-    // Narrow (beside the preview) it is just the link; the explanation is its tooltip.
-    expect(await page.getByTestId('mic-label').innerText()).toContain('Set up');
-    expect(await page.getByTestId('mic-label').getAttribute('title')).toContain('speech model');
-    await page.getByTestId('voice-setup').click();
+    expect(await page.getByTestId('mic-label').count()).toBe(0);
+    expect(await page.getByTestId('mic-button').getAttribute('title')).toBe('Set up voice');
+    await page.getByTestId('mic-button').click();
     await expect.poll(() => page.locator('[data-testid="settings-page"], .settings').count()).toBeGreaterThan(0);
     await app.close();
   }, 120000);
