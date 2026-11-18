@@ -283,6 +283,63 @@ export function groupTranscript(items: TranscriptItem[], allTools = false): Arra
   return out;
 }
 
+/** How many of the latest turns stay open; earlier ones fold to: your message, a summary, the reply. */
+export const OPEN_TURNS = 3;
+
+export interface Turn {
+  /** The user's message that starts it (none for what came before the first one). */
+  user?: TranscriptItem;
+  /** Everything the agent did on the way: tool calls, thinking, messages along the way. */
+  steps: TranscriptItem[];
+  /** Its last message: the answer. */
+  final?: TranscriptItem;
+  /** Still going (streaming, a tool running or waiting for approval). */
+  live: boolean;
+}
+
+/** The conversation as turns: each of the user's messages and what the agent did until the next one. */
+export function splitTurns(items: TranscriptItem[]): Turn[] {
+  const turns: Array<{ user?: TranscriptItem; rest: TranscriptItem[] }> = [];
+  for (const it of items) {
+    if (it.role === 'user' || !turns.length) turns.push(it.role === 'user' ? { user: it, rest: [] } : { rest: [it] });
+    else turns[turns.length - 1].rest.push(it);
+  }
+  return turns.map(({ user, rest }) => {
+    const final = [...rest].reverse().find((i) => i.role === 'assistant' && i.text.trim());
+    return {
+      user,
+      final,
+      steps: rest.filter((i) => i !== final),
+      live: rest.some((i) => i.streaming || i.toolStatus === 'running' || i.toolStatus === 'awaiting_approval'),
+    };
+  });
+}
+
+/** Whether a turn shows folded: not one of the latest, not still going, and with steps worth folding. */
+export function foldsTurn(turn: Turn, index: number, count: number): boolean {
+  return index < count - OPEN_TURNS && !turn.live && turn.steps.length >= 2;
+}
+
+/** "14 steps · edited 3 files · ran 4 commands · 1 failed · 2 min" for a folded turn. */
+export function turnSummary(turn: Turn): string {
+  const tools = turn.steps.filter((i) => i.role === 'tool');
+  const edited = new Set(tools.filter((i) => ['edit', 'delete', 'move'].includes(i.tool?.kind ?? '')).map((i) => i.tool?.locations[0]?.path ?? i.id)).size;
+  const ran = tools.filter((i) => i.tool?.kind === 'execute').length;
+  const failed = tools.filter((i) => i.toolStatus === 'failed').length;
+  const end = turn.final ?? turn.steps.at(-1);
+  const ms = turn.user && end ? Date.parse(end.createdAt) - Date.parse(turn.user.createdAt) : 0;
+  const took = ms >= 60_000 ? t('{n} min', { n: Math.round(ms / 60_000) }) : ms >= 1000 ? t('{n} s', { n: Math.round(ms / 1000) }) : '';
+  return [
+    t(turn.steps.length === 1 ? '{n} step' : '{n} steps', { n: turn.steps.length }),
+    edited && t(edited === 1 ? 'edited {n} file' : 'edited {n} files', { n: edited }),
+    ran && t(ran === 1 ? 'ran {n} command' : 'ran {n} commands', { n: ran }),
+    failed && t('{n} failed', { n: failed }),
+    took,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** The main agent's workspace tools, as one-line actions. */
 const WORKSPACE_ACTION: Record<string, string> = {
   list_workspace_agents: 'checked the agents',

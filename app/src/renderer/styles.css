@@ -4874,47 +4874,6 @@ button.subtask-row:hover {
   align-items: center;
   gap: 6px;
 }
-.side-panel {
-  width: min(460px, 40%);
-  gap: 10px;
-  border-left: 0;
-  min-width: 0;
-  max-width: calc(100% - 380px);
-}
-.side-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 2px;
-}
-.side-top {
-  position: sticky;
-  top: -14px;
-  z-index: 3;
-  margin: -14px -14px 0;
-  padding: 14px 14px 8px;
-  background: var(--panel-2);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-bottom: 1px solid var(--border);
-}
-.side-panel.maximized {
-  flex: 1;
-  width: auto;
-  max-width: none;
-}
-.side-ident {
-  flex: 1;
-  min-width: 0;
-  padding-top: 4px;
-}
-.side-sub {
-  font-size: 11px;
-  color: var(--text-3);
-  margin-top: 2px;
-  direction: rtl;
-  text-align: left;
-}
 .skills {
   display: flex;
   flex-direction: column;
@@ -5637,6 +5596,337 @@ button.subtask-row:hover {
   padding-left: 4px;
 }
 
+/* ------------------------------------------------------------------ side panels: one frame */
+/* Side questions, changes and memory share the preview's width and drag bar. */
+.memory.side {
+  gap: 10px;
+  border-left: 0;
+  min-width: 0;
+  max-width: calc(100% - 380px);
+}
+.stage-side > .memory.side {
+  max-width: none;
+  height: 100%;
+}
+.stage-side > .memory.side:first-child {
+  border-left: 1px solid var(--border);
+}
+/* A side panel with nothing to show: one short, centred explanation and a way forward. */
+.side-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  margin: 48px auto 0;
+  max-width: 280px;
+  color: var(--text-2);
+}
+.side-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--text-3);
+}
+.side-empty-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.side-empty p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.side-empty .btn {
+  margin-top: 4px;
+}
+.agent-memory .memory-pop-later {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ Settings › Memory */
+.memory-settings {
+  gap: 12px;
+}
+.ms-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ms-intro p {
+  flex: 1;
+  margin: 0;
+}
+.ms-tabs {
+  margin-top: 4px;
+}
+.ms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ms-hint {
+  margin-bottom: 2px;
+}
+.ms-empty {
+  padding: 18px 0;
+  text-align: center;
+}
+.ms-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.ms-note.dim .ms-note-title {
+  color: var(--text-3);
+}
+.ms-note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+.ms-note-head .icon {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.12s;
+}
+.ms-note.open .ms-note-head .icon {
+  transform: rotate(90deg);
+}
+.ms-note-title {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 550;
+}
+.ms-note-source {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ms-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--hover);
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.ms-tag.warn {
+  background: color-mix(in srgb, var(--needs) 15%, transparent);
+  color: var(--needs);
+}
+.ms-note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px 31px;
+}
+.ms-text {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ms-text > :first-child {
+  margin-top: 0;
+}
+.ms-text > :last-child {
+  margin-bottom: 0;
+}
+.ms-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ms-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ms-new .ms-editor {
+  padding: 12px;
+}
+.ms-add {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+}
+.ms-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ms-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ms-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.ms-group-head .truncate {
+  flex: 1;
+  min-width: 0;
+}
+.ms-share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.ms-details summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+.ms-details p {
+  margin: 6px 0 0;
+}
+.ms-share .memory-sync-status {
+  padding: 0;
+  margin: 0;
+}
+/* Settings index: a small label above each group. */
+.settings-nav-group {
+  margin: 14px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.settings-nav-group:first-child {
+  margin-top: 2px;
+}
+/* A one-line setting: what it does on the left, its button on the right. */
+.settings-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ------------------------------------------------------------------ earlier turns, folded */
+/* Earlier turns show your message, this line and the answer; the steps open on click. */
+.turn-fold {
+  margin: -2px 0 2px;
+}
+.turn-fold > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.turn-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.turn-fold > summary:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.turn-fold > summary .icon {
+  transition: transform 0.12s;
+}
+.turn-fold[open] > summary .icon {
+  transform: rotate(90deg);
+}
+.turn-fold-failed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--risk);
+}
+.turn-steps {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  margin: 6px 0 4px 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ find in conversation */
+.focus-thread {
+  position: relative;
+}
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(15, 18, 24, 0.12);
+  color: var(--text-3);
+}
+.find-input {
+  width: 200px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+.find-count {
+  min-width: 52px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.find-up,
+.find-down {
+  display: inline-flex;
+}
+.find-up {
+  transform: rotate(-90deg);
+}
+.find-down {
+  transform: rotate(90deg);
+}
+::highlight(find) {
+  background-color: rgba(250, 204, 21, 0.35);
+}
+::highlight(find-current) {
+  background-color: rgba(249, 115, 22, 0.55);
+}
+
 /* Session map: the session's tasks as an index, beside the conversation (in the room on its right) or
    in the side column. A thin line joins the tasks; the one being read is marked. */
 .focus-thread {
@@ -6192,4 +6482,45 @@ button.subtask-row:hover {
   height: 7px;
   border-radius: 50%;
   border: 1.5px dashed var(--text-3);
+}
+
+/* The side panel frame (SidePanel) every side panel uses. */
+.side-panel {
+  width: min(460px, 40%);
+  gap: 10px;
+  border-left: 0;
+  min-width: 0;
+  max-width: calc(100% - 380px);
+}
+.side-top {
+  position: sticky;
+  top: -14px;
+  z-index: 3;
+  margin: -14px -14px 0;
+  padding: 14px 14px 8px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.side-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.side-ident {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+.side-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.side-panel.maximized {
+  flex: 1;
+  width: auto;
+  max-width: none;
 }

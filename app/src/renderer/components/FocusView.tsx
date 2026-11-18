@@ -1,18 +1,18 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
-import { memorySourceText } from './MemorySettings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
-import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
+import { foldsTurn, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
 import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
 import { RetryNotice } from './Retry';
+import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
@@ -698,6 +698,19 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
   const [remember, setRemember] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
   const stick = useRef(true);
+  // ⌘F: find in this conversation (folded turns included).
+  const inner = useRef<HTMLDivElement>(null);
+  const [finding, setFinding] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'f' || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      setFinding(true);
+      window.dispatchEvent(new CustomEvent('amw:find-again'));
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -713,19 +726,10 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
     if (el.firstElementChild) ro.observe(el.firstElementChild);
     return () => ro.disconnect();
   }, []);
-  return (
-    <div
-      className="transcript"
-      ref={ref}
-      data-testid="transcript"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-      }}
-    >
-      <div className="transcript-inner">
-        {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
-        {groupNotices(groupTranscript(items.filter((i) => i.tool?.name !== 'ToolSearch'), main), main).map((entry) => {
+  const shown = items.filter((i) => i.tool?.name !== 'ToolSearch');
+  const order = new Map(shown.map((x, n) => [x.id, n]));
+  const turns = splitTurns(shown);
+  const renderEntry = (entry: TranscriptItem | TranscriptItem[] | { notices: TranscriptItem[] }) => {
           if (Array.isArray(entry)) return <ToolGroup key={entry[0].id} items={entry} main={main} />;
           if ('notices' in entry) return <NoticeGroup key={entry.notices[0].id} notices={entry.notices} />;
           const item = entry;
@@ -777,11 +781,45 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
           );
+          };
+  return (
+    <>
+    {finding ? <FindBar scope={inner} version={items} onClose={() => setFinding(false)} onJump={() => (stick.current = false)} /> : null}
+    <div
+      className="transcript"
+      ref={ref}
+      data-testid="transcript"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      }}
+    >
+      <div className="transcript-inner" ref={inner}>
+        {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
+        {turns.map((turn, i) => {
+          const entries = (list: TranscriptItem[]) => groupNotices(groupTranscript(list, main), main).map(renderEntry);
+          if (!foldsTurn(turn, i, turns.length)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
+          // An earlier turn: the message, what the agent did folded into one line, and its answer.
+          return (
+            <Fragment key={turn.user?.id ?? `t${i}`}>
+              {turn.user ? renderEntry(turn.user) : null}
+              <details className="turn-fold" data-testid="turn-fold">
+                <summary>
+                  <Icon name="chevron" size={11} />
+                  <span>{turnSummary(turn)}</span>
+                  {turn.steps.some((x) => x.toolStatus === 'failed') ? <span className="turn-fold-failed" aria-hidden /> : null}
+                </summary>
+                <div className="turn-steps">{entries(turn.steps)}</div>
+              </details>
+              {turn.final ? renderEntry(turn.final) : null}
+            </Fragment>
+          );
         })}
       </div>
       {menu ? <RememberMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onRemember={() => (setRemember(menu.itemId), setMenu(null))} /> : null}
       {remember ? <RememberDialog task={task} itemId={remember} snapshot={snapshot} onClose={() => setRemember(null)} /> : null}
     </div>
+    </>
   );
 }
 

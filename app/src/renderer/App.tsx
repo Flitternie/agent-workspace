@@ -135,8 +135,18 @@ export function App() {
       setSettingsSection((e as CustomEvent<{ section?: string }>).detail?.section);
       setSettingsOpen(true);
     };
+    // The setup guide, reopened from Settings: it shows where the Overview is.
+    const guide = () => {
+      setSettingsOpen(false);
+      setSettingsSection(undefined);
+      setFocusId(null);
+    };
     window.addEventListener('amw:open-settings', open);
-    return () => window.removeEventListener('amw:open-settings', open);
+    window.addEventListener('amw:open-guide', guide);
+    return () => {
+      window.removeEventListener('amw:open-settings', open);
+      window.removeEventListener('amw:open-guide', guide);
+    };
   }, []);
   // Overview: a clicked card is who you are talking to (voice/typed default target) without opening it.
   const [selectedId, setSelectedId] = useState<string | null>(null);
