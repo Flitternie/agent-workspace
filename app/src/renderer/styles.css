@@ -6524,3 +6524,18 @@ button.subtask-row:hover {
   width: auto;
   max-width: none;
 }
+/* Projects where nothing is going on, folded into one row at the end of the list. */
+.team-archive {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.team-archive-head .team-name {
+  color: var(--text-3);
+}
+.team-archive-head[aria-expanded='true'] > .team-chevron {
+  transform: rotate(90deg);
+}
+.team-archive .team {
+  opacity: 0.85;
+}
