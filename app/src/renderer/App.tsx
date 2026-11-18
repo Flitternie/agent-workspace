@@ -244,7 +244,7 @@ export function App() {
   const onboarding = !snapshot.demo && !ob.dismissed && (!!ob.started || snapshot.tasks.length === 0);
   setLanguage(snapshot.settings.language ?? 'en');
   const openItems = snapshot.attention.filter((a) => a.state === 'open');
-  const needYou = new Set(openItems.filter((a) => a.kind !== 'completion').map((a) => a.taskId)).size;
+  const needYou = new Set(openItems.filter((a) => a.kind !== 'completion' && !snapshot.tasks.find((t) => t.taskId === a.taskId)?.setAside).map((a) => a.taskId)).size;
   const working = snapshot.tasks.filter((t) => t.status === 'running' || t.status === 'starting').length;
   // A layout keeps its number of tiles; when the Overview is too narrow for its columns, the same
   // tiles go into fewer columns (3×2 becomes 2×3) rather than squeezing below a readable width.

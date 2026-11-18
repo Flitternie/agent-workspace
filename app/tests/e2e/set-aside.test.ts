@@ -94,5 +94,34 @@ describe('seen and set aside', () => {
     await invoke(page, 'task:send', { taskId: a.taskId, text: 'One more thing.', via: 'text' });
     await expect.poll(async () => (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)?.setAside ?? false).toBe(false);
     await expect.poll(() => card('Orders').count(), { timeout: 30_000 }).toBe(1);
+
+    // One that ended its turn on a question (waiting on you): set aside, it leaves "Needs you", its
+    // team and every count too; the question it ended on is hidden with it.
+    const q = await invoke<Task>(page, 'task:create', { projectId: p.projectId, provider: 'mock', title: 'Research', name: 'Research', mockScript: 'ask:Should I keep going?', instruction: 'Look into it.', isolate: false });
+    const needs = () => page.locator(`[data-testid="needs-item"][data-alias="${q.alias}"]`);
+    await expect.poll(() => needs().count(), { timeout: 30_000 }).toBe(1);
+    const needCount = async () => Number(/(\d+) need/.exec(await page.getByTestId('topbar-summary').innerText())?.[1] ?? 0);
+    await expect.poll(needCount).toBeGreaterThan(0);
+    const before = await needCount();
+    await needs().click();
+    await page.getByTestId('set-aside').click();
+    await page.getByRole('button', { name: /^Overview/ }).click();
+    await expect.poll(() => needs().count()).toBe(0);
+    // Listed only under its team's idle row (unfolded earlier in this test), after the idle toggle.
+    await expect
+      .poll(() =>
+        page.evaluate((al) => {
+          const row = document.querySelector(`[data-testid="rail-item"][data-alias="${al}"]`);
+          const toggle = document.querySelector('[data-testid="team-idle"]');
+          return !!row && !!toggle && !!(toggle.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }, q.alias),
+      )
+      .toBe(true);
+    await expect.poll(() => page.locator(`[data-testid="agent-card"][data-alias="${q.alias}"]`).count()).toBe(0);
+    await expect.poll(needCount).toBe(before - 1);
+    await page.screenshot({ path: join(shots, 'aside-03-question-hidden.png') });
+    // Messaged, it is back (and its new turn is under way).
+    await invoke(page, 'task:send', { taskId: q.taskId, text: 'Yes, keep going.', via: 'text' });
+    await expect.poll(() => page.locator(`[data-testid="agent-card"][data-alias="${q.alias}"]`).count(), { timeout: 30_000 }).toBe(1);
   }, 120_000);
 });
