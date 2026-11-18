@@ -40,7 +40,7 @@ export function SkillsSettings() {
   return (
     <div className="skills" data-testid="skills-settings">
       <div className="muted small">
-        {t('Skills here are loaded into every agent the app starts — Claude Code and Codex, on this Mac and on remote machines. Your ~/.claude/skills and ~/.codex/skills are only read.')}
+        {t('Loaded into every agent the app starts, Claude Code and Codex, on every machine.')}
       </div>
 
       <div className="section-label">{t('Library · {n}', { n: library.length })}</div>
@@ -117,7 +117,7 @@ export function SkillsSettings() {
         </div>
       ))}
       {error ? <div className="error-text small">{error}</div> : null}
-      <div className="muted small">{t('Changes reach running agents too: Codex picks them up by itself, Claude Code reloads its plugins. An agent started before the library had any skills picks them up when restarted.')}</div>
+      <div className="muted small">{t('Running agents pick up changes; one started with no skills needs a restart.')}</div>
     </div>
   );
 }

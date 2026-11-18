@@ -5,12 +5,12 @@ import { Icon } from './bits';
 import { DiffStat } from './Content';
 
 /** The agent's latest turn at a glance: the files it changed, each a click from its diff; and "follow". */
-export function ChangesPanel({ task, changes, follow, onFollow, onOpen }: { task: Task; changes: TurnChanges; follow: boolean; onFollow: (on: boolean) => void; onOpen: (path: string, line?: number) => void }) {
+export function ChangesPanel({ task, changes, follow, width, onFollow, onOpen }: { task: Task; changes: TurnChanges; follow: boolean; width?: number; onFollow: (on: boolean) => void; onOpen: (path: string, line?: number) => void }) {
   const added = changes.files.reduce((n, f) => n + f.added, 0);
   const removed = changes.files.reduce((n, f) => n + f.removed, 0);
   const rel = (p: string) => (p.startsWith(`${task.cwd}/`) ? p.slice(task.cwd.length + 1) : p);
   return (
-    <aside className="memory changes" aria-label={t('Changes')} data-testid="changes-panel">
+    <aside className="memory side changes" style={width ? { width } : undefined} aria-label={t('Changes')} data-testid="changes-panel">
       <div className="preview-top">
         <div className="preview-head">
           <div className="preview-ident">

@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
-import { memorySourceText } from './MemorySettings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { groupTranscript, PlanChecklist, PreviewContext, ToolCallRow, ToolGroup } from './Content';
@@ -384,15 +383,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         </div>
       </section>
       {(() => {
-        const panel = preview && !covering ? (
-          <>
-            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-            {previewPanel}
-          </>
+        // Every side panel (preview, side questions, changes, memory) has the same width and the same
+        // drag bar: one column, whatever it shows.
+        const content = preview && !covering ? (
+          previewPanel
         ) : !preview && showBtw && btw.length ? (
           <BtwPanel
             task={task}
             entries={btw}
+            width={shownWidth}
             onClose={() => setShowBtw(false)}
             onClear={() => {
               setBtw([]);
@@ -402,11 +401,14 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
           />
         ) : !preview && showChanges ? (
-          <ChangesPanel task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
+          <ChangesPanel task={task} changes={changes} follow={follow} width={shownWidth} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
         ) : !preview && showMemory ? (
+          <AgentMemoryPanel snapshot={snapshot} task={task} width={shownWidth} onClose={() => setShowMemory(false)} />
+        ) : null;
+        const panel = content ? (
           <>
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-            <AgentMemoryPanel snapshot={snapshot} task={task} frame={{ width: shownWidth, onClose: () => setShowMemory(false) }} />
+            {content}
           </>
         ) : null;
         if (!panel) return null;

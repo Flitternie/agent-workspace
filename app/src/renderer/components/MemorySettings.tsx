@@ -5,6 +5,7 @@ import { t } from '../i18n';
 import { MemoryShare } from './MemoryShare';
 import { timeAgo } from '../state';
 import { Icon } from './bits';
+import { Markdown } from './Markdown';
 
 // Settings › Memory: user memory (scope `global`) and project memory, sharing user
 // memory with the CLIs on linked machines (MemoryShare), and a manual import list.
@@ -20,176 +21,219 @@ export function describeImportKey(key: string): string {
   return `${host && host !== 'local' ? `${host} · ` : `${t('This Mac')} · `}${file}${section && section !== 'all' ? ` › ${section}` : ''}`;
 }
 
-/** Where a record came from, for its meta line. */
+/** Where a note came from, in a few words. */
 export function memorySourceText(m: MemoryRecord): string {
-  return m.importKeys?.length ? m.importKeys.map(describeImportKey).join(', ') : m.source;
+  if (m.importKeys?.length) return m.importKeys.map(describeImportKey).join(', ');
+  if (m.source === 'voice') return t('Said to the coordinator');
+  if (m.source === 'main agent') return t('Saved by the main agent');
+  if (m.originTaskId) return t('Kept from a conversation');
+  return t('Added in the app');
 }
 
-function RecordRow({ m, onError }: { m: MemoryRecord; onError: (e: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
+/** A note as one line: its title, else its first line of text. */
+const lineOf = (m: MemoryRecord) => (m.title || m.body.replace(/^#{1,6}\s+/, '').split('\n').find((l) => l.trim()) || '').trim();
+
+/** One note: a line (title, state, source); opens to the rendered text and its actions. */
+function NoteRow({ m, onError }: { m: MemoryRecord; onError: (e: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<{ title: string; body: string } | null>(null);
   const run = (p: Promise<unknown>) => p.catch((e) => onError(errorText(e)));
+  const off = !m.approvedForReuse;
   return (
-    <div className="memory-record" data-testid="memory-setting-record" data-scope={m.scope}>
-      {draft === null ? (
-        <>
-          {/* Instruction sections already start with their heading. */}
-          {m.title && !m.body.startsWith(`#`) ? <div className="memory-title">{m.title}</div> : null}
-          <div className="memory-body">{m.body}</div>
-        </>
-      ) : (
-        <textarea className="input" rows={Math.min(12, Math.max(3, draft.split('\n').length + 1))} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
-      )}
-      {m.sourceBody !== undefined ? (
-        <div className="memory-conflict" data-testid="memory-conflict">
-          <div className="small">{t('Changed at its source too. Its source now says:')}</div>
-          <div className="memory-body">{m.sourceBody}</div>
-          <div className="row">
-            <button className="btn btn-sm" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'source' }))}>
-              {t('Use this version')}
-            </button>
-            <button className="btn btn-sm btn-ghost" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'mine' }))}>
-              {t('Keep mine')}
-            </button>
-          </div>
+    <div className={`ms-note${open ? ' open' : ''}${off || m.sourceRemoved ? ' dim' : ''}`} data-testid="memory-setting-record" data-scope={m.scope}>
+      <button className="ms-note-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name="chevron" size={11} />
+        <span className="ms-note-title">{lineOf(m)}</span>
+        {m.sourceBody !== undefined ? <span className="ms-tag warn">{t('changed at its source')}</span> : null}
+        {m.sourceRemoved ? <span className="ms-tag">{t('retired')}</span> : off ? <span className="ms-tag">{t('off')}</span> : null}
+        <span className="ms-note-source truncate" title={memorySourceText(m)}>
+          {memorySourceText(m)}
+        </span>
+      </button>
+      {open ? (
+        <div className="ms-note-body">
+          {draft ? (
+            <div className="ms-editor">
+              <input className="input" value={draft.title} placeholder={t('Title')} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              <textarea className="input mono" rows={Math.min(14, Math.max(4, draft.body.split('\n').length + 1))} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} autoFocus />
+              <div className="ms-actions">
+                <button className="btn btn-sm btn-primary" disabled={!draft.body.trim()} onClick={() => void run(call('memory:update', { id: m.id, title: draft.title.trim() || undefined, body: draft.body.trim() }).then(() => setDraft(null)))}>
+                  {t('Save')}
+                </button>
+                <button className="btn btn-sm" onClick={() => setDraft(null)}>
+                  {t('Cancel')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="ms-text">
+              <Markdown text={m.body} />
+            </div>
+          )}
+          {m.sourceBody !== undefined ? (
+            <div className="memory-conflict" data-testid="memory-conflict">
+              <div className="small">{t('Changed at its source too. Its source now says:')}</div>
+              <div className="ms-text">
+                <Markdown text={m.sourceBody} />
+              </div>
+              <div className="row">
+                <button className="btn btn-sm" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'source' }))}>
+                  {t('Use this version')}
+                </button>
+                <button className="btn btn-sm btn-ghost" onClick={() => void run(call('memory:resolveConflict', { id: m.id, take: 'mine' }))}>
+                  {t('Keep mine')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {m.sourceRemoved ? (
+            <div className="muted small">
+              {t('Its source was deleted on its machine, so it is no longer shared or given to agents. Nothing was deleted here.')}{' '}
+              <button className="link small" onClick={() => void run(call('memory:restoreNote', { id: m.id }))} data-testid="memory-restore-note">
+                {t('Use it again')}
+              </button>
+            </div>
+          ) : null}
+          {draft ? null : (
+            <div className="ms-actions">
+              <button className="link" onClick={() => setDraft({ title: m.title ?? '', body: m.body })}>
+                {t('Edit')}
+              </button>
+              {m.scope !== 'task' && !m.sourceRemoved ? (
+                <button className="link" title={t('An off note is kept but not given to agents or shared.')} onClick={() => void run(call('memory:update', { id: m.id, approvedForReuse: off }))}>
+                  {off ? t('Turn on') : t('Turn off')}
+                </button>
+              ) : null}
+              <button className="link danger" onClick={() => void run(call('memory:delete', { id: m.id }))}>
+                {t('Delete')}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
-      <div className="memory-meta">
-        {memorySourceText(m)}
-        {m.sourceRemoved ? (
-          <>
-            <span className="badge badge-missing memory-badge" title={t('Its source was deleted on its machine, so it is no longer shared or given to agents. Nothing was deleted here.')}>
-              {t('source deleted · retired')}
-            </span>
-            <button className="link small" onClick={() => void run(call('memory:restoreNote', { id: m.id }))} data-testid="memory-restore-note">
-              {t('Use it again')}
-            </button>
-          </>
-        ) : null}
-        {!m.approvedForReuse ? <span className="badge memory-badge">{t('not loaded (not approved)')}</span> : null}
-      </div>
-      <div className="memory-actions">
-        {draft === null ? (
-          <>
-            <button className="link" onClick={() => setDraft(m.body)}>
-              {t('Edit')}
-            </button>
-            {m.scope !== 'task' ? (
-              <label className="small check">
-                <input type="checkbox" checked={m.approvedForReuse} onChange={(e) => void run(call('memory:update', { id: m.id, approvedForReuse: e.target.checked }))} /> {t('approved for reuse')}
-              </label>
-            ) : null}
-            <button className="link danger" onClick={() => void run(call('memory:delete', { id: m.id }))}>
-              {t('Delete')}
-            </button>
-          </>
-        ) : (
-          <>
-            <button className="link" disabled={!draft.trim()} onClick={() => void run(call('memory:update', { id: m.id, body: draft.trim() }).then(() => setDraft(null)))}>
-              {t('Save')}
-            </button>
-            <button className="link" onClick={() => setDraft(null)}>
-              {t('Cancel')}
-            </button>
-          </>
-        )}
+    </div>
+  );
+}
+
+/** A new user note, written here: title and text, saved when the user says so. */
+function NewNote({ onDone, onError }: { onDone: () => void; onError: (e: string) => void }) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  return (
+    <div className="ms-note open ms-new">
+      <div className="ms-editor">
+        <input className="input" value={title} placeholder={t('Title (optional)')} onChange={(e) => setTitle(e.target.value)} autoFocus data-testid="memory-new-title" />
+        <textarea className="input" rows={4} value={body} placeholder={t('What every agent should know or do…')} onChange={(e) => setBody(e.target.value)} data-testid="memory-new-body" />
+        <div className="ms-actions">
+          <button className="btn btn-sm btn-primary" disabled={!body.trim()} data-testid="memory-new-save"
+            onClick={() => void call('memory:add', { scope: 'global', scopeId: 'global', title: title.trim() || undefined, body: body.trim(), approvedForReuse: true }).then(onDone, (e) => onError(errorText(e)))}>
+            {t('Save')}
+          </button>
+          <button className="btn btn-sm" onClick={onDone}>
+            {t('Cancel')}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function AddNote({ scope, scopeId, onError }: { scope: 'global' | 'project'; scopeId: string; onError: (e: string) => void }) {
-  const [draft, setDraft] = useState('');
-  return (
-    <div className="memory-add-row">
-      <input className="input" placeholder={scope === 'global' ? t('Add a user note…') : t('Add a project note…')} value={draft} onChange={(e) => setDraft(e.target.value)} data-testid={`memory-add-${scope}`}
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter' || !draft.trim()) return;
-          void call('memory:add', { scope, scopeId, body: draft.trim(), approvedForReuse: true }).then(() => setDraft(''), (err) => onError(errorText(err)));
-        }}
-      />
-    </div>
-  );
+/** "~/projects/shop" for a project's folder (home shortened), with its machine. */
+function where(p: WorkspaceSnapshot['projects'][number]): string {
+  const path = p.rootPath.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~');
+  return p.host ? `${p.host}:${path}` : path;
 }
 
 export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
+  const [tab, setTab] = useState<'user' | 'project'>('user');
+  const [adding, setAdding] = useState(false);
   const sync = snapshot.memorySync;
-  const user = snapshot.memory.filter((m) => m.scope === 'global');
   const last = sync.last;
   const hostName = (h: string) => (h === 'local' ? t('This Mac') : h);
+  const user = snapshot.memory.filter((m) => m.scope === 'global');
+  const projectNotes = snapshot.memory.filter((m) => m.scope === 'project');
+  const groups = snapshot.projects.map((p) => ({ p, notes: projectNotes.filter((m) => m.scopeId === p.projectId) })).filter((g) => g.notes.length);
 
   return (
     <div className="memory-settings">
-      <p className="muted small">
-        {t('Notes the app gives to every agent it starts, with Claude Code or Codex, here or over SSH. They load when a session starts or resumes.')}
-      </p>
-
-      <MemoryShare snapshot={snapshot} />
-
-      <div className="memory-sync-status small" data-testid="memory-sync-status">
-        <span className="muted">
-          {sync.running
-            ? t('Syncing…')
-            : last
-              ? t('Last synced {time} · {machines}', { time: timeAgo(last.at), machines: last.hosts.map(hostName).join(', ') || t('no machine') })
-              : t('Not synced yet')}
-        </span>
-        {last && !sync.running ? (
-          <span>{last.added || last.updated || last.removed ? t('{added} added, {updated} updated, {removed} retired', { added: last.added, updated: last.updated, removed: last.removed }) : t('no changes')}</span>
-        ) : null}
-        <button className="btn btn-sm" disabled={sync.running} onClick={() => void call('memory:syncNow', {}).catch((e) => setError(errorText(e)))} data-testid="memory-sync-now">
-          <Icon name="refresh" size={12} /> {t('Sync now')}
-        </button>
-      </div>
-      {last?.errors.length ? (
-        <ul className="memory-errors small">
-          {last.errors.map((e) => (
-            <li key={e.host}>
-              <strong>{hostName(e.host)}</strong>: {e.error}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <div className="memory-settings-head">
-        <h3>
-          {t('User memory')} <span className="count-muted">{user.length}</span>
-        </h3>
+      <div className="ms-intro">
+        <p className="muted small">{t('Given to every agent the app starts, when its session starts.')}</p>
         <button className="btn btn-sm" onClick={() => setImporting(!importing)} data-testid="memory-import-open">
           {importing ? t('Close import') : t('Import…')}
         </button>
       </div>
       {importing ? <ImportList snapshot={snapshot} onClose={() => setImporting(false)} /> : null}
-      <p className="muted small">{t('Applies to every agent the app starts, on every machine.')}</p>
-      <AddNote scope="global" scopeId="global" onError={setError} />
-      {user.map((m) => (
-        <RecordRow key={m.id} m={m} onError={setError} />
-      ))}
 
-      <h3>{t('Project memory')}</h3>
-      <p className="muted small">{t('Applies to every agent in that project. Import Claude Code project notes with Import….')}</p>
-      {snapshot.projects.length === 0 ? <div className="muted small">{t('No projects yet.')}</div> : null}
-      {snapshot.projects.map((p) => {
-        const records = snapshot.memory.filter((m) => m.scope === 'project' && m.scopeId === p.projectId);
-        return (
-          <div key={p.projectId} className="memory-group" data-testid="memory-project">
-            <div className="section-label">
-              {p.name}
-              <span className="muted small mono memory-project-path">
-                {p.host ? `${p.host}:` : ''}
-                {p.rootPath}
-              </span>
-              <span className="count-muted">{records.length}</span>
+      <div className="seg ms-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'user'} className={tab === 'user' ? 'on' : ''} onClick={() => setTab('user')} data-testid="memory-tab-user">
+          {t('User memory')} <span className="count-muted">{user.length}</span>
+        </button>
+        <button role="tab" aria-selected={tab === 'project'} className={tab === 'project' ? 'on' : ''} onClick={() => setTab('project')} data-testid="memory-tab-project">
+          {t('Project memory')} <span className="count-muted">{projectNotes.length}</span>
+        </button>
+      </div>
+
+      {tab === 'user' ? (
+        <div className="ms-list">
+          {user.map((m) => (
+            <NoteRow key={m.id} m={m} onError={setError} />
+          ))}
+          {adding ? (
+            <NewNote onDone={() => setAdding(false)} onError={setError} />
+          ) : (
+            <button className="ms-add" onClick={() => setAdding(true)} data-testid="memory-add-global">
+              <Icon name="plus" size={12} /> {t('New note')}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="ms-list">
+          {groups.length === 0 ? <div className="ms-empty muted small">{t('No project notes yet. Keep one from an agent’s conversation, or Import… Claude Code’s.')}</div> : null}
+          {groups.map(({ p, notes }) => (
+            <div key={p.projectId} className="ms-group" data-testid="memory-project">
+              <div className="ms-group-head">
+                <strong>{p.name}</strong>
+                <span className="muted small mono truncate" title={`${p.host ? `${p.host}:` : ''}${p.rootPath}`}>
+                  {where(p)}
+                </span>
+                <span className="count-muted">{notes.length}</span>
+              </div>
+              {notes.map((m) => (
+                <NoteRow key={m.id} m={m} onError={setError} />
+              ))}
             </div>
-            {records.map((m) => (
-              <RecordRow key={m.id} m={m} onError={setError} />
-            ))}
-            <AddNote scope="project" scopeId={p.projectId} onError={setError} />
-          </div>
-        );
-      })}
+          ))}
+        </div>
+      )}
       {error ? <div className="error-text">{error}</div> : null}
+
+      <div className="ms-share">
+        <MemoryShare snapshot={snapshot} />
+        <div className="memory-sync-status small" data-testid="memory-sync-status">
+          <span className="muted">
+            {sync.running
+              ? t('Syncing…')
+              : last
+                ? t('Last synced {time} · {machines}', { time: timeAgo(last.at), machines: last.hosts.map(hostName).join(', ') || t('no machine') })
+                : t('Not synced yet')}
+            {last && !sync.running && (last.added || last.updated || last.removed) ? ` · ${t('{added} added, {updated} updated, {removed} retired', { added: last.added, updated: last.updated, removed: last.removed })}` : ''}
+          </span>
+          <button className="btn btn-sm" disabled={sync.running} onClick={() => void call('memory:syncNow', {}).catch((e) => setError(errorText(e)))} data-testid="memory-sync-now">
+            <Icon name="refresh" size={12} /> {t('Sync now')}
+          </button>
+        </div>
+        {last?.errors.length ? (
+          <ul className="memory-errors small">
+            {last.errors.map((e) => (
+              <li key={e.host}>
+                <strong>{hostName(e.host)}</strong>: {e.error}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }
