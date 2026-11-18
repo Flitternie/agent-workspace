@@ -31,7 +31,7 @@ jobs:
       publish: ${{ steps.pick.outputs.publish }}
       ref: ${{ steps.pick.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: pick
         run: |
           version=$(node -p "require('./app/package.json').version")
@@ -76,11 +76,11 @@ jobs:
         shell: bash
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.tag.outputs.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -110,7 +110,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.tag.outputs.tag }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-workspace-${{ runner.os }}
           path: |
