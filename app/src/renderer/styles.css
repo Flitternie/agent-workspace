@@ -5651,7 +5651,7 @@ button.subtask-row:hover {
 /* No room beside: the tree's outline alone (no words) in a strip right of the conversation; a click opens it. */
 .session-minimap {
   position: absolute;
-  top: 18px;
+  top: 8px;
   right: 18px;
   z-index: 2;
   display: flex;
@@ -5659,8 +5659,11 @@ button.subtask-row:hover {
   align-items: center;
   width: 26px;
   max-height: calc(100% - 210px);
-  overflow: hidden;
-  padding: 8px 0 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 10px 0 22px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
   border: 0;
   border-radius: 8px;
   background: none;
@@ -5670,6 +5673,7 @@ button.subtask-row:hover {
   background: var(--hover);
 }
 .mini-task {
+  flex: none;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -5738,8 +5742,13 @@ button.subtask-row:hover {
 }
 .session-map-beside {
   position: absolute;
-  top: 16px;
-  right: 14px;
+  top: 4px;
+  /* Room for the fades: a long map fades out at its ends, so it reads as going on. */
+  padding: 12px 0 30px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  /* Clear of the conversation's scrollbar, with a margin of its own before the window's edge. */
+  right: 30px;
   bottom: 190px;
   z-index: 2;
   overflow-y: auto;

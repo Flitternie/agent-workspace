@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MapDecision, MapTask } from '../../shared/session-map';
 import { t } from '../i18n';
 import { Alias, Icon } from './bits';
@@ -37,8 +37,12 @@ export function SessionMap({
       else next.add(id);
       return next;
     });
+  const root = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    keepInView(root.current, current);
+  }, [current, tasks.length]);
   return (
-    <ol className="session-map" data-testid="session-map">
+    <ol className="session-map" ref={root} data-testid="session-map">
       {origin ? (
         <li className="map-origin">
           <button className="map-branch from" onClick={() => onOpenAgent(origin.taskId)} title={`${origin.alias} · ${origin.name}`} data-testid="map-origin">
@@ -191,8 +195,12 @@ function notTaken(d: MapDecision): string[] {
  * colour, its decisions as diamonds, its forks as twigs. A click opens the full map in the side column.
  */
 export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; current: string | null; onOpen: () => void }) {
+  const root = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    keepInView(root.current, current, true);
+  }, [current, tasks.length]);
   return (
-    <button className="session-minimap" onClick={onOpen} data-tip={t('Task index')} aria-label={t('Task index')} title={tasks.map((x) => x.title).join('\n')} data-testid="session-minimap">
+    <button className="session-minimap" ref={root} onClick={onOpen} data-tip={t('Task index')} aria-label={t('Task index')} title={tasks.map((x) => x.title).join('\n')} data-testid="session-minimap">
       {tasks.map((task, i) => {
         const decisions = Math.min(task.decisions.length, 3);
         return (
@@ -202,6 +210,7 @@ export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; c
             style={{ ['--hue' as string]: HUES[i % HUES.length] }}
             data-status={task.status ?? 'unknown'}
             data-testid="mini-task"
+            data-start={task.startItemId}
           >
             <span className="mini-node" />
             {decisions ? (
@@ -219,4 +228,21 @@ export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; c
       })}
     </button>
   );
+}
+
+/**
+ * A long session's map is taller than its room: keep the task being read in view, scrolling only the
+ * map's own box (never the conversation), centred when it has to move.
+ */
+function keepInView(el: HTMLElement | null, current: string | null, self = false) {
+  if (!el || !current) return;
+  let box: HTMLElement | null = self ? el : el.parentElement;
+  while (box && !/(auto|scroll|hidden)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+  const node = el.querySelector<HTMLElement>(`[data-start="${CSS.escape(current)}"]`);
+  if (!box || !node) return;
+  const b = box.getBoundingClientRect();
+  const n = node.getBoundingClientRect();
+  const margin = 40;
+  if (n.top >= b.top + margin && n.top + Math.min(n.height, 80) <= b.bottom - margin) return;
+  box.scrollTo({ top: box.scrollTop + (n.top - b.top) - box.clientHeight / 3, behavior: 'smooth' });
 }

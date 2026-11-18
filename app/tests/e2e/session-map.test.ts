@@ -123,6 +123,12 @@ describe('session map', () => {
       return { left: col.left - pane.left, right: map.left - col.right };
     });
     expect(Math.abs(gaps.left - gaps.right)).toBeLessThan(60);
+    // And a margin on its right: nothing in it runs to the window's edge.
+    const edge = await page.evaluate(() => {
+      const pane = document.querySelector('.focus-thread')!.getBoundingClientRect();
+      return Math.max(...[...document.querySelectorAll('[data-testid="session-map-beside"] *')].map((el) => el.getBoundingClientRect().right)) - pane.right;
+    });
+    expect(edge).toBeLessThanOrEqual(-24);
 
     // Narrow: not beside the conversation; its outline (no words) at the edge opens it in the side column.
     await page.setViewportSize({ width: 1100, height: 900 });

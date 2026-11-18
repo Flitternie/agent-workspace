@@ -510,7 +510,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           <div className={`focus-thread${mapRoom ? ' with-map' : ''}`} hidden={covering} ref={threadRef} style={mapRoom ? { ['--map-room' as string]: `${mapRoom}px` } : undefined}>
             {/* The session map in the room right of the conversation; with no room, its outline, opening the side column. */}
             {mapBeside ? (
-              <div className="session-map-beside" style={{ width: MAP_ROOM - 30 }} data-testid="session-map-beside">
+              <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
                 <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
               </div>
             ) : mapRoom ? (
