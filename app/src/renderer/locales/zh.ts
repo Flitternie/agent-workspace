@@ -198,7 +198,7 @@ export const zh: Record<string, string> = {
   'The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name (from its next turn).': '模型繁忙或触发了限流。稍后重试，或点 agent 名字旁边的模型名切换到其他模型（从下一轮开始生效）。',
   Maximize: '最大化',
   'Back to the side (Esc)': '还原到侧边（Esc）',
-  'Resize the preview': '调整预览宽度',
+  'Resize the side column': '调整侧栏宽度',
   'Drag to resize; double-click to reset': '拖动调整宽度，双击恢复默认',
   // `!command` and suggested replies
   Command: '命令',
@@ -902,7 +902,6 @@ export const zh: Record<string, string> = {
   '{n} decisions': '{n} 个决策',
   '{n} forks': '{n} 个分叉',
   'Forked from {name}': '分叉自 {name}',
-  'forked off here': '从这里分叉',
   '{n} sub-agents': '{n} 个子 agent',
   '{n} dropped': '{n} 个放弃的尝试',
   'Tried: {x}': '试过：{x}',

@@ -143,6 +143,15 @@ describe('session map', () => {
     await page.getByTestId('session-minimap').click();
     await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
     await expect.poll(() => page.getByTestId('session-minimap').count()).toBe(0);
+    // The side column is resized like the preview: drag its edge.
+    const panelW = () => page.getByTestId('session-map-panel').evaluate((el) => el.getBoundingClientRect().width);
+    const before = await panelW();
+    const bar = (await page.getByTestId('panel-resizer').boundingBox())!;
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + 100, bar.y + 200, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(panelW).toBeLessThan(before - 40);
     expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
 

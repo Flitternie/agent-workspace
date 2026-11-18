@@ -500,7 +500,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {previewPanel}
           </>
         ) : !preview && showMap && !mapBeside && mapTasks.length ? (
-          <aside className="memory map" aria-label={t('Task index')} data-testid="session-map-panel">
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
+          <aside className="memory map" style={{ width: shownWidth }} aria-label={t('Task index')} data-testid="session-map-panel">
             <div className="preview-top">
               <div className="preview-head">
                 <div className="preview-ident">
@@ -513,8 +515,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
             <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
           </aside>
+          </>
         ) : !preview && showBtw && btw.length ? (
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
           <BtwPanel
+            width={shownWidth}
             task={task}
             entries={btw}
             onClose={() => setShowBtw(false)}
@@ -525,8 +531,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             }}
             onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
           />
+          </>
         ) : !preview && showChanges ? (
-          <ChangesPanel task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
+          <>
+            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
+          <ChangesPanel width={shownWidth} task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
+          </>
         ) : !preview && showMemory ? (
           <>
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
@@ -565,7 +575,7 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
       className="panel-resizer"
       role="separator"
       aria-orientation="vertical"
-      aria-label={t('Resize the preview')}
+      aria-label={t('Resize the side column')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="panel-resizer"
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}

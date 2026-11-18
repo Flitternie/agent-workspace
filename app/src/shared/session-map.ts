@@ -80,7 +80,7 @@ export interface MapGrouping {
 }
 
 /** The grouping prompt's version (bump when what it asks for changes). */
-export const GROUPING_VERSION = 3;
+export const GROUPING_VERSION = 4;
 
 /** Structure only, until the model's grouping: a pause this long starts a new task. */
 export const PAUSE_MS = 45 * 60_000;
@@ -267,11 +267,14 @@ export const GROUPING_PROMPT = `You index a coding agent's session for the perso
 You get the turns in order, numbered: what the user asked, the agent's last reply, and hints (a new plan, a long pause, files touched). Group consecutive turns into tasks. A task usually spans several turns: follow-ups, confirmations, corrections and fixes for the same goal stay in the same task. Start a new task only where the goal changes. The hints are evidence, not rules.
 
 For each task:
-- title: what was worked on, in the language the user writes in, at most 8 words (about 16 characters in Chinese), no trailing punctuation.
-- outcome: one short sentence on what came of it (what was built, fixed, found or decided), in the same language. Only what the turns show.
+Write like index entries, not sentences: terse phrases, no subject (no "I", "we", "the user"), no filler, no trailing punctuation. Name code by its identifier.
+Language: write every title, outcome, decision and attempt in the language of the user's own messages. If the user writes Chinese, write Chinese, even when the code, the agent's replies or these instructions are in English.
+
+- title: what was worked on, at most 5 words (about 10 characters in Chinese), e.g. "Add discount to total" / "给 total 加折扣参数".
+- outcome: what came of it, at most 10 words (about 20 characters in Chinese), e.g. "Refund rule documented, not enforced" / "退款规则只写入文档，未校验". Only what the turns show.
 - status: "done" when it was finished, "in_progress" when it is still going (usually only the last task), "abandoned" when it was dropped or undone.
-- decisions: the choices that were settled in the conversation, the ones someone coming back later would want to find: a direction picked, an option ruled out, a trade-off accepted. For each, the turn it was settled in, the decision, and what it ruled out if anything. Leave routine steps out; none is fine.
-- attempts: approaches that were actually tried and then dropped or undone (changes reverted, a route abandoned for another). For each, the turn it was tried in, what was tried, and why it was dropped if the turns say. Not options merely discussed; none is fine.
+- decisions: the choices that were settled in the conversation, the ones someone coming back later would want to find: a direction picked, an option ruled out, a trade-off accepted. For each, the turn it was settled in, the decision (at most 6 words, about 12 characters in Chinese, e.g. "按减掉的比例算折扣"), and what it ruled out if anything (at most 4 words, about 8 characters, e.g. "打八折写法"). Leave routine steps out; none is fine.
+- attempts: approaches that were actually tried and then dropped or undone (changes reverted, a route abandoned for another). For each, the turn it was tried in, what was tried (at most 5 words) and why it was dropped if the turns say (at most 6 words). Not options merely discussed; none is fine.
 
 Use only what the turns say. Every turn number you give must be one of the turns shown, and a decision's turn must lie inside its task.
 

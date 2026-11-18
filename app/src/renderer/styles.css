@@ -5894,6 +5894,10 @@ button.subtask-row:hover {
   color: var(--text-3);
 }
 .map-outcome {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.45;
@@ -5954,6 +5958,10 @@ button.subtask-row:hover {
   line-height: 1.4;
   text-align: left;
   cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .map-decision.kind-decided .map-decision-label {
   color: var(--text);
@@ -6101,6 +6109,9 @@ button.subtask-row:hover {
   text-decoration-color: color-mix(in srgb, var(--text-3) 55%, transparent);
 }
 .map-attempt-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--text-3);
 }

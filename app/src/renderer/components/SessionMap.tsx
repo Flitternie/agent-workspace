@@ -88,7 +88,7 @@ export function SessionMap({
               {task.status === 'in_progress' ? <span className="map-state going">{t('in progress')}</span> : task.status === 'abandoned' ? <span className="map-state dropped">{t('dropped')}</span> : null}
               {meta.join(' · ')}
             </div>
-            {open && task.outcome ? <div className="map-outcome">{task.outcome}</div> : null}
+            {open && task.outcome ? <div className="map-outcome" title={task.outcome}>{task.outcome}</div> : null}
             {open ? (
               task.decisions.map((d) => <Decision key={d.itemId + d.label} d={d} onJump={onJump} />)
             ) : details ? (
@@ -121,7 +121,7 @@ export function SessionMap({
                       <Icon name="x" size={8} />
                     </span>
                     <span className="map-attempt-text">
-                      <span className="map-attempt-tried">{t('Tried: {x}', { x: a.tried })}</span>
+                      <span className="map-attempt-tried">{a.tried}</span>
                       {a.why ? <span className="map-attempt-why">{a.why}</span> : null}
                     </span>
                   </button>
@@ -133,7 +133,6 @@ export function SessionMap({
                     <span className="map-lane" aria-hidden />
                     <Alias alias={b.alias} size="xs" />
                     <span className="map-branch-name">{b.alias}</span>
-                    <span className="truncate map-branch-sub">{t('forked off here')}</span>
                   </button>
                 ))
               : null}
@@ -145,7 +144,7 @@ export function SessionMap({
 }
 
 function Decision({ d, onJump }: { d: MapDecision; onJump: (turnId: string) => void }) {
-  const label = d.kind === 'approval' ? t('Allowed: {x}', { x: d.label }) : d.kind === 'answer' ? t('Answered: {x}', { x: d.label }) : d.kind === 'redirect' ? t('Changed course: {x}', { x: d.label }) : d.label;
+  const label = d.kind === 'approval' ? t('Allowed: {x}', { x: d.label }) : d.kind === 'redirect' ? t('Changed course: {x}', { x: d.label }) : d.label;
   return (
     <div className={`map-decision kind-${d.kind}`} data-testid="map-decision">
       <span className="map-twig" aria-hidden />
