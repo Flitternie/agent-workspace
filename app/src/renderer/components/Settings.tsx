@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import type { Language, MicMode, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
@@ -768,17 +768,18 @@ function ShortcutField({ value, onChange }: { value: string; onChange: (shortcut
   );
 }
 
-const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
-  { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
-  { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
-  { id: 'remote', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
-  { id: 'skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
-  { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
-  { id: 'memory', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
-  { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
-  { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
-  { id: 'voice', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
-  { id: 'data', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
+// The settings, grouped: connecting the CLIs, how agents work, what they know, voice, general.
+const SECTIONS: Array<{ id: string; group: string; title: string; keywords: string[] }> = [
+  { id: 'agents', group: 'Connect', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
+  { id: 'remote', group: 'Connect', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
+  { id: 'main', group: 'How agents work', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
+  { id: 'permissions', group: 'How agents work', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
+  { id: 'memory', group: 'Memory and skills', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
+  { id: 'skills', group: 'Memory and skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
+  { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
+  { id: 'openai', group: 'Voice and OpenAI', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
+  { id: 'language', group: 'General', title: 'Language', keywords: ['English', '中文', 'locale'] },
+  { id: 'data', group: 'General', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
 ];
 
 /** A settings group; hidden when the search does not match its title or contents. */
@@ -843,23 +844,16 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </header>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={t('Settings')}>
-          {SECTIONS.map((sec) => (
-            <button key={sec.id} className="settings-nav-item" onClick={() => jump(sec.id)}>
-              {t(sec.title)}
-            </button>
+          {SECTIONS.map((sec, i) => (
+            <Fragment key={sec.id}>
+              {sec.group !== SECTIONS[i - 1]?.group ? <div className="settings-nav-group">{t(sec.group)}</div> : null}
+              <button className="settings-nav-item" onClick={() => jump(sec.id)}>
+                {t(sec.title)}
+              </button>
+            </Fragment>
           ))}
         </nav>
         <div className="settings-content">
-      <Section id="language" query={query}>
-        <div className="segmented" role="radiogroup" aria-label={t('Language')}>
-          {LANGUAGES.map((l) => (
-            <button key={l.id} role="radio" aria-checked={s.language === l.id} className={s.language === l.id ? 'on' : ''} onClick={() => update({ language: l.id })} data-testid={`lang-${l.id}`}>
-              {l.label}
-            </button>
-          ))}
-        </div>
-      </Section>
-
       <Section
         id="agents"
         query={query}
@@ -907,7 +901,6 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           );
         })}
       </Section>
-
       <Section id="remote" query={query}>
         <p className="muted small">
           {t(
@@ -915,10 +908,6 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           )}
         </p>
         <RemoteHosts snapshot={snapshot} />
-      </Section>
-
-      <Section id="skills" query={query}>
-        <SkillsSettings />
       </Section>
       <Section id="main" query={query}>
         <p className="muted small">
@@ -942,20 +931,16 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
       </Section>
-
-      <Section id="memory" query={query}>
-        <MemorySettings snapshot={snapshot} />
-      </Section>
-
       <Section id="permissions" query={query}>
         <p className="muted small">{t('Default for new agents; each agent can change its own.')}</p>
         <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
       </Section>
-
-      <Section id="openai" query={query}>
-        <OpenAiKey snapshot={snapshot} />
+      <Section id="memory" query={query}>
+        <MemorySettings snapshot={snapshot} />
       </Section>
-
+      <Section id="skills" query={query}>
+        <SkillsSettings />
+      </Section>
       <Section id="voice" query={query}>
         <div className="settings-row">
           <div className="settings-row-main">
@@ -1017,7 +1002,18 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           </span>
         </label>
       </Section>
-
+      <Section id="openai" query={query}>
+        <OpenAiKey snapshot={snapshot} />
+      </Section>
+      <Section id="language" query={query}>
+        <div className="segmented" role="radiogroup" aria-label={t('Language')}>
+          {LANGUAGES.map((l) => (
+            <button key={l.id} role="radio" aria-checked={s.language === l.id} className={s.language === l.id ? 'on' : ''} onClick={() => update({ language: l.id })} data-testid={`lang-${l.id}`}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </Section>
       <Section id="data" query={query}>
         <div className="small">
           {t('Workspace data is stored in')} <code>{snapshot.dataDir}</code>

@@ -905,4 +905,9 @@ export const zh: Record<string, string> = {
   'Running agents pick up changes; one started with no skills needs a restart.': '正在运行的 agent 也会用上改动；启动时还没有任何 skill 的 agent 需要重启。',
   'Routine actions go through; only risky ones ask you.': '常规操作直接放行，只有有风险的才问你。',
   'Always listening; a short pause sends. The shortcut mutes.': '一直在听，停顿一下就发送。快捷键静音。',
+  'Connect': '连接',
+  'How agents work': 'Agent 工作方式',
+  'Memory and skills': '记忆与技能',
+  'General': '通用',
+  'Voice and OpenAI': '语音与 OpenAI',
 };
