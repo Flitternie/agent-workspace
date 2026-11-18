@@ -71,6 +71,53 @@ export function Sidebar({
   const projectName = (id: string) => snapshot.projects.find((p) => p.projectId === id)?.name ?? '';
   // ⌘1–9 numbers, as App assigns them.
   const number = new Map(visibleOrder(teamList, expanded).slice(0, 9).map((t, i) => [t.taskId, i + 1]));
+  // Projects where nothing is going on (every agent idle for days or set aside) fold into one
+  // "Archived" row at the end, so the list does not grow with every project ever used. A project
+  // comes back by itself as soon as one of its agents does something, or is opened or messaged.
+  const live = teamList.filter((team) => team.active);
+  const archived = teamList.filter((team) => !team.active);
+  const [archiveOpen, setArchiveOpenState] = useState(() => localStorage.getItem('amw.archiveOpen') === '1');
+  const setArchiveOpen = (on: boolean) => {
+    localStorage.setItem('amw.archiveOpen', on ? '1' : '0');
+    setArchiveOpenState(on);
+  };
+  // The agent on screen is always visible in the list.
+  const archiveShown = archiveOpen || archived.some((team) => snapshot.tasks.some((t) => t.taskId === focusId && t.projectId === team.project.projectId));
+  const renderTeam = (team: Team) => {
+          const open_ = expanded(team);
+          const idleShown = showIdle[team.project.projectId];
+          return (
+            <div key={team.project.projectId} className={`team${open_ ? ' open' : ''}`} data-testid="team" data-project={team.project.name}>
+              <button className="team-head" onClick={() => toggle(team)} aria-expanded={open_} data-testid="team-head">
+                <span className="team-chevron" aria-hidden>
+                  <Icon name="chevron" size={12} />
+                </span>
+                <span className="team-name truncate">{team.project.name}</span>
+                <span className="team-counts">
+                  {team.counts.waiting ? <span className="team-count needs" title={tr('{n} need you', { n: team.counts.waiting })}>⚑ {team.counts.waiting}</span> : null}
+                  {team.counts.running ? <span className="team-count running" title={tr('{n} working', { n: team.counts.running })}>
+                      <span className="count-dot" aria-hidden /> {team.counts.running}
+                    </span> : null}
+                  {team.counts.failed ? <span className="team-count failed" title={tr('{n} failed', { n: team.counts.failed })}>! {team.counts.failed}</span> : null}
+                  {!team.members.length ? <span className="team-count idle">{tr('{n} idle', { n: team.idle.length })}</span> : null}
+                </span>
+              </button>
+              {open_ ? (
+                <>
+                  {team.members.map((t) => row(t))}
+                  {team.idle.length ? (
+                    <>
+                      <button className="team-idle" onClick={() => setShowIdle((cur) => ({ ...cur, [team.project.projectId]: !idleShown }))} data-testid="team-idle">
+                        {idleShown ? tr('Hide idle') : tr('⋯ {n} idle', { n: team.idle.length })}
+                      </button>
+                      {idleShown ? team.idle.map((t) => row(t)) : null}
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          );
+          };
   const row = (t: Task, opts: { project?: string; needs?: boolean } = {}) => {
     const pending = open.filter((a) => a.taskId === t.taskId);
     const n = opts.needs ? undefined : number.get(t.taskId);
@@ -169,41 +216,19 @@ export function Sidebar({
       </div>
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
-        {teamList.map((team) => {
-          const open_ = expanded(team);
-          const idleShown = showIdle[team.project.projectId];
-          return (
-            <div key={team.project.projectId} className={`team${open_ ? ' open' : ''}`} data-testid="team" data-project={team.project.name}>
-              <button className="team-head" onClick={() => toggle(team)} aria-expanded={open_} data-testid="team-head">
-                <span className="team-chevron" aria-hidden>
-                  <Icon name="chevron" size={12} />
-                </span>
-                <span className="team-name truncate">{team.project.name}</span>
-                <span className="team-counts">
-                  {team.counts.waiting ? <span className="team-count needs" title={tr('{n} need you', { n: team.counts.waiting })}>⚑ {team.counts.waiting}</span> : null}
-                  {team.counts.running ? <span className="team-count running" title={tr('{n} working', { n: team.counts.running })}>
-                      <span className="count-dot" aria-hidden /> {team.counts.running}
-                    </span> : null}
-                  {team.counts.failed ? <span className="team-count failed" title={tr('{n} failed', { n: team.counts.failed })}>! {team.counts.failed}</span> : null}
-                  {!team.members.length ? <span className="team-count idle">{tr('{n} idle', { n: team.idle.length })}</span> : null}
-                </span>
-              </button>
-              {open_ ? (
-                <>
-                  {team.members.map((t) => row(t))}
-                  {team.idle.length ? (
-                    <>
-                      <button className="team-idle" onClick={() => setShowIdle((cur) => ({ ...cur, [team.project.projectId]: !idleShown }))} data-testid="team-idle">
-                        {idleShown ? tr('Hide idle') : tr('⋯ {n} idle', { n: team.idle.length })}
-                      </button>
-                      {idleShown ? team.idle.map((t) => row(t)) : null}
-                    </>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-          );
-        })}
+        {live.map(renderTeam)}
+        {archived.length ? (
+          <div className="team-archive" data-testid="team-archive">
+            <button className="team-head team-archive-head" onClick={() => setArchiveOpen(!archiveShown)} aria-expanded={archiveShown} data-testid="team-archive-head" title={tr('Projects where nothing is going on: no agent working or waiting, none used for 3 days. One comes back by itself when an agent in it does something or you message it.')}>
+              <span className="team-chevron" aria-hidden>
+                <Icon name="chevron" size={12} />
+              </span>
+              <span className="team-name truncate">{tr('Archived')}</span>
+              <span className="team-count idle">{tr('{n} projects', { n: archived.length })}</span>
+            </button>
+            {archiveShown ? archived.map(renderTeam) : null}
+          </div>
+        ) : null}
       </nav>
 
       <div className="sidebar-foot">

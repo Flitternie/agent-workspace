@@ -948,4 +948,6 @@ export const zh: Record<string, string> = {
   'Tried: {x}': '试过：{x}',
   'Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.': '停止这个 agent 并把它从工作区移除。如果它的独立工作副本里没有未提交的改动，副本会被删除，之后这段对话就无法继续；有未提交的改动则保留在磁盘上。',
   'Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里，随时可以用「接入已有会话…」找回来。',
+  'Archived': '已归档',
+  'Projects where nothing is going on: no agent working or waiting, none used for 3 days. One comes back by itself when an agent in it does something or you message it.': '没有动静的项目：没有 agent 在工作或等你，且都 3 天没用过。项目里的 agent 一有动静，或者你给它发消息，项目就会自动回到上面。',
 };
