@@ -4931,3 +4931,85 @@ button.subtask-row:hover {
 .project-item.active .project-item-hint {
   opacity: 1;
 }
+
+/* Side questions ("btw"): the bubble button by Send, and the thread in the side column. */
+.btw-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.btw-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.btw-btn[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.btw-btn[data-tip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.25s;
+}
+.memory.btw {
+  width: 380px;
+  gap: 10px;
+}
+.btw-sub {
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.btw-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.btw-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.btw-q {
+  align-self: flex-end;
+  max-width: 90%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 3px 12px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.btw-a {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 3px 12px 12px 12px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.btw-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+.btw-pending {
+  padding-left: 4px;
+}

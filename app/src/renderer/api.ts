@@ -12,8 +12,7 @@ import type {
   RouteDecision,
   Task,
   TranscriptItem,
-  WorkspaceSnapshot,
-} from '../shared/types';
+  WorkspaceSnapshot, BtwEntry } from '../shared/types';
 
 interface Bridge {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
@@ -58,6 +57,9 @@ export interface Outputs {
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
   'sessions:discoverAll': NativeSessionInfo[];
+  'btw:list': BtwEntry[];
+  'btw:ask': BtwEntry;
+  'btw:clear': void;
   'fs:listDirs': { dir: string; names: string[] };
   'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;

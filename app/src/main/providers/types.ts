@@ -141,6 +141,11 @@ export interface ProviderSession {
    * driven from the phone while it keeps running here. Resolves with the session's link when on.
    */
   setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string }>;
+  /**
+   * A side question ("btw"): answered from this conversation without entering it or interrupting a
+   * turn under way. `history` holds the earlier side questions and answers, oldest first.
+   */
+  askSide?(question: string, history: Array<{ question: string; response: string }>): Promise<string>;
   close(): Promise<void>;
 }
 

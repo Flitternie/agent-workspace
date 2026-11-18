@@ -417,3 +417,17 @@ export interface ModelOption {
   /** The full model id an alias stands for (Claude Code's `opus` → `claude-opus-…`), to recognise the running model. */
   resolves?: string;
 }
+
+/**
+ * A side question ("btw") to an agent: answered from its conversation so far without entering it or
+ * interrupting the turn under way (Claude Code's side questions; a read-only side thread in Codex).
+ */
+export interface BtwEntry {
+  id: string;
+  question: string;
+  /** Set once answered. */
+  answer?: string;
+  error?: string;
+  askedAt: string;
+  answeredAt?: string;
+}
