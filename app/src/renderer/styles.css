@@ -5796,3 +5796,98 @@ button.subtask-row:hover {
   justify-content: space-between;
   gap: 12px;
 }
+
+/* ------------------------------------------------------------------ earlier turns, folded */
+/* Earlier turns show your message, this line and the answer; the steps open on click. */
+.turn-fold {
+  margin: -2px 0 2px;
+}
+.turn-fold > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.turn-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.turn-fold > summary:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.turn-fold > summary .icon {
+  transition: transform 0.12s;
+}
+.turn-fold[open] > summary .icon {
+  transform: rotate(90deg);
+}
+.turn-fold-failed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--risk);
+}
+.turn-steps {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  margin: 6px 0 4px 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ find in conversation */
+.focus-thread {
+  position: relative;
+}
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(15, 18, 24, 0.12);
+  color: var(--text-3);
+}
+.find-input {
+  width: 200px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+.find-count {
+  min-width: 52px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.find-up,
+.find-down {
+  display: inline-flex;
+}
+.find-up {
+  transform: rotate(-90deg);
+}
+.find-down {
+  transform: rotate(90deg);
+}
+::highlight(find) {
+  background-color: rgba(250, 204, 21, 0.35);
+}
+::highlight(find-current) {
+  background-color: rgba(249, 115, 22, 0.55);
+}
