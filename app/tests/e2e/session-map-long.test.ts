@@ -101,6 +101,12 @@ describe('session map, long session', () => {
     await page.locator('.transcript').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
     await expect.poll(() => currentShown('[data-testid="session-minimap"]', '.mini-task')).toBe(true);
     await page.screenshot({ path: join(shots, 'map-long-03-outline.png') });
+    // The agent list's scrollbar: hidden at rest, shown while it scrolls, hidden again a moment after.
+    const bar = () => page.getByTestId('agent-list').evaluate((el) => getComputedStyle(el).scrollbarColor);
+    expect(await bar()).toContain('rgba(0, 0, 0, 0)');
+    await page.getByTestId('agent-list').evaluate((el) => el.dispatchEvent(new Event('scroll')));
+    expect(await bar()).not.toMatch(/^rgba\(0, 0, 0, 0\) /);
+    await expect.poll(bar, { timeout: 3000 }).toMatch(/^rgba\(0, 0, 0, 0\) /);
     expect(errors).toEqual([]);
   }, 180_000);
 });

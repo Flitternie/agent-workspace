@@ -571,9 +571,15 @@ body.resizing .sidebar-resizer {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Hidden until it scrolls (see showScrollbarAWhile): thin, and transparent at rest. */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.agent-list.scrolling {
+  scrollbar-color: color-mix(in srgb, var(--text-3) 55%, transparent) transparent;
 }
 .agent-row {
   display: flex;

@@ -167,7 +167,7 @@ export function Sidebar({
           <Icon name="plus" />
         </button>
       </div>
-      <nav className="agent-list" aria-label="Agents">
+      <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
         {teamList.map((team) => {
           const open_ = expanded(team);
@@ -236,5 +236,17 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+/** The list's scrollbar shows while it scrolls and fades a moment after (also with "always show" on). */
+const scrollTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+function showScrollbarAWhile(e: { currentTarget: Element }) {
+  const el = e.currentTarget;
+  el.classList.add('scrolling');
+  clearTimeout(scrollTimers.get(el));
+  scrollTimers.set(
+    el,
+    setTimeout(() => el.classList.remove('scrolling'), 900),
   );
 }
