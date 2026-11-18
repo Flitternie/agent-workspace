@@ -940,7 +940,7 @@ export class Workspace {
     }
     this.requireHost(host);
     // On the machine: expand ~, list the subfolders (names ending in /), first line the folder as resolved.
-    const script = `d=${shq(dir)}; case "$d" in "~"|"~/"*) d="$HOME\${d#\~}";; esac; cd -- "$d" 2>/dev/null || exit 3; pwd; ls -1Ap | grep '/$' | head -500`;
+    const script = `d=${shq(dir)}; case "$d" in "~"|"~/"*) d="$HOME\${d#?}";; esac; cd -- "$d" 2>/dev/null || exit 3; pwd; ls -1Ap | grep '/$' | head -500`;
     const r = await sshRun(host, `sh -c ${shq(script)}`, 15_000);
     if (r.code === 3) return { dir, names: [] };
     if (r.code !== 0) throw new Error(sshError(host, r.stderr));

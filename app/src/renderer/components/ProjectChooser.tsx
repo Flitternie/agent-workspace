@@ -32,8 +32,17 @@ export function defaultProject(snapshot: WorkspaceSnapshot): string {
 /** Every word of the query somewhere in the text (case-insensitive). */
 const matches = (q: string, text: string) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w));
 
+/**
+ * A Chinese input method in its own punctuation mode types ～ for ~ and 、 for /: a path typed that way
+ * is still a path (only when it starts like one; 、 inside a search for words stays as typed).
+ */
+export function asPath(q: string): string {
+  return /^[～~、/]/.test(q) ? q.replace(/^～/, '~').replace(/、/g, '/') : q;
+}
+
 /** A typed path (~… or /…): the folder to list and the start of the name being typed. */
-export function splitTyped(q: string): { parent: string; prefix: string } | null {
+export function splitTyped(raw: string): { parent: string; prefix: string } | null {
+  const q = asPath(raw);
   if (!/^[~/]/.test(q)) return null;
   if (q === '~') return { parent: '~/', prefix: '' };
   const cut = q.lastIndexOf('/') + 1;
@@ -242,11 +251,14 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
   };
 
   const keys = (e: React.KeyboardEvent) => {
+    // The highlighted item, kept inside the list: right after the list shrinks (a completion taken),
+    // the highlight may still point past its end until it is reset.
+    const current = items[Math.min(active, items.length - 1)];
     if (e.key === 'ArrowDown') setActive((i) => Math.min(items.length - 1, i + 1));
-    else if (e.key === 'ArrowUp') setActive((i) => Math.max(0, i - 1));
-    else if (e.key === 'Enter') void choose(items[active]);
+    else if (e.key === 'ArrowUp') setActive((i) => Math.max(0, Math.min(i, items.length - 1) - 1));
+    else if (e.key === 'Enter') void choose(current);
     // Tab completes a folder and goes into it: the highlighted one, else the first that matches (as in a shell).
-    else if (e.key === 'Tab' && typed && items.some((i) => i.kind === 'dir')) void choose(items[active]?.kind === 'dir' ? items[active] : items.find((i) => i.kind === 'dir'));
+    else if (e.key === 'Tab' && typed && items.some((i) => i.kind === 'dir')) void choose(current?.kind === 'dir' ? current : items.find((i) => i.kind === 'dir'));
     else if (e.key === 'Backspace' && !query && stage === 'folder') back();
     else if (e.key === 'Escape') toggle(false);
     else return;
@@ -294,7 +306,12 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
             spellCheck={false}
             placeholder={stage === 'place' ? t('Where? This Mac or a machine…') : place ? t('Search, or type a path on {host} (~/… or /…)', { host: place }) : t('Search, or type a path (~/… or /…)')}
             defaultValue=""
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              // ～ / 、 from a Chinese input method: written back as ~ and / at once.
+              const v = asPath(e.target.value);
+              if (v !== e.target.value) e.target.value = v;
+              setQuery(v);
+            }}
             onKeyDown={keys}
             data-testid="project-search"
           />

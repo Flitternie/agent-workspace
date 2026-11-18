@@ -32,10 +32,11 @@ describe('new agent', () => {
     // the app's own HOME lists it in ~/.ssh/config.
     const home = join(scratch, 'home');
     mkdirSync(join(home, '.ssh'), { recursive: true });
+    mkdirSync(join(home, 'Documents'));
     writeFileSync(join(home, '.ssh', 'config'), 'Host devbox\n  HostName 10.0.0.5\n  User dev\n');
     const remoteHome = join(scratch, 'remote-home');
     const train = join(scratch, 'gpu', 'train');
-    mkdirSync(remoteHome);
+    mkdirSync(join(remoteHome, 'models'), { recursive: true });
     mkdirSync(train, { recursive: true });
     const localLib = join(scratch, 'local-lib');
     mkdirSync(localLib);
@@ -130,6 +131,11 @@ describe('new agent', () => {
     expect(await page.getByTestId('project-back').innerText()).toContain('devbox');
     // The machine: only the folders where sessions ran there.
     await expect.poll(async () => (await kinds()).map((k) => k.slice(0, 11))).toEqual(['found:train']);
+    // ~ is that machine's home (its own, not this Mac's).
+    await page.keyboard.type('~/');
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:models/Tab to open']);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
     // Any folder on it by typing a path, completed from that machine (over ssh) as typed; Tab goes in.
     await page.keyboard.type(`${scratch}/g`);
     await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:gpu/Tab to open']);
@@ -152,6 +158,12 @@ describe('new agent', () => {
     await page.getByTestId('project-back').click();
     await page.keyboard.press('Enter');
     await expect.poll(() => page.getByTestId('project-back').innerText()).toContain('This Mac');
+    // A Chinese input method's punctuation (～ and 、) still types a path.
+    await page.keyboard.type('～、');
+    await expect.poll(() => page.getByTestId('project-search').inputValue()).toBe('~/');
+    await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:Documents/Tab to open']);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
     await page.keyboard.type(`${scratch}/lo`);
     await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:local-lib/Tab to open']);
     await page.keyboard.press('Tab');

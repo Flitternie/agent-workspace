@@ -32,7 +32,7 @@ describe('preview rendering helpers', () => {
   });
 });
 
-import { splitTyped } from '../../src/renderer/components/ProjectChooser';
+import { asPath, splitTyped } from '../../src/renderer/components/ProjectChooser';
 
 describe('typed folder paths', () => {
   it('splits a typed path into the folder to list and the name being typed', () => {
@@ -41,5 +41,9 @@ describe('typed folder paths', () => {
     expect(splitTyped('/srv/data/')).toEqual({ parent: '/srv/data/', prefix: '' });
     expect(splitTyped('/srv/da')).toEqual({ parent: '/srv/', prefix: 'da' });
     expect(splitTyped('billing')).toBeNull();
+    // A Chinese input method's ～ and 、 for ~ and /, only when it starts like a path.
+    expect(asPath('～、projects、')).toBe('~/projects/');
+    expect(asPath('、srv')).toBe('/srv');
+    expect(asPath('报告、草稿')).toBe('报告、草稿');
   });
 });
