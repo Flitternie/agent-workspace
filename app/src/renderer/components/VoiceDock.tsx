@@ -669,7 +669,7 @@ export function VoiceDock({
           {!live ? <span className="mic-slash" aria-hidden /> : null}
         </button>
         <div className="mic-state">
-          <div className={`mic-label state-${mic}${!stt && !hint ? ' unset' : ''}`} title={!stt && !hint ? tr('Choose a speech model in Settings to talk to your agents. Typing works without one.') : undefined} data-testid="mic-label">
+          <div className={`mic-label state-${mic}${!stt && !hint ? ' unset' : ''}`} title={!stt && !hint ? tr('Set up a speech model to talk to your agents') : undefined} data-testid="mic-label">
             {live ? <span className="live-dot" aria-hidden /> : null}
             <span className="mic-label-text">{micLabel}</span>
             {/* Not set up yet (not an error): one click to where it is set up. */}
@@ -713,9 +713,6 @@ export function VoiceDock({
               }
             }}
           />
-          <span className="dock-hint">
-            <Kbd>↵</Kbd> {tr('route')}
-          </span>
         </div>
         {snapshot.main ? (
           <button className={`btn dock-side${showMain ? ' btn-pressed' : ''}`} onClick={() => setShowMain(!showMain)} title={tr('Main agent')} data-testid="main-toggle">
@@ -781,7 +778,6 @@ function RoutePreview({
             </strong>
             <span className="muted small">
               {tr(`${decision.confidence} confidence`)} · {decision.reason}
-              {decision.taskId !== focusedTaskId && focusedTaskId ? ` · ${tr('your view stays where it is')}` : ''}
             </span>
           </div>
           <div className="route-actions">

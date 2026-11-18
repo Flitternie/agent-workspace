@@ -799,7 +799,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
       }}
     >
       <div className="transcript-inner" ref={inner}>
-        {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
+        {items.length === 0 ? <div className="muted pad">{t('No messages yet.')}</div> : null}
         {turns.map((turn, i) => {
           const entries = (list: TranscriptItem[]) => groupNotices(groupTranscript(list, main), main).map(renderEntry);
           if (!foldsTurn(turn, i, turns.length)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
@@ -987,7 +987,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           <span className="hint" data-testid="composer-hint">
             {suggestion ? (
               <>
-                <Kbd>→</Kbd> {t('use suggestion')} ·{' '}
+                <Kbd>→</Kbd> {t('use suggestion')}{shell || working ? ' · ' : ''}
               </>
             ) : null}
             {shell ? (
@@ -997,16 +997,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             ) : working ? (
               <>
                 <Kbd>↵</Kbd> {t('add to current work')} · <Kbd>⌘↵</Kbd> {t('stop and send')}
-              </>
-            ) : (
-              <>
-                <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
-              </>
-            )}
-            {onBtw && !shell ? (
-              <>
-                {' '}
-                · <Kbd>⌥↵</Kbd> {t('side question')}
               </>
             ) : null}
           </span>

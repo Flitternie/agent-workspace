@@ -219,7 +219,7 @@ export function Sidebar({
         {live.map(renderTeam)}
         {archived.length ? (
           <div className="team-archive" data-testid="team-archive">
-            <button className="team-head team-archive-head" onClick={() => setArchiveOpen(!archiveShown)} aria-expanded={archiveShown} data-testid="team-archive-head" title={tr('Projects where nothing is going on: no agent working or waiting, none used for 3 days. One comes back by itself when an agent in it does something or you message it.')}>
+            <button className="team-head team-archive-head" onClick={() => setArchiveOpen(!archiveShown)} aria-expanded={archiveShown} data-testid="team-archive-head" title={tr('Nothing going on for 3 days; a project comes back when one of its agents is used.')}>
               <span className="team-chevron" aria-hidden>
                 <Icon name="chevron" size={12} />
               </span>

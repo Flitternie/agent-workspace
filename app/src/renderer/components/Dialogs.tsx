@@ -151,17 +151,13 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
         </div>
         {project?.host && remote?.ssh !== 'ok' ? (
           <div className="warn-text small">{t('{host} is not connected. Check it in Settings › Remote machines.', { host: project.host })}</div>
-        ) : project?.host && cap?.available && cap.auth?.loggedIn !== false ? (
-          <div className="muted small">{t('Runs {name} on {host} over SSH, with the login there.', { name: PROVIDER_LABEL[cap.provider], host: project.host })}</div>
-        ) : cap ? (
+        ) : cap && !(cap.available && cap.auth?.loggedIn !== false) ? (
           <div className="muted small">
             {cap.available && cap.auth?.loggedIn === false
               ? project?.host
                 ? t('{name} on {host} is not signed in. Sign in there once, then recheck in Settings.', { name: PROVIDER_LABEL[cap.provider], host: project.host })
                 : t('{name} is installed but not signed in. Open Settings for how to sign in.', { name: PROVIDER_LABEL[cap.provider] })
-              : cap.available
-                ? t('Uses your existing {name} login. Permissions follow the mode chosen in Settings.', { name: PROVIDER_LABEL[cap.provider] })
-                : project?.host
+              : project?.host
                   ? t('{name} is not installed on {host}.', { name: PROVIDER_LABEL[cap.provider], host: project.host })
                   : t('{name} CLI not found on PATH.', { name: PROVIDER_LABEL[cap.provider] })}
           </div>
@@ -169,8 +165,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
       </div>
       <div className="field">
         <label>{t('First instruction (optional)')}</label>
-        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the agent do? Or leave it empty and tell it in the conversation.')} data-testid="new-instruction" />
-        <div className="muted small">{t('Its name comes from what you ask it to do.')}</div>
+        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should it do?')} data-testid="new-instruction" />
       </div>
       {provider === 'mock' ? (
         <div className="field">
@@ -186,7 +181,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
           ? t('(not on SSH hosts yet — will share the folder)')
           : project && !project.isGitRepo
             ? t('(not a git repo — will share the folder)')
-            : t('(isolates edits from other tasks; not a security sandbox)')}
+            : null}
       </label>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
@@ -262,12 +257,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
 
   return (
     <Modal title={t('Continue an existing session')} onClose={onClose}>
-      <p className="muted small">
-        {t(
-          'Conversations you had with Claude Code or Codex on this Mac, in any folder. Importing continues that conversation here with its full history. It does not take over a session that is still open in a terminal — close that one first so the two do not edit at the same time.',
-        )}
-        {hosts.length ? ` ${t('Sessions on a remote machine (including ones the Claude and ChatGPT apps started there over SSH) continue on that machine.')}` : ''}
-      </p>
+      <p className="muted small">{t('Continues a Claude Code or Codex conversation here, with its history. Close it in the terminal first.')}</p>
       <div className="row">
         {hosts.length ? (
           <select className="input select" value={source} onChange={(e) => setSource(e.target.value)} title={t('Where the sessions are')} data-testid="session-host">
@@ -290,7 +280,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
         </div>
       </div>
       {automatedCount || showAutomated ? (
-        <label className="check small muted" title={t('Sessions an agent started for itself while working on a task: claude -p and codex exec runs, and Codex sub-agent threads. Sessions you or an app started (terminal, IDE, desktop apps, this app) are always listed.')}>
+        <label className="check small muted" title={t('Started by an agent for itself: claude -p, codex exec, Codex sub-agents.')}>
           <input
             type="checkbox"
             checked={showAutomated}
@@ -416,7 +406,7 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   };
   return (
     <Modal title={t('Fork {name}', { name: task.alias })} onClose={onClose}>
-      <div className="muted small">{t('A new agent continues a copy of this conversation. {name} and its conversation stay as they are.', { name: task.alias })}</div>
+      <div className="muted small">{t('A new agent continues from a copy; {name} stays as it is.', { name: task.alias })}</div>
       <div className="field">
         <label>{t('Fork from')}</label>
         <div className="fork-points" data-testid="fork-points">
