@@ -102,6 +102,11 @@ describe('session map', () => {
     await expect.poll(() => tasks.nth(1).innerText(), { timeout: 15_000 }).toContain('1 forks');
     await tasks.nth(1).getByTestId('map-caret').click();
     await expect.poll(() => tasks.nth(1).getByTestId('map-branch').count()).toBe(1);
+    // Its avatar stays inside its box (a two-character alias shows one character, on one line).
+    const avatar = await tasks.nth(1).getByTestId('map-branch').locator('.alias').evaluate((el) => ({ h: el.scrollHeight, w: el.scrollWidth, box: el.clientHeight, text: el.textContent }));
+    expect(avatar.h).toBeLessThanOrEqual(avatar.box);
+    expect(avatar.w).toBeLessThanOrEqual(avatar.box);
+    expect(await tasks.nth(1).getByTestId('map-branch').innerText()).toContain(fork.alias);
     await page.screenshot({ path: join(shots, 'map-02b-fork.png') });
 
     // The reader merges the second task into the first.
@@ -109,11 +114,35 @@ describe('session map', () => {
     await tasks.nth(1).getByTestId('map-merge').click();
     await expect.poll(titles).toEqual(['Clean the build']);
 
-    // Narrow: not beside the conversation; a button opens it in the side column.
+    // Beside the map, the conversation is centred in the room left of it: the blank on its left is no
+    // wider than the gap between it and the map.
+    const gaps = await page.evaluate(() => {
+      const col = document.querySelector('.transcript-inner')!.getBoundingClientRect();
+      const pane = document.querySelector('.focus-thread')!.getBoundingClientRect();
+      const map = document.querySelector('[data-testid="session-map-beside"]')!.getBoundingClientRect();
+      return { left: col.left - pane.left, right: map.left - col.right };
+    });
+    expect(Math.abs(gaps.left - gaps.right)).toBeLessThan(60);
+
+    // Narrow: not beside the conversation; its outline (no words) at the edge opens it in the side column.
     await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(0);
-    await page.getByTestId('session-map-toggle').click();
+    await expect.poll(() => page.getByTestId('mini-task').count()).toBe(1);
+    expect(await page.getByTestId('session-minimap').innerText()).toBe('');
+    // It sits in the margin, clear of the messages.
+    const clear = await page.evaluate(() => {
+      const mini = document.querySelector('[data-testid="session-minimap"]')!.getBoundingClientRect();
+      const msgs = [...document.querySelectorAll('.transcript-inner > *')].map((m) => m.getBoundingClientRect());
+      return msgs.every((m) => m.right <= mini.left || m.bottom <= mini.top || m.top >= mini.bottom);
+    });
+    expect(clear).toBe(true);
+    // With no blank beside the messages at all, not even the outline (nothing floats over them).
+    await page.setViewportSize({ width: 820, height: 900 });
+    await expect.poll(() => page.getByTestId('session-minimap').count()).toBe(0);
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.getByTestId('session-minimap').click();
     await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
+    await expect.poll(() => page.getByTestId('session-minimap').count()).toBe(0);
     expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
 
@@ -133,7 +162,7 @@ describe('session map', () => {
     await page.locator(`[data-testid="rail-item"][data-alias="${fork.alias}"],[data-testid="needs-item"][data-alias="${fork.alias}"]`).first().click();
     await invoke(page, 'task:send', { taskId: fork.taskId, text: 'Try another way.', via: 'text' });
     await expect.poll(() => page.getByTestId('map-origin').count(), { timeout: 30_000 }).toBe(1);
-    expect(await page.getByTestId('map-origin').innerText()).toContain('Build');
+    expect(await page.getByTestId('map-origin').innerText()).toContain(a.alias);
     await page.getByTestId('map-origin').click();
     await expect.poll(() => page.locator('.focus-head').innerText()).toContain('Build');
     expect(errors).toEqual([]);

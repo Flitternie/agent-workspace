@@ -354,6 +354,12 @@ pre code {
   background: hsl(var(--hue, 220) 60% 92%);
   color: hsl(var(--hue, 220) 45% 28%);
 }
+.alias-xs {
+  width: 16px;
+  height: 16px;
+  font-size: 9.5px;
+  border-radius: 5px;
+}
 .alias-sm {
   width: 20px;
   height: 20px;
@@ -5607,9 +5613,105 @@ button.subtask-row:hover {
 .focus-thread {
   position: relative;
 }
-/* With the map beside it, the conversation column leaves the map its room on both sides (still centred). */
+/* With the map beside it, the conversation is centred in the room left of the map (not in the whole pane),
+   so the blank on its left matches the gap before the map instead of the map's width plus that gap. */
 .focus-thread.with-map {
-  --chat-w: min(1160px, max(720px, 80cqw), calc(100cqw - 2 * var(--map-room)));
+  --chat-w: min(1160px, max(720px, 80cqw), calc(100cqw - var(--map-room) - 32px));
+}
+.focus-thread.with-map > .focus-attention,
+.focus-thread.with-map > .pinned-plan,
+.focus-thread.with-map > .composer,
+.focus-thread.with-map .transcript-inner {
+  margin-left: max(0px, calc((100cqw - var(--map-room) - var(--chat-w)) / 2));
+  margin-right: auto;
+}
+/* No room beside: the tree's outline alone (no words) in a strip right of the conversation; a click opens it. */
+.session-minimap {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 26px;
+  max-height: calc(100% - 210px);
+  overflow: hidden;
+  padding: 8px 0 2px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.session-minimap:hover {
+  background: var(--hover);
+}
+.mini-task {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding-bottom: 14px;
+}
+/* The trunk between tasks, in the task's colour. */
+.mini-task:not(.last)::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: -2px;
+  left: 50%;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: var(--hue);
+  opacity: 0.4;
+}
+.mini-node {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--hue);
+}
+.mini-task[data-status='in_progress'] .mini-node {
+  background: var(--panel);
+  border: 1.5px solid var(--hue);
+}
+.mini-task[data-status='abandoned'] .mini-node {
+  background: var(--panel);
+  border: 1.5px dashed var(--text-3);
+}
+.mini-task.current .mini-node {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hue) 25%, transparent);
+}
+.mini-mark {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.mini-mark .map-diamond {
+  width: 5px;
+  height: 5px;
+  margin: 0;
+}
+/* A fork off the trunk: a short twig to the right. */
+.mini-fork {
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-left: 1.5px solid #8b5cf6;
+  border-bottom: 1.5px solid #8b5cf6;
+  border-bottom-left-radius: 4px;
+}
+.mini-fork.sub {
+  border-color: #14b8a6;
+}
+.mini-fork.dead {
+  border-style: dashed;
+  border-color: var(--text-3);
 }
 .session-map-beside {
   position: absolute;
@@ -5619,45 +5721,6 @@ button.subtask-row:hover {
   z-index: 2;
   overflow-y: auto;
   scrollbar-width: none;
-}
-.session-map-toggle {
-  position: absolute;
-  top: 10px;
-  right: 18px;
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--text-2);
-  cursor: pointer;
-}
-.session-map-toggle:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.session-map-toggle[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  padding: 3px 7px;
-  border-radius: 5px;
-  background: var(--ink);
-  color: #fff;
-  font-size: 11.5px;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-.session-map-toggle[data-tip]:hover::after {
-  opacity: 1;
-  transition-delay: 0.25s;
 }
 .memory.map {
   width: 340px;
@@ -5954,20 +6017,16 @@ button.subtask-row:hover {
   border-bottom-left-radius: 8px;
   opacity: 0.7;
 }
-.map-branch-alias {
+.map-branch-name {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: color-mix(in srgb, #8b5cf6 16%, transparent);
-  color: #7c3aed;
-  font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--text);
 }
-.map-branch:hover {
+.map-branch-sub {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.map-branch:hover .map-branch-name {
   color: #7c3aed;
 }
 

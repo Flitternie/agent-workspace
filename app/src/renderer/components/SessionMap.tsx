@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { MapDecision, MapTask } from '../../shared/session-map';
 import { t } from '../i18n';
-import { Icon } from './bits';
+import { Alias, Icon } from './bits';
 
 // The session as a tree of tasks, git-graph style: one trunk, a colour per task so their stretches read
 // apart, the node's shape for its state (done, going, given up), decisions as diamonds on short twigs off
@@ -41,10 +41,10 @@ export function SessionMap({
     <ol className="session-map" data-testid="session-map">
       {origin ? (
         <li className="map-origin">
-          <button className="map-branch from" onClick={() => onOpenAgent(origin.taskId)} title={origin.name} data-testid="map-origin">
+          <button className="map-branch from" onClick={() => onOpenAgent(origin.taskId)} title={`${origin.alias} · ${origin.name}`} data-testid="map-origin">
             <span className="map-lane in" aria-hidden />
-            <span className="map-branch-alias">{origin.alias}</span>
-            <span className="truncate">{t('Forked from {name}', { name: origin.name })}</span>
+            <Alias alias={origin.alias} size="xs" />
+            <span className="truncate">{t('Forked from {name}', { name: origin.alias })}</span>
           </button>
         </li>
       ) : null}
@@ -129,10 +129,11 @@ export function SessionMap({
               : null}
             {open
               ? task.branches.map((b) => (
-                  <button key={b.taskId} className="map-branch" onClick={() => onOpenAgent(b.taskId)} title={b.name} data-testid="map-branch">
+                  <button key={b.taskId} className="map-branch" onClick={() => onOpenAgent(b.taskId)} title={`${b.alias} · ${b.name}`} data-testid="map-branch">
                     <span className="map-lane" aria-hidden />
-                    <span className="map-branch-alias">{b.alias}</span>
-                    <span className="truncate">{b.name}</span>
+                    <Alias alias={b.alias} size="xs" />
+                    <span className="map-branch-name">{b.alias}</span>
+                    <span className="truncate map-branch-sub">{t('forked off here')}</span>
                   </button>
                 ))
               : null}
@@ -184,4 +185,39 @@ function notTaken(d: MapDecision): string[] {
   if (d.kind === 'decided') return d.about ? [d.about] : [];
   if (d.kind === 'answer') return (d.options ?? []).filter((o) => !o.chosen).map((o) => o.label).slice(0, 4);
   return [];
+}
+
+/**
+ * The tree's outline with no words, for a conversation with no room beside it: a node per task in its
+ * colour, its decisions as diamonds, its forks as twigs. A click opens the full map in the side column.
+ */
+export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; current: string | null; onOpen: () => void }) {
+  return (
+    <button className="session-minimap" onClick={onOpen} data-tip={t('Task index')} aria-label={t('Task index')} title={tasks.map((x) => x.title).join('\n')} data-testid="session-minimap">
+      {tasks.map((task, i) => {
+        const decisions = Math.min(task.decisions.length, 3);
+        return (
+          <span
+            key={task.startItemId}
+            className={`mini-task${task.startItemId === current ? ' current' : ''}${i === tasks.length - 1 ? ' last' : ''}`}
+            style={{ ['--hue' as string]: HUES[i % HUES.length] }}
+            data-status={task.status ?? 'unknown'}
+            data-testid="mini-task"
+          >
+            <span className="mini-node" />
+            {decisions ? (
+              <span className="mini-mark">
+                {Array.from({ length: decisions }, (_, k) => (
+                  <span key={k} className="map-diamond" />
+                ))}
+              </span>
+            ) : null}
+            {task.subagents.length ? <span className="mini-fork sub" /> : null}
+            {task.attempts.length ? <span className="mini-fork dead" /> : null}
+            {task.branches.length ? <span className="mini-fork" /> : null}
+          </span>
+        );
+      })}
+    </button>
+  );
 }

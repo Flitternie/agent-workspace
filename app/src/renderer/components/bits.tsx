@@ -51,7 +51,7 @@ export const KIND_LABEL: Record<AttentionKind, string> = {
   error: 'Error',
 };
 
-export function Alias({ alias, size = 'md' }: { alias: string; size?: 'sm' | 'md' | 'lg' }) {
+export function Alias({ alias, size = 'md' }: { alias: string; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   const hue = ([...alias].reduce((n, c) => n + c.charCodeAt(0), 0) * 67) % 360;
   return (
     <span className={`alias alias-${size}`} style={{ ['--hue' as string]: hue }} title={alias}>

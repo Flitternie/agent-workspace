@@ -17,7 +17,7 @@ import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
-import { SessionMap } from './SessionMap';
+import { SessionMap, SessionMiniMap } from './SessionMap';
 import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
@@ -160,11 +160,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   /**
-   * Beside the conversation when the pane can give the map its room on both sides (the column stays
-   * centred) and still keep a readable column; else in the side column.
+   * Beside the conversation when the pane can give the map its room and still keep a readable column
+   * (centred in what is left); else its outline at the edge, opening the full map in the side column.
    */
   const MAP_ROOM = 250;
-  const mapBeside = mapTasks.length > 0 && threadW - 2 * MAP_ROOM >= 720;
+  const mapBeside = mapTasks.length > 0 && threadW - MAP_ROOM - 32 >= 720;
+  // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
+  // would leave too narrow a column; then nothing (nothing floats over the messages).
+  const MINI_ROOM = 48;
+  const miniFits = !mapBeside && mapTasks.length > 0 && threadW - MINI_ROOM - 32 >= 520;
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -225,6 +229,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Too narrow for both (the conversation keeps 400px, the preview 300px): the preview covers it.
   const narrow = bodyW > 0 && bodyW < PREVIEW_MIN + CONVERSATION_MIN;
   const covering = !!preview && (previewMax || narrow);
+  // The room the map takes right of the conversation: all of it beside, a strip for the outline, or none
+  // while the full map is open in the side column.
+  const mapRoom = mapBeside ? MAP_ROOM : miniFits && !(showMap && !preview) ? MINI_ROOM : 0;
   const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -452,16 +459,14 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
 
         <div className="focus-body" ref={bodyRef}>
           {/* Kept mounted while the preview is maximized, so the conversation keeps its place. */}
-          <div className={`focus-thread${mapBeside ? ' with-map' : ''}`} hidden={covering} ref={threadRef} style={mapBeside ? { ['--map-room' as string]: `${MAP_ROOM}px` } : undefined}>
-            {/* The session map in the room right of the conversation; with no room, a button for the side column. */}
+          <div className={`focus-thread${mapRoom ? ' with-map' : ''}`} hidden={covering} ref={threadRef} style={mapRoom ? { ['--map-room' as string]: `${mapRoom}px` } : undefined}>
+            {/* The session map in the room right of the conversation; with no room, its outline, opening the side column. */}
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 30 }} data-testid="session-map-beside">
                 <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
               </div>
-            ) : mapTasks.length ? (
-              <button className="session-map-toggle" data-tip={t('Task index')} aria-label={t('Task index')} onClick={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} data-testid="session-map-toggle">
-                <Icon name="list" size={13} />
-              </button>
+            ) : mapRoom ? (
+              <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
             ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
