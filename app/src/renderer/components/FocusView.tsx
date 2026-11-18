@@ -496,7 +496,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         {removing ? (
           <ConfirmDialog
             title={t('Remove {name}?', { name: displayName(task) })}
-            message={t('Stop the agent and remove it from the workspace. A worktree with uncommitted changes is kept on disk.')}
+            message={
+              task.worktree
+                ? t('Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.')
+                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
+            }
             confirmLabel={t('Remove')}
             danger
             onConfirm={() => run(() => call('task:remove', { taskId: task.taskId }))}

@@ -1025,12 +1025,21 @@ export class Workspace {
     this.changed();
   }
 
+  /**
+   * Native sessions an agent in the workspace works on, so "Continue a session" does not offer
+   * them twice. Only agents still here: a removed agent's session can be brought back.
+   */
+  private attachedSessionIds(): Set<string> {
+    const here = new Set([...this.store.data.tasks.map((t) => t.taskId), ...(this.store.data.mainAgent ? [this.store.data.mainAgent.taskId] : [])]);
+    return new Set(this.store.data.sessions.filter((s) => here.has(s.taskId) && s.nativeSessionId).map((s) => s.nativeSessionId));
+  }
+
   async discoverSessions(projectId: string, provider: 'claude' | 'codex'): Promise<NativeSessionInfo[]> {
     const adapter = this.opts.adapters[provider];
     if (!adapter) throw new Error(`Provider ${provider} is not available.`);
     const project = this.project(projectId);
     if (project.host && !adapter.remote) return [];
-    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const known = this.attachedSessionIds();
     const found = await adapter.discoverSessions({ cwd: project.rootPath, host: project.host });
     return found.filter((s) => !known.has(s.nativeSessionId));
   }
@@ -1072,7 +1081,7 @@ export class Workspace {
     this.requireHost(host);
     // Tests: the fixture's sessions on this host (see discoverAllSessions).
     if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => s.host === host);
-    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const known = this.attachedSessionIds();
     const caps = this.hostStatus.get(host)?.capabilities;
     const adapters = Object.values(this.opts.adapters).filter((a): a is ProviderAdapter => !!a?.remote && caps?.find((c) => c.provider === a.provider)?.available !== false);
     const results = await Promise.allSettled(adapters.map((a) => a.discoverSessions({ limit: 60, host })));
@@ -1091,7 +1100,7 @@ export class Workspace {
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
     // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
     if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => !s.host);
-    const known = new Set(this.store.data.sessions.map((s) => s.nativeSessionId));
+    const known = this.attachedSessionIds();
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
       (['claude', 'codex'] as const).map(async (p) => {

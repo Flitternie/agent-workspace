@@ -946,4 +946,6 @@ export const zh: Record<string, string> = {
   '{n} sub-agents': '{n} 个子 agent',
   '{n} dropped': '{n} 个放弃的尝试',
   'Tried: {x}': '试过：{x}',
+  'Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.': '停止这个 agent 并把它从工作区移除。如果它的独立工作副本里没有未提交的改动，副本会被删除，之后这段对话就无法继续；有未提交的改动则保留在磁盘上。',
+  'Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里，随时可以用「接入已有会话…」找回来。',
 };
