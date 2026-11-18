@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
@@ -70,6 +70,8 @@ const workspace = new Workspace({
   log,
   demo: demoMode,
   hiddenSessionDirs: [join(appRoot, '.cache')],
+  // Tests: the background model answers from a file (never a real CLI), e.g. a session map grouping.
+  ...(process.env.AMW_BACKGROUND_ANSWER ? { backgroundModel: async () => readFileSync(process.env.AMW_BACKGROUND_ANSWER!, 'utf8') } : {}),
 });
 notifyModels = () => workspace.notifyChanged();
 const keySource = (): 'env' | 'file' | null => (envOpenAiKey() ? 'env' : key ? 'file' : null);
@@ -186,6 +188,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
   // Side questions ("btw"): never part of the agent's conversation.
+  // The session map: an agent's turns grouped into tasks by a model (null: group by structure).
+  'session:map': (i: { taskId: string }) => workspace.sessionMapGrouping(i.taskId),
   'btw:list': (i: { taskId: string }) => workspace.btwList(i.taskId),
   'btw:ask': (i: { taskId: string; question: string }) => workspace.askBtw(i.taskId, i.question),
   'btw:clear': (i: { taskId: string }) => workspace.clearBtw(i.taskId),

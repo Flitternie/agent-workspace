@@ -17,6 +17,8 @@ import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
+import { SessionMap } from './SessionMap';
+import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
 import { t } from '../i18n';
@@ -60,6 +62,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   }, [task.taskId]);
   const askBtw = (question: string) => {
     setShowBtw(true);
+    setShowMap(false);
     setPreview(null);
     if (!question) return;
     const taskId = task.taskId;
@@ -71,6 +74,90 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       .then((list) => taskId === task.taskId && setBtw(list))
       .catch(() => {});
   };
+  // The session map: its turns as tasks (a model's grouping, cached; structure until then), beside the
+  // conversation when the window leaves room, else in the side column.
+  const threadRef = useRef<HTMLDivElement>(null);
+  const turnCount = useMemo(() => transcript.filter((i) => i.role === 'user').length, [transcript]);
+  const [grouping, setGrouping] = useState<MapGrouping | null>(null);
+  const settled = task.status !== 'running' && task.status !== 'starting';
+  useEffect(() => setGrouping(null), [task.taskId]);
+  useEffect(() => {
+    if (turnCount < 2 || !settled) return;
+    let live = true;
+    void call('session:map', { taskId: task.taskId })
+      .then((g) => live && setGrouping(g))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [task.taskId, turnCount, settled]);
+  const forks = useMemo(() => snapshot.tasks.filter((x) => x.forkedFrom?.taskId === task.taskId), [snapshot.tasks, task.taskId]);
+  // The reader's corrections to the grouping, kept per agent on this machine.
+  const [mapEdits, setMapEdits] = useState<MapEdits>({});
+  useEffect(() => {
+    try {
+      setMapEdits(JSON.parse(localStorage.getItem(`amw.mapEdits.${task.taskId}`) ?? '{}') as MapEdits);
+    } catch {
+      setMapEdits({});
+    }
+  }, [task.taskId]);
+  const mergeTask = (startItemId: string) =>
+    setMapEdits((cur) => {
+      const next = { ...cur, merged: [...new Set([...(cur.merged ?? []), startItemId])] };
+      localStorage.setItem(`amw.mapEdits.${task.taskId}`, JSON.stringify(next));
+      return next;
+    });
+  const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  const [showMap, setShowMap] = useState(false);
+  /** The conversation pane's width (px), and the task whose turns are in view. */
+  const [threadW, setThreadW] = useState(0);
+  const [currentTask, setCurrentTask] = useState<string | null>(null);
+  useEffect(() => {
+    const thread = threadRef.current;
+    const scroller = thread?.querySelector<HTMLElement>('.transcript');
+    const inner = thread?.querySelector<HTMLElement>('.transcript-inner');
+    if (!thread || !scroller || !inner) return;
+    const measure = () => setThreadW(scroller.clientWidth);
+    const track = () => {
+      // Right after a jump from the map, its choice stands (the jump's own scrolling does not overrule it).
+      if (Date.now() - jumpedAt.current < 900) return;
+      // The last turn starting above 40% of the view is the one being read.
+      const top = scroller.getBoundingClientRect().top + scroller.clientHeight * 0.4;
+      let turn: string | null = null;
+      for (const el of scroller.querySelectorAll<HTMLElement>('.msg.user[data-item-id]')) {
+        if (el.getBoundingClientRect().top <= top) turn = el.dataset.itemId ?? null;
+        else break;
+      }
+      // At the end of the conversation, the latest task is the one in view (however short it is).
+      const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+      const owner = atEnd ? mapTasks.at(-1) : (mapTasks.find((x) => turn && x.turnIds.includes(turn)) ?? mapTasks[0]);
+      setCurrentTask(owner?.startItemId ?? null);
+    };
+    measure();
+    track();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    scroller.addEventListener('scroll', track, { passive: true });
+    return () => {
+      ro.disconnect();
+      scroller.removeEventListener('scroll', track);
+    };
+    // Width changes (a preview opening, covering) reach the ResizeObserver.
+  }, [mapTasks]);
+  const jumpedAt = useRef(0);
+  const jumpTo = (turnId: string) => {
+    // The task jumped to is the one being read, whether or not the conversation can scroll to it.
+    jumpedAt.current = Date.now();
+    setCurrentTask(mapTasks.find((x) => x.turnIds.includes(turnId))?.startItemId ?? null);
+    const el = threadRef.current?.querySelector<HTMLElement>(`.msg.user[data-item-id="${turnId}"]`);
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  /**
+   * Beside the conversation when the pane can give the map its room on both sides (the column stays
+   * centred) and still keep a readable column; else in the side column.
+   */
+  const MAP_ROOM = 250;
+  const mapBeside = mapTasks.length > 0 && threadW - 2 * MAP_ROOM >= 720;
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -302,6 +389,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 const on = preview || showBtw ? true : !showChanges;
                 setShowChanges(on);
                 setShowBtw(false);
+                setShowMap(false);
                 if (on) setShowMemory(false);
                 setPreview(null);
               }}
@@ -357,7 +445,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
 
         <div className="focus-body" ref={bodyRef}>
           {/* Kept mounted while the preview is maximized, so the conversation keeps its place. */}
-          <div className="focus-thread" hidden={covering}>
+          <div className={`focus-thread${mapBeside ? ' with-map' : ''}`} hidden={covering} ref={threadRef} style={mapBeside ? { ['--map-room' as string]: `${MAP_ROOM}px` } : undefined}>
+            {/* The session map in the room right of the conversation; with no room, a button for the side column. */}
+            {mapBeside ? (
+              <div className="session-map-beside" style={{ width: MAP_ROOM - 30 }} data-testid="session-map-beside">
+                <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} />
+              </div>
+            ) : mapTasks.length ? (
+              <button className="session-map-toggle" data-tip={t('Task index')} aria-label={t('Task index')} onClick={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} data-testid="session-map-toggle">
+                <Icon name="list" size={13} />
+              </button>
+            ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
               <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
@@ -389,6 +487,20 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
             {previewPanel}
           </>
+        ) : !preview && showMap && !mapBeside && mapTasks.length ? (
+          <aside className="memory map" aria-label={t('Task index')} data-testid="session-map-panel">
+            <div className="preview-top">
+              <div className="preview-head">
+                <div className="preview-ident">
+                  <div className="panel-title">{t('Task index')}</div>
+                </div>
+                <button className="icon-btn" title={t('Close')} aria-label={t('Close')} onClick={() => setShowMap(false)}>
+                  <Icon name="x" size={13} />
+                </button>
+              </div>
+            </div>
+            <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} />
+          </aside>
         ) : !preview && showBtw && btw.length ? (
           <BtwPanel
             task={task}
@@ -614,6 +726,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               key={item.id}
               className={`msg ${item.role}`}
               data-role={item.role}
+              data-item-id={item.id}
               onContextMenu={
                 item.role === 'user' && item.via !== 'main'
                   ? (e) => {

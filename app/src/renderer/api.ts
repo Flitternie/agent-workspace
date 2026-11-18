@@ -1,3 +1,4 @@
+import type { MapGrouping } from '../shared/session-map';
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
@@ -75,6 +76,7 @@ export interface Outputs {
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
   'sessions:discoverAll': NativeSessionInfo[];
+  'session:map': MapGrouping | null;
   'btw:list': BtwEntry[];
   'btw:ask': BtwEntry;
   'btw:clear': void;

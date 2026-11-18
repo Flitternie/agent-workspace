@@ -1,0 +1,102 @@
+// The session map: an agent's turns as a tree of tasks (grouped by a model, here a fixed answer),
+// beside the conversation when there is room, in the side column when not (mock agent).
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
+import { afterAll, describe, expect, it } from 'vitest';
+import type { AttentionItem, Task } from '../../src/shared/types';
+
+const appDir = resolve(__dirname, '../..');
+const shots = join(appDir, 'test-results');
+mkdirSync(shots, { recursive: true });
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const electronPath = require('electron') as unknown as string;
+let app: ElectronApplication | undefined;
+afterAll(async () => {
+  await app?.close().catch(() => {});
+});
+const invoke = <T,>(page: Page, c: string, p: unknown) => page.evaluate(([c, p]) => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke(c as string, p), [c, p] as const) as Promise<T>;
+
+describe('session map', () => {
+  it('draws the tasks with their outcome, decisions and options, follows the reading, and folds into the side column', async () => {
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'amw-map-')));
+    const dir = join(scratch, 'shop');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'README.md'), '# shop\n');
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    // The background model's answer (a real one is never called in tests).
+    const answer = join(scratch, 'answer.json');
+    writeFileSync(
+      answer,
+      JSON.stringify({
+        tasks: [
+          { start: 0, title: 'Clean the build', outcome: 'dist removed, build is green', status: 'done', decisions: [{ turn: 1, decision: 'Keep the old config', rejected: 'Rewrite it' }] },
+          { start: 2, title: 'Refund flow', outcome: 'Endpoints drafted', status: 'in_progress' },
+        ],
+      }),
+    );
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: join(scratch, 'data'), AMW_MOCK_DELAY_MS: '40', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_BACKGROUND_ANSWER: answer } });
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.setViewportSize({ width: 1720, height: 960 });
+    await page.waitForSelector('.app');
+    await invoke(page, 'settings:update', { onboarding: { dismissed: true } });
+    const p = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: dir, name: 'shop' });
+    const a = await invoke<Task>(page, 'task:create', { projectId: p.projectId, provider: 'mock', title: 'Build', name: 'Build', mockScript: 'approval:rm -rf dist', instruction: 'Clean the build output.', isolate: false });
+    const snap = () => invoke<{ tasks: Task[]; attention: AttentionItem[] }>(page, 'workspace:snapshot', {});
+    // The approval: allowed, which records the decision with the options offered.
+    await expect.poll(async () => (await snap()).attention.find((x) => x.taskId === a.taskId && x.state === 'open' && x.kind === 'approval')?.id, { timeout: 30_000 }).toBeTruthy();
+    const ask = (await snap()).attention.find((x) => x.taskId === a.taskId && x.state === 'open' && x.kind === 'approval')!;
+    await invoke(page, 'attention:respond', { attentionId: ask.id, decision: ask.options![0].id });
+    const settled = async () => !['running', 'starting'].includes((await snap()).tasks.find((t) => t.taskId === a.taskId)!.status);
+    for (const text of ['Keep the old config, do not rewrite it.', 'Now the refund flow.', 'Add the refund endpoints.']) {
+      await expect.poll(settled, { timeout: 30_000 }).toBe(true);
+      await invoke(page, 'task:send', { taskId: a.taskId, text, via: 'text' });
+    }
+    await expect.poll(settled, { timeout: 30_000 }).toBe(true);
+    await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"],[data-testid="needs-item"][data-alias="${a.alias}"]`).first().click();
+
+    // Beside the conversation: the model's tasks, titles, state, outcome of the one in view.
+    await expect.poll(() => page.getByTestId('session-map-beside').count(), { timeout: 15_000 }).toBe(1);
+    const titles = () => page.getByTestId('map-task-title').allInnerTexts();
+    await expect.poll(titles).toEqual(['Clean the build', 'Refund flow']);
+    const tasks = page.getByTestId('map-task');
+    expect(await tasks.nth(0).getAttribute('data-status')).toBe('done');
+    expect(await tasks.nth(1).getAttribute('data-status')).toBe('in_progress');
+    // Scrolled to the end, the last task is the one being read: open, its outcome shown.
+    await expect.poll(() => tasks.nth(1).getAttribute('class')).toContain('current');
+    expect(await tasks.nth(1).innerText()).toContain('Endpoints drafted');
+    await page.screenshot({ path: join(shots, 'map-01-beside.png') });
+    // The first task, opened: the decision read from the talk, and the approval with the options offered.
+    await page.getByTestId('map-caret').first().click();
+    const decisions = tasks.nth(0).getByTestId('map-decision');
+    await expect.poll(() => decisions.count()).toBe(2);
+    expect(await decisions.nth(0).innerText()).toContain('Allowed:');
+    expect(await decisions.nth(0).locator('.map-option.chosen').count()).toBe(1);
+    expect(await decisions.nth(1).innerText()).toContain('Keep the old config');
+    expect(await decisions.nth(1).innerText()).toContain('Rewrite it');
+    await page.screenshot({ path: join(shots, 'map-02-decisions.png') });
+    // A title jumps the conversation there, and the map follows.
+    await page.getByTestId('map-task-title').first().click();
+    await expect.poll(() => tasks.nth(0).getAttribute('class'), { timeout: 5000 }).toContain('current');
+
+    // The reader merges the second task into the first.
+    await tasks.nth(1).hover();
+    await tasks.nth(1).getByTestId('map-merge').click();
+    await expect.poll(titles).toEqual(['Clean the build']);
+
+    // Narrow: not beside the conversation; a button opens it in the side column.
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(0);
+    await page.getByTestId('session-map-toggle').click();
+    await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
+    expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
+    await page.screenshot({ path: join(shots, 'map-03-panel.png') });
+    expect(errors).toEqual([]);
+  }, 120_000);
+});
