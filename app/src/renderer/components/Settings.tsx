@@ -216,7 +216,7 @@ export const PERMISSION_MODES: Array<{ id: PermissionMode; label: string; detail
   {
     id: 'auto',
     label: 'Decide automatically',
-    detail: 'Like auto mode in Claude Code: the agent’s own reviewer approves routine actions and only asks you about risky ones (Codex: auto-review of sandbox escalations).',
+    detail: 'Routine actions go through; only risky ones ask you.',
   },
   { id: 'edits', label: 'Allow file edits', detail: 'Edits inside the workspace go ahead; commands and anything else ask you first.' },
   { id: 'ask', label: 'Ask every time', detail: 'Every action that changes something waits for your approval.' },
@@ -361,7 +361,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
       <div className="model-pick-head">
         <span>
           <strong>{t('Speech recognition model')}</strong>
-          <span className="muted small">{t('Turns what you say into text. Ratings are from this app’s own tests.')}</span>
+          <span className="muted small">{t('Turns what you say into text.')}</span>
         </span>
       </div>
       <div className="model-list" role="radiogroup" aria-label={t('Speech recognition model')} data-testid="stt-list">
@@ -431,7 +431,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
       <div className="model-pick-head">
         <span>
           <strong>{t('Routing model')}</strong>
-          <span className="muted small">{t('Decides which agent a sentence is for when you do not name one. It does not rewrite what you said.')}</span>
+          <span className="muted small">{t('Picks the agent when you do not name one.')}</span>
         </span>
       </div>
       {v.cloudAvailable ? (
@@ -450,7 +450,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
               ) : null}
         </div>
       ) : (
-        <div className="muted small">{t('Without an OpenAI key, a spoken message goes to the agent it names (or the one you are looking at).')}</div>
+        <div className="muted small">{t('Without an OpenAI key, a message goes to the agent it names, or the one on screen.')}</div>
       )}
     </div>
   );
@@ -495,7 +495,7 @@ function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="openai-key" data-testid="openai-key">
       <p className="muted small">
-        {t('Used for cloud speech recognition and for routing messages you do not address by name. Optional: with an on-device speech model, voice works without it.')}{' '}
+        {t('Optional: for cloud speech recognition and routing.')}{' '}
         <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
           {t('Get a key')}
         </a>
@@ -532,7 +532,7 @@ function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       </div>
       {error ? <div className="error-text small">{error}</div> : null}
       {note ? <div className="small ok-text">{note}</div> : null}
-      <div className="muted small">{t('The key is checked with OpenAI, then stored encrypted (macOS Keychain) in the app’s data folder. It is never shown again or written to logs.')}</div>
+      <div className="muted small">{t('Stored encrypted in the Keychain; never shown again.')}</div>
     </div>
   );
 }
@@ -711,7 +711,7 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
 }
 
 const MIC_MODES: Array<{ id: MicMode; label: string; detail: string }> = [
-  { id: 'open', label: 'Always on', detail: 'The microphone stays on, like a call; a short pause sends what you said. The shortcut mutes and unmutes.' },
+  { id: 'open', label: 'Always on', detail: 'Always listening; a short pause sends. The shortcut mutes.' },
   { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to start talking and press it again to send. The microphone is off the rest of the time.' },
   { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; letting go sends. The microphone is off the rest of the time.' },
   { id: 'both', label: 'Tap or hold', detail: 'Tap the shortcut to start and tap again to send, or hold it while you talk and let go to send.' },
@@ -884,7 +884,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       >
         <p className="muted small">
           {t(
-            'Agents run through the Claude Code and Codex already installed on this Mac and use the account you are signed in with there. No extra authorization or API key is needed, and this app never reads or stores those credentials.',
+            'Uses the Claude Code and Codex already signed in on this Mac. The app never reads their credentials.',
           )}
         </p>
         {(['claude', 'codex'] as const).map((p) => {
@@ -911,7 +911,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       <Section id="remote" query={query}>
         <p className="muted small">
           {t(
-            'Run agents on machines in your ~/.ssh/config, with the Claude Code and Codex installed and signed in there; their sessions stay on those machines. Add the ones you use: they become sources in Continue a session and places for new folders. Nothing asks for a password in the background; logging in or unlocking a key only happens when you click.',
+            'Run agents on machines from your ~/.ssh/config, with the Claude Code and Codex signed in there.',
           )}
         </p>
         <RemoteHosts snapshot={snapshot} />
@@ -922,7 +922,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </Section>
       <Section id="main" query={query}>
         <p className="muted small">
-          {t('The main agent is who you talk to when no agent is selected. It sees every agent, passes your instructions on, starts new agents and answers status questions. It runs on your own Claude Code or Codex, does not edit code itself, and cannot approve other agents’ permission requests.')}
+          {t('Who you talk to when no agent is selected: it passes instructions on, starts agents and answers status questions.')}
         </p>
         <div className="segmented" role="radiogroup" aria-label={t('Main agent')}>
           {(['claude', 'codex', 'off'] as const).map((p) => {
@@ -948,7 +948,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </Section>
 
       <Section id="permissions" query={query}>
-        <p className="muted small">{t('Default for new agents. Each agent can be switched on its own page; nothing ever runs with permissions bypassed.')}</p>
+        <p className="muted small">{t('Default for new agents; each agent can change its own.')}</p>
         <PermissionChoice value={s.permissionMode ?? 'auto'} onChange={(m) => update({ permissionMode: m })} />
       </Section>
 
@@ -962,7 +962,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             <strong>{t('Speech recognition')}</strong>
             <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
           </div>
-          {!snapshot.voice.sttAvailable ? <div className="small">{t('Pick a model below: download one to run on this Mac, or add an OpenAI key. Typing works either way.')}</div> : null}
+          {!snapshot.voice.sttAvailable ? <div className="small">{t('Pick a model below or add an OpenAI key. Typing always works.')}</div> : null}
         </div>
         <div className="settings-field">
           <strong>{t('Microphone')}</strong>
@@ -988,7 +988,6 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
             <span>
               {t('Open the microphone when the app starts')}
-              <span className="muted small"> — {t('like joining a call; macOS asks for microphone access the first time')}</span>
             </span>
           </label>
         ) : null}
@@ -1014,7 +1013,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           <input type="checkbox" checked={s.alwaysConfirmVoice} onChange={(e) => update({ alwaysConfirmVoice: e.target.checked })} />
           <span>
             {t('Confirm every voice send')}
-            <span className="muted small"> — {t('when off, commands that clearly name an agent are sent right away')}</span>
+            <span className="muted small"> — {t('off: messages that name an agent go right away')}</span>
           </span>
         </label>
       </Section>

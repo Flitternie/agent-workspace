@@ -159,7 +159,7 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="memory-settings">
       <div className="ms-intro">
-        <p className="muted small">{t('Notes every agent the app starts gets, with Claude Code or Codex, here or over SSH. They load when a session starts.')}</p>
+        <p className="muted small">{t('Given to every agent the app starts, when its session starts.')}</p>
         <button className="btn btn-sm" onClick={() => setImporting(!importing)} data-testid="memory-import-open">
           {importing ? t('Close import') : t('Import…')}
         </button>
@@ -177,7 +177,6 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
       {tab === 'user' ? (
         <div className="ms-list">
-          <div className="ms-hint muted small">{t('For every agent, in every project, on every machine.')}</div>
           {user.map((m) => (
             <NoteRow key={m.id} m={m} onError={setError} />
           ))}
@@ -191,8 +190,7 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         </div>
       ) : (
         <div className="ms-list">
-          <div className="ms-hint muted small">{t('For the agents in one project. Notes come from “Keep as memory” in an agent’s conversation, or from Claude Code’s own project memory with Import….')}</div>
-          {groups.length === 0 ? <div className="ms-empty muted small">{t('No project notes yet.')}</div> : null}
+          {groups.length === 0 ? <div className="ms-empty muted small">{t('No project notes yet. Keep one from an agent’s conversation, or Import… Claude Code’s.')}</div> : null}
           {groups.map(({ p, notes }) => (
             <div key={p.projectId} className="ms-group" data-testid="memory-project">
               <div className="ms-group-head">

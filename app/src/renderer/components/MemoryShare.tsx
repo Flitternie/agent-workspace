@@ -69,10 +69,10 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="memory-share" data-testid="memory-share">
       <div className="section-label">{t('Share with the CLIs on each machine')}</div>
-      <p className="muted small">{t('Also write your user memory into Claude Code’s and Codex’s own files on a machine, so terminal sessions there know it too. Backed up first; nothing is ever overwritten.')}</p>
+      <p className="muted small">{t('Also write user memory into Claude Code’s and Codex’s files on each machine, for terminal sessions too. Always backed up, never overwritten.')}</p>
       <details className="ms-details">
         <summary className="small">{t('How it works')}</summary>
-        <p className="muted small">{t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the user-level notes already there: CLAUDE.md, ~/.claude/rules, AGENTS.md, and Claude Code’s auto memory if every project shares one folder. A project’s own Claude Code memory belongs to that project and stays there; import it under Import… if you want it here. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}</p>
+        <p className="muted small">{t('Linking backs up those files and brings in the user-level notes there: CLAUDE.md, ~/.claude/rules, AGENTS.md, and a shared auto-memory folder. A project’s own Claude Code memory stays with that project. Your own text in those files is never changed.')}</p>
       </details>
       {machines.map((h) => {
         const link = snapshot.memoryShare[h];
@@ -158,7 +158,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               ) : (
                 <div className="muted small">{t('None: everything there is already in your user memory.')}</div>
               )}
-              <div className="muted small">{t('Notes from CLAUDE.md, rules and AGENTS.md are copied in once, then belong to the app. Claude Code’s shared auto memory stays in sync: new notes there come in, edits follow, deleted ones are retired (not deleted).')}</div>
+              <div className="muted small">{t('Notes from CLAUDE.md, rules and AGENTS.md are copied in once; a shared auto-memory folder stays in sync.')}</div>
               {preview.data.blocked.map((f) => (
                 <div key={f} className="warn-text small">
                   <Icon name="alert" size={12} /> {t('{file} is kept in sync by another Agent Workspace; it will not be touched.', { file: f })}
@@ -206,7 +206,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
       {unlinking ? (
         <Modal title={t('Unlink {machine}', { machine: name(unlinking) })} onClose={() => setUnlinking(null)}>
-          <p>{t('The CLIs there stop getting your user memory. Only what the app added is taken out (its line in CLAUDE.md, its section in AGENTS.md, its own user.md), each file backed up first. Your own text there stays, and the notes stay in the app.')}</p>
+          <p>{t('The CLIs there stop getting your user memory. Only what the app added is taken out, backed up first; your own text there and your notes here stay.')}</p>
           {!reachable(unlinking) ? <p className="muted small">{t('It is not connected now: it stops getting updates at once and is cleaned up when it connects again.')}</p> : null}
           <div className="modal-foot">
             <button className="btn" onClick={() => setUnlinking(null)}>
