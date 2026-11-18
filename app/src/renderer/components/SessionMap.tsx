@@ -17,8 +17,11 @@ export function SessionMap({
   onJump,
   onOpenAgent,
   onMerge,
+  origin,
 }: {
   tasks: MapTask[];
+  /** The agent this session was forked from, drawn as where the trunk came in. */
+  origin?: { taskId: string; alias: string; name: string };
   current: string | null;
   onJump: (turnId: string) => void;
   onOpenAgent: (taskId: string) => void;
@@ -36,10 +39,19 @@ export function SessionMap({
     });
   return (
     <ol className="session-map" data-testid="session-map">
+      {origin ? (
+        <li className="map-origin">
+          <button className="map-branch from" onClick={() => onOpenAgent(origin.taskId)} title={origin.name} data-testid="map-origin">
+            <span className="map-lane in" aria-hidden />
+            <span className="map-branch-alias">{origin.alias}</span>
+            <span className="truncate">{t('Forked from {name}', { name: origin.name })}</span>
+          </button>
+        </li>
+      ) : null}
       {tasks.map((task, i) => {
         const on = task.startItemId === current;
         const open = on || opened.has(task.startItemId);
-        const details = task.decisions.length + task.branches.length;
+        const details = task.decisions.length + task.branches.length + task.subagents.length + task.attempts.length;
         const meta = [
           task.turnIds.length > 1 ? t('{n} turns', { n: task.turnIds.length }) : t('1 turn'),
           task.files.length ? (task.files.length === 1 ? t('1 file') : t('{n} files', { n: task.files.length })) : '',
@@ -82,9 +94,39 @@ export function SessionMap({
             ) : details ? (
               <div className="map-folded">
                 {task.decisions.length ? <span className="map-diamond" aria-hidden /> : null}
-                {[task.decisions.length ? t('{n} decisions', { n: task.decisions.length }) : '', task.branches.length ? t('{n} forks', { n: task.branches.length }) : ''].filter(Boolean).join(' · ')}
+                {[
+                  task.decisions.length ? t('{n} decisions', { n: task.decisions.length }) : '',
+                  task.subagents.length ? t('{n} sub-agents', { n: task.subagents.length }) : '',
+                  task.attempts.length ? t('{n} dropped', { n: task.attempts.length }) : '',
+                  task.branches.length ? t('{n} forks', { n: task.branches.length }) : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </div>
             ) : null}
+            {open
+              ? task.subagents.map((a) => (
+                  <button key={a.itemId} className={`map-sub status-${a.status}`} onClick={() => onJump(a.turnId)} title={a.label} data-testid="map-subagent">
+                    <span className="map-lane sub" aria-hidden />
+                    <Icon name="subtasks" size={11} />
+                    <span className="truncate">{a.label}</span>
+                  </button>
+                ))
+              : null}
+            {open
+              ? task.attempts.map((a) => (
+                  <button key={a.turnId + a.tried} className="map-attempt" onClick={() => onJump(a.turnId)} title={a.why ? `${a.tried}\n${a.why}` : a.tried} data-testid="map-attempt">
+                    <span className="map-lane dead" aria-hidden />
+                    <span className="map-cross" aria-hidden>
+                      <Icon name="x" size={8} />
+                    </span>
+                    <span className="map-attempt-text">
+                      <span className="map-attempt-tried">{t('Tried: {x}', { x: a.tried })}</span>
+                      {a.why ? <span className="map-attempt-why">{a.why}</span> : null}
+                    </span>
+                  </button>
+                ))
+              : null}
             {open
               ? task.branches.map((b) => (
                   <button key={b.taskId} className="map-branch" onClick={() => onOpenAgent(b.taskId)} title={b.name} data-testid="map-branch">
@@ -111,8 +153,8 @@ function Decision({ d, onJump }: { d: MapDecision; onJump: (turnId: string) => v
         <button className="map-decision-label" onClick={() => onJump(d.turnId)} title={d.about ? `${d.about}\n→ ${d.label}` : d.label}>
           {label}
         </button>
-        {d.kind === 'decided' && d.about ? <div className="map-ruled-out">{t('instead of {x}', { x: d.about })}</div> : null}
-        {d.options?.length ? (
+        {/* An approval's options stay chips: allowing a command is not a fork in the work. */}
+        {d.kind === 'approval' && d.options?.length ? (
           <div className="map-options">
             {d.options.map((o) => (
               <span key={o.label} className={`map-option${o.chosen ? ' chosen' : ''}`}>
@@ -122,7 +164,24 @@ function Decision({ d, onJump }: { d: MapDecision; onJump: (turnId: string) => v
             ))}
           </div>
         ) : null}
+        {/* A design or implementation choice is a fork: the way not taken branches off, dashed, and ends. */}
+        {notTaken(d).map((alt) => (
+          <div key={alt} className="map-not-taken" data-testid="map-not-taken">
+            <span className="map-lane dead" aria-hidden />
+            <span className="map-end" aria-hidden />
+            <span className="truncate" title={alt}>
+              {alt}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+/** The ways not taken at a decision: what it ruled out, or the options offered and not chosen. */
+function notTaken(d: MapDecision): string[] {
+  if (d.kind === 'decided') return d.about ? [d.about] : [];
+  if (d.kind === 'answer') return (d.options ?? []).filter((o) => !o.chosen).map((o) => o.label).slice(0, 4);
+  return [];
 }

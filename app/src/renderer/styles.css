@@ -5970,3 +5970,121 @@ button.subtask-row:hover {
 .map-branch:hover {
   color: #7c3aed;
 }
+
+/* More kinds of branching: sub-agents (teal lanes), dead ends (dashed, crossed), where a fork came from. */
+.map-sub,
+.map-attempt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.map-sub .icon {
+  flex: none;
+  color: #0d9488;
+}
+.map-sub.status-failed {
+  color: var(--risk);
+}
+.map-sub.status-running .icon {
+  animation: map-going-op 1.6s ease-in-out infinite;
+}
+@keyframes map-going-op {
+  50% {
+    opacity: 0.35;
+  }
+}
+.map-sub:hover {
+  color: #0d9488;
+}
+.map-lane.sub {
+  border-color: #14b8a6;
+}
+.map-lane.dead {
+  border-left-style: dashed;
+  border-bottom-style: dashed;
+  border-color: var(--text-3);
+  opacity: 0.6;
+}
+.map-attempt {
+  align-items: flex-start;
+}
+.map-cross {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--text-3);
+  color: var(--text-3);
+}
+.map-attempt-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.map-attempt-tried {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 55%, transparent);
+}
+.map-attempt-why {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.map-attempt:hover .map-attempt-tried {
+  color: var(--text-2);
+}
+.map-origin {
+  position: relative;
+  padding: 0 0 12px 22px;
+}
+.map-branch.from {
+  margin-top: 0;
+}
+.map-lane.in {
+  left: -16px;
+  top: auto;
+  bottom: -14px;
+  height: 18px;
+  border-bottom: none;
+  border-top: 1.5px solid #8b5cf6;
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 8px;
+}
+
+/* A decision as a fork: the diamond on the trunk, each way not taken a dashed branch ending in a hollow node. */
+.map-not-taken {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.map-not-taken .map-lane.dead {
+  left: -11px;
+  top: -8px;
+  height: 15px;
+}
+.map-end {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--text-3);
+}

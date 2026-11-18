@@ -32,7 +32,7 @@ describe('session map', () => {
       answer,
       JSON.stringify({
         tasks: [
-          { start: 0, title: 'Clean the build', outcome: 'dist removed, build is green', status: 'done', decisions: [{ turn: 1, decision: 'Keep the old config', rejected: 'Rewrite it' }] },
+          { start: 0, title: 'Clean the build', outcome: 'dist removed, build is green', status: 'done', decisions: [{ turn: 1, decision: 'Keep the old config', rejected: 'Rewrite it' }], attempts: [{ turn: 1, tried: 'Rewrite the config', why: 'Too risky before the release' }] },
           { start: 2, title: 'Refund flow', outcome: 'Endpoints drafted', status: 'in_progress' },
         ],
       }),
@@ -86,11 +86,23 @@ describe('session map', () => {
     expect(await decisions.nth(0).innerText()).toContain('Allowed:');
     expect(await decisions.nth(0).locator('.map-option.chosen').count()).toBe(1);
     expect(await decisions.nth(1).innerText()).toContain('Keep the old config');
-    expect(await decisions.nth(1).innerText()).toContain('Rewrite it');
+    // The way not taken branches off the decision.
+    expect(await decisions.nth(1).getByTestId('map-not-taken').innerText()).toContain('Rewrite it');
+    // An approach tried and dropped: a dead end, with why.
+    expect(await tasks.nth(0).getByTestId('map-attempt').innerText()).toContain('Rewrite the config');
+    expect(await tasks.nth(0).getByTestId('map-attempt').innerText()).toContain('Too risky before the release');
     await page.screenshot({ path: join(shots, 'map-02-decisions.png') });
     // A title jumps the conversation there, and the map follows.
     await page.getByTestId('map-task-title').first().click();
     await expect.poll(() => tasks.nth(0).getAttribute('class'), { timeout: 5000 }).toContain('current');
+
+    // A fork of this agent: a lane off the task under way, to the new agent; in the new agent, where it came from.
+    const fork = await invoke<Task>(page, 'task:fork', { taskId: a.taskId, isolate: false });
+    // Folded, the task says it has one; opened, the lane to the new agent.
+    await expect.poll(() => tasks.nth(1).innerText(), { timeout: 15_000 }).toContain('1 forks');
+    await tasks.nth(1).getByTestId('map-caret').click();
+    await expect.poll(() => tasks.nth(1).getByTestId('map-branch').count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'map-02b-fork.png') });
 
     // The reader merges the second task into the first.
     await tasks.nth(1).hover();
@@ -104,6 +116,26 @@ describe('session map', () => {
     await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
     expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
+
+    // Sub-agents sent off in a task: lanes of their own (another agent; structure groups it, no fitting answer).
+    await page.setViewportSize({ width: 1720, height: 960 });
+    const b = await invoke<Task>(page, 'task:create', { projectId: p.projectId, provider: 'mock', title: 'Orders', name: 'Orders', mockScript: 'subagents', instruction: 'Move the orders API to v2.', isolate: false });
+    const settledB = async () => !['running', 'starting'].includes((await snap()).tasks.find((t) => t.taskId === b.taskId)!.status);
+    await expect.poll(settledB, { timeout: 30_000 }).toBe(true);
+    await invoke(page, 'task:send', { taskId: b.taskId, text: 'Thanks, carry on.', via: 'text' });
+    await expect.poll(settledB, { timeout: 30_000 }).toBe(true);
+    await page.locator(`[data-testid="rail-item"][data-alias="${b.alias}"],[data-testid="needs-item"][data-alias="${b.alias}"]`).first().click();
+    await expect.poll(() => page.getByTestId('map-subagent').count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+    expect(await page.getByTestId('map-subagent').first().innerText()).toContain('Find callers of the old API');
+    await page.screenshot({ path: join(shots, 'map-04-subagents.png') });
+
+    // The forked agent shows where it came from, and that leads back.
+    await page.locator(`[data-testid="rail-item"][data-alias="${fork.alias}"],[data-testid="needs-item"][data-alias="${fork.alias}"]`).first().click();
+    await invoke(page, 'task:send', { taskId: fork.taskId, text: 'Try another way.', via: 'text' });
+    await expect.poll(() => page.getByTestId('map-origin').count(), { timeout: 30_000 }).toBe(1);
+    expect(await page.getByTestId('map-origin').innerText()).toContain('Build');
+    await page.getByTestId('map-origin').click();
+    await expect.poll(() => page.locator('.focus-head').innerText()).toContain('Build');
     expect(errors).toEqual([]);
   }, 120_000);
 });

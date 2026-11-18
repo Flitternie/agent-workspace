@@ -901,5 +901,8 @@ export const zh: Record<string, string> = {
   'dropped': '已放弃',
   '{n} decisions': '{n} 个决策',
   '{n} forks': '{n} 个分叉',
-  'instead of {x}': '没选：{x}',
+  'Forked from {name}': '分叉自：{name}',
+  '{n} sub-agents': '{n} 个子 agent',
+  '{n} dropped': '{n} 个放弃的尝试',
+  'Tried: {x}': '试过：{x}',
 };

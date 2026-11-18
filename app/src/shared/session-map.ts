@@ -28,6 +28,21 @@ export interface MapBranch {
   name: string;
 }
 
+/** A sub-agent the agent sent off within a task (Claude's Task/Agent tool, a Codex sub-agent). */
+export interface MapSubagent {
+  itemId: string;
+  turnId: string;
+  label: string;
+  status: 'running' | 'done' | 'failed';
+}
+
+/** An approach tried and then dropped or undone (read by the model), with why. */
+export interface MapAttempt {
+  turnId: string;
+  tried: string;
+  why?: string;
+}
+
 export interface MapTask {
   /** The first turn's user message: where the task begins in the conversation. */
   startItemId: string;
@@ -44,6 +59,8 @@ export interface MapTask {
   commands: number;
   decisions: MapDecision[];
   branches: MapBranch[];
+  subagents: MapSubagent[];
+  attempts: MapAttempt[];
 }
 
 /** A decision the model read from the conversation, at a turn (index), with what it ruled out. */
@@ -59,16 +76,25 @@ export interface MapGrouping {
   version?: number;
   /** How many turns it covers (newer turns join the last task until it is asked again). */
   turns: number;
-  tasks: Array<{ start: number; title: string; outcome?: string; status?: MapTask['status']; decisions?: GroupedDecision[] }>;
+  tasks: Array<{ start: number; title: string; outcome?: string; status?: MapTask['status']; decisions?: GroupedDecision[]; attempts?: Array<{ turn: number; tried: string; why?: string }> }>;
 }
 
 /** The grouping prompt's version (bump when what it asks for changes). */
-export const GROUPING_VERSION = 2;
+export const GROUPING_VERSION = 3;
 
 /** Structure only, until the model's grouping: a pause this long starts a new task. */
 export const PAUSE_MS = 45 * 60_000;
 
 const PLAN_TOOLS = new Set(['TodoWrite', 'update_plan', 'ExitPlanMode']);
+/** Tools that send off a sub-agent (Claude Code, Codex). */
+const SUBAGENT_TOOLS = new Set(['Task', 'Agent', 'collabAgentToolCall']);
+/** A sub-agent call's label: Claude's description (our title, less its prefix) or Codex's prompt. */
+function subagentLabel(item: TranscriptItem): string {
+  const title = item.tool?.title ?? '';
+  const prompt = item.tool?.content.find((c) => c.type === 'text');
+  if (item.tool?.name === 'collabAgentToolCall') return clip(prompt && 'text' in prompt ? prompt.text : title, 70);
+  return clip(title.startsWith('Subagent: ') ? title.slice('Subagent: '.length) : title, 70);
+}
 const ms = (iso: string) => Date.parse(iso) || 0;
 const clip = (s: string, n: number) => {
   const line = s.replace(/\s+/g, ' ').trim();
@@ -157,16 +183,22 @@ export function sessionMap(items: TranscriptItem[], forks: Pick<Task, 'taskId' |
         commands: 0,
         decisions: [],
         branches: [],
+        subagents: [],
+        attempts: [],
       });
     const task = tasks.at(-1)!;
     task.turnIds.push(turn.user.id);
     // Decisions the model read from this turn (it was checked to lie inside its task).
     for (const g of groups) for (const d of g.decisions ?? []) if (d.turn === i) task.decisions.push({ itemId: turn.user.id, turnId: turn.user.id, kind: 'decided', label: clip(d.decision, 80), about: d.rejected ? clip(d.rejected, 80) : undefined });
+    // Approaches tried and dropped in this turn (the model's, checked to lie inside its task).
+    for (const g of groups) for (const a of g.attempts ?? []) if (a.turn === i) task.attempts.push({ turnId: turn.user.id, tried: clip(a.tried, 80), ...(a.why ? { why: clip(a.why, 80) } : {}) });
     // Stopping a running turn with a new message changes course (a structured flag on the message).
     if (turn.user.delivery === 'interrupt') task.decisions.push({ itemId: turn.user.id, turnId: turn.user.id, kind: 'redirect', label: clip(turn.user.text, 60) });
     for (const item of turn.items) {
       task.endedAt = item.createdAt || task.endedAt;
       if (item.role === 'tool' && item.tool?.kind === 'execute') task.commands++;
+      if (item.role === 'tool' && item.tool && SUBAGENT_TOOLS.has(item.tool.name))
+        task.subagents.push({ itemId: item.id, turnId: turn.user.id, label: subagentLabel(item), status: item.toolStatus === 'failed' ? 'failed' : item.toolStatus === 'completed' ? 'done' : 'running' });
       for (const f of item.role === 'tool' ? filesOf({ user: turn.user, items: [item] }) : []) if (!task.files.includes(f)) task.files.push(f);
       if (item.decision) task.decisions.push({ itemId: item.id, turnId: turn.user.id, kind: item.decision.kind, label: clip(item.decision.label, 60), about: item.decision.about ? clip(item.decision.about, 80) : undefined, ...(item.decision.options?.length ? { options: item.decision.options } : {}) });
     }
@@ -197,6 +229,7 @@ export function parseGrouping(answer: string, turns: number, first = 0): MapGrou
         outcome: typeof t.outcome === 'string' && t.outcome.trim() ? t.outcome.trim().slice(0, 200) : undefined,
         status: t.status === 'done' || t.status === 'in_progress' || t.status === 'abandoned' ? (t.status as MapTask['status']) : undefined,
         decisions: Array.isArray(t.decisions) ? (t.decisions as Array<Record<string, unknown>>) : [],
+        attempts: Array.isArray(t.attempts) ? (t.attempts as Array<Record<string, unknown>>) : [],
       }))
       .filter((t) => Number.isInteger(t.start) && t.start >= first && t.start < turns && t.title);
     if (!out.length || out[0].start !== first || out.some((t, i) => i && t.start <= out[i - 1].start)) return null;
@@ -210,7 +243,12 @@ export function parseGrouping(answer: string, turns: number, first = 0): MapGrou
           .map((d) => ({ turn: Number(d.turn), decision: String(d.decision ?? '').trim(), rejected: typeof d.rejected === 'string' && d.rejected.trim() ? d.rejected.trim() : undefined }))
           .filter((d) => Number.isInteger(d.turn) && d.turn >= t.start && d.turn < end && d.decision)
           .slice(0, 6);
-        return { start: t.start, title: t.title, ...(t.outcome ? { outcome: t.outcome } : {}), ...(t.status ? { status: t.status } : {}), ...(decisions.length ? { decisions } : {}) };
+        const attempts = t.attempts
+          .map((a) => ({ turn: Number(a.turn), tried: String(a.tried ?? '').trim(), why: typeof a.why === 'string' && a.why.trim() ? a.why.trim() : undefined }))
+          .filter((a) => Number.isInteger(a.turn) && a.turn >= t.start && a.turn < end && a.tried)
+          .slice(0, 4)
+          .map((a) => (a.why ? a : { turn: a.turn, tried: a.tried }));
+        return { start: t.start, title: t.title, ...(t.outcome ? { outcome: t.outcome } : {}), ...(t.status ? { status: t.status } : {}), ...(decisions.length ? { decisions } : {}), ...(attempts.length ? { attempts } : {}) };
       }),
     };
   } catch {
@@ -233,11 +271,12 @@ For each task:
 - outcome: one short sentence on what came of it (what was built, fixed, found or decided), in the same language. Only what the turns show.
 - status: "done" when it was finished, "in_progress" when it is still going (usually only the last task), "abandoned" when it was dropped or undone.
 - decisions: the choices that were settled in the conversation, the ones someone coming back later would want to find: a direction picked, an option ruled out, a trade-off accepted. For each, the turn it was settled in, the decision, and what it ruled out if anything. Leave routine steps out; none is fine.
+- attempts: approaches that were actually tried and then dropped or undone (changes reverted, a route abandoned for another). For each, the turn it was tried in, what was tried, and why it was dropped if the turns say. Not options merely discussed; none is fine.
 
 Use only what the turns say. Every turn number you give must be one of the turns shown, and a decision's turn must lie inside its task.
 
 Answer with JSON only:
-{"tasks":[{"start":0,"title":"…","outcome":"…","status":"done","decisions":[{"turn":2,"decision":"…","rejected":"…"}]}]}
+{"tasks":[{"start":0,"title":"…","outcome":"…","status":"done","decisions":[{"turn":2,"decision":"…","rejected":"…"}],"attempts":[{"turn":3,"tried":"…","why":"…"}]}]}
 start is the index of the task's first turn, in increasing order.`;
 
 export const GROUPING_UPDATE_NOTE = (first: number, earlier: string[]) =>

@@ -75,7 +75,7 @@ describe('session map', () => {
   });
 
   it('checks the model answer: JSON with starts in order from 0, within the turns', () => {
-    expect(parseGrouping('Sure:\n{"tasks":[{"start":0,"title":"A"},{"start":3,"title":"B"}]}', 5)).toEqual({ version: 2, turns: 5, tasks: [{ start: 0, title: 'A' }, { start: 3, title: 'B' }] });
+    expect(parseGrouping('Sure:\n{"tasks":[{"start":0,"title":"A"},{"start":3,"title":"B"}]}', 5)).toEqual({ version: 3, turns: 5, tasks: [{ start: 0, title: 'A' }, { start: 3, title: 'B' }] });
     expect(parseGrouping('{"tasks":[{"start":1,"title":"A"}]}', 5)).toBeNull();
     expect(parseGrouping('{"tasks":[{"start":0,"title":"A"},{"start":0,"title":"B"}]}', 5)).toBeNull();
     expect(parseGrouping('no json', 5)).toBeNull();
@@ -120,7 +120,7 @@ describe('session map', () => {
   });
 
   it('an update keeps the earlier tasks and replaces from the latest one', () => {
-    const earlier = { version: 2, turns: 4, tasks: [{ start: 0, title: 'A' }, { start: 3, title: 'B' }] };
+    const earlier = { version: 3, turns: 4, tasks: [{ start: 0, title: 'A' }, { start: 3, title: 'B' }] };
     const fresh = parseGrouping('{"tasks":[{"start":3,"title":"B, renamed"},{"start":5,"title":"C"}]}', 6, 3)!;
     expect(mergeGrouping(earlier, fresh).tasks.map((t) => t.title)).toEqual(['A', 'B, renamed', 'C']);
     // An update must start at the latest task.
@@ -129,7 +129,7 @@ describe('session map', () => {
 
   it('the reader can merge a task into the one before, or start one at a turn', () => {
     const items = session();
-    const g = { version: 2, turns: 4, tasks: [{ start: 0, title: 'Orders' }, { start: 3, title: 'Refunds' }] };
+    const g = { version: 3, turns: 4, tasks: [{ start: 0, title: 'Orders' }, { start: 3, title: 'Refunds' }] };
     const merged = sessionMap(items, [], g, { merged: [items[8].id] });
     expect(merged.map((t) => [t.title, t.turnIds.length])).toEqual([['Orders', 4]]);
     const split = sessionMap(items, [], g, { split: [items[6].id] });
@@ -145,5 +145,22 @@ describe('session map', () => {
       { label: 'Vite', chosen: true },
       { label: 'webpack', chosen: false },
     ]);
+  });
+
+  it('sub-agents sent off in a task are its lanes; attempts the model found tried and dropped are its dead ends', () => {
+    const items = [
+      user('Find the slow query', 0),
+      tool('Task', 'other', 1, [], 'Subagent: profile the orders endpoint'),
+      ({ ...tool('collabAgentToolCall', 'other', 2, [{ type: 'text', text: 'Check the indexes on orders', format: 'plain' }], 'Codex sub-agent · spawn_agent'), toolStatus: 'failed' }) as TranscriptItem,
+      user('try caching it', 3),
+      user('undo the cache, keep it simple', 4),
+    ];
+    const g = parseGrouping('{"tasks":[{"start":0,"title":"Slow query","attempts":[{"turn":1,"tried":"Cache the orders query","why":"Too complex"},{"turn":7,"tried":"not a turn"}]}]}', 3)!;
+    const [task] = sessionMap(items, [], g);
+    expect(task.subagents.map((s) => [s.label, s.status])).toEqual([
+      ['profile the orders endpoint', 'done'],
+      ['Check the indexes on orders', 'failed'],
+    ]);
+    expect(task.attempts).toEqual([{ turnId: items[3].id, tried: 'Cache the orders query', why: 'Too complex' }]);
   });
 });
