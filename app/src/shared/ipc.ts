@@ -49,6 +49,9 @@ export const ipcSchemas = {
   'task:remove': z.object({ taskId: id }),
   'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
   'sessions:discoverAll': z.object({}),
+  'btw:list': z.object({ taskId: z.string() }),
+  'btw:ask': z.object({ taskId: z.string(), question: z.string().min(1).max(20_000) }),
+  'btw:clear': z.object({ taskId: z.string() }),
   'fs:listDirs': z.object({ dir: z.string().min(1).max(2000), host: z.string().max(200).optional() }),
   'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({

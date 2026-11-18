@@ -365,6 +365,13 @@ class MockSession implements ProviderSession {
     return { url: on ? `https://claude.ai/code/session_mock${this.args.title ? '_' + this.args.title.replace(/\W+/g, '') : ''}` : undefined };
   }
 
+  /** Side questions in tests: an answer that shows the question and how many earlier ones it saw. */
+  async askSide(question: string, history: Array<{ question: string; response: string }>): Promise<string> {
+    await new Promise((r) => setTimeout(r, Math.min(400, Number(process.env.AMW_MOCK_DELAY_MS ?? 200) * 2)));
+    if (question.includes('fail')) throw new Error('The side question could not be answered.');
+    return `Side answer to "${question}" (saw ${history.length} earlier side question${history.length === 1 ? '' : 's'}; main turn ${this.busy ? 'still running' : 'idle'}).`;
+  }
+
   async setModel(model: string | undefined): Promise<void> {
     this.args.model = model;
     this.emit({ type: 'model', model: model ?? MOCK_MODELS[0].id });

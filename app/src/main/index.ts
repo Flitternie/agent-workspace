@@ -171,6 +171,10 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
   'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
+  // Side questions ("btw"): never part of the agent's conversation.
+  'btw:list': (i: { taskId: string }) => workspace.btwList(i.taskId),
+  'btw:ask': (i: { taskId: string; question: string }) => workspace.askBtw(i.taskId, i.question),
+  'btw:clear': (i: { taskId: string }) => workspace.clearBtw(i.taskId),
   // Typing a folder path in the project chooser: its subfolders, here or on a machine.
   'fs:listDirs': (i: { dir: string; host?: string }) => workspace.listDirs(i.dir, i.host),
   'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),

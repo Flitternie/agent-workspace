@@ -1,7 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
-import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
@@ -14,6 +14,7 @@ import { RetryNotice } from './Retry';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
+import { BtwPanel } from './Btw';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
 import { t } from '../i18n';
@@ -41,6 +42,33 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // The files the agent changed in its latest turn; their list shares the side column (closing a
   // file previewed from it brings the list back). Follow: each file it changes opens as it changes.
   const changes = useMemo(() => turnChanges(transcript), [transcript]);
+  // Side questions ("btw"): asked from the reply box, read in the side column (which they open).
+  const [showBtw, setShowBtw] = useState(false);
+  const [btw, setBtw] = useState<BtwEntry[]>([]);
+  const [inject, setInject] = useState({ text: '', n: 0 });
+  useEffect(() => {
+    let live = true;
+    setBtw([]);
+    void call('btw:list', { taskId: task.taskId })
+      .then((list) => live && setBtw(list))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [task.taskId]);
+  const askBtw = (question: string) => {
+    setShowBtw(true);
+    setPreview(null);
+    if (!question) return;
+    const taskId = task.taskId;
+    // Shown at once, answered when the agent answers; the main conversation is not touched.
+    setBtw((list) => [...list, { id: `pending-${Date.now()}`, question, askedAt: new Date().toISOString() }]);
+    void call('btw:ask', { taskId, question })
+      .catch(() => undefined)
+      .then(() => call('btw:list', { taskId }))
+      .then((list) => taskId === task.taskId && setBtw(list))
+      .catch(() => {});
+  };
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -252,14 +280,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             {/* The files changed in the latest turn (a count while there are some). */}
             <button
-              className={`btn btn-icon btn-badged${showChanges && !preview ? ' btn-pressed' : ''}`}
+              className={`btn btn-icon btn-badged${showChanges && !preview && !showBtw ? ' btn-pressed' : ''}`}
               data-tip={t('Changes')}
               aria-label={t('Changed this turn')}
-              aria-pressed={showChanges && !preview}
+              aria-pressed={showChanges && !preview && !showBtw}
               data-testid="show-changes"
               onClick={() => {
-                const on = preview ? true : !showChanges;
+                const on = preview || showBtw ? true : !showChanges;
                 setShowChanges(on);
+                setShowBtw(false);
                 if (on) setShowMemory(false);
                 setPreview(null);
               }}
@@ -268,16 +297,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
             </button>
             <button
-              className={`btn btn-icon${showMemory && !preview && !showChanges ? ' btn-pressed' : ''}`}
+              className={`btn btn-icon${showMemory && !preview && !showChanges && !showBtw ? ' btn-pressed' : ''}`}
               data-tip={t('Memory')}
               aria-label={t('Memory')}
               onClick={() => {
-                const on = preview || showChanges ? true : !showMemory;
+                const on = preview || showChanges || showBtw ? true : !showMemory;
                 setShowMemory(on);
+                setShowBtw(false);
                 if (on) setShowChanges(false);
                 setPreview(null);
               }}
-              aria-pressed={showMemory && !preview && !showChanges}
+              aria-pressed={showMemory && !preview && !showChanges && !showBtw}
             >
               <Icon name="note" />
             </button>
@@ -348,7 +378,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <PlanChecklist plan={task.plan} />
               </div>
             ) : null}
-            <Composer task={task} />
+            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -361,6 +391,18 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
             {previewPanel}
           </>
+        ) : !preview && showBtw && btw.length ? (
+          <BtwPanel
+            task={task}
+            entries={btw}
+            onClose={() => setShowBtw(false)}
+            onClear={() => {
+              setBtw([]);
+              setShowBtw(false);
+              void call('btw:clear', { taskId: task.taskId }).catch(() => {});
+            }}
+            onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
+          />
         ) : !preview && showChanges ? (
           <ChangesPanel task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
         ) : !preview && showMemory ? (
@@ -629,8 +671,15 @@ function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
   );
 }
 
-function Composer({ task }: { task: Task }) {
+function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (question: string) => void; btwCount?: number; inject?: { text: string; n: number } }) {
   const [draft, setDraft] = useState('');
+  const box = useRef<HTMLTextAreaElement>(null);
+  /** The bubble pressed with nothing typed and nothing asked yet: say how, in the box, for a moment. */
+  const [btwHint, setBtwHint] = useState(false);
+  // Text handed back from elsewhere (a side answer brought into the conversation): into the box to edit.
+  useEffect(() => {
+    if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
+  }, [inject?.n]);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // While the agent works, Enter adds to what it is doing (read at its next step);
@@ -639,9 +688,28 @@ function Composer({ task }: { task: Task }) {
   // `!command` runs a command in the agent's folder, as in the CLIs.
   const shell = draft.trimStart().startsWith('!') && !isMainAgent(task);
   const suggestion = !draft && task.suggestion ? task.suggestion : '';
+  /**
+   * A side question ("btw"): the same box, another way to send (⌥↵, the bubble button, or a message
+   * starting /btw). It goes to the side column, never into the conversation, and interrupts nothing.
+   * The button with nothing typed just opens the side questions.
+   */
+  const btw = () => {
+    if (!onBtw) return;
+    const text = draft.trim().replace(/^\/btw\b\s*/i, '');
+    // Nothing to ask and nothing asked before: no empty side column, a hint in the box instead.
+    if (!text && !btwCount) {
+      setBtwHint(true);
+      box.current?.focus();
+      setTimeout(() => setBtwHint(false), 3000);
+      return;
+    }
+    onBtw(text);
+    if (text) setDraft('');
+  };
   const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
+    if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
     setError('');
     try {
@@ -668,12 +736,13 @@ function Composer({ task }: { task: Task }) {
     <div className="composer">
       <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
         <textarea
+          ref={box}
           className="composer-input"
           rows={3}
           // A new agent with nothing asked yet: ready for its first message.
           autoFocus={!task.title.trim()}
           value={draft}
-          placeholder={suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
+          placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
@@ -682,6 +751,11 @@ function Composer({ task }: { task: Task }) {
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
               e.preventDefault();
               setDraft(suggestion);
+              return;
+            }
+            if (e.key === 'Enter' && e.altKey && !e.nativeEvent.isComposing && onBtw) {
+              e.preventDefault();
+              if (draft.trim()) btw();
               return;
             }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -726,10 +800,21 @@ function Composer({ task }: { task: Task }) {
                 <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
               </>
             )}
+            {onBtw && !shell ? (
+              <>
+                {' '}
+                · <Kbd>⌥↵</Kbd> {t('side question')}
+              </>
+            ) : null}
           </span>
           {working && !shell ? (
             <button className="btn btn-sm" disabled={!draft.trim() || sending} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
               {t('Stop & send')}
+            </button>
+          ) : null}
+          {onBtw && !shell ? (
+            <button className="btw-btn" aria-label={t('Side question')} data-tip={t('Side question (⌥↵): not part of the conversation, interrupts nothing')} onClick={btw} data-testid="btw-send">
+              <Icon name="btw" />
             </button>
           ) : null}
           <button className="send-btn" aria-label={t('Send')} disabled={!draft.trim() || sending} onClick={() => void send()}>

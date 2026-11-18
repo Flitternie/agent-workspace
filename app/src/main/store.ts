@@ -9,6 +9,7 @@ import type {
   Settings,
   Task,
   TranscriptItem,
+  BtwEntry,
 } from '../shared/types';
 
 export interface WorkspaceData {
@@ -26,6 +27,8 @@ export interface WorkspaceData {
   labelsVersion?: number;
   /** The main agent's task record (kept apart from `tasks`: not a worker). */
   mainAgent?: Task;
+  /** Side questions per agent (newest last, the latest few kept). */
+  btw?: Record<string, BtwEntry[]>;
 }
 
 const empty = (): WorkspaceData => ({

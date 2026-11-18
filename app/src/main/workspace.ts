@@ -23,8 +23,7 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot,
-} from '../shared/types';
+  WorkspaceSnapshot, BtwEntry } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
@@ -252,6 +251,9 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
+    // A side question still unanswered when the app quit will not be answered now.
+    for (const list of Object.values(d.btw ?? {}))
+      for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';
     // Native approvals/questions die with the provider process: never show them as still answerable.
     for (const a of d.attention) {
       if (a.state === 'open' && a.providerRequestId) {
@@ -692,6 +694,44 @@ export class Workspace {
     t.updatedAt = now();
     this.changed();
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
+  }
+
+  // ---------------------------------------------------------------- side questions ("btw")
+
+  /** This agent's side questions, oldest first. */
+  btwList(taskId: string): BtwEntry[] {
+    return this.store.data.btw?.[taskId] ?? [];
+  }
+
+  /**
+   * Asks the agent a side question: answered from its conversation so far (Claude Code's side
+   * questions; a read-only side thread in Codex), never entering that conversation or interrupting a
+   * turn under way. Starts its session if needed. Resolves with the entry, answered or failed.
+   */
+  async askBtw(taskId: string, question: string): Promise<BtwEntry> {
+    const task = this.task(taskId);
+    const all = (this.store.data.btw ??= {});
+    const list = (all[taskId] ??= []);
+    const entry: BtwEntry = { id: `b-${randomUUID().slice(0, 8)}`, question: question.trim(), askedAt: now() };
+    const history = list.filter((e) => e.answer).map((e) => ({ question: e.question, response: e.answer! }));
+    list.push(entry);
+    all[taskId] = list.slice(-20);
+    this.store.save();
+    try {
+      const live = this.live.get(taskId) ?? (await this.connect(taskId));
+      if (!live.session.askSide) throw new Error(`${task.provider} does not take side questions.`);
+      entry.answer = await live.session.askSide(entry.question, history);
+    } catch (error) {
+      entry.error = (error as Error).message;
+    }
+    entry.answeredAt = now();
+    this.store.save();
+    return entry;
+  }
+
+  clearBtw(taskId: string): void {
+    if (this.store.data.btw) delete this.store.data.btw[taskId];
+    this.store.save();
   }
 
   /** The user did something with this agent: it moves up in the sidebar (and is no longer set aside). */
