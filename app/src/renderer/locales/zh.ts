@@ -910,4 +910,6 @@ export const zh: Record<string, string> = {
   'Memory and skills': '记忆与技能',
   'General': '通用',
   'Voice and OpenAI': '语音与 OpenAI',
+  'Connect Claude Code and Codex, machines and voice, step by step.': '一步步连接 Claude Code 和 Codex、远程机器和语音。',
+  'Open the guide': '打开引导',
 };

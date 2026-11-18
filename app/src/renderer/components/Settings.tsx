@@ -768,8 +768,11 @@ function ShortcutField({ value, onChange }: { value: string; onChange: (shortcut
   );
 }
 
-// The settings, grouped: connecting the CLIs, how agents work, what they know, voice, general.
+// The settings, grouped: general first (language), then connecting the CLIs, how agents work, what they know, voice.
 const SECTIONS: Array<{ id: string; group: string; title: string; keywords: string[] }> = [
+  { id: 'language', group: 'General', title: 'Language', keywords: ['English', '中文', 'locale'] },
+  { id: 'guide', group: 'General', title: 'Setup guide', keywords: ['guide', 'onboarding', 'first run', 'setup', 'Open the guide'] },
+  { id: 'data', group: 'General', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
   { id: 'agents', group: 'Connect', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'remote', group: 'Connect', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
   { id: 'main', group: 'How agents work', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
@@ -778,8 +781,6 @@ const SECTIONS: Array<{ id: string; group: string; title: string; keywords: stri
   { id: 'skills', group: 'Memory and skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
   { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'openai', group: 'Voice and OpenAI', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
-  { id: 'language', group: 'General', title: 'Language', keywords: ['English', '中文', 'locale'] },
-  { id: 'data', group: 'General', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
 ];
 
 /** A settings group; hidden when the search does not match its title or contents. */
@@ -844,9 +845,9 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </header>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={t('Settings')}>
-          {SECTIONS.map((sec, i) => (
+          {SECTIONS.filter((sec) => !(snapshot.demo && sec.id === 'guide')).map((sec, i, list) => (
             <Fragment key={sec.id}>
-              {sec.group !== SECTIONS[i - 1]?.group ? <div className="settings-nav-group">{t(sec.group)}</div> : null}
+              {sec.group !== list[i - 1]?.group ? <div className="settings-nav-group">{t(sec.group)}</div> : null}
               <button className="settings-nav-item" onClick={() => jump(sec.id)}>
                 {t(sec.title)}
               </button>
@@ -854,26 +855,46 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           ))}
         </nav>
         <div className="settings-content">
+      <Section id="language" query={query}>
+        <div className="segmented" role="radiogroup" aria-label={t('Language')}>
+          {LANGUAGES.map((l) => (
+            <button key={l.id} role="radio" aria-checked={s.language === l.id} className={s.language === l.id ? 'on' : ''} onClick={() => update({ language: l.id })} data-testid={`lang-${l.id}`}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </Section>
+      {snapshot.demo ? null : (
+        <Section id="guide" query={query}>
+          <div className="settings-row-inline">
+            <span className="muted small">{t('Connect Claude Code and Codex, machines and voice, step by step.')}</span>
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                // The guide lives where the Overview is: back there, with the guide reopened.
+                void call('settings:update', { onboarding: { ...s.onboarding, started: true, dismissed: false } });
+                window.dispatchEvent(new CustomEvent('amw:open-guide'));
+              }}
+              data-testid="reopen-onboarding"
+            >
+              {t('Open the guide')}
+            </button>
+          </div>
+        </Section>
+      )}
+      <Section id="data" query={query}>
+        <div className="small">
+          {t('Workspace data is stored in')} <code>{snapshot.dataDir}</code>
+        </div>
+        <div className="muted small">{snapshot.demo ? t('This is the demo entry; its data is separate from your real workspace.') : t('To try mock agents without touching this workspace, run npm run demo.')}</div>
+      </Section>
       <Section
         id="agents"
         query={query}
         actions={
-          <div className="row">
-            {/* The first-run guide again: installing, signing in, bringing work in. */}
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                void call('settings:update', { onboarding: { ...s.onboarding, started: true, dismissed: false } });
-                onClose();
-              }}
-              data-testid="reopen-onboarding"
-            >
-              {t('Setup guide')}
-            </button>
-            <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
-              {checking ? t('Checking…') : t('Recheck')}
-            </button>
-          </div>
+          <button className="btn btn-sm" disabled={checking} onClick={() => void recheck()}>
+            {checking ? t('Checking…') : t('Recheck')}
+          </button>
         }
       >
         <p className="muted small">
@@ -1004,21 +1025,6 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </Section>
       <Section id="openai" query={query}>
         <OpenAiKey snapshot={snapshot} />
-      </Section>
-      <Section id="language" query={query}>
-        <div className="segmented" role="radiogroup" aria-label={t('Language')}>
-          {LANGUAGES.map((l) => (
-            <button key={l.id} role="radio" aria-checked={s.language === l.id} className={s.language === l.id ? 'on' : ''} onClick={() => update({ language: l.id })} data-testid={`lang-${l.id}`}>
-              {l.label}
-            </button>
-          ))}
-        </div>
-      </Section>
-      <Section id="data" query={query}>
-        <div className="small">
-          {t('Workspace data is stored in')} <code>{snapshot.dataDir}</code>
-        </div>
-        <div className="muted small">{snapshot.demo ? t('This is the demo entry; its data is separate from your real workspace.') : t('To try mock agents without touching this workspace, run npm run demo.')}</div>
       </Section>
       {error ? <div className="error-text">{error}</div> : null}
         </div>

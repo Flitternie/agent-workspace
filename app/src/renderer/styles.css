@@ -5789,3 +5789,10 @@ button.subtask-row:hover {
 .settings-nav-group:first-child {
   margin-top: 2px;
 }
+/* A one-line setting: what it does on the left, its button on the right. */
+.settings-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
