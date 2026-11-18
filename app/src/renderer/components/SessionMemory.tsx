@@ -6,6 +6,7 @@ import { t } from '../i18n';
 import { Icon, isMainAgent } from './bits';
 import { Markdown } from './Markdown';
 import { Modal } from './Dialogs';
+import { SidePanel, type SideFrame } from './SidePanel';
 
 // Memory where it matters in an agent's view: which notes this agent works with (a chip
 // in its header; this project's notes first, one line each), and saving something the
@@ -57,7 +58,7 @@ export function MemoryChip({ snapshot, task, open, onToggle }: { snapshot: Works
  * one title each; a note opens rendered as Markdown. Read-only (manage in Settings).
  * Same frame as the other side panels (header row, width, drag bar).
  */
-export function AgentMemoryPanel({ snapshot, task, width, onClose }: { snapshot: WorkspaceSnapshot; task: Task; width?: number; onClose: () => void }) {
+export function AgentMemoryPanel({ snapshot, task, frame }: { snapshot: WorkspaceSnapshot; task: Task; frame: SideFrame }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const { project, user, started } = sessionMemory(snapshot, task);
   const projectName = snapshot.projects.find((p) => p.projectId === task.projectId)?.name ?? '';
@@ -85,23 +86,18 @@ export function AgentMemoryPanel({ snapshot, task, width, onClose }: { snapshot:
       </div>
     ));
   return (
-    <aside className="memory side agent-memory" style={width ? { width } : undefined} aria-label={t('The memory this agent works with')} data-testid="agent-memory">
-      <div className="preview-top">
-        <div className="preview-head">
-          <div className="preview-ident">
-            <div className="panel-title">{t('Memory')}</div>
-            <div className="changes-sub muted small">
-              {total ? (later ? t('{n} notes · {later} from the next start', { n: total, later }) : t('{n} notes · loaded at start', { n: total })) : t('No notes yet')}
-            </div>
-          </div>
-          <button className="icon-btn" title={t('Memory settings')} aria-label={t('Memory settings')} onClick={() => openSettings('memory')}>
-            <Icon name="gear" size={13} />
-          </button>
-          <button className="icon-btn" title={t('Close')} aria-label={t('Close')} data-testid="side-close" onClick={onClose}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-      </div>
+    <SidePanel
+      title={t('Memory')}
+      subtitle={<bdi>{total ? (later ? t('{n} notes · {later} from the next start', { n: total, later }) : t('{n} notes · loaded at start', { n: total })) : t('No notes yet')}</bdi>}
+      label={t('The memory this agent works with')}
+      testId="agent-memory"
+      frame={frame}
+      actions={
+        <button className="icon-btn" title={t('Memory settings')} aria-label={t('Memory settings')} onClick={() => openSettings('memory')}>
+          <Icon name="gear" size={13} />
+        </button>
+      }
+    >
       {total === 0 ? (
         <div className="side-empty" data-testid="agent-memory-empty">
           <span className="side-empty-icon">
@@ -133,7 +129,7 @@ export function AgentMemoryPanel({ snapshot, task, width, onClose }: { snapshot:
           ) : null}
         </>
       )}
-    </aside>
+    </SidePanel>
   );
 }
 

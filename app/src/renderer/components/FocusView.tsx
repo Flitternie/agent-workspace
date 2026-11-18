@@ -17,6 +17,9 @@ import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
+import { SidePanel } from './SidePanel';
+import { SessionMap, SessionMiniMap } from './SessionMap';
+import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
 import { t } from '../i18n';
@@ -60,6 +63,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   }, [task.taskId]);
   const askBtw = (question: string) => {
     setShowBtw(true);
+    setShowMap(false);
     setPreview(null);
     if (!question) return;
     const taskId = task.taskId;
@@ -71,6 +75,101 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       .then((list) => taskId === task.taskId && setBtw(list))
       .catch(() => {});
   };
+  // The session map: its turns as tasks (a model's grouping, cached; structure until then), beside the
+  // conversation when the window leaves room, else in the side column.
+  const threadRef = useRef<HTMLDivElement>(null);
+  const turnCount = useMemo(() => transcript.filter((i) => i.role === 'user').length, [transcript]);
+  const [grouping, setGrouping] = useState<MapGrouping | null>(null);
+  const settled = task.status !== 'running' && task.status !== 'starting';
+  useEffect(() => setGrouping(null), [task.taskId]);
+  useEffect(() => {
+    if (turnCount < 2 || !settled) return;
+    let live = true;
+    void call('session:map', { taskId: task.taskId })
+      .then((g) => live && setGrouping(g))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [task.taskId, turnCount, settled]);
+  const forks = useMemo(() => snapshot.tasks.filter((x) => x.forkedFrom?.taskId === task.taskId), [snapshot.tasks, task.taskId]);
+  // The reader's corrections to the grouping, kept per agent on this machine.
+  const [mapEdits, setMapEdits] = useState<MapEdits>({});
+  useEffect(() => {
+    try {
+      setMapEdits(JSON.parse(localStorage.getItem(`amw.mapEdits.${task.taskId}`) ?? '{}') as MapEdits);
+    } catch {
+      setMapEdits({});
+    }
+  }, [task.taskId]);
+  const mergeTask = (startItemId: string) =>
+    setMapEdits((cur) => {
+      const next = { ...cur, merged: [...new Set([...(cur.merged ?? []), startItemId])] };
+      localStorage.setItem(`amw.mapEdits.${task.taskId}`, JSON.stringify(next));
+      return next;
+    });
+  const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  // Forked from another agent: where this trunk came in.
+  const mapOrigin = useMemo(() => {
+    const from = task.forkedFrom;
+    if (!from) return undefined;
+    const parent = snapshot.tasks.find((x) => x.taskId === from.taskId);
+    return { taskId: from.taskId, alias: parent?.alias ?? from.alias, name: parent?.name ?? from.alias };
+  }, [task.forkedFrom, snapshot.tasks]);
+  const [showMap, setShowMap] = useState(false);
+  /** The conversation pane's width (px), and the task whose turns are in view. */
+  const [threadW, setThreadW] = useState(0);
+  const [currentTask, setCurrentTask] = useState<string | null>(null);
+  useEffect(() => {
+    const thread = threadRef.current;
+    const scroller = thread?.querySelector<HTMLElement>('.transcript');
+    const inner = thread?.querySelector<HTMLElement>('.transcript-inner');
+    if (!thread || !scroller || !inner) return;
+    const measure = () => setThreadW(scroller.clientWidth);
+    const track = () => {
+      // Right after a jump from the map, its choice stands (the jump's own scrolling does not overrule it).
+      if (Date.now() - jumpedAt.current < 900) return;
+      // The last turn starting above 40% of the view is the one being read.
+      const top = scroller.getBoundingClientRect().top + scroller.clientHeight * 0.4;
+      let turn: string | null = null;
+      for (const el of scroller.querySelectorAll<HTMLElement>('.msg.user[data-item-id]')) {
+        if (el.getBoundingClientRect().top <= top) turn = el.dataset.itemId ?? null;
+        else break;
+      }
+      // At the end of the conversation, the latest task is the one in view (however short it is).
+      const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+      const owner = atEnd ? mapTasks.at(-1) : (mapTasks.find((x) => turn && x.turnIds.includes(turn)) ?? mapTasks[0]);
+      setCurrentTask(owner?.startItemId ?? null);
+    };
+    measure();
+    track();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    scroller.addEventListener('scroll', track, { passive: true });
+    return () => {
+      ro.disconnect();
+      scroller.removeEventListener('scroll', track);
+    };
+    // Width changes (a preview opening, covering) reach the ResizeObserver.
+  }, [mapTasks]);
+  const jumpedAt = useRef(0);
+  const jumpTo = (turnId: string) => {
+    // The task jumped to is the one being read, whether or not the conversation can scroll to it.
+    jumpedAt.current = Date.now();
+    setCurrentTask(mapTasks.find((x) => x.turnIds.includes(turnId))?.startItemId ?? null);
+    const el = threadRef.current?.querySelector<HTMLElement>(`.msg.user[data-item-id="${turnId}"]`);
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  /**
+   * Beside the conversation when the pane can give the map its room and still keep a readable column
+   * (centred in what is left); else its outline at the edge, opening the full map in the side column.
+   */
+  const MAP_ROOM = 250;
+  const mapBeside = mapTasks.length > 0 && threadW - MAP_ROOM - 32 >= 720;
+  // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
+  // would leave too narrow a column; then nothing (nothing floats over the messages).
+  const MINI_ROOM = 48;
+  const miniFits = !mapBeside && mapTasks.length > 0 && threadW - MINI_ROOM - 32 >= 520;
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -109,10 +208,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // The preview column's width: dragged by the user, kept for next time.
   const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
   // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
+  // Maximized: the side panel (any kind) takes the whole conversation area until restored (Esc) or closed.
   const [previewMax, setPreviewMax] = useState(false);
-  useEffect(() => {
-    if (!preview) setPreviewMax(false);
-  }, [preview]);
   useEffect(() => {
     if (!previewMax) return;
     const esc = (e: KeyboardEvent) => {
@@ -128,9 +225,28 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     localStorage.setItem('amw.previewWidth', String(Math.round(w)));
   };
   useEffect(() => setPreviewState(restored(task.taskId)), [task.taskId]);
-  // Too narrow for both (the conversation keeps 400px, the preview 300px): the preview covers it.
+  // Too narrow for both (the conversation keeps 400px, a side panel 300px): the panel covers it.
   const narrow = bodyW > 0 && bodyW < PREVIEW_MIN + CONVERSATION_MIN;
-  const covering = !!preview && (previewMax || narrow);
+  // Which panel the side column shows: one at a time, the preview first.
+  const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
+    ? 'preview'
+    : showMap && !mapBeside && mapTasks.length
+      ? 'map'
+      : showBtw && btw.length
+        ? 'btw'
+        : showChanges
+          ? 'changes'
+          : showMemory
+            ? 'memory'
+            : null;
+  useEffect(() => {
+    setPreviewMax(false);
+  }, [sideKind]);
+  // Every panel alike: beside the conversation when both fit, else (or maximized) in its place.
+  const covering = !!sideKind && (previewMax || narrow);
+  // The room the map takes right of the conversation: all of it beside, a strip for the outline, or none
+  // while the full map is open in the side column.
+  const mapRoom = mapBeside ? MAP_ROOM : miniFits && !(showMap && !preview) ? MINI_ROOM : 0;
   const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -161,6 +277,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setPreview(latest.path, { line: latest.line, diff: true });
   }, [latest?.lastItemId, follow]);
   const previewDiffs = preview ? changes.files.find((f) => f.path === preview.path || resolvePosix(task.cwd, f.path) === resolvePosix(task.cwd, preview.path))?.diffs : undefined;
+  /** The frame every side panel shares: one width, maximize (unless it already covers), close. */
+  const frame = (onClose: () => void) => ({ width: shownWidth, maximized: covering, onToggleMax: narrow ? undefined : () => setPreviewMax(!previewMax), onClose });
+  /** In the conversation's place, acting on the conversation closes the panel first, so it is seen. */
+  const thenConversation = (fn: () => void) => {
+    if (!covering) return fn();
+    setShowMap(false);
+    setShowBtw(false);
+    setTimeout(fn, 50);
+  };
   const previewPanel = preview ? (
     <FilePreviewPanel
                 task={task}
@@ -182,6 +307,30 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 }}
               />
   ) : null;
+  const sidePanel =
+    sideKind === 'preview' ? (
+      previewPanel
+    ) : sideKind === 'map' ? (
+      <SidePanel title={t('Task index')} label={t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
+        <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+      </SidePanel>
+    ) : sideKind === 'btw' ? (
+      <BtwPanel
+        task={task}
+        entries={btw}
+        frame={frame(() => setShowBtw(false))}
+        onClear={() => {
+          setBtw([]);
+          setShowBtw(false);
+          void call('btw:clear', { taskId: task.taskId }).catch(() => {});
+        }}
+        onBring={(text) => thenConversation(() => setInject((cur) => ({ text, n: cur.n + 1 })))}
+      />
+    ) : sideKind === 'changes' ? (
+      <ChangesPanel frame={frame(() => setShowChanges(false))} task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
+    ) : sideKind === 'memory' ? (
+      <AgentMemoryPanel snapshot={snapshot} task={task} frame={frame(() => setShowMemory(false))} />
+    ) : null;
   return (
     <div className="focus">
       <section className="focus-main">
@@ -302,6 +451,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 const on = preview || showBtw ? true : !showChanges;
                 setShowChanges(on);
                 setShowBtw(false);
+                setShowMap(false);
                 if (on) setShowMemory(false);
                 setPreview(null);
               }}
@@ -357,7 +507,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
 
         <div className="focus-body" ref={bodyRef}>
           {/* Kept mounted while the preview is maximized, so the conversation keeps its place. */}
-          <div className="focus-thread" hidden={covering}>
+          <div className={`focus-thread${mapRoom ? ' with-map' : ''}`} hidden={covering} ref={threadRef} style={mapRoom ? { ['--map-room' as string]: `${mapRoom}px` } : undefined}>
+            {/* The session map in the room right of the conversation; with no room, its outline, opening the side column. */}
+            {mapBeside ? (
+              <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
+                <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+              </div>
+            ) : mapRoom ? (
+              <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+            ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
               <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
@@ -380,39 +538,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
-          {preview && covering ? previewPanel : null}
+          {covering ? sidePanel : null}
         </div>
       </section>
       {(() => {
-        // Every side panel (preview, side questions, changes, memory) has the same width and the same
-        // drag bar: one column, whatever it shows.
-        const content = preview && !covering ? (
-          previewPanel
-        ) : !preview && showBtw && btw.length ? (
-          <BtwPanel
-            task={task}
-            entries={btw}
-            width={shownWidth}
-            onClose={() => setShowBtw(false)}
-            onClear={() => {
-              setBtw([]);
-              setShowBtw(false);
-              void call('btw:clear', { taskId: task.taskId }).catch(() => {});
-            }}
-            onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
-          />
-        ) : !preview && showChanges ? (
-          <ChangesPanel task={task} changes={changes} follow={follow} width={shownWidth} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
-        ) : !preview && showMemory ? (
-          <AgentMemoryPanel snapshot={snapshot} task={task} width={shownWidth} onClose={() => setShowMemory(false)} />
-        ) : null;
-        const panel = content ? (
+        if (!sidePanel || covering) return null;
+        const panel = (
           <>
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-            {content}
+            {sidePanel}
           </>
-        ) : null;
-        if (!panel) return null;
+        );
         return side ? createPortal(panel, side) : panel;
       })()}
     </div>
@@ -444,7 +580,7 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
       className="panel-resizer"
       role="separator"
       aria-orientation="vertical"
-      aria-label={t('Resize the preview')}
+      aria-label={t('Resize the side column')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="panel-resizer"
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}
@@ -621,6 +757,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               key={item.id}
               className={`msg ${item.role}`}
               data-role={item.role}
+              data-item-id={item.id}
               onContextMenu={
                 item.role === 'user' && item.via !== 'main'
                   ? (e) => {
@@ -840,7 +977,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             ) : (
               <>
                 {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
-                <span className="muted"> — {t('typed text goes only to this agent')}</span>
               </>
             )}
           </span>

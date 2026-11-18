@@ -33,6 +33,8 @@ export interface WorkspaceData {
   mainAgent?: Task;
   /** Side questions per agent (newest last, the latest few kept). */
   btw?: Record<string, BtwEntry[]>;
+  /** The session map's grouping of each agent's turns into tasks (by a model), with the turns it covers. */
+  sessionMaps?: Record<string, import('../shared/session-map').MapGrouping>;
 }
 
 const empty = (): WorkspaceData => ({

@@ -354,6 +354,12 @@ pre code {
   background: hsl(var(--hue, 220) 60% 92%);
   color: hsl(var(--hue, 220) 45% 28%);
 }
+.alias-xs {
+  width: 16px;
+  height: 16px;
+  font-size: 9.5px;
+  border-radius: 5px;
+}
 .alias-sm {
   width: 20px;
   height: 20px;
@@ -565,9 +571,15 @@ body.resizing .sidebar-resizer {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Hidden until it scrolls (see showScrollbarAWhile): thin, and transparent at rest. */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.agent-list.scrolling {
+  scrollbar-color: color-mix(in srgb, var(--text-3) 55%, transparent) transparent;
 }
 .agent-row {
   display: flex;
@@ -1626,6 +1638,28 @@ body.resizing .sidebar-resizer {
 }
 .composer-foot .hint {
   margin-left: auto;
+  white-space: nowrap;
+}
+.to-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer {
+  container: composer / inline-size;
+}
+.composer-foot > button {
+  flex: none;
+}
+/* A narrow reply box: one line at its foot; the key hints go (the buttons and placeholder say enough). */
+@container composer (max-width: 680px) {
+  .composer-foot .hint {
+    display: none;
+  }
+  .composer-foot .to-label {
+    margin-right: auto;
+  }
 }
 .memory {
   width: 300px;
@@ -4713,10 +4747,6 @@ button.subtask-row:hover {
   flex-direction: column;
   gap: 10px;
 }
-.memory.changes {
-  width: 360px;
-  gap: 10px;
-}
 .changes-sub {
   display: flex;
   align-items: center;
@@ -4791,7 +4821,16 @@ button.subtask-row:hover {
     margin-left: 52px;
     gap: 3px;
   }
-  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview). */
+  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview); square,
+     and never squeezed narrower by the row (they would read as stretched). */
+  .focus-actions > * {
+    flex: none;
+  }
+  .focus-actions .btn,
+  .focus-actions .perm,
+  .focus-actions .perm .perm-select {
+    height: 28px;
+  }
   .focus-actions .btn.btn-icon,
   .focus-actions .perm,
   .focus-actions .perm .perm-select {
@@ -5521,10 +5560,6 @@ button.subtask-row:hover {
   opacity: 1;
   transition-delay: 0.25s;
 }
-.memory.btw {
-  width: 380px;
-  gap: 10px;
-}
 .btw-thread {
   display: flex;
   flex-direction: column;
@@ -5890,4 +5925,602 @@ button.subtask-row:hover {
 }
 ::highlight(find-current) {
   background-color: rgba(249, 115, 22, 0.55);
+}
+
+/* Session map: the session's tasks as an index, beside the conversation (in the room on its right) or
+   in the side column. A thin line joins the tasks; the one being read is marked. */
+.focus-thread {
+  position: relative;
+}
+/* With the map beside it, the conversation is centred in the room left of the map (not in the whole pane),
+   so the blank on its left matches the gap before the map instead of the map's width plus that gap. */
+.focus-thread.with-map {
+  --chat-w: min(1160px, max(720px, 80cqw), calc(100cqw - var(--map-room) - 32px));
+}
+.focus-thread.with-map > .focus-attention,
+.focus-thread.with-map > .pinned-plan,
+.focus-thread.with-map > .composer,
+.focus-thread.with-map .transcript-inner {
+  margin-left: max(0px, calc((100cqw - var(--map-room) - var(--chat-w)) / 2));
+  margin-right: auto;
+}
+/* No room beside: the tree's outline alone (no words) in a strip right of the conversation; a click opens it. */
+.session-minimap {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 26px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 10px 0 22px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.session-minimap:hover {
+  background: var(--hover);
+}
+.mini-task {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding-bottom: 14px;
+}
+/* The trunk between tasks, in the task's colour. */
+.mini-task:not(.last)::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: -2px;
+  left: 50%;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: var(--hue);
+  opacity: 0.4;
+}
+.mini-node {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--hue);
+}
+.mini-task[data-status='in_progress'] .mini-node {
+  background: var(--panel);
+  border: 1.5px solid var(--hue);
+}
+.mini-task[data-status='abandoned'] .mini-node {
+  background: var(--panel);
+  border: 1.5px dashed var(--text-3);
+}
+.mini-task.current .mini-node {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hue) 25%, transparent);
+}
+.mini-mark {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.mini-mark .map-diamond {
+  width: 5px;
+  height: 5px;
+  margin: 0;
+}
+/* A fork off the trunk: a short twig to the right. */
+.mini-fork {
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-left: 1.5px solid #8b5cf6;
+  border-bottom: 1.5px solid #8b5cf6;
+  border-bottom-left-radius: 4px;
+}
+.mini-fork.sub {
+  border-color: #14b8a6;
+}
+.mini-fork.dead {
+  border-style: dashed;
+  border-color: var(--text-3);
+}
+.session-map-beside {
+  position: absolute;
+  top: 4px;
+  /* Room for the fades: a long map fades out at its ends, so it reads as going on. */
+  padding: 12px 0 30px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+  /* Clear of the conversation's scrollbar, with a margin of its own before the window's edge. */
+  right: 30px;
+  /* Down to the reply box's bottom edge: the room right of it is the map's too (the column moved left). */
+  bottom: 2px;
+  z-index: 2;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+/* The tree: a trunk (one colour per task's stretch), nodes shaped by state, twigs to decisions,
+   lanes curving off to forked agents. */
+.session-map {
+  list-style: none;
+  margin: 0;
+  /* Room on the left for the current node's enlarged dot and its glow (the scroll box clips the rest). */
+  padding: 4px 0 0 7px;
+}
+.map-task {
+  position: relative;
+  padding: 0 0 16px 22px;
+}
+.map-task::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--hue);
+  opacity: 0.35;
+}
+.map-task.current::before {
+  opacity: 0.8;
+}
+.map-task.last::before {
+  bottom: 6px;
+}
+.map-node {
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--hue);
+  color: #fff;
+}
+.map-task[data-status='done'] .map-node {
+  background: var(--hue);
+}
+.map-task[data-status='in_progress'] .map-node {
+  animation: map-going 2s ease-in-out infinite;
+}
+@keyframes map-going {
+  50% {
+    box-shadow: inset 0 0 0 2px var(--hue), 0 0 0 4px color-mix(in srgb, var(--hue) 25%, transparent);
+  }
+}
+.map-task[data-status='abandoned'] .map-node {
+  box-shadow: none;
+  border: 2px dashed var(--text-3);
+  background: var(--panel);
+}
+.map-task.current .map-node {
+  transform: scale(1.25);
+  box-shadow: inset 0 0 0 2px var(--hue), 0 0 0 4px color-mix(in srgb, var(--hue) 18%, transparent);
+}
+.map-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.map-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.map-task.current .map-title {
+  color: var(--text);
+  font-weight: 650;
+}
+.map-task[data-status='abandoned'] .map-title {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.map-title:hover {
+  color: var(--hue) !important;
+}
+.map-caret,
+.map-merge {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.map-caret:hover,
+.map-merge:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.map-caret.open .icon {
+  transform: rotate(90deg);
+}
+.map-merge {
+  opacity: 0;
+}
+.map-task:hover .map-merge {
+  opacity: 1;
+}
+.map-merge[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.map-merge[data-tip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.25s;
+}
+.map-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.map-state {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.map-state.going {
+  background: color-mix(in srgb, var(--hue) 14%, transparent);
+  color: var(--hue);
+}
+.map-state.dropped {
+  background: var(--hover);
+  color: var(--text-3);
+}
+.map-outcome {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.map-folded {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+/* A decision: a twig off the trunk, a diamond, what was decided and what was offered. */
+.map-decision {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 7px;
+}
+.map-twig {
+  position: absolute;
+  left: -16px;
+  top: 7px;
+  width: 12px;
+  height: 1.5px;
+  background: var(--hue);
+  opacity: 0.45;
+}
+.map-diamond {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  transform: rotate(45deg);
+  border-radius: 1.5px;
+  background: #f59e0b;
+}
+.map-decision.kind-approval .map-diamond,
+.map-decision.kind-answer .map-diamond {
+  background: #fbbf24;
+  opacity: 0.75;
+}
+.map-decision.kind-redirect .map-diamond {
+  background: var(--risk);
+}
+.map-decision-body {
+  min-width: 0;
+}
+.map-decision-label {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.map-decision.kind-decided .map-decision-label {
+  color: var(--text);
+  font-weight: 500;
+}
+.map-decision-label:hover {
+  color: var(--hue);
+}
+.map-ruled-out {
+  font-size: 11px;
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+.map-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.map-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.map-option.chosen {
+  border-color: color-mix(in srgb, var(--hue) 60%, transparent);
+  background: color-mix(in srgb, var(--hue) 10%, transparent);
+  color: var(--text);
+}
+/* A forked agent: a lane curving off the trunk to its avatar. */
+.map-branch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.map-lane {
+  position: absolute;
+  left: -16px;
+  top: -6px;
+  width: 12px;
+  height: 14px;
+  border-left: 1.5px solid #8b5cf6;
+  border-bottom: 1.5px solid #8b5cf6;
+  border-bottom-left-radius: 8px;
+  opacity: 0.7;
+}
+.map-branch-name {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.map-branch-sub {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.map-branch:hover .map-branch-name {
+  color: #7c3aed;
+}
+
+/* More kinds of branching: sub-agents (teal lanes), dead ends (dashed, crossed), where a fork came from. */
+.map-sub,
+.map-attempt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.map-sub .icon {
+  flex: none;
+  color: #0d9488;
+}
+.map-sub.status-failed {
+  color: var(--risk);
+}
+.map-sub.status-running .icon {
+  animation: map-going-op 1.6s ease-in-out infinite;
+}
+@keyframes map-going-op {
+  50% {
+    opacity: 0.35;
+  }
+}
+.map-sub:hover {
+  color: #0d9488;
+}
+.map-lane.sub {
+  border-color: #14b8a6;
+}
+.map-lane.dead {
+  border-left-style: dashed;
+  border-bottom-style: dashed;
+  border-color: var(--text-3);
+  opacity: 0.6;
+}
+.map-attempt {
+  align-items: flex-start;
+}
+.map-cross {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--text-3);
+  color: var(--text-3);
+}
+.map-attempt-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.map-attempt-tried {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 55%, transparent);
+}
+.map-attempt-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.map-attempt:hover .map-attempt-tried {
+  color: var(--text-2);
+}
+.map-origin {
+  position: relative;
+  padding: 0 0 12px 22px;
+}
+.map-branch.from {
+  margin-top: 0;
+}
+.map-lane.in {
+  left: -16px;
+  top: auto;
+  bottom: -14px;
+  height: 18px;
+  border-bottom: none;
+  border-top: 1.5px solid #8b5cf6;
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 8px;
+}
+
+/* A decision as a fork: the diamond on the trunk, each way not taken a dashed branch ending in a hollow node. */
+.map-not-taken {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.map-not-taken .map-lane.dead {
+  left: -11px;
+  top: -8px;
+  height: 15px;
+}
+.map-end {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--text-3);
+}
+
+/* The side panel frame (SidePanel) every side panel uses. */
+.side-panel {
+  width: min(460px, 40%);
+  gap: 10px;
+  border-left: 0;
+  min-width: 0;
+  max-width: calc(100% - 380px);
+}
+.side-top {
+  position: sticky;
+  top: -14px;
+  z-index: 3;
+  margin: -14px -14px 0;
+  padding: 14px 14px 8px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.side-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.side-ident {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+.side-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.side-panel.maximized {
+  flex: 1;
+  width: auto;
+  max-width: none;
 }

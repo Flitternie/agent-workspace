@@ -40,6 +40,7 @@ import { aliasFor, JsonStore } from './store';
 import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
+import { GROUPING_PROMPT, GROUPING_UPDATE_NOTE, GROUPING_VERSION, mergeGrouping, parseGrouping, turnsDigest, turnsOf, type MapGrouping } from '../shared/session-map';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
@@ -715,6 +716,56 @@ export class Workspace {
     this.changed();
     await this.live.get(taskId)?.session.setPermissionMode?.(mode);
   }
+
+  // ---------------------------------------------------------------- session map
+
+  /**
+   * The session's turns grouped into tasks, with titles, by a model (the background labeller): which
+   * turns worked toward one goal is a judgement about meaning. Cached per agent with the number of
+   * turns it covers; asked again only when there are new turns. Null with no model at hand (the map
+   * then groups by structure).
+   */
+  async sessionMapGrouping(taskId: string): Promise<MapGrouping | null> {
+    const items = this.store.transcript(taskId);
+    const turns = turnsOf(items).length;
+    const cache = (this.store.data.sessionMaps ??= {});
+    const cached = cache[taskId] as MapGrouping | undefined;
+    const current = cached?.version === GROUPING_VERSION ? cached : undefined;
+    if (!turns) return null;
+    if (current && current.turns === turns) return current;
+    if (!this.canLabel()) return current ?? null;
+    const ask = this.backgroundAsk();
+    if (!ask) return current ?? null;
+    const pending = this.mapAsks.get(taskId);
+    if (pending) return pending;
+    const job = (async () => {
+      try {
+        // Few new turns: only the latest task is looked at again (earlier ones stay as they were);
+        // many, or none cached yet: the whole session.
+        const last = current?.tasks.at(-1);
+        let grouping: MapGrouping | null;
+        if (current && last && turns - current.turns <= 15) {
+          const note = GROUPING_UPDATE_NOTE(last.start, current.tasks.slice(0, -1).map((t) => t.title));
+          const fresh = parseGrouping(await ask(GROUPING_PROMPT, `${note}\n\n${turnsDigest(items, last.start)}`), turns, last.start);
+          grouping = fresh ? mergeGrouping(current, fresh) : null;
+        } else grouping = parseGrouping(await ask(GROUPING_PROMPT, turnsDigest(items)), turns);
+        if (grouping) {
+          cache[taskId] = grouping;
+          this.store.save();
+        }
+        return grouping ?? current ?? null;
+      } catch (error) {
+        this.log('session map grouping failed', error);
+        return current ?? null;
+      } finally {
+        this.mapAsks.delete(taskId);
+      }
+    })();
+    this.mapAsks.set(taskId, job);
+    return job;
+  }
+
+  private mapAsks = new Map<string, Promise<MapGrouping | null>>();
 
   // ---------------------------------------------------------------- side questions ("btw")
 
@@ -1824,7 +1875,15 @@ export class Workspace {
     this.closeAttention(a, 'resolved', String(label));
     const task = this.task(a.taskId);
     if (!this.hasOpenNative(a.taskId)) task.status = live.turnActive ? 'running' : task.status;
-    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${task.provider}: ${label}`);
+    // The decision as data too (the session map shows it), not only as words.
+    const chosen = a.kind === 'approval' ? String(label) : Object.values(answers ?? {}).join(', ');
+    // The decision space: every option that was offered, the ones picked marked.
+    const picked = new Set([decision, ...Object.values(answers ?? {}).flatMap((v) => String(v).split(/\s*,\s*/))].filter(Boolean).map(String));
+    const offered = a.kind === 'approval' ? (a.options ?? []) : (a.questions ?? []).flatMap((q) => q.options);
+    const options = offered.slice(0, 8).map((o) => ({ label: clip(o.label, 60), chosen: picked.has(o.id) || picked.has(o.label) }));
+    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${task.provider}: ${label}`, {
+      decision: { kind: a.kind === 'approval' ? 'approval' : 'answer', label: clip(chosen, 200), about: clip(a.headline, 200), ...(options.length ? { options } : {}) },
+    });
     this.changed();
   }
 
@@ -1861,8 +1920,8 @@ export class Workspace {
     this.emitTranscript(taskId, item);
   }
 
-  private appendSystem(taskId: string, text: string): void {
-    this.upsertTranscript(taskId, { id: `sys-${randomUUID()}`, taskId, role: 'system', text, createdAt: now() });
+  private appendSystem(taskId: string, text: string, extra: Partial<TranscriptItem> = {}): void {
+    this.upsertTranscript(taskId, { id: `sys-${randomUUID()}`, taskId, role: 'system', text, createdAt: now(), ...extra });
   }
 
   private emitTranscript(taskId: string, item: TranscriptItem): void {

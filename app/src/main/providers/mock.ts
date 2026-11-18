@@ -221,6 +221,13 @@ class MockSession implements ProviderSession {
       this.later(() => this.emit({ type: 'subtask', id: 's1', step: zh ? '在 3 个文件里找到 7 处调用' : 'Found 7 calls in 3 files' }), 6);
       this.later(() => this.emit({ type: 'subtask', id: 's2', step: zh ? '运行 npm test -- orders' : 'Running npm test -- orders' }), 6.5);
       this.later(() => this.emit({ type: 'progress', text: zh ? '等两个子任务完成…' : 'Waiting on two sub-agents…' }), 5);
+      // As Claude Code records them: one Task tool call per sub-agent in the transcript.
+      for (const [id, description] of [
+        ['s1', zh ? '查找旧接口的调用方' : 'Find callers of the old API'],
+        ['s2', zh ? '补充接口测试' : 'Add endpoint tests'],
+        ['s3', zh ? '检查更新日志' : 'Check the changelog'],
+      ] as const)
+        this.later(() => this.emit({ type: 'transcriptItem', itemId: `task-${id}-${userTurns}`, role: 'tool', text: '', toolStatus: 'completed', tool: { name: 'Task', kind: 'other', title: `Subagent: ${description}`, locations: [], content: [] } }), 0.8);
       this.later(() => {
         for (const id of ['s1', 's2']) this.emit({ type: 'subtask', id, status: 'done', step: '' });
         this.busy = false;

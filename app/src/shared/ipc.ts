@@ -63,6 +63,7 @@ export const ipcSchemas = {
   'task:remove': z.object({ taskId: id }),
   'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
   'sessions:discoverAll': z.object({}),
+  'session:map': z.object({ taskId: z.string() }),
   'btw:list': z.object({ taskId: z.string() }),
   'btw:ask': z.object({ taskId: z.string(), question: z.string().min(1).max(20_000) }),
   'btw:clear': z.object({ taskId: z.string() }),

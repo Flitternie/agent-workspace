@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BtwEntry, Task } from '../../shared/types';
 import { t } from '../i18n';
+import { SidePanel, type SideFrame } from './SidePanel';
 import { Icon } from './bits';
 import { Markdown } from './Markdown';
 
@@ -9,7 +10,7 @@ import { Markdown } from './Markdown';
  * never part of it, never interrupting a turn. Asked from the reply box (⌥↵ / the bubble button);
  * here only to read, copy, or bring an answer back into the conversation (into the box, to edit).
  */
-export function BtwPanel({ task, entries, width, onClear, onBring, onClose }: { task: Task; entries: BtwEntry[]; width?: number; onClear: () => void; onBring: (text: string) => void; onClose: () => void }) {
+export function BtwPanel({ task, entries, onClear, onBring, frame }: { task: Task; entries: BtwEntry[]; onClear: () => void; onBring: (text: string) => void; frame: SideFrame }) {
   const end = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
   const last = entries.at(-1);
@@ -20,25 +21,20 @@ export function BtwPanel({ task, entries, width, onClear, onBring, onClose }: { 
   }, [entries.length, last?.answer, last?.error]);
   const what = task.provider === 'codex' ? t('A read-only side thread of this conversation.') : t('Answered from what is already in this conversation; no tools.');
   return (
-    <aside className="memory side btw" style={width ? { width } : undefined} aria-label={t('Side questions')} data-testid="btw-panel">
-      <div className="preview-top">
-        <div className="preview-head">
-          <div className="preview-ident">
-            {/* The what and how in its tooltip; the panel itself stays quiet. */}
-            <div className="panel-title" title={`${t('Not part of the conversation; interrupts nothing.')} ${what}`}>
-              {t('Side questions')}
-            </div>
-          </div>
-          {entries.length ? (
-            <button className="icon-btn" title={t('Clear')} aria-label={t('Clear')} onClick={onClear} data-testid="btw-clear">
-              <Icon name="trash" size={13} />
-            </button>
-          ) : null}
-          <button className="icon-btn" title={t('Close')} aria-label={t('Close')} onClick={onClose}>
-            <Icon name="x" size={13} />
+    <SidePanel
+      // The what and how in its tooltip; the panel itself stays quiet.
+      title={<span title={`${t('Not part of the conversation; interrupts nothing.')} ${what}`}>{t('Side questions')}</span>}
+      label={t('Side questions')}
+      testId="btw-panel"
+      frame={frame}
+      actions={
+        entries.length ? (
+          <button className="icon-btn" title={t('Clear')} aria-label={t('Clear')} onClick={onClear} data-testid="btw-clear">
+            <Icon name="trash" size={13} />
           </button>
-        </div>
-      </div>
+        ) : null
+      }
+    >
       {entries.length ? (
         <div className="btw-thread">
           {entries.map((e) => (
@@ -78,6 +74,6 @@ export function BtwPanel({ task, entries, width, onClear, onBring, onClose }: { 
           <div ref={end} />
         </div>
       ) : null}
-    </aside>
+    </SidePanel>
   );
 }

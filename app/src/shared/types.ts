@@ -207,6 +207,8 @@ export interface TranscriptItem {
   toolStatus?: ToolStatus;
   /** Structured tool call (role 'tool'). */
   tool?: ToolCallInfo;
+  /** A decision the user made here (role 'system'): an approval given or a question answered. */
+  decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
   streaming?: boolean;
   createdAt: string;
 }
