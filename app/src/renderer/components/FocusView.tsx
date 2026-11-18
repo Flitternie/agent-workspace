@@ -670,6 +670,8 @@ function Composer({ task }: { task: Task }) {
         <textarea
           className="composer-input"
           rows={3}
+          // A new agent with nothing asked yet: ready for its first message.
+          autoFocus={!task.title.trim()}
           value={draft}
           placeholder={suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => setDraft(e.target.value)}

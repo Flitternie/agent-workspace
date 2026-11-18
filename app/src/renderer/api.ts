@@ -58,6 +58,7 @@ export interface Outputs {
   'task:remove': string;
   'sessions:discover': NativeSessionInfo[];
   'sessions:discoverAll': NativeSessionInfo[];
+  'fs:listDirs': { dir: string; names: string[] };
   'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;
   'attention:respond': void;
