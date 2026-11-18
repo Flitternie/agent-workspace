@@ -225,6 +225,63 @@ export interface MemoryRecord {
   source: string;
   approvedForReuse: boolean;
   updatedAt: string;
+  /** Short heading for imported notes (memory name, file section). */
+  title?: string;
+  /** Imported: every native source with this text (`source|host|file|section`, see memory-import). */
+  importKeys?: string[];
+  /** Hash of the body as last imported; a different body hash means the user edited it, so sync leaves it alone. */
+  importedHash?: string;
+  /** Retired: its source file is gone from the machine it came from. Not shared or given to agents; kept so it can be restored. */
+  sourceRemoved?: boolean;
+  /** The source changed after the note was edited in the app: the source's text, for the user to choose. */
+  sourceBody?: string;
+}
+
+/** A note found in a CLI's native memory or instruction files, offered for import. */
+export interface MemoryCandidate {
+  key: string;
+  source: 'claude-memory' | 'instructions';
+  /** SSH alias; unset = this Mac. */
+  host?: string;
+  /** Path as found, `~/`-relative when under the home folder. */
+  file: string;
+  title: string;
+  body: string;
+  /** The body was cut to fit one note. */
+  truncated: boolean;
+  suggestedScope: 'global' | 'project';
+  /** The app project whose folder this Claude memory belongs to (project-type notes only). */
+  projectId?: string;
+  /** Claude memory type (user | feedback | project | reference). */
+  memoryType?: string;
+  /** For project notes without a matching app project: the folder Claude recorded (decoded best-effort). */
+  folderHint?: string;
+  alreadyImported: boolean;
+  /** The user deleted the imported note in the app; sync will not bring it back. */
+  dismissed: boolean;
+}
+
+/** A backup of a CLI file taken before the app changed it (main/memory-writeback.ts). */
+export interface MemoryBackup {
+  id: string;
+  host: string;
+  path: string;
+  at: string;
+  reason: 'link' | 'sync' | 'restore' | 'unlink';
+  existed: boolean;
+  size: number;
+  /** The file as it was before the machine was linked: never pruned. */
+  original?: boolean;
+}
+
+export interface MemorySyncStatus {
+  at: string;
+  added: number;
+  updated: number;
+  removed: number;
+  /** Machines scanned ('local' = this Mac). */
+  hosts: string[];
+  errors: Array<{ host: string; error: string }>;
 }
 
 export interface ProviderCapabilities {
@@ -319,6 +376,13 @@ export interface Settings {
   language?: Language;
   /** SSH aliases (from ~/.ssh/config) whose agents and sessions the app uses. */
   remoteHosts?: string[];
+  /** Keep user memory in sync with the CLIs' native user-level memory; unset = on. */
+  memorySync?: boolean;
+  /**
+   * Machines whose CLIs share user memory ('local' = this Mac), linked once (files backed
+   * up, notes merged); from then on the shared user memory is kept in sync there.
+   */
+  memoryLinks?: Record<string, { linkedAt: string; /** Unlinked while offline: cleaned up when it connects. */ unlinking?: boolean }>;
 }
 
 /**
@@ -375,6 +439,10 @@ export interface WorkspaceSnapshot {
   sessions: SessionRecord[];
   attention: AttentionItem[];
   memory: MemoryRecord[];
+  /** Last automatic user-memory sync (Settings › Memory). */
+  memorySync: { running: boolean; last?: MemorySyncStatus };
+  /** Per linked machine: the last write of user memory into its CLI files. */
+  memoryShare: Record<string, { linkedAt: string; unlinking?: boolean; lastWrite?: string; errors?: string[]; notices?: string[]; paused?: Array<{ kind: string; why: string }> }>;
   coordinator: CoordinatorEntry[];
   capabilities: ProviderCapabilities[];
   /** Enabled SSH hosts and what works on them. */

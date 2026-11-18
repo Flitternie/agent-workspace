@@ -2,10 +2,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { Language, MicMode, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
+import { SkillsSettings } from './SkillsSettings';
 import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } from '../voice/shortcut';
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
 import { ConfirmDialog } from './Dialogs';
 import { INSTALL_SCRIPT } from '../../shared/install';
+import { MemorySettings } from './MemorySettings';
 
 export const LANGUAGES: Array<{ id: Language; label: string }> = [
   { id: 'en', label: 'English' },
@@ -770,7 +772,9 @@ const SECTIONS: Array<{ id: string; title: string; keywords: string[] }> = [
   { id: 'language', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'agents', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'remote', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
+  { id: 'skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
   { id: 'main', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
+  { id: 'memory', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
   { id: 'permissions', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'openai', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
   { id: 'voice', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
@@ -798,8 +802,11 @@ function Section({ id, query, actions, children }: { id: string; query: string; 
  * Settings as a page in the main area (like VS Code): a fixed header with search,
  * a section index on the left, and the settings themselves scrolling on the right.
  */
-export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClose: () => void }) {
+export function SettingsPage({ snapshot, section, onClose }: { snapshot: WorkspaceSnapshot; section?: string; onClose: () => void }) {
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' });
+  }, [section]);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const s = snapshot.settings;
@@ -910,6 +917,9 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
         <RemoteHosts snapshot={snapshot} />
       </Section>
 
+      <Section id="skills" query={query}>
+        <SkillsSettings />
+      </Section>
       <Section id="main" query={query}>
         <p className="muted small">
           {t('The main agent is who you talk to when no agent is selected. It sees every agent, passes your instructions on, starts new agents and answers status questions. It runs on your own Claude Code or Codex, does not edit code itself, and cannot approve other agents’ permission requests.')}
@@ -931,6 +941,10 @@ export function SettingsPage({ snapshot, onClose }: { snapshot: WorkspaceSnapsho
             ? t('Changing it starts a new main-agent conversation.')
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
+      </Section>
+
+      <Section id="memory" query={query}>
+        <MemorySettings snapshot={snapshot} />
       </Section>
 
       <Section id="permissions" query={query}>

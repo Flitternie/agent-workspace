@@ -9,8 +9,10 @@ import type { ModelOption,
   DispatchResult,
   FilePreview,
   ForkPoint,
+  MemoryCandidate,
   MemoryRecord,
   MemoryScope,
+  MemorySyncStatus,
   NativeSessionInfo,
   PermissionMode,
   Project,
@@ -27,6 +29,7 @@ import type { ModelOption,
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
+import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
@@ -39,6 +42,9 @@ import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agen
 import { gitRoot, WorktreeService } from './worktree';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
+import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
+import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
+import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -83,6 +89,8 @@ export interface WorkspaceOptions {
   hiddenSessionDirs?: string[];
   /** Automatic retries of turns that failed because the model was busy (tests use short waits). */
   retry?: Partial<RetryPolicy>;
+  /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
+  home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
   /** How long a label stands before new work may rewrite it (tests use 0). */
@@ -113,8 +121,14 @@ export class Workspace {
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
 
+  /** The skill library loaded into every agent the app starts (see skills.ts). */
+  readonly skills: SkillLibrary;
+  private writeback: MemoryWriteback;
+
   constructor(private opts: WorkspaceOptions) {
     this.store = new JsonStore(opts.dataDir);
+    this.skills = new SkillLibrary(opts.dataDir);
+    this.writeback = new MemoryWriteback(opts.dataDir, opts.home);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
     this.log = opts.log ?? (() => {});
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
@@ -333,6 +347,8 @@ export class Workspace {
     const same = (a?: RemoteHostStatus) => !!a && JSON.stringify({ ...a, checkedAt: undefined }) === JSON.stringify({ ...status, checkedAt: undefined });
     if (this.enabledHosts().includes(host)) this.hostStatus.set(host, status);
     if (!quiet || !same(prev)) this.changed();
+    // A machine that just became reachable may hold user memory we have not seen.
+    if (status.ssh === 'ok' && prev?.ssh !== 'ok') void this.syncMemory();
     return status;
   }
 
@@ -376,6 +392,8 @@ export class Workspace {
   }
 
   async shutdown(): Promise<void> {
+    clearInterval(this.memSync.timer);
+    this.memSync.started = false;
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
@@ -413,6 +431,8 @@ export class Workspace {
       sessions: d.sessions,
       attention: d.attention,
       memory: d.memory,
+      memorySync: { running: this.memSync.running, last: d.memorySync },
+      memoryShare: Object.fromEntries(Object.entries(d.settings.memoryLinks ?? {}).map(([h, l]) => [h, { ...l, ...this.shareResults.get(h), paused: this.writeback.targets(h).filter((t) => t.paused).map((t) => ({ kind: t.kind, why: t.paused! })) }])),
       coordinator: d.coordinator.slice(-50),
       capabilities: this.capabilities,
       remoteHosts: this.enabledHosts().map((host) => this.hostStatus.get(host) ?? { host, ssh: 'checking', capabilities: [] }),
@@ -831,11 +851,19 @@ export class Workspace {
     task.sessionLocalId = record.localId;
     task.status = 'starting';
     task.lastError = undefined;
-    const injected = memoryForTask(task, this.store.data.memory);
+    // On a linked machine the CLI reads user memory from its own files: not given twice
+    // (unless a file there is paused and may be out of date: then rather twice than missing).
+    const machine = task.host ?? LOCAL;
+    const link = this.store.data.settings.memoryLinks?.[machine];
+    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+    // Only the notes that fit in those files: the rest (over the size limit) are given here.
+    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
+    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
     task.injectedMemoryIds = injected.map((m) => m.id);
     this.changed();
 
     const isMain = task === this.store.data.mainAgent;
+    const skills = isMain ? undefined : await this.skillsFor(task);
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -850,6 +878,7 @@ export class Workspace {
         model: task.model,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
+        skills,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
@@ -1351,6 +1380,123 @@ export class Workspace {
     this.changed();
   }
 
+  /** The library for an agent on this Mac, or its copy on the agent's host (copied when it changed). */
+  private async skillsFor(task: Task): Promise<{ pluginDir: string; root: string } | undefined> {
+    try {
+      return task.host ? await this.skills.ensureOnHost(task.host) : this.skills.localLoad();
+    } catch (error) {
+      // The agent still starts, just without the workspace skills.
+      this.appendSystem(task.taskId, `Workspace skills not loaded: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /** Last scan's results, so an import names a found skill by key rather than by path. */
+  private foundSkills = new Map<string, FoundSkill>();
+
+  /** Skills in the CLIs' own folders on this Mac and on every reachable enabled host. */
+  async scanSkills(): Promise<{ found: FoundSkill[]; errors: Array<{ host: string; error: string }> }> {
+    const errors: Array<{ host: string; error: string }> = [];
+    const found: FoundSkill[] = [...scanLocal()];
+    await Promise.all(
+      this.enabledHosts().map(async (host) => {
+        if (this.hostStatus.get(host)?.ssh !== 'ok') return errors.push({ host, error: this.hostStatus.get(host)?.error ?? `${host} is not connected.` });
+        const r = await sshRun(host, remoteScanScript(), 60_000);
+        if (r.code !== 0) return errors.push({ host, error: r.code === 255 ? sshError(host, r.stderr) : `Could not list skills on ${host}.` });
+        found.push(...parseRemoteScan(host, r.stdout));
+      }),
+    );
+    this.foundSkills = new Map(found.map((f) => [f.key, f]));
+    return { found, errors };
+  }
+
+  async importSkill(key: string): Promise<void> {
+    const found = this.foundSkills.get(key);
+    if (!found) throw new Error('That skill is no longer in the list. Scan again.');
+    await this.skills.import(found);
+    await this.skillsChanged();
+  }
+
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    this.skills.setEnabled(name, enabled);
+    await this.skillsChanged();
+  }
+
+  async removeSkill(name: string): Promise<void> {
+    this.skills.remove(name);
+    await this.skillsChanged();
+  }
+
+  /** After the library changed: copy it to hosts with running agents and tell running sessions. */
+  async skillsChanged(): Promise<void> {
+    const hosts = new Set<string>();
+    for (const [taskId] of this.live) {
+      const host = this.findTask(taskId)?.host;
+      if (host) hosts.add(host);
+    }
+    for (const host of hosts) await this.skills.ensureOnHost(host).catch((e: Error) => this.log('skills sync', host, e.message));
+    await Promise.all([...this.live.values()].map((l) => l.session.reloadSkills?.()));
+    this.changed();
+  }
+
+  /**
+   * A memory note drafted from one of the user's own messages, read with the conversation
+   * around it (the user asked: "Remember" on that message). Only a draft: the user edits,
+   * picks user or project memory and saves. Without a CLI to ask (or if it fails), the
+   * draft is the message itself, marked so.
+   */
+  async distillMemory(taskId: string, itemId: string): Promise<{ title: string; body: string; scope: 'global' | 'project'; worth: boolean; reason: string; similar?: { id: string; title: string; body: string }; fallback?: string }> {
+    const task = this.task(taskId);
+    const items = this.store.transcript(taskId);
+    const at = items.findIndex((i) => i.id === itemId);
+    if (at === -1 || items[at].role !== 'user') throw new Error('That message is no longer in the conversation.');
+    const message = items[at].text;
+    const talk = (i: TranscriptItem) => (i.role === 'user' || i.role === 'assistant') && !!i.text.trim();
+    const before = items.slice(0, at).filter(talk).slice(-6);
+    const after = items.slice(at + 1).filter(talk).slice(0, 2);
+    const project = this.store.data.projects.find((p) => p.projectId === task.projectId);
+    const existing = this.store.data.memory
+      .filter((m) => !m.sourceRemoved && (m.scope === 'global' || (m.scope === 'project' && m.scopeId === task.projectId)))
+      .slice(-40)
+      .map((m) => ({ id: m.id, scope: (m.scope === 'global' ? 'user' : 'project') as 'user' | 'project', title: m.title || m.body.split('\n')[0].slice(0, 80), text: m.body }));
+    const raw = { title: message.split('\n')[0].slice(0, 60), body: message.trim(), scope: 'global' as const, worth: true, reason: '' };
+    // The demo asks no model: a canned draft shows the shape of a real one.
+    if (this.opts.demo)
+      return {
+        title: raw.title.replace(/\.$/, ''),
+        body: `${message.trim()}\n\n**Why:** said while correcting the agent's work in this conversation.\n**How to apply:** follow it whenever this kind of change comes up again.`,
+        scope: task.projectId && task !== this.store.data.mainAgent ? 'project' : 'global',
+        worth: true,
+        reason: 'A convention for this project (demo draft, no model asked).',
+      };
+    const ask = this.backgroundAsk();
+    if (!ask) return { ...raw, fallback: 'No Claude Code or Codex is signed in to draft the note; here is your message to edit.' };
+    try {
+      const answer = await ask(
+        DISTILL_SYSTEM,
+        distillPrompt({
+          message,
+          around: [...before.map((i) => ({ role: i.role as 'user' | 'assistant', text: i.text })), { role: 'user', text: message, isTarget: true }, ...after.map((i) => ({ role: i.role as 'user' | 'assistant', text: i.text }))],
+          existing,
+          projectName: project?.name,
+        }),
+      );
+      const r = parseDistill(answer, existing.map((e) => e.id));
+      const similar = r.similarId ? this.store.data.memory.find((m) => m.id === r.similarId) : undefined;
+      return {
+        title: r.title || raw.title,
+        body: r.body || raw.body,
+        scope: r.scope === 'project' && task.projectId && task !== this.store.data.mainAgent ? 'project' : 'global',
+        worth: r.worth,
+        reason: r.reason,
+        ...(similar ? { similar: { id: similar.id, title: similar.title || similar.body.split('\n')[0], body: similar.body } } : {}),
+      };
+    } catch (error) {
+      this.log('distill failed', error);
+      return { ...raw, fallback: `Could not draft the note (${(error as Error).message}); here is your message to edit.` };
+    }
+  }
+
   // ---------------------------------------------------------------- provider events
 
   handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
@@ -1835,21 +1981,27 @@ export class Workspace {
     const rec: MemoryRecord = { ...m, id: `m-${randomUUID().slice(0, 8)}`, updatedAt: now() };
     this.store.data.memory.push(rec);
     this.changed();
+    this.schedulePush();
     return rec;
   }
 
-  updateMemory(id: string, patch: { body?: string; approvedForReuse?: boolean }): void {
+  updateMemory(id: string, patch: { body?: string; title?: string; approvedForReuse?: boolean }): void {
     const m = this.store.data.memory.find((x) => x.id === id);
     if (!m) throw new Error('Unknown memory record.');
     if (patch.body !== undefined) m.body = patch.body;
+    if (patch.title !== undefined) m.title = patch.title;
     if (patch.approvedForReuse !== undefined) m.approvedForReuse = patch.approvedForReuse;
     m.updatedAt = now();
     this.changed();
+    this.schedulePush();
   }
 
   deleteMemory(id: string): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (m) tombstone(this.store.data, m);
     this.store.data.memory = this.store.data.memory.filter((m) => m.id !== id);
     this.changed();
+    this.schedulePush();
   }
 
   /** Explicit promotion: copies a note upward with provenance; the original stays. */
@@ -1867,7 +2019,293 @@ export class Workspace {
     return this.addMemory({ scope, scopeId, body: m.body, originTaskId: m.originTaskId ?? (m.scope === 'task' ? m.scopeId : undefined), approvedForReuse: true, source: `promoted from ${m.scope} note ${m.id}` });
   }
 
+  // ---------------------------------------------------------------- memory import / sync
+
+  private lastScan = new Map<string, MemoryCandidate>();
+  private memSync: { started: boolean; running: boolean; queued: boolean; timer?: NodeJS.Timeout } = { started: false, running: false, queued: false };
+
+  /** One machine's native memory files in one round trip (read-only), as candidates. */
+  private async scanMachine(host?: string): Promise<MemoryCandidate[]> {
+    const r = host
+      ? await sshRun(host, `sh -c ${shq(MEMORY_SCAN_SCRIPT)}`, 30_000)
+      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
+    const out = parseScanOutput(r.stdout);
+    if (!out.complete) throw new Error(host ? sshError(host, r.stderr) : r.stderr.trim() || 'Could not read the memory files.');
+    return candidatesFrom(host, out.home, out.files, this.store.data.projects, out.shared);
+  }
+
+  /** This Mac and every reachable enabled host; hosts that are not connected are reported, not waited for. */
+  async scanMemoryImports(): Promise<{ candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> }> {
+    const errors: Array<{ host: string; error: string }> = [];
+    const ready: Array<string | undefined> = [undefined];
+    for (const h of this.enabledHosts()) {
+      const st = this.hostStatus.get(h);
+      if (st?.ssh === 'ok') ready.push(h);
+      else errors.push({ host: h, error: st?.ssh === 'checking' || !st ? 'Still connecting.' : (st.error ?? 'Not connected.') });
+    }
+    const results = await Promise.all(
+      ready.map((h) =>
+        this.scanMachine(h)
+          .then((candidates) => ({ host: h ?? LOCAL, candidates }))
+          .catch((error: Error) => {
+            errors.push({ host: h ?? LOCAL, error: error.message });
+            return null;
+          }),
+      ),
+    );
+    const ok = results.filter((x) => x !== null);
+    const candidates = markCandidates(ok.flatMap((x) => x.candidates), this.store.data);
+    this.lastScan = new Map(candidates.map((c) => [c.key, c]));
+    return { candidates, scanned: ok.map((x) => x.host), errors };
+  }
+
+  /** Explicit import of scanned notes (approved); re-importing a note updates its record. */
+  importMemory(items: Array<{ key: string; scope: 'global' | 'project'; projectId?: string }>): number {
+    const picks = items.map((i) => {
+      const candidate = this.lastScan.get(i.key);
+      if (!candidate) throw new Error('A picked note is no longer in the scan results. Scan again.');
+      if (i.scope === 'project' && !this.store.data.projects.some((p) => p.projectId === i.projectId)) throw new Error('Pick a project for project memory.');
+      return { candidate, scope: i.scope, scopeId: i.scope === 'project' ? i.projectId! : 'global' };
+    });
+    const n = importCandidates(this.store.data, picks).length;
+    this.changed();
+    this.schedulePush();
+    return n;
+  }
+
+  /** Starts automatic user-memory sync: now and every `intervalMs` (and when a host becomes reachable). */
+  startMemorySync(intervalMs = 10 * 60_000): void {
+    this.memSync.started = true;
+    clearInterval(this.memSync.timer);
+    this.memSync.timer = setInterval(() => void this.syncMemory(), intervalMs);
+    this.memSync.timer.unref?.();
+    void this.syncMemory();
+  }
+
+  /**
+   * Imports and refreshes user-level notes from every reachable machine (never project
+   * notes: those stay manual). `manual` runs it even before startMemorySync (Sync now).
+   */
+  async syncMemory(manual = false): Promise<MemorySyncStatus | undefined> {
+    // Linking a machine is the switch: with none linked, this reads nothing that matters.
+    if (!manual && !this.memSync.started) return undefined;
+    if (this.memSync.running) {
+      this.memSync.queued = true;
+      return undefined;
+    }
+    this.memSync.running = true;
+    this.changed();
+    try {
+      const scan = await this.scanMemoryImports();
+      // Only linked machines take part; others are linked once, from Settings › Memory.
+      const linked = (h: string | undefined) => !!this.store.data.settings.memoryLinks?.[h ?? LOCAL];
+      const counts = syncUserMemory(
+        this.store.data,
+        scan.candidates.filter((c) => linked(c.host)),
+        scan.scanned.filter((h) => linked(h === LOCAL ? undefined : h)),
+      );
+      await this.pushMemory();
+      this.store.data.memorySync = { at: now(), ...counts, hosts: scan.scanned, errors: scan.errors };
+      this.lastScan = new Map(markCandidates([...this.lastScan.values()], this.store.data).map((c) => [c.key, c]));
+    } catch (error) {
+      this.log('memory sync failed', error);
+    } finally {
+      this.memSync.running = false;
+      this.changed();
+    }
+    if (this.memSync.queued) {
+      this.memSync.queued = false;
+      void this.syncMemory(manual);
+    }
+    return this.store.data.memorySync;
+  }
+
+  // ---------------------------------------------------------------- user memory in the CLIs' files
+
+  private shareResults = new Map<string, { lastWrite?: string; errors?: string[]; notices?: string[] }>();
+  private pushTimer?: NodeJS.Timeout;
+  /** Writes to the CLIs' files run one at a time (a link, a push, a restore never overlap). */
+  private shareQueue: Promise<unknown> = Promise.resolve();
+  private shareSerial<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.shareQueue.then(fn, fn);
+    this.shareQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private reachable(host: string): boolean {
+    return host === LOCAL || this.hostStatus.get(host)?.ssh === 'ok';
+  }
+
+  /** Soon after user memory changed in the app: the linked machines get it. */
+  private schedulePush(): void {
+    clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => void this.pushMemory(), 2000);
+    this.pushTimer.unref?.();
+  }
+
+  /**
+   * Writes the shared user memory to every linked, reachable machine (offline ones catch
+   * up later), and finishes unlinking machines that were offline when the user unlinked them.
+   */
+  pushMemory(): Promise<void> {
+    return this.shareSerial(() => this.doPush());
+  }
+
+  private async doPush(): Promise<void> {
+    const links = this.store.data.settings.memoryLinks ?? {};
+    for (const [h, link] of Object.entries(links)) {
+      if (!this.reachable(h)) continue;
+      if (link.unlinking) {
+        await this.finishUnlink(h).catch((e: Error) => this.shareResults.set(h, { errors: [e.message] }));
+        continue;
+      }
+      const r = await this.writeback.write(h, this.store.data.memory, 'sync').catch((e: Error) => ({ written: [], notices: [], errors: [e.message] }));
+      this.shareResults.set(h, { lastWrite: r.written.length ? now() : this.shareResults.get(h)?.lastWrite, errors: r.errors.length ? r.errors : undefined, notices: r.notices.length ? r.notices : undefined });
+    }
+    this.changed();
+  }
+
+  /** Notes on a machine that linking would bring in: its user-level instruction files (Claude Code memory is project memory: not brought in). */
+  private async incoming(host: string): Promise<MemoryCandidate[]> {
+    const found = (await this.scanMachine(host === LOCAL ? undefined : host)).filter((c) => c.suggestedScope === 'global');
+    return markCandidates(found, this.store.data).filter((c) => !c.alreadyImported && !c.dismissed);
+  }
+
+  /**
+   * What linking a machine would do: the notes that would join the shared user memory,
+   * and each of its CLI files before and after (nothing is changed).
+   */
+  async linkPreview(host: string): Promise<{ incoming: MemoryCandidate[]; files: Array<{ path: string; kind: string; exists: boolean; before: string; after: string | null }>; blocked: string[] }> {
+    const incoming = await this.incoming(host);
+    const after = [...this.store.data.memory, ...incoming.map((c, i) => ({ id: `preview-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, title: c.title, source: c.key, importKeys: [c.key], importedHash: bodyHash(c.body), approvedForReuse: true, updatedAt: now() }))];
+    const files = await this.writeback.read(host);
+    // Text another Agent Workspace keeps there is never overwritten: say so up front.
+    const blocked = files.filter((f) => { const o = ownerOf(f.kind, f.content); return o && o !== this.writeback.owner; }).map((f) => f.file);
+    const plan = planWriteback(files, after, this.writeback.owner, this.writeback.label);
+    return { incoming, blocked, files: plan.map(({ file, next }) => ({ path: file.path, kind: file.kind, exists: file.exists, before: file.content, after: blocked.includes(file.file) ? null : next })) };
+  }
+
+  /**
+   * The first sync with a machine: its notes join the shared user memory (instruction
+   * files once, as notes the app then owns), its files
+   * are backed up and the shared memory is written there.
+   */
+  linkMachine(host: string): Promise<{ added: number } & WriteResult> {
+    return this.shareSerial(() => this.doLink(host));
+  }
+
+  private async doLink(host: string): Promise<{ added: number } & WriteResult> {
+    const fresh = await this.incoming(host);
+    const r = await this.writeback.write(host, [...this.store.data.memory, ...fresh.map((c, i) => ({ id: `link-${i}`, scope: 'global' as const, scopeId: 'global', body: c.body, title: c.title, source: c.key, importKeys: [c.key], importedHash: bodyHash(c.body), approvedForReuse: true, updatedAt: now() }))], 'link');
+    // Nothing could be written (and nothing was): not linked, the notes stay where they are.
+    if (!r.written.length && (r.errors.length || r.notices.length)) return { added: 0, ...r };
+    const added = importCandidates(this.store.data, fresh.map((candidate) => ({ candidate, scope: 'global' as const, scopeId: 'global' }))).length;
+    this.store.data.settings.memoryLinks = { ...this.store.data.settings.memoryLinks, [host]: { linkedAt: now() } };
+    this.shareResults.set(host, { lastWrite: r.written.length ? now() : undefined, errors: r.errors.length ? r.errors : undefined, notices: r.notices.length ? r.notices : undefined });
+    this.changed();
+    // Machines linked earlier get the notes this one brought.
+    if (added) this.schedulePush();
+    return { added, ...r };
+  }
+
+  /**
+   * Stops sharing with a machine: only the app's line, section and user.md are taken out
+   * (backed up first). If the machine is offline, it stops getting updates now and is
+   * cleaned up when it connects again.
+   */
+  async unlinkMachine(host: string): Promise<{ pending: boolean; notices: string[] }> {
+    if (!this.reachable(host)) {
+      const links = { ...this.store.data.settings.memoryLinks };
+      if (links[host]) links[host] = { ...links[host], unlinking: true };
+      this.store.data.settings.memoryLinks = links;
+      this.changed();
+      return { pending: true, notices: [] };
+    }
+    const notices = await this.shareSerial(() => this.finishUnlink(host));
+    return { pending: false, notices };
+  }
+
+  private async finishUnlink(host: string): Promise<string[]> {
+    const notices = await this.writeback.unlink(host);
+    const links = { ...this.store.data.settings.memoryLinks };
+    delete links[host];
+    this.store.data.settings.memoryLinks = links;
+    this.shareResults.delete(host);
+    this.changed();
+    return notices;
+  }
+
+  /** For a file the app stopped writing: write again, or first bring the notes found there into user memory. */
+  async resolveShare(host: string, kind: TargetKind, how: 'resume' | 'adopt'): Promise<number> {
+    const notes = await this.shareSerial(() => this.writeback.resolve(host, kind, how));
+    // Compared as written in the file: unchanged blocks are skipped; a block whose title is a
+    // note's title is that note, edited there (the user chose to keep it); the rest is new.
+    const user = this.store.data.memory.filter((m) => m.scope === 'global');
+    const known = new Set(user.map((m) => renderNotes([{ title: m.title, body: m.body }])));
+    const titleOf = (block: string) => /^### (.*)$/m.exec(block)?.[1];
+    let added = 0;
+    for (const n of notes) {
+      const block = renderNotes([n]);
+      if (known.has(block)) continue;
+      const title = titleOf(block);
+      const same = title ? user.find((m) => titleOf(renderNotes([{ title: m.title, body: m.body }])) === title) : undefined;
+      if (same) {
+        const text = n.body.replace(/^#{1,6}\s+.*\n+/, '');
+        const heading = /^(#{1,6}\s+.*)\n/.exec(same.body)?.[1];
+        Object.assign(same, { body: heading ? `${heading}\n\n${text}` : text, updatedAt: now() });
+        continue;
+      }
+      this.store.data.memory.push({ id: `m-${randomUUID().slice(0, 8)}`, scope: 'global', scopeId: 'global', body: n.body, title: n.title, source: 'user', approvedForReuse: true, updatedAt: now() });
+      added++;
+    }
+    this.changed();
+    void this.pushMemory();
+    return added;
+  }
+
+  /** A note whose source changed after it was edited here: take the source's text, or keep this one. */
+  resolveConflict(id: string, take: 'source' | 'mine'): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m || m.sourceBody === undefined) return;
+    if (take === 'source') Object.assign(m, { body: m.sourceBody, importedHash: bodyHash(m.sourceBody) });
+    // Keep the app's text: the source's current text counts as seen, so it is not offered again
+    // (the note stays "edited", so later syncs leave it alone too).
+    else m.importedHash = bodyHash(m.sourceBody);
+    delete m.sourceBody;
+    m.updatedAt = now();
+    this.changed();
+    this.schedulePush();
+  }
+
+  /** A retired note (its source was deleted on its machine) back into use. */
+  restoreNote(id: string): void {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) return;
+    // It now belongs to the app: no source to follow (or retire it again).
+    Object.assign(m, { sourceRemoved: false, importKeys: (m.importKeys ?? []).filter((k) => !k.startsWith('claude-memory|')), updatedAt: now() });
+    this.changed();
+    this.schedulePush();
+  }
+
+  shareTargets(host?: string): TargetState[] {
+    return this.writeback.targets(host);
+  }
+
+  memoryBackups(host?: string): BackupEntry[] {
+    return this.writeback.backups(host).slice().reverse();
+  }
+
+  memoryBackupContent(id: string): string {
+    return this.writeback.backupContent(id);
+  }
+
+  async restoreMemoryBackup(id: string): Promise<void> {
+    await this.shareSerial(() => this.writeback.restore(id));
+    this.changed();
+  }
+
   updateSettings(patch: Partial<Settings>): void {
+    if (patch.memorySync && this.store.data.settings.memorySync === false) queueMicrotask(() => void this.syncMemory(true));
     Object.assign(this.store.data.settings, patch);
     this.applyModels();
     if ('mainAgent' in patch) this.syncMainAgent();

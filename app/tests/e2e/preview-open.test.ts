@@ -189,7 +189,7 @@ describe('preview and open with…', () => {
     await page.getByTestId('preview-maximize').click();
     await expect.poll(() => page.getByTestId('stage-side').evaluate((e) => e.childElementCount)).toBeGreaterThan(0);
     // Memory takes the same full-height column.
-    await page.getByRole('button', { name: 'Memory' }).click();
+    await page.getByTestId('memory-chip').click();
     await expect.poll(() => page.locator('[data-testid="stage-side"] > .memory').count()).toBe(1);
     await page.screenshot({ path: join(shots, 'open-in-06-memory.png') });
 

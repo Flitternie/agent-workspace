@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentProvider, ForkPoint, NativeSessionInfo, Task, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
@@ -6,20 +6,30 @@ import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
 import { t } from '../i18n';
 import { defaultProject, ProjectChooser } from './ProjectChooser';
 
+/** Open dialogs, innermost last: Esc closes only the one on top (a confirmation over a dialog). */
+const openModals: object[] = [];
+
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
+    const me = {};
+    openModals.push(me);
     // Esc closes the dialog and only the dialog: caught first, so the app's own Esc (back to Overview) never sees it.
     const esc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || openModals.at(-1) !== me) return;
       // A list open inside the dialog closes itself first.
       if ((e.target as Element | null)?.closest?.('[data-own-esc]')) return;
       e.stopImmediatePropagation();
       e.preventDefault();
-      onClose();
+      close.current();
     };
     window.addEventListener('keydown', esc, true);
-    return () => window.removeEventListener('keydown', esc, true);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', esc, true);
+      openModals.splice(openModals.indexOf(me), 1);
+    };
+  }, []);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={title}>
