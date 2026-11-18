@@ -25,7 +25,7 @@ vi.mock('../../src/main/util/ssh', async (orig) => ({
   },
 }));
 
-const { bodyHash, candidatesFrom, encodeClaudeCwd, importCandidates, markCandidates, memoryKey, parseFrontmatter, parseScanOutput, scopeForType, splitInstructions, syncUserMemory, tombstone, MAX_BODY } = await import('../../src/main/memory-import');
+const { MEMORY_SCAN_SCRIPT, SHARED_DIR, bodyHash, candidatesFrom, encodeClaudeCwd, importCandidates, markCandidates, memoryKey, parseFrontmatter, parseScanOutput, scopeForType, splitInstructions, syncUserMemory, tombstone, MAX_BODY } = await import('../../src/main/memory-import');
 const { instructionsFor, memoryForTask } = await import('../../src/main/memory');
 const { Workspace } = await import('../../src/main/workspace');
 
@@ -109,7 +109,7 @@ describe('parsing', () => {
 
   it('ignores banner lines and needs the end marker', () => {
     const out = `Welcome!\n__AMW_MEM_HOME__\t/h\n__AMW_MEM_FILE__\t/h/AGENTS.md\t${Buffer.from('hi\n').toString('base64')}\nnoise\n`;
-    expect(parseScanOutput(out)).toEqual({ home: '/h', files: [{ path: '/h/AGENTS.md', content: 'hi\n' }], complete: false });
+    expect(parseScanOutput(out)).toEqual({ home: '/h', files: [{ path: '/h/AGENTS.md', content: 'hi\n' }], complete: false, shared: [] });
     expect(parseScanOutput(`${out}__AMW_MEM_DONE__\n`).complete).toBe(true);
   });
 });
@@ -130,7 +130,8 @@ describe('import and sync', () => {
 
   const M = memoryKey('claude-memory', 'devbox', '~/.claude/projects/p/memory/lang.md');
   const M2 = memoryKey('claude-memory', undefined, '~/.claude/projects/q/memory/style.md');
-  const mem = (key: string, body: string, type = 'feedback') => ({ ...cand(key, body), source: 'claude-memory' as const, memoryType: type });
+  // Project auto memory (the usual kind): suggestedScope 'project', whatever its type.
+  const mem = (key: string, body: string, type = 'feedback') => ({ ...cand(key, body), source: 'claude-memory' as const, memoryType: type, suggestedScope: 'project' as const });
 
   const imported = (key = M, body = 'Reply in Chinese.', scope: 'global' | 'project' = 'project') => {
     const s = state();
@@ -235,3 +236,55 @@ describe('workspace scan over SSH (local sh, temp HOME)', () => {
     }
   });
 });
+
+describe('Claude Code’s user level: rules and a shared auto-memory folder', () => {
+  const scan = (home: string, env: Record<string, string> = {}) => {
+    const r = spawnSync('/bin/sh', ['-c', MEMORY_SCAN_SCRIPT], { env: { PATH: process.env.PATH ?? '', HOME: home, ...env }, encoding: 'utf8' });
+    const out = parseScanOutput(r.stdout);
+    return { out, c: candidatesFrom(undefined, out.home, out.files, [], out.shared) };
+  };
+
+  it('reads ~/.claude/rules (one note per file, user memory); a paths: rule keeps its condition', () => {
+    const h = temp('amw-rules-');
+    put(h, '.claude/rules/style.md', '# Code style\nUse tabs.\n');
+    put(h, '.claude/rules/web/react.md', '---\npaths:\n  - "src/**/*.tsx"\n  - src/ui/**\n---\nFunction components only.\n');
+    const { c } = scan(h);
+    const rules = c.filter((x) => x.file.includes('/rules/'));
+    expect(rules.map((x) => [x.file, x.title, x.suggestedScope, x.source])).toEqual([
+      ['~/.claude/rules/style.md', 'Code style', 'global', 'instructions'],
+      ['~/.claude/rules/web/react.md', 'react', 'global', 'instructions'],
+    ]);
+    expect(rules[1].body).toBe('Applies only when working with files matching: `src/**/*.tsx`, `src/ui/**`.\n\nFunction components only.');
+  });
+
+  it('treats the auto-memory folder every project shares as user memory (settings or environment)', () => {
+    const h = temp('amw-shared-');
+    put(h, '.claude/settings.json', JSON.stringify({ autoMemoryDirectory: '~/notes/claude-memory', model: 'x' }, null, 2));
+    put(h, 'notes/claude-memory/MEMORY.md', '- [tabs](tabs.md)');
+    put(h, 'notes/claude-memory/tabs.md', '---\nname: tabs\ntype: feedback\n---\nUse tabs.\n');
+    put(h, '.claude/projects/-w-p/memory/build.md', '---\nname: build\ntype: user\n---\nRun make.\n');
+    const a = scan(h);
+    expect(a.out.shared).toEqual([`${h}/notes/claude-memory`]);
+    expect(a.c.map((x) => [x.title, x.suggestedScope, x.key.split('|')[3]])).toEqual([
+      ['build', 'project', ''], // a project's own auto memory stays the project's, even of type user
+      ['tabs', 'global', SHARED_DIR],
+    ]);
+    // CLAUDE_CODE_PROJECT_DIR_NAME: every project's auto memory in one folder under projects/.
+    const g = temp('amw-shared-env-');
+    put(g, '.claude/projects/everything/memory/lang.md', '---\nname: lang\ntype: feedback\n---\nReply in Chinese.\n');
+    put(g, '.claude/projects/-w-p/memory/build.md', '---\nname: build\ntype: user\n---\nRun make.\n');
+    expect(scan(g, { CLAUDE_CODE_PROJECT_DIR_NAME: 'everything' }).c.map((x) => [x.title, x.suggestedScope]).sort()).toEqual([['build', 'project'], ['lang', 'global']]);
+    put(g, '.claude/settings.json', '{ "env": { "CLAUDE_CODE_PROJECT_DIR_NAME": "everything" } }');
+    expect(scan(g).c.find((x) => x.title === 'lang')?.suggestedScope).toBe('global');
+    expect(scan(g, { CLAUDE_CODE_PROJECT_DIR_NAME: '../etc' }).out.shared).toEqual([`${g}/.claude/projects/everything/memory`]); // a bad name in the environment is ignored; settings still count
+  });
+
+  it('brings new notes from the shared folder in by itself, never a project’s', () => {
+    const s = { memory: [] as MemoryRecord[], memoryTombstones: [] as string[] };
+    const shared = { ...cand(memoryKey('claude-memory', undefined, '~/notes/claude-memory/tabs.md', SHARED_DIR), 'Use tabs.'), source: 'claude-memory' as const };
+    const project = { ...cand(memoryKey('claude-memory', undefined, '~/.claude/projects/-w-p/memory/build.md'), 'Run make.', 'project'), source: 'claude-memory' as const };
+    expect(syncUserMemory(s, [shared, project], ['local'])).toEqual({ added: 1, updated: 0, removed: 0 });
+    expect(s.memory.map((m) => [m.body, m.scope])).toEqual([['Use tabs.', 'global']]);
+  });
+});
+

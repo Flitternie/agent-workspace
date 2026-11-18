@@ -177,9 +177,14 @@ const hashBody = (body: string) => createHash('sha256').update(body.replace(/\s+
  * them to its own agents instead. Shared notes keep their order.
  */
 export function notesFor(host: string, ownFile: string, records: MemoryRecord[]): { notes: Note[]; dropped: number; covered: Set<string>; left: string[] } {
+  // Claude Code also reads its user rules (~/.claude/rules/ beside CLAUDE.md) by itself.
+  const rules = /CLAUDE\.md$/.test(ownFile) ? ownFile.replace(/CLAUDE\.md$/, 'rules/') : undefined;
   const fromThere = (key: string) => {
-    const [source, h, file] = key.split('|');
-    return source === 'instructions' && (h ?? LOCAL) === host && file === ownFile;
+    const [source, h, file, section] = key.split('|');
+    if ((h ?? LOCAL) !== host) return false;
+    // Claude Code's shared auto memory on that machine: Claude reads it there itself.
+    if (source === 'claude-memory') return !!rules && section === 'user-dir';
+    return source === 'instructions' && (file === ownFile || (!!rules && !!file?.startsWith(rules)));
   };
   const covered = new Set<string>();
   const want: MemoryRecord[] = [];

@@ -1952,7 +1952,7 @@ export class Workspace {
       : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
     const out = parseScanOutput(r.stdout);
     if (!out.complete) throw new Error(host ? sshError(host, r.stderr) : r.stderr.trim() || 'Could not read the memory files.');
-    return candidatesFrom(host, out.home, out.files, this.store.data.projects);
+    return candidatesFrom(host, out.home, out.files, this.store.data.projects, out.shared);
   }
 
   /** This Mac and every reachable enabled host; hosts that are not connected are reported, not waited for. */

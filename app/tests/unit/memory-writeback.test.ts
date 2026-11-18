@@ -83,6 +83,18 @@ describe('what is shared', () => {
     expect(notesFor('neptune', '~/.codex/AGENTS.md', records).notes.map((n) => n.body)).toEqual(['Reply in Chinese.', 'From my AGENTS.md', 'Also from it']);
   });
 
+  it('Claude reads its own rules and shared auto memory on its machine: only Codex (and other machines) get them', () => {
+    const records = [
+      note('Rule from rules/', { importKeys: ['instructions|local|~/.claude/rules/style.md|'], importedHash: wbHash('Rule from rules/') }),
+      note('From the shared folder', { importKeys: ['claude-memory|local|~/notes/claude-memory/tabs.md|user-dir'] }),
+      note('A project note kept as user memory', { importKeys: ['claude-memory|local|~/.claude/projects/-w-p/memory/b.md|'] }),
+    ];
+    const bodies = (host: string, own: string) => notesFor(host, own, records).notes.map((n) => n.body);
+    expect(bodies('local', '~/.claude/CLAUDE.md')).toEqual(['A project note kept as user memory']);
+    expect(bodies('local', '~/.codex/AGENTS.md')).toEqual(['Rule from rules/', 'From the shared folder', 'A project note kept as user memory']);
+    expect(bodies('neptune', '~/.claude/CLAUDE.md')).toEqual(['Rule from rules/', 'From the shared folder', 'A project note kept as user memory']);
+  });
+
   it('over the size limit: notes written in the app first, then the newest; the rest are named, not lost', () => {
     const big = (c: string) => c.repeat(9000);
     const records = [

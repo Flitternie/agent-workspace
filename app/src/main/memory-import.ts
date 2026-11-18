@@ -8,7 +8,8 @@ import { stripAppText } from './memory-writeback';
 //    note per file with YAML frontmatter (name, description, type or metadata.type).
 //    Always project memory (Claude Code loads it only in its folder).
 //  - User instruction files: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md,
-//    split into one note per top-level section so the user can pick.
+//    split into one note per top-level section so the user can pick; and Claude Code's
+//    user rules, ~/.claude/rules/*.md (one subfolder deep), one note per file.
 // Each note has a stable key `source|host|file|section` (host 'local' = this Mac).
 // A record keeps every key whose text it holds (`importKeys`), so the same AGENTS.md
 // on two machines is one record, and a re-scan updates rather than duplicates.
@@ -54,7 +55,12 @@ export function parseFrontmatter(text: string): { meta: Record<string, string>; 
     if (!indent) parent = raw.trim() ? '' : k;
     const key = indent && parent ? `${parent}.${k}` : k;
     let v = raw.trim();
-    if (/^[|>][-+]?$/.test(v)) {
+    if (!v && !indent && /^\s+-\s/.test(lines[i + 1] ?? '')) {
+      // A list (e.g. a rule's paths:): its items, comma-separated.
+      const items: string[] = [];
+      while (i + 1 < lines.length && /^\s+-\s/.test(lines[i + 1])) items.push(lines[++i].replace(/^\s+-\s+/, '').trim().replace(/^(["'])(.*)\1$/, '$2'));
+      v = items.join(', ');
+    } else if (/^[|>][-+]?$/.test(v)) {
       // Block scalar: the following more-indented lines.
       const block: string[] = [];
       while (i + 1 < lines.length && (/^\s*$/.test(lines[i + 1]) || /^\s/.test(lines[i + 1]) && lines[i + 1].search(/\S/) > indent.length)) block.push(lines[++i].trim());
@@ -148,12 +154,23 @@ export function splitInstructions(text: string): Array<{ section: string; title:
  */
 export const MEMORY_SCAN_SCRIPT = `h="$HOME"; c="\${CLAUDE_CONFIG_DIR:-$h/.claude}"; x="\${CODEX_HOME:-$h/.codex}"
 printf '__AMW_MEM_HOME__\\t%s\\n' "$h"
-for f in "$c/CLAUDE.md" "$x/AGENTS.md" "$h/AGENTS.md" "$c"/projects/*/memory/*.md; do
-  [ -f "$f" ] || continue
-  case "$f" in */MEMORY.md) continue;; esac
-  s=$(wc -c < "$f" | tr -d ' '); [ "$s" -le ${MAX_FILE_BYTES} ] || continue
-  printf '__AMW_MEM_FILE__\\t%s\\t%s\\n' "$f" "$(base64 < "$f" | tr -d '\\n')"
-done
+# A Claude Code auto-memory folder shared by every project (user settings or the environment).
+st="$c/settings.json"; amd=""; pdn="\${CLAUDE_CODE_PROJECT_DIR_NAME:-}"
+jv() { tr -d '\\n' < "$st" | grep -o "\\"$1\\"[[:space:]]*:[[:space:]]*\\"[^\\"]*\\"" | head -n 1 | sed 's/.*:[[:space:]]*"//; s/"$//'; }
+ok() { case "$1" in ""|*/*|..|.) return 1;; esac; }
+ok "$pdn" || pdn=""
+if [ -f "$st" ]; then amd=$(jv autoMemoryDirectory); [ -n "$pdn" ] || { pdn=$(jv CLAUDE_CODE_PROJECT_DIR_NAME); ok "$pdn" || pdn=""; }; fi
+case "$amd" in "~/"*) amd="$h/\${amd#\\~/}";; /*) ;; *) amd="";; esac
+[ -n "$amd" ] && printf '__AMW_MEM_SHARED__\\t%s\\n' "\${amd%/}"
+[ -n "$pdn" ] && printf '__AMW_MEM_SHARED__\\t%s\\n' "$c/projects/$pdn/memory"
+emit() {
+  [ -f "$1" ] || return 0
+  case "$1" in */MEMORY.md) return 0;; esac
+  s=$(wc -c < "$1" | tr -d ' '); [ "$s" -le ${MAX_FILE_BYTES} ] || return 0
+  printf '__AMW_MEM_FILE__\\t%s\\t%s\\n' "$1" "$(base64 < "$1" | tr -d '\\n')"
+}
+for f in "$c/CLAUDE.md" "$c"/rules/*.md "$c"/rules/*/*.md "$x/AGENTS.md" "$h/AGENTS.md" "$c"/projects/*/memory/*.md; do emit "$f"; done
+if [ -n "$amd" ]; then for f in "$amd"/*.md; do emit "$f"; done; fi
 printf '__AMW_MEM_DONE__\\n'`;
 
 export interface ScannedFile {
@@ -161,17 +178,19 @@ export interface ScannedFile {
   content: string;
 }
 
-export function parseScanOutput(stdout: string): { home: string; files: ScannedFile[]; complete: boolean } {
+export function parseScanOutput(stdout: string): { home: string; files: ScannedFile[]; complete: boolean; shared: string[] } {
   let home = '';
   const files: ScannedFile[] = [];
+  const shared: string[] = [];
   let complete = false;
   for (const line of stdout.split('\n')) {
     const parts = line.replace(/\r$/, '').split('\t');
     if (parts[0] === '__AMW_MEM_HOME__') home = parts[1] ?? '';
     else if (parts[0] === '__AMW_MEM_FILE__' && parts.length >= 3) files.push({ path: parts[1], content: Buffer.from(parts[2], 'base64').toString('utf8') });
+    else if (parts[0] === '__AMW_MEM_SHARED__' && parts[1]) shared.push(parts[1].replace(/\/+$/, ''));
     else if (parts[0] === '__AMW_MEM_DONE__') complete = true;
   }
-  return { home, files, complete };
+  return { home, files, complete, shared };
 }
 
 function cap(body: string): { body: string; truncated: boolean } {
@@ -179,12 +198,29 @@ function cap(body: string): { body: string; truncated: boolean } {
 }
 
 /** Candidates from one machine's scanned files; Claude project notes are matched to app projects on that machine. */
-export function candidatesFrom(host: string | undefined, home: string, files: ScannedFile[], projects: Project[]): MemoryCandidate[] {
+/** Key section of a note from a Claude Code auto-memory folder shared by every project (user memory). */
+export const SHARED_DIR = 'user-dir';
+
+export function candidatesFrom(host: string | undefined, home: string, files: ScannedFile[], projects: Project[], shared: string[] = []): MemoryCandidate[] {
   const rel = (p: string) => (home && p.startsWith(`${home}/`) ? `~/${p.slice(home.length + 1)}` : p);
   const out: MemoryCandidate[] = [];
   const base = { host, alreadyImported: false, dismissed: false };
+  const done = new Set<string>();
   for (const f of files) {
+    if (done.has(f.path)) continue;
+    done.add(f.path);
     const file = rel(f.path);
+    // Auto memory every project shares (autoMemoryDirectory in user settings, or
+    // CLAUDE_CODE_PROJECT_DIR_NAME): Claude Code's user-level memory, so user memory here.
+    const dir = f.path.slice(0, f.path.lastIndexOf('/'));
+    if (shared.includes(dir)) {
+      const { meta, body } = parseFrontmatter(f.content);
+      const type = (meta.type || meta['metadata.type'] || '').toLowerCase() || undefined;
+      const text = [meta.description, body.trim()].filter(Boolean).join('\n\n').trim();
+      if (!text) continue;
+      out.push({ ...base, key: memoryKey('claude-memory', host, file, SHARED_DIR), source: 'claude-memory', file, title: meta.name || f.path.slice(dir.length + 1).replace(/\.md$/, ''), ...cap(text), suggestedScope: 'global', memoryType: type });
+      continue;
+    }
     const mem = /\/projects\/([^/]+)\/memory\/([^/]+)\.md$/.exec(f.path);
     if (mem) {
       const { meta, body } = parseFrontmatter(f.content);
@@ -194,6 +230,18 @@ export function candidatesFrom(host: string | undefined, home: string, files: Sc
       const scope = scopeForType(type);
       const project = scope === 'project' ? projects.find((p) => (p.host ?? undefined) === host && encodeClaudeCwd(p.rootPath) === mem[1]) : undefined;
       out.push({ ...base, key: memoryKey('claude-memory', host, file), source: 'claude-memory', file, title: meta.name || mem[2], ...cap(text), suggestedScope: scope, memoryType: type, projectId: project?.projectId, folderHint: scope === 'project' && !project ? mem[1] : undefined });
+      continue;
+    }
+    // Claude Code's user rules (~/.claude/rules/, read in every project): one note per file.
+    // A rule with `paths:` applies only to matching files, and keeps saying so.
+    if (/\/rules\/(?:[^/]+\/)?[^/]+\.md$/.test(f.path) && !/\/projects\//.test(f.path)) {
+      const { meta, body } = parseFrontmatter(f.content);
+      const text = body.trim();
+      if (!text) continue;
+      const paths = (meta.paths ?? '').replace(/^\[|\]$/g, '').split(/\s*,\s*/).map((x) => x.trim().replace(/^(["'])(.*)\1$/, '$2')).filter(Boolean);
+      const heading = /^#{1,6}\s+(.+)$/m.exec(text)?.[1]?.trim();
+      const scoped = paths.length ? `Applies only when working with files matching: ${paths.map((x) => '`' + x + '`').join(', ')}.\n\n${text}` : text;
+      out.push({ ...base, key: memoryKey('instructions', host, file, ''), source: 'instructions', file, title: heading || file.split('/').pop()!.replace(/\.md$/, ''), ...cap(scoped), suggestedScope: 'global' });
       continue;
     }
     // The app's own import line and section are not the user's notes (they come from here).
@@ -272,8 +320,10 @@ export function importCandidates(state: MemoryState, picks: Array<{ candidate: M
 
 /**
  * Keeps notes imported from Claude Code memory in step with their files (one file is one
- * note and its key, so edits and deletions on a machine are unambiguous). Nothing new is
- * brought in here: Claude Code memory belongs to its project and is imported by the user.
+ * note and its key, so edits and deletions on a machine are unambiguous). Project auto
+ * memory is never brought in here (it belongs to its project; the user imports it); the
+ * auto memory every project shares (user-level) is: a new file there becomes a note,
+ * unless its text is already in memory or the user deleted it.
  * (The user's own CLAUDE.md / AGENTS.md text is imported once, when a machine is linked or
  * by hand, and then belongs to the app.) Nothing is ever deleted or overwritten:
  * - a changed file updates its note, unless the note was edited in the app: then the
@@ -286,10 +336,19 @@ export function syncUserMemory(state: MemoryState, candidates: MemoryCandidate[]
   const counts = { added: 0, updated: 0, removed: 0 };
   const notes = candidates.filter((c) => c.source === 'claude-memory');
   const byKey = (key: string) => state.memory.find((r) => r.importKeys?.includes(key));
+  const dead = new Set(state.memoryTombstones ?? []);
   for (const c of notes) {
     const r = byKey(c.key);
-    if (!r) continue;
     const hash = bodyHash(c.body);
+    if (!r) {
+      // Only Claude Code's user-level auto memory (a folder every project shares) comes in by itself.
+      if (c.suggestedScope !== 'global') continue;
+      if (dead.has(c.key) || dead.has(`hash:${hash}`)) continue;
+      if (state.memory.some((m) => !m.sourceRemoved && (m.importedHash === hash || bodyHash(m.body) === hash))) continue;
+      state.memory.push(newRecord({ title: c.title, body: c.body, keys: [c.key] }, 'global', 'global'));
+      counts.added++;
+      continue;
+    }
     if (r.sourceRemoved) {
       r.sourceRemoved = false;
       r.updatedAt = now();
