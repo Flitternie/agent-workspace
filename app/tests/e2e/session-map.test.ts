@@ -72,6 +72,13 @@ describe('session map', () => {
     await expect.poll(() => tasks.nth(1).getAttribute('class')).toContain('current');
     expect(await tasks.nth(1).innerText()).toContain('Endpoints drafted');
     await page.screenshot({ path: join(shots, 'map-01-beside.png') });
+    // The current node, enlarged with its glow, is not cut off by the box around the map.
+    const clip = await page.evaluate(() => {
+      const box = document.querySelector('[data-testid="session-map-beside"]')!.getBoundingClientRect();
+      const node = document.querySelector('.map-task.current .map-node')!.getBoundingClientRect();
+      return node.left - 4 - box.left;
+    });
+    expect(clip).toBeGreaterThanOrEqual(0);
     // The first task, opened: the decision read from the talk, and the approval with the options offered.
     await page.getByTestId('map-caret').first().click();
     const decisions = tasks.nth(0).getByTestId('map-decision');

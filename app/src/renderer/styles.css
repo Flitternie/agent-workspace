@@ -5668,7 +5668,8 @@ button.subtask-row:hover {
 .session-map {
   list-style: none;
   margin: 0;
-  padding: 2px 0 0;
+  /* Room on the left for the current node's enlarged dot and its glow (the scroll box clips the rest). */
+  padding: 4px 0 0 7px;
 }
 .map-task {
   position: relative;
