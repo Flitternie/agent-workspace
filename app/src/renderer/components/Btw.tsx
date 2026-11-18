@@ -9,7 +9,7 @@ import { Markdown } from './Markdown';
  * never part of it, never interrupting a turn. Asked from the reply box (⌥↵ / the bubble button);
  * here only to read, copy, or bring an answer back into the conversation (into the box, to edit).
  */
-export function BtwPanel({ task, entries, onClear, onBring, onClose }: { task: Task; entries: BtwEntry[]; onClear: () => void; onBring: (text: string) => void; onClose: () => void }) {
+export function BtwPanel({ task, entries, width, onClear, onBring, onClose }: { task: Task; entries: BtwEntry[]; width?: number; onClear: () => void; onBring: (text: string) => void; onClose: () => void }) {
   const end = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
   const last = entries.at(-1);
@@ -20,7 +20,7 @@ export function BtwPanel({ task, entries, onClear, onBring, onClose }: { task: T
   }, [entries.length, last?.answer, last?.error]);
   const what = task.provider === 'codex' ? t('A read-only side thread of this conversation.') : t('Answered from what is already in this conversation; no tools.');
   return (
-    <aside className="memory btw" aria-label={t('Side questions')} data-testid="btw-panel">
+    <aside className="memory side btw" style={width ? { width } : undefined} aria-label={t('Side questions')} data-testid="btw-panel">
       <div className="preview-top">
         <div className="preview-head">
           <div className="preview-ident">

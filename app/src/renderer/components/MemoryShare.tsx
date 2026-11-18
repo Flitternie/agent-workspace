@@ -69,9 +69,11 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="memory-share" data-testid="memory-share">
       <div className="section-label">{t('Share with the CLIs on each machine')}</div>
-      <p className="muted small">
-        {t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the user-level notes already there: CLAUDE.md, ~/.claude/rules, AGENTS.md, and Claude Code’s auto memory if every project shares one folder. A project’s own Claude Code memory belongs to that project and stays there; import it under Import… if you want it here. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}
-      </p>
+      <p className="muted small">{t('Also write your user memory into Claude Code’s and Codex’s own files on a machine, so terminal sessions there know it too. Backed up first; nothing is ever overwritten.')}</p>
+      <details className="ms-details">
+        <summary className="small">{t('How it works')}</summary>
+        <p className="muted small">{t('Linked machines get your user memory in Claude Code’s and Codex’s own files, so agents you start in a terminal know it too. Linking backs up those files and brings in the user-level notes already there: CLAUDE.md, ~/.claude/rules, AGENTS.md, and Claude Code’s auto memory if every project shares one folder. A project’s own Claude Code memory belongs to that project and stays there; import it under Import… if you want it here. Your own text in those files is never changed, and nothing is deleted or overwritten on either side.')}</p>
+      </details>
       {machines.map((h) => {
         const link = snapshot.memoryShare[h];
         return (

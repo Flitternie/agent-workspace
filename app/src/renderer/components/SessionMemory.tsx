@@ -6,7 +6,6 @@ import { t } from '../i18n';
 import { Icon, isMainAgent } from './bits';
 import { Markdown } from './Markdown';
 import { Modal } from './Dialogs';
-import { SidePanel, type SideFrame } from './SidePanel';
 
 // Memory where it matters in an agent's view: which notes this agent works with (a chip
 // in its header; this project's notes first, one line each), and saving something the
@@ -48,7 +47,7 @@ export function MemoryChip({ snapshot, task, open, onToggle }: { snapshot: Works
       <Icon name="note" size={11} />
       {/* Narrow headers show the counts only (the full words are in the tooltip). */}
       <span className="chip-full">{isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}</span>
-      <span className="chip-short">{isMainAgent(task) ? count(user) : `${count(project)} · ${count(user)}`}</span>
+      <span className="chip-short">{isMainAgent(task) ? count(user) : count(project) + count(user)}</span>
     </button>
   );
 }
@@ -56,19 +55,27 @@ export function MemoryChip({ snapshot, task, open, onToggle }: { snapshot: Works
 /**
  * The side column's memory view: the notes this agent works with, this project's first,
  * one title each; a note opens rendered as Markdown. Read-only (manage in Settings).
+ * Same frame as the other side panels (header row, width, drag bar).
  */
-export function AgentMemoryPanel({ snapshot, task, frame }: { snapshot: WorkspaceSnapshot; task: Task; frame: SideFrame }) {
+export function AgentMemoryPanel({ snapshot, task, width, onClose }: { snapshot: WorkspaceSnapshot; task: Task; width?: number; onClose: () => void }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const { project, user, started } = sessionMemory(snapshot, task);
   const projectName = snapshot.projects.find((p) => p.projectId === task.projectId)?.name ?? '';
   const toggle = (id: string) => setOpen((s) => (s.has(id) ? new Set([...s].filter((x) => x !== id)) : new Set([...s, id])));
+  const shownProject = isMainAgent(task) ? [] : project;
+  const total = shownProject.length + user.length;
+  const later = [...shownProject, ...user].filter((x) => !x.on).length;
   const list = (items: Array<{ m: MemoryRecord; on: boolean }>) =>
     items.map(({ m, on }) => (
       <div key={m.id} className={`am-note${on ? '' : ' later'}${open.has(m.id) ? ' open' : ''}`} data-testid="agent-memory-note">
         <button className="am-note-head" onClick={() => toggle(m.id)} aria-expanded={open.has(m.id)}>
           <Icon name="chevron" size={11} />
           <span className="am-note-title">{lineOf(m)}</span>
-          {on ? null : <span className="memory-pop-later">{started ? t('from the next start') : t('when it starts')}</span>}
+          {on ? null : (
+            <span className="memory-pop-later" title={started ? t('Added or changed after this session started: it works from the next start.') : t('Loaded when the session starts.')}>
+              {started ? t('next start') : t('at start')}
+            </span>
+          )}
         </button>
         {open.has(m.id) ? (
           <div className="am-note-body">
@@ -78,31 +85,55 @@ export function AgentMemoryPanel({ snapshot, task, frame }: { snapshot: Workspac
       </div>
     ));
   return (
-    <SidePanel
-      label={t('The memory this agent works with')}
-      testId="agent-memory"
-      frame={frame}
-      title={t('This agent’s memory')}
-    >
-      <p className="muted small">{t('Loaded when the session starts or resumes. Notes added or changed since then work from the next start.')}</p>
-      {isMainAgent(task) ? null : (
-        <section className="am-section">
-          <div className="section-label">
-            {t('This project')} · {projectName} <span className="count-muted">{project.length}</span>
+    <aside className="memory side agent-memory" style={width ? { width } : undefined} aria-label={t('The memory this agent works with')} data-testid="agent-memory">
+      <div className="preview-top">
+        <div className="preview-head">
+          <div className="preview-ident">
+            <div className="panel-title">{t('Memory')}</div>
+            <div className="changes-sub muted small">
+              {total ? (later ? t('{n} notes · {later} from the next start', { n: total, later }) : t('{n} notes · loaded at start', { n: total })) : t('No notes yet')}
+            </div>
           </div>
-          {project.length ? list(project) : <div className="muted small">{t('No notes for this project yet. To add one, use “Remember › For this project” on one of your messages.')}</div>}
-        </section>
-      )}
-      <section className="am-section">
-        <div className="section-label">
-          {t('User memory')} · {t('every project')} <span className="count-muted">{user.length}</span>
+          <button className="icon-btn" title={t('Memory settings')} aria-label={t('Memory settings')} onClick={() => openSettings('memory')}>
+            <Icon name="gear" size={13} />
+          </button>
+          <button className="icon-btn" title={t('Close')} aria-label={t('Close')} data-testid="side-close" onClick={onClose}>
+            <Icon name="x" size={13} />
+          </button>
         </div>
-        {user.length ? list(user) : <div className="muted small">{t('None yet.')}</div>}
-      </section>
-      <button className="link small am-manage" onClick={() => openSettings('memory')}>
-        {t('Manage in Settings')}
-      </button>
-    </SidePanel>
+      </div>
+      {total === 0 ? (
+        <div className="side-empty" data-testid="agent-memory-empty">
+          <span className="side-empty-icon">
+            <Icon name="remember" size={18} />
+          </span>
+          <div className="side-empty-title">{t('No memory yet')}</div>
+          <p>{t('Right-click one of your messages and choose “Keep as memory”. Notes are given to every agent from its next start.')}</p>
+          <button className="btn btn-sm" onClick={() => openSettings('memory')}>
+            {t('Memory settings')}
+          </button>
+        </div>
+      ) : (
+        <>
+          {shownProject.length ? (
+            <section className="am-section">
+              <div className="section-label">
+                {t('This project')} · {projectName} <span className="count-muted">{shownProject.length}</span>
+              </div>
+              {list(shownProject)}
+            </section>
+          ) : null}
+          {user.length ? (
+            <section className="am-section">
+              <div className="section-label">
+                {t('User memory')} <span className="count-muted">{user.length}</span>
+              </div>
+              {list(user)}
+            </section>
+          ) : null}
+        </>
+      )}
+    </aside>
   );
 }
 
