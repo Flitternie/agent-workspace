@@ -4974,10 +4974,6 @@ button.subtask-row:hover {
   width: 380px;
   gap: 10px;
 }
-.btw-sub {
-  margin-top: 2px;
-  line-height: 1.45;
-}
 .btw-thread {
   display: flex;
   flex-direction: column;

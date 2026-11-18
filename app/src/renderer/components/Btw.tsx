@@ -24,9 +24,9 @@ export function BtwPanel({ task, entries, onClear, onBring, onClose }: { task: T
       <div className="preview-top">
         <div className="preview-head">
           <div className="preview-ident">
-            <div className="panel-title">{t('Side questions')}</div>
-            <div className="btw-sub muted small">
-              {t('Not part of the conversation; interrupts nothing.')} {what}
+            {/* The what and how in its tooltip; the panel itself stays quiet. */}
+            <div className="panel-title" title={`${t('Not part of the conversation; interrupts nothing.')} ${what}`}>
+              {t('Side questions')}
             </div>
           </div>
           {entries.length ? (
@@ -78,7 +78,7 @@ export function BtwPanel({ task, entries, onClear, onBring, onClose }: { task: T
           <div ref={end} />
         </div>
       ) : (
-        <p className="muted small">{t('Ask in the reply box and press ⌥↵ (or the bubble button): the answer shows here, and the agent’s work goes on.')}</p>
+        <p className="muted small">{t('Ask in the box below with ⌥↵.')}</p>
       )}
     </aside>
   );

@@ -714,5 +714,5 @@ export const zh: Record<string, string> = {
   'About my side question “{q}”:': '关于我的旁支提问「{q}」：',
   'Bring into the conversation': '带回主对话',
   'Answering…': '正在回答…',
-  'Ask in the reply box and press ⌥↵ (or the bubble button): the answer shows here, and the agent’s work goes on.': '在下方输入框里提问，按 ⌥↵（或点气泡按钮）：回答会显示在这里，Agent 的工作照常进行。',
+  'Ask in the box below with ⌥↵.': '在下方输入框里提问，按 ⌥↵ 发送。',
 };
