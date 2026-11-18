@@ -3,28 +3,31 @@ import { t } from '../i18n';
 import type { TurnChanges } from '../turn-changes';
 import { Icon } from './bits';
 import { DiffStat } from './Content';
+import { SidePanel, type SideFrame } from './SidePanel';
 
 /** The agent's latest turn at a glance: the files it changed, each a click from its diff; and "follow". */
-export function ChangesPanel({ task, changes, follow, onFollow, onOpen, width }: { task: Task; changes: TurnChanges; follow: boolean; onFollow: (on: boolean) => void; onOpen: (path: string, line?: number) => void; width?: number }) {
+export function ChangesPanel({ task, changes, follow, onFollow, onOpen, frame }: { task: Task; changes: TurnChanges; follow: boolean; onFollow: (on: boolean) => void; onOpen: (path: string, line?: number) => void; frame: SideFrame }) {
   const added = changes.files.reduce((n, f) => n + f.added, 0);
   const removed = changes.files.reduce((n, f) => n + f.removed, 0);
   const rel = (p: string) => (p.startsWith(`${task.cwd}/`) ? p.slice(task.cwd.length + 1) : p);
   return (
-    <aside className="memory changes" style={width ? { width } : undefined} aria-label={t('Changes')} data-testid="changes-panel">
-      <div className="preview-top">
-        <div className="preview-head">
-          <div className="preview-ident">
-            <div className="panel-title">{changes.which === 'current' ? t('Changed this turn') : t('Changed last turn')}</div>
-            <div className="changes-sub muted small">
-              {t('{n} files', { n: changes.files.length })} <DiffStat added={added} removed={removed} />
-            </div>
-          </div>
-          <label className="follow-toggle" title={t('Show each file in the preview as the agent changes it')}>
-            <input type="checkbox" checked={follow} onChange={(e) => onFollow(e.target.checked)} data-testid="follow-agent" />
-            {t('Follow')}
-          </label>
-        </div>
-      </div>
+    <SidePanel
+      title={changes.which === 'current' ? t('Changed this turn') : t('Changed last turn')}
+      subtitle={
+        <span className="changes-sub">
+          {t('{n} files', { n: changes.files.length })} <DiffStat added={added} removed={removed} />
+        </span>
+      }
+      label={t('Changes')}
+      testId="changes-panel"
+      frame={frame}
+      actions={
+        <label className="follow-toggle" title={t('Show each file in the preview as the agent changes it')}>
+          <input type="checkbox" checked={follow} onChange={(e) => onFollow(e.target.checked)} data-testid="follow-agent" />
+          {t('Follow')}
+        </label>
+      }
+    >
       {changes.files.length ? (
         <ul className="changes-list">
           {changes.files.map((f) => (
@@ -41,6 +44,6 @@ export function ChangesPanel({ task, changes, follow, onFollow, onOpen, width }:
       ) : (
         <p className="muted small">{t('No file changes yet. With Follow on, each file the agent changes opens here.')}</p>
       )}
-    </aside>
+    </SidePanel>
   );
 }

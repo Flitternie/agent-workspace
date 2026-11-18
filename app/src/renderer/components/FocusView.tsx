@@ -17,6 +17,7 @@ import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
 import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
+import { SidePanel } from './SidePanel';
 import { SessionMap, SessionMiniMap } from './SessionMap';
 import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
@@ -207,10 +208,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // The preview column's width: dragged by the user, kept for next time.
   const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
   // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
+  // Maximized: the side panel (any kind) takes the whole conversation area until restored (Esc) or closed.
   const [previewMax, setPreviewMax] = useState(false);
-  useEffect(() => {
-    if (!preview) setPreviewMax(false);
-  }, [preview]);
   useEffect(() => {
     if (!previewMax) return;
     const esc = (e: KeyboardEvent) => {
@@ -226,9 +225,25 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     localStorage.setItem('amw.previewWidth', String(Math.round(w)));
   };
   useEffect(() => setPreviewState(restored(task.taskId)), [task.taskId]);
-  // Too narrow for both (the conversation keeps 400px, the preview 300px): the preview covers it.
+  // Too narrow for both (the conversation keeps 400px, a side panel 300px): the panel covers it.
   const narrow = bodyW > 0 && bodyW < PREVIEW_MIN + CONVERSATION_MIN;
-  const covering = !!preview && (previewMax || narrow);
+  // Which panel the side column shows: one at a time, the preview first.
+  const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
+    ? 'preview'
+    : showMap && !mapBeside && mapTasks.length
+      ? 'map'
+      : showBtw && btw.length
+        ? 'btw'
+        : showChanges
+          ? 'changes'
+          : showMemory
+            ? 'memory'
+            : null;
+  useEffect(() => {
+    setPreviewMax(false);
+  }, [sideKind]);
+  // Every panel alike: beside the conversation when both fit, else (or maximized) in its place.
+  const covering = !!sideKind && (previewMax || narrow);
   // The room the map takes right of the conversation: all of it beside, a strip for the outline, or none
   // while the full map is open in the side column.
   const mapRoom = mapBeside ? MAP_ROOM : miniFits && !(showMap && !preview) ? MINI_ROOM : 0;
@@ -262,6 +277,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     setPreview(latest.path, { line: latest.line, diff: true });
   }, [latest?.lastItemId, follow]);
   const previewDiffs = preview ? changes.files.find((f) => f.path === preview.path || resolvePosix(task.cwd, f.path) === resolvePosix(task.cwd, preview.path))?.diffs : undefined;
+  /** The frame every side panel shares: one width, maximize (unless it already covers), close. */
+  const frame = (onClose: () => void) => ({ width: shownWidth, maximized: covering, onToggleMax: narrow ? undefined : () => setPreviewMax(!previewMax), onClose });
+  /** In the conversation's place, acting on the conversation closes the panel first, so it is seen. */
+  const thenConversation = (fn: () => void) => {
+    if (!covering) return fn();
+    setShowMap(false);
+    setShowBtw(false);
+    setTimeout(fn, 50);
+  };
   const previewPanel = preview ? (
     <FilePreviewPanel
                 task={task}
@@ -283,6 +307,30 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 }}
               />
   ) : null;
+  const sidePanel =
+    sideKind === 'preview' ? (
+      previewPanel
+    ) : sideKind === 'map' ? (
+      <SidePanel title={t('Task index')} label={t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
+        <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+      </SidePanel>
+    ) : sideKind === 'btw' ? (
+      <BtwPanel
+        task={task}
+        entries={btw}
+        frame={frame(() => setShowBtw(false))}
+        onClear={() => {
+          setBtw([]);
+          setShowBtw(false);
+          void call('btw:clear', { taskId: task.taskId }).catch(() => {});
+        }}
+        onBring={(text) => thenConversation(() => setInject((cur) => ({ text, n: cur.n + 1 })))}
+      />
+    ) : sideKind === 'changes' ? (
+      <ChangesPanel frame={frame(() => setShowChanges(false))} task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
+    ) : sideKind === 'memory' ? (
+      <AgentMemoryPanel snapshot={snapshot} task={task} frame={frame(() => setShowMemory(false))} />
+    ) : null;
   return (
     <div className="focus">
       <section className="focus-main">
@@ -490,60 +538,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
-          {preview && covering ? previewPanel : null}
+          {covering ? sidePanel : null}
         </div>
       </section>
       {(() => {
-        const panel = preview && !covering ? (
+        if (!sidePanel || covering) return null;
+        const panel = (
           <>
             <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-            {previewPanel}
+            {sidePanel}
           </>
-        ) : !preview && showMap && !mapBeside && mapTasks.length ? (
-          <>
-            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-          <aside className="memory map" style={{ width: shownWidth }} aria-label={t('Task index')} data-testid="session-map-panel">
-            <div className="preview-top">
-              <div className="preview-head">
-                <div className="preview-ident">
-                  <div className="panel-title">{t('Task index')}</div>
-                </div>
-                <button className="icon-btn" title={t('Close')} aria-label={t('Close')} onClick={() => setShowMap(false)}>
-                  <Icon name="x" size={13} />
-                </button>
-              </div>
-            </div>
-            <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
-          </aside>
-          </>
-        ) : !preview && showBtw && btw.length ? (
-          <>
-            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-          <BtwPanel
-            width={shownWidth}
-            task={task}
-            entries={btw}
-            onClose={() => setShowBtw(false)}
-            onClear={() => {
-              setBtw([]);
-              setShowBtw(false);
-              void call('btw:clear', { taskId: task.taskId }).catch(() => {});
-            }}
-            onBring={(text) => setInject((cur) => ({ text, n: cur.n + 1 }))}
-          />
-          </>
-        ) : !preview && showChanges ? (
-          <>
-            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-          <ChangesPanel width={shownWidth} task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
-          </>
-        ) : !preview && showMemory ? (
-          <>
-            <PanelResizer width={shownWidth} room={bodyW} onChange={setPreviewWidth} />
-            <AgentMemoryPanel snapshot={snapshot} task={task} frame={{ width: shownWidth, onClose: () => setShowMemory(false) }} />
-          </>
-        ) : null;
-        if (!panel) return null;
+        );
         return side ? createPortal(panel, side) : panel;
       })()}
     </div>
@@ -934,7 +939,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             ) : (
               <>
                 {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
-                <span className="muted"> — {t('typed text goes only to this agent')}</span>
               </>
             )}
           </span>

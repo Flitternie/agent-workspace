@@ -1632,6 +1632,28 @@ body.resizing .sidebar-resizer {
 }
 .composer-foot .hint {
   margin-left: auto;
+  white-space: nowrap;
+}
+.to-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer {
+  container: composer / inline-size;
+}
+.composer-foot > button {
+  flex: none;
+}
+/* A narrow reply box: one line at its foot; the key hints go (the buttons and placeholder say enough). */
+@container composer (max-width: 680px) {
+  .composer-foot .hint {
+    display: none;
+  }
+  .composer-foot .to-label {
+    margin-right: auto;
+  }
 }
 .memory {
   width: 300px;
@@ -4719,10 +4741,6 @@ button.subtask-row:hover {
   flex-direction: column;
   gap: 10px;
 }
-.memory.changes {
-  width: 360px;
-  gap: 10px;
-}
 .changes-sub {
   display: flex;
   align-items: center;
@@ -4797,7 +4815,16 @@ button.subtask-row:hover {
     margin-left: 52px;
     gap: 3px;
   }
-  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview). */
+  /* Slightly smaller buttons, so the row fits the narrowest column (400px beside a preview); square,
+     and never squeezed narrower by the row (they would read as stretched). */
+  .focus-actions > * {
+    flex: none;
+  }
+  .focus-actions .btn,
+  .focus-actions .perm,
+  .focus-actions .perm .perm-select {
+    height: 28px;
+  }
   .focus-actions .btn.btn-icon,
   .focus-actions .perm,
   .focus-actions .perm .perm-select {
@@ -5568,10 +5595,6 @@ button.subtask-row:hover {
   opacity: 1;
   transition-delay: 0.25s;
 }
-.memory.btw {
-  width: 380px;
-  gap: 10px;
-}
 .btw-thread {
   display: flex;
   flex-direction: column;
@@ -5721,10 +5744,6 @@ button.subtask-row:hover {
   z-index: 2;
   overflow-y: auto;
   scrollbar-width: none;
-}
-.memory.map {
-  width: 340px;
-  gap: 10px;
 }
 /* The tree: a trunk (one colour per task's stretch), nodes shaped by state, twigs to decisions,
    lanes curving off to forked agents. */

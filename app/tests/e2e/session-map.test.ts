@@ -143,6 +143,28 @@ describe('session map', () => {
     await page.getByTestId('session-minimap').click();
     await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
     await expect.poll(() => page.getByTestId('session-minimap').count()).toBe(0);
+    // Squeezed by the side column, the header's buttons stay square and the reply box's foot one line
+    // (the key hints go).
+    for (const w of [1100, 1000]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      const shape = await page.evaluate(() => ({
+        buttons: [...document.querySelectorAll('.focus-actions .btn.btn-icon')].map((b) => { const r = b.getBoundingClientRect(); return Math.abs(r.width - r.height); }),
+        foot: document.querySelector('.composer-foot')!.getBoundingClientRect().height,
+        hint: getComputedStyle(document.querySelector('[data-testid="composer-hint"]')!).display,
+      }));
+      expect(Math.max(...shape.buttons)).toBeLessThanOrEqual(1);
+      expect(shape.foot).toBeLessThan(40);
+      expect(shape.hint).toBe('none');
+    }
+    // Too narrow for both, it covers the conversation like a preview does; a task there closes it and goes.
+    await page.setViewportSize({ width: 940, height: 900 });
+    await expect.poll(() => page.locator('.focus-thread').isHidden()).toBe(true);
+    expect(await page.getByTestId('session-map-panel').count()).toBe(1);
+    await page.getByTestId('session-map-panel').getByTestId('map-task-title').first().click();
+    await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(0);
+    await expect.poll(() => page.locator('.focus-thread').isVisible()).toBe(true);
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.getByTestId('session-minimap').click();
     // The side column is resized like the preview: drag its edge.
     const panelW = () => page.getByTestId('session-map-panel').evaluate((el) => el.getBoundingClientRect().width);
     const before = await panelW();
