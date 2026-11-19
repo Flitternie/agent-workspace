@@ -52,6 +52,8 @@ export interface Task {
   setAside?: boolean;
   /** Finished a turn the user has not looked at since (a green dot); opening the agent clears it. */
   unread?: boolean;
+  /** When the agent entered its current status group (waiting on you / working / anything else); orders the sidebar. */
+  statusSince?: string;
   /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */
   subtasks?: SubtaskInfo[];
   projectId: string;
