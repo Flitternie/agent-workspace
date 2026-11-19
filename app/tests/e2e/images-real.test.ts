@@ -86,4 +86,31 @@ describe.runIf(enabled)('images to real agents', () => {
       await page.screenshot({ path: join(appDir, 'test-results', `images-real-${provider}.png`) });
     }, 420_000);
   }
+  it('the main agent sees an image and passes it on to the agent it hands the work to', async () => {
+    mkdirSync(join(appDir, '.cache'), { recursive: true });
+    const root = mkdtempSync(join(appDir, '.cache', 'img-main-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    writeFileSync(join(root, 'README.md'), '# images e2e\n');
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !['ELECTRON_RUN_AS_NODE', 'CLAUDECODE'].includes(k)) env[k] = v;
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MAIN_AGENT: 'claude', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-imgm-')), AMW_NO_AUTOLISTEN: '1', AMW_NO_OPENAI: '1' } });
+    const page = await app.firstWindow();
+    await page.waitForSelector('.app');
+    await invoke(page, 'settings:update', { onboarding: { dismissed: true } });
+    const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
+    const transcript = (id: string) => invoke<TranscriptItem[]>(page, 'transcript:get', { taskId: id });
+    const mainOf = async () => (await snap() as unknown as { main?: { taskId: string } }).main;
+    await expect.poll(async () => !!(await mainOf()), { timeout: 30_000 }).toBe(true);
+    const main = (await mainOf())!;
+    const project = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: root, name: 'shop' });
+    const ui = await invoke<Task>(page, 'task:create', { projectId: project.projectId, provider: 'mock', name: 'checkout-ui', title: 'Checkout page UI', mockScript: 'quick', isolate: false });
+    const ref = await drawWord(page, 'BUY NOW');
+    const r = await invoke<{ ok: boolean; error?: string }>(page, 'task:send', { taskId: main.taskId, text: 'Ask the checkout-ui agent to make the button in this screenshot green. Pass the screenshot on to it.', via: 'text', images: [ref] });
+    expect(r).toMatchObject({ ok: true });
+    await expect.poll(async () => (await transcript(ui.taskId)).filter((i) => i.role === 'user' && i.via === 'main').length, { timeout: 180_000, interval: 1000 }).toBeGreaterThan(0);
+    const got = (await transcript(ui.taskId)).filter((i) => i.role === 'user' && i.via === 'main');
+    console.log('[main] sent to agent:', JSON.stringify(got.map((i) => ({ text: i.text, images: i.images?.length ?? 0 }))));
+    if (!got.some((i) => i.images?.[0]?.id === ref.id)) console.log((await transcript(main.taskId)).map((i) => `[${i.role}] ${(i.tool?.name ?? '') + ' ' + i.text}`.slice(0, 300)).join('\n'));
+    expect(got.some((i) => i.images?.[0]?.id === ref.id)).toBe(true);
+  }, 300_000);
 });
