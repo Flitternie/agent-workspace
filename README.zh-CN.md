@@ -5,8 +5,8 @@
 <h1 align="center">Agent Workspace</h1>
 
 <p align="center">
-  <b>给你的编程 Agent 一间会议室。</b><br>
-  Claude Code 与 Codex 并肩工作，一个主 Agent 统一调度，每一步都画在地图上。
+  <b>多开不乱，一眼看全。</b><br>
+  Claude Code 和 Codex 开得再多，谁在干活、谁在等你、每一步怎么走的，都在一个窗口里。
 </p>
 
 <p align="center">
@@ -26,11 +26,11 @@
   <img src="docs/assets/zh/overview.png" alt="总览：四个 Agent 在工作，其中一个在请求授权">
 </p>
 
-Agent 可以并行，你的注意力不行。Agent Workspace 让每个 Agent 都坐到同一张桌前，把你说的话交给对的那一个，并记下工作是怎么一步步推进的。
+同时开过几个 Claude Code 或 Codex 的人都知道：终端开了一堆，有个 Agent 已经等你二十分钟了你都不知道，它们之前试过什么也很难翻回去看。Agent Workspace 把它们放进一个窗口。
 
 ## 总览
 
-**所有 Agent 一目了然，没有被忽略的等待。**
+**所有 Agent，一屏看完。**
 
 - 每个 Agent 一张卡片：做了什么、在做什么、需要你做什么。
 - 提问和权限请求连同改动内容一起留在卡片上，直到你处理。
@@ -38,7 +38,7 @@ Agent 可以并行，你的注意力不行。Agent Workspace 让每个 Agent 都
 
 ## 主 Agent
 
-**一个对话管住整个团队，打字或开口都行。**
+**说一次，主 Agent 帮你分下去。**
 
 <p align="center">
   <img src="docs/assets/zh/team-map.png" alt="主 Agent 把指令转给几个 Agent，旁边是团队地图">
@@ -51,7 +51,7 @@ Agent 可以并行，你的注意力不行。Agent Workspace 让每个 Agent 都
 
 ## 工作地图（Work Map）
 
-**工作是怎么推进的，替你画出来。**
+**几个小时的对话，不用从头翻。**
 
 <p align="center">
   <img src="docs/assets/zh/session-map.png" alt="会话地图：按任务分段，带结果、决策点和 fork 分支">
@@ -93,9 +93,9 @@ Agent 可以并行，你的注意力不行。Agent Workspace 让每个 Agent 都
 
 ## 隐私
 
-- **本地优先。** Agent 通过你机器或服务器上的 `claude` 和 `codex` CLI 运行，中间没有任何我们的服务器，工作区数据留在你的硬盘上。
-- **按你的规则来。** 权限遵循各 CLI 自己的模式，可按 Agent 单独设置，从不绕过。应用不改你的 CLI 设置；共享记忆只在先备份后，写入它自己标记的那一段。
-- **声音只属于你。** 用你自己的 OpenAI key，或用本机模型（SenseVoice、Whisper、Paraformer），音频不会发送到任何地方。
+- **中间没有我们的服务器。** Agent 通过你机器或服务器上的 `claude` 和 `codex` CLI 运行，中间没有任何我们的服务器，工作区数据留在你的硬盘上。
+- **权限按你设的来。** 权限遵循各 CLI 自己的模式，可按 Agent 单独设置，从不绕过。应用不改你的 CLI 设置；共享记忆只在先备份后，写入它自己标记的那一段。
+- **语音可以只在本机。** 用你自己的 OpenAI key，或用本机模型（SenseVoice、Whisper、Paraformer），音频不会发送到任何地方。
 
 <details>
 <summary><b>从源码运行</b></summary>

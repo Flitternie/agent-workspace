@@ -5,8 +5,8 @@
 <h1 align="center">Agent Workspace</h1>
 
 <p align="center">
-  <b>The meeting room for your coding agents.</b><br>
-  Run Claude Code and Codex side by side, talk to one main agent, and see every step on a map.
+  <b>Stop juggling tabs and terminals. Run a meeting with your agents.</b><br>
+  A desktop app for running Claude Code and Codex side by side: every agent on its own card, a main agent to pass things on, and a map of how the work went.
 </p>
 
 <p align="center">
@@ -26,11 +26,11 @@
   <img src="docs/assets/en/overview.png" alt="The Overview: four agents at work, one asking for permission">
 </p>
 
-Agents work in parallel. Your attention doesn't. Agent Workspace gives every agent a seat at one table, routes what you say to the right one, and keeps a record of how the work unfolded.
+If you run several Claude Code or Codex sessions at once, you know how it goes: a dozen terminals, an agent that has been waiting on you for twenty minutes, and no easy way to see what each one already tried. Agent Workspace puts them all in one window.
 
 ## Overview
 
-**Every agent at a glance, and nothing waiting unseen.**
+**See every agent at once.**
 
 - Each agent is a card: what it did, what it is doing, what it needs from you.
 - Questions and permission requests stay on the card, with the proposed change, until you answer.
@@ -38,7 +38,7 @@ Agents work in parallel. Your attention doesn't. Agent Workspace gives every age
 
 ## Main agent
 
-**One conversation for the whole team. Type it or say it.**
+**Tell one agent. It tells the rest.**
 
 <p align="center">
   <img src="docs/assets/en/team-map.png" alt="The main agent relaying instructions to three agents, with its Team Map">
@@ -51,7 +51,7 @@ Agents work in parallel. Your attention doesn't. Agent Workspace gives every age
 
 ## Work Map
 
-**How the work unfolded, drawn for you.**
+**Read back a long session without scrolling through it.**
 
 <p align="center">
   <img src="docs/assets/en/session-map.png" alt="A Session Map: tasks with outcomes, decisions and a fork">
@@ -93,9 +93,9 @@ Every feature works the same with both CLIs:
 
 ## Privacy
 
-- **Local by design.** Agents run through the `claude` and `codex` CLIs on your machine or your server. No server of ours sits in between, and your workspace stays on your disk.
-- **Your rules.** Permissions follow each CLI's own modes, per agent, and are never bypassed. Your CLI settings are left alone; shared memory writes only to its own marked section, after a backup.
-- **Your voice stays yours.** Use OpenAI with your own key, or an on-device model (SenseVoice, Whisper, Paraformer) that sends no audio anywhere.
+- **No server in between.** Agents run through the `claude` and `codex` CLIs on your machine or your server. No server of ours sits in between, and your workspace stays on your disk.
+- **Permissions as you set them.** Permissions follow each CLI's own modes, per agent, and are never bypassed. Your CLI settings are left alone; shared memory writes only to its own marked section, after a backup.
+- **Voice can stay local.** Use OpenAI with your own key, or an on-device model (SenseVoice, Whisper, Paraformer) that sends no audio anywhere.
 
 <details>
 <summary><b>Build from source</b></summary>
