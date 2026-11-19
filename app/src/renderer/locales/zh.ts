@@ -53,6 +53,7 @@ export const zh: Record<string, string> = {
   '{alias} is asking you: {what}': '{alias} 在问你：{what}',
   '{alias}’s request is settled: {what}': '{alias} 的请求已处理：{what}',
   'Waiting on you · {n}': '等你处理 · {n}',
+  '{n} waiting on you': '{n} 个待处理',
   '{n} requests from agents': '{n} 个 agent 请求',
   '{n} settled': '{n} 个已处理',
   'Show the request': '展开请求',

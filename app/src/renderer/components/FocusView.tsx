@@ -556,7 +556,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
               )
             ) : null}
-            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
               <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
             </PreviewContext.Provider>
@@ -574,6 +573,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <PlanChecklist plan={task.plan} />
               </div>
             ) : null}
+            {/* What the agents wait on: one line right above the reply box, unfolding to answer them here. */}
+            {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} bar /> : null}
             <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
@@ -649,57 +650,93 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
 }
 
 /**
- * In the main agent's view: everything the agents are waiting on, answerable right
- * here (same buttons as on their cards), or by telling the main agent.
+ * Everything the agents are waiting on, answerable right here (same buttons as on their cards),
+ * or by telling the main agent. In the main agent's view (`bar`): one line above the reply box,
+ * "N waiting", that unfolds into the list; nothing at all when nothing waits.
  */
-export function WaitingOnYou({ snapshot, now, onOpen, compact, limit }: { snapshot: WorkspaceSnapshot; now: number; onOpen?: (taskId: string) => void; compact?: boolean; limit?: number }) {
+export function WaitingOnYou({ snapshot, now, onOpen, compact, limit, bar }: { snapshot: WorkspaceSnapshot; now: number; onOpen?: (taskId: string) => void; compact?: boolean; limit?: number; bar?: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [unfolded, setUnfolded] = useState(false);
   const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId));
+  // Folds again once everything is answered, so the next request arrives as one line.
+  useEffect(() => {
+    if (!open.length) setUnfolded(false);
+  }, [open.length]);
   if (!open.length) return null;
   // With several waiting, one line each (expand one to answer) so the list stays short.
   const rows = open.length > 2;
+  const list = open.slice(0, limit ?? open.length).map((a) => {
+    const worker = snapshot.tasks.find((x) => x.taskId === a.taskId)!;
+    if (rows && expanded !== a.id)
+      return (
+        <div key={a.id} className={`waiting-row kind-${a.kind}`} data-testid="waiting-row">
+          <button className="waiting-row-main" onClick={() => setExpanded(a.id)} title={t('Show the request')}>
+            <Alias alias={worker.alias} size="sm" />
+            <span className="waiting-row-name">
+              <AgentName task={worker} />
+            </span>
+            <span className="waiting-row-text">{a.headline}</span>
+          </button>
+          {onOpen ? (
+            <button className="link small" onClick={() => onOpen(worker.taskId)}>
+              {t('Open')}
+            </button>
+          ) : null}
+        </div>
+      );
+    return (
+      <div key={a.id} className="waiting-item" data-testid="waiting-item">
+        <div className="waiting-from">
+          <Alias alias={worker.alias} size="sm" /> <AgentName task={worker} />
+          {onOpen ? (
+            <button className="link small" onClick={() => onOpen(worker.taskId)}>
+              {t('Open')}
+            </button>
+          ) : null}
+          {rows ? (
+            <button className="link small" onClick={() => setExpanded(null)}>
+              {t('Show less')}
+            </button>
+          ) : null}
+        </div>
+        <AttentionView item={a} task={worker} compact now={now} />
+      </div>
+    );
+  });
+  const more = limit && open.length > limit ? <div className="muted small">{t('+{n} more', { n: open.length - limit })}</div> : null;
+  if (bar) {
+    // Who is waiting, once each, for the folded line.
+    const who = [...new Map(open.map((a) => [a.taskId, snapshot.tasks.find((x) => x.taskId === a.taskId)!])).values()];
+    return (
+      <div className={`waiting waiting-bar${unfolded ? ' open' : ''}`} data-testid="waiting-on-you">
+        <div className="waiting-bar-box">
+          <button className="waiting-bar-head" aria-expanded={unfolded} onClick={() => setUnfolded(!unfolded)} data-testid="waiting-bar-toggle">
+            <span className="waiting-bar-dot" aria-hidden />
+            <span className="waiting-bar-count">{t('{n} waiting on you', { n: open.length })}</span>
+            <span className="waiting-bar-who" aria-hidden>
+              {who.slice(0, 3).map((w) => (
+                <Alias key={w.taskId} alias={w.alias} size="sm" />
+              ))}
+            </span>
+            {!unfolded ? <span className="waiting-bar-peek">{open[0].headline}</span> : <span className="waiting-bar-peek" />}
+            <span className="waiting-bar-chevron" aria-hidden>
+              <Icon name="chevron" size={12} />
+            </span>
+          </button>
+          {unfolded ? (
+            <div className="waiting-bar-list" data-testid="waiting-bar-list">
+              {list}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`waiting${compact ? ' compact' : ''}`} data-testid="waiting-on-you">
       <div className="section-label">{t('Waiting on you · {n}', { n: open.length })}</div>
-      {open.slice(0, limit ?? open.length).map((a) => {
-        const worker = snapshot.tasks.find((x) => x.taskId === a.taskId)!;
-        if (rows && expanded !== a.id)
-          return (
-            <div key={a.id} className={`waiting-row kind-${a.kind}`} data-testid="waiting-row">
-              <button className="waiting-row-main" onClick={() => setExpanded(a.id)} title={t('Show the request')}>
-                <Alias alias={worker.alias} size="sm" />
-                <span className="waiting-row-name">
-                  <AgentName task={worker} />
-                </span>
-                <span className="waiting-row-text">{a.headline}</span>
-              </button>
-              {onOpen ? (
-                <button className="link small" onClick={() => onOpen(worker.taskId)}>
-                  {t('Open')}
-                </button>
-              ) : null}
-            </div>
-          );
-        return (
-          <div key={a.id} className="waiting-item">
-            <div className="waiting-from">
-              <Alias alias={worker.alias} size="sm" /> <AgentName task={worker} />
-              {onOpen ? (
-                <button className="link small" onClick={() => onOpen(worker.taskId)}>
-                  {t('Open')}
-                </button>
-              ) : null}
-              {rows ? (
-                <button className="link small" onClick={() => setExpanded(null)}>
-                  {t('Show less')}
-                </button>
-              ) : null}
-            </div>
-            <AttentionView item={a} task={worker} compact now={now} />
-          </div>
-        );
-      })}
-      {limit && open.length > limit ? <div className="muted small">{t('+{n} more', { n: open.length - limit })}</div> : null}
+      {list}
+      {more}
     </div>
   );
 }
