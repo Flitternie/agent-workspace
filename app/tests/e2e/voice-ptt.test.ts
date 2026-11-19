@@ -74,7 +74,7 @@ describe.runIf(enabled)('push to talk', () => {
     await page.keyboard.down('Alt');
     await page.keyboard.down('Space');
     await expect.poll(() => mic.getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
-    await expect.poll(label).toMatch(/let go to send|Hearing you/);
+    await expect.poll(label).toMatch(/Let go to stop|Hearing you/);
     await page.waitForTimeout(4000);
     await page.screenshot({ path: join(shots, 'ptt-01-holding.png') });
     await page.waitForTimeout(9000);

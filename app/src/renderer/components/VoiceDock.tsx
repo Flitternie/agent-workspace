@@ -90,7 +90,11 @@ export function VoiceDock({
   const [level, setLevel] = useState(0);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [text, setText] = useState('');
+  const [text, setTextState] = useState('');
+  const setText = (v: string) => {
+    textRef.current = v;
+    setTextState(v);
+  };
   const [showLog, setShowLog] = useState(false);
   const [showMain, setShowMain] = useState(false);
   const [newProvider, setNewProvider] = useState<AgentProvider>('claude');
@@ -131,6 +135,23 @@ export function VoiceDock({
   /** What is being said on an agent's page, shown in its own box (the Composer listens). */
   const voiceToBox = (taskId: string, text: string, phase: 'listening' | 'keep' | 'drop') =>
     window.dispatchEvent(new CustomEvent('amw:voice-draft', { detail: { taskId, text, phase } }));
+  // On the Overview the bar's own box shows it, after whatever was typed there.
+  const textRef = useRef('');
+  const dockVoice = useRef<{ base: string } | null>(null);
+  const toBox = (text: string, phase: 'listening' | 'keep' | 'drop') => {
+    const box = composeRef.current;
+    if (box) return voiceToBox(box, text, phase);
+    const join = (a: string, b: string) => (a.trim() && b ? `${a.trimEnd()} ${b}` : a || b);
+    if (!dockVoice.current) {
+      if (phase !== 'listening') return;
+      dockVoice.current = { base: textRef.current };
+    }
+    const base = dockVoice.current.base;
+    if (phase === 'listening') return setText(join(base, text));
+    dockVoice.current = null;
+    setText(phase === 'keep' ? join(base, text) : base);
+    if (phase === 'keep') requestAnimationFrame(() => (document.querySelector('[data-testid="dock-input"]') as HTMLTextAreaElement | null)?.focus());
+  };
 
   const dispatch = useCallback(
     async (entry: Pick<Entry, 'id' | 'text' | 'interrupt'> & { source?: Entry['source'] }, target: Target) => {
@@ -168,6 +189,21 @@ export function VoiceDock({
   const route = useCallback(
     async (entry: Entry) => {
       patch(entry.id, { phase: 'routing' });
+      // Push to talk (any mode but "always on"): what was said waits in the box, to check and
+      // send with Enter. Always on (a meeting): it goes once the pause ends, as before.
+      const manual = entry.source === 'voice' && modeRef.current !== 'open';
+      if (entry.inBox && !composeRef.current) {
+        if (kept.current.has(entry.id)) return;
+        if (manual) {
+          kept.current.add(entry.id);
+          toBox(entry.text, 'keep');
+          setEntries((list) => list.filter((x) => x.id !== entry.id));
+          return;
+        }
+        toBox('', 'drop');
+        entry.inBox = false;
+        patch(entry.id, { inBox: false, phase: 'routing' });
+      }
       try {
         // With a main agent, a message that does not go to the selected/open agent goes to
         // the main agent, which decides what to do. Only an agent named outright is sent
@@ -179,7 +215,7 @@ export function VoiceDock({
             const named = await call('route:decide', { utterance: entry.text, focusedTaskId: null, namedOnly: true });
             if (named.kind === 'existing') {
               patch(entry.id, { decision: named, phase: 'review' });
-              const confirm = named.confidence !== 'high' || (entry.source === 'voice' && snapRef.current.settings.alwaysConfirmVoice);
+              const confirm = manual || named.confidence !== 'high' || (entry.source === 'voice' && snapRef.current.settings.alwaysConfirmVoice);
               if (confirm) setActiveId(entry.id);
               else await dispatch(entry, { kind: 'existing', taskId: named.taskId });
               return;
@@ -189,7 +225,7 @@ export function VoiceDock({
           if (entry.inBox && composeRef.current === main.taskId) {
             if (kept.current.has(entry.id)) return;
             kept.current.add(entry.id);
-            if (snapRef.current.settings.alwaysConfirmVoice) {
+            if (manual || snapRef.current.settings.alwaysConfirmVoice) {
               voiceToBox(main.taskId, entry.text, 'keep');
               setEntries((list) => list.filter((x) => x.id !== entry.id));
               return;
@@ -206,7 +242,7 @@ export function VoiceDock({
         if (kept.current.has(entry.id)) return;
         if (entry.inBox && box && d.kind === 'existing' && d.taskId === box) {
           kept.current.add(entry.id);
-          if (snapRef.current.settings.alwaysConfirmVoice || d.confidence !== 'high') {
+          if (manual || snapRef.current.settings.alwaysConfirmVoice || d.confidence !== 'high') {
             voiceToBox(box, entry.text, 'keep');
             setEntries((list) => list.filter((x) => x.id !== entry.id));
             return;
@@ -231,6 +267,7 @@ export function VoiceDock({
         // that names nobody else goes to it directly. A sensitive command still asks first.
         const toContext = d.kind === 'existing' && d.context === true && d.taskId === focusRef.current && !/sensitive command/.test(d.reason);
         const auto =
+          !manual &&
           (entry.source === 'voice' || toContext) &&
           (!snapRef.current.settings.alwaysConfirmVoice || entry.source === 'typed') &&
           ((d.kind === 'existing' && (d.confidence === 'high' || toContext)) || (d.kind === 'coordinator' && d.reason === 'workspace status question'));
@@ -278,7 +315,7 @@ export function VoiceDock({
       return;
     }
     // "Stop, …" without a known agent yet: route the rest, and stop whoever gets it.
-    const entry: Entry = { id: d.id, source: 'voice', text: stop && rest ? rest : said, phase: 'routing', at: d.at, interrupt: stop || undefined, inBox: !!composeRef.current };
+    const entry: Entry = { id: d.id, source: 'voice', text: stop && rest ? rest : said, phase: 'routing', at: d.at, interrupt: stop || undefined, inBox: true };
     patch(d.id, { text: said, phase: 'routing', holdUntil: undefined });
     // Route in the order things were said.
     queue.current = queue.current.then(() => route(entry));
@@ -361,7 +398,7 @@ export function VoiceDock({
       if (!d) {
         d = { id: nextId++, at: new Date().toISOString(), parts: [] };
         draft.current = d;
-        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: !!composeRef.current });
+        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: true });
       }
       const current = d;
       partialGen.current++;
@@ -401,7 +438,7 @@ export function VoiceDock({
       if (!d) {
         d = { id: nextId++, at: new Date().toISOString(), parts: [] };
         draft.current = d;
-        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: !!composeRef.current });
+        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: true });
       }
       const current = d;
       const gen = partialGen.current;
@@ -542,6 +579,7 @@ export function VoiceDock({
   useEffect(() => () => gesture.current.reset(), [mode, shortcut]);
 
   const submitTyped = (interrupt = false) => {
+    if (dockVoice.current) takeOver();
     const u = text.trim();
     const active = entries.find((e) => e.id === activeId && e.phase === 'review');
     if (!u) {
@@ -582,21 +620,32 @@ export function VoiceDock({
 
   // On an agent's page, what is being said shows in its box as it is transcribed. Once the
   // draft is decided ('keep' / 'drop' above) or gone (nothing heard, cancelled), the box lets go.
-  const boxLive = composeTo ? entries.find((e) => e.inBox && (e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing')) : undefined;
+  const boxLive = entries.find((e) => e.inBox && (e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing'));
   const boxShown = useRef<{ id: number; text: string } | null>(null);
   useEffect(() => {
     const was = boxShown.current;
-    if (boxLive && composeTo) {
-      if (was?.id !== boxLive.id || was.text !== boxLive.text) voiceToBox(composeTo, boxLive.text, 'listening');
+    if (boxLive) {
+      if (was?.id !== boxLive.id || was.text !== boxLive.text) toBox(boxLive.text, 'listening');
       boxShown.current = { id: boxLive.id, text: boxLive.text };
     } else if (was) {
       boxShown.current = null;
       // Decided already (kept in the box, or sent): nothing to undo. Otherwise it went away: let go.
       const e = entries.find((x) => x.id === was.id);
-      if (composeTo && (!e || e.phase === 'dismissed' || e.phase === 'error') && !kept.current.has(was.id)) voiceToBox(composeTo, '', 'drop');
+      if ((!e || e.phase === 'dismissed' || e.phase === 'error') && !kept.current.has(was.id)) toBox('', 'drop');
     }
   });
   // The user took it over in the box (typed into it, or sent it): this draft is not sent again.
+  const takeOver = () => {
+    const d = draft.current;
+    if (d) {
+      clearTimeout(d.timer);
+      draft.current = null;
+      kept.current.add(d.id);
+      setEntries((list) => list.filter((x) => x.id !== d.id));
+    }
+    setEntries((list) => list.filter((x) => !(x.inBox && x.phase === 'routing' && (kept.current.add(x.id), true))));
+    dockVoice.current = null;
+  };
   useEffect(() => {
     const taken = (ev: Event) => {
       if ((ev as CustomEvent<{ taskId: string }>).detail.taskId !== composeRef.current) return;
@@ -642,8 +691,8 @@ export function VoiceDock({
         ? mode === 'open'
           ? tr('Listening')
           : holding
-            ? tr('Let go to send')
-            : tr('Press {keys} again to send', { keys })
+            ? tr('Let go to stop')
+            : tr('Press {keys} again to stop', { keys })
         : mic === 'starting'
           ? tr('Turning on the microphone…')
           : mic === 'denied'
@@ -661,7 +710,7 @@ export function VoiceDock({
     ? tr('Set up voice')
     : mode === 'open'
       ? `${live ? tr('Mute') : tr('Unmute')} (${keys})`
-      : `${live ? tr('Send') : tr('Talk')} (${keys})`;
+      : `${live ? tr('Stop') : tr('Talk')} (${keys})`;
 
   // The mic button: in the bar on the Overview; on an agent's page, beside its own box.
   const micButton = (
@@ -670,7 +719,7 @@ export function VoiceDock({
           disabled={!stt && !onSettings}
           onClick={!stt ? onSettings : toggleMic}
           aria-pressed={live}
-          aria-label={mode !== 'open' ? (live ? tr('Send') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
+          aria-label={mode !== 'open' ? (live ? tr('Stop') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
           title={micTitle}
           data-testid="mic-button"
           style={{ ['--level' as string]: live ? level.toFixed(2) : '0' }}
@@ -970,7 +1019,10 @@ export function VoiceDock({
                   ? tr('Talk to the main agent — or name an agent: “Charlie, hold the migration”')
                   : tr('Type to any agent — “Charlie, hold the migration”')
             }
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              if (dockVoice.current) takeOver();
+              setText(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();

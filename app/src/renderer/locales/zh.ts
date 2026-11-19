@@ -969,4 +969,10 @@ export const zh: Record<string, string> = {
   'Listening': '正在听',
   'Let go to send': '松开发送',
   'Press {keys} again to send': '再按 {keys} 发送',
+  'Let go to stop': '松开结束',
+  'Press {keys} again to stop': '再按 {keys} 结束',
+  'talk': '说话',
+  'Press the shortcut to talk and again to stop; what you said waits in the box. The mic is off the rest of the time.': '按一下快捷键开始说话，再按一下结束；说的话会留在输入框里。其余时间麦克风关闭。',
+  'Hold the shortcut while you talk; what you said waits in the box. The mic is off the rest of the time.': '说话时按住快捷键；说的话会留在输入框里。其余时间麦克风关闭。',
+  'Tap to start and again to stop, or hold while you talk; what you said waits in the box.': '按一下开始、再按一下结束，或者说话时按住；说的话会留在输入框里。',
 };
