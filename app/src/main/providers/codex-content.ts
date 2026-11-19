@@ -27,6 +27,8 @@ export interface CodexItemView {
   text: string;
   status?: ToolStatus;
   tool?: ToolCallInfo;
+  /** Images in a user message from history: inline (data URL) or a file on the agent's machine. */
+  images?: Array<{ data: string; mediaType?: string } | { path: string }>;
 }
 
 /** One FileUpdateChange → FileDiff. `add` carries the whole file without @@ headers. */
@@ -66,6 +68,18 @@ function status(item: Rec, completed: boolean, history: boolean): ToolStatus {
   return history && st === 'running' ? 'interrupted' : st;
 }
 
+/** The images in a user message's content: `localImage` paths and `image` data URLs (other URLs are not fetched). */
+function codexImages(content: unknown): NonNullable<CodexItemView['images']> {
+  const out: NonNullable<CodexItemView['images']> = [];
+  for (const c of arr(content)) {
+    const part = rec(c);
+    if (part.type === 'localImage' && str(part.path)) out.push({ path: str(part.path) });
+    const data = part.type === 'image' ? /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(str(part.url)) : null;
+    if (data) out.push({ data: data[2], mediaType: data[1] });
+  }
+  return out;
+}
+
 export function codexItem(value: unknown, opts: { history: boolean; completed: boolean; cwd: string }): CodexItemView | undefined {
   const item = rec(value);
   const id = str(item.id);
@@ -85,7 +99,8 @@ export function codexItem(value: unknown, opts: { history: boolean; completed: b
           .filter(Boolean)
           .join('\n'),
       );
-      return text ? { id, role: 'user', text } : undefined;
+      const images = codexImages(item.content);
+      return text || images.length ? { id, role: 'user', text, ...(images.length ? { images } : {}) } : undefined;
     }
     case 'reasoning': {
       const text = arr(item.summary).map(str).filter(Boolean).join('\n\n');

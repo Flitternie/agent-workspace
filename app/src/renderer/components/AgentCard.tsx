@@ -8,6 +8,7 @@ import { DiffStat, KIND_ICON, PlanChecklist, touchedPaths } from './Content';
 import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread, warningText } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
+import { AttachmentStrip, useAttachments } from './Attachments';
 
 /** One participant tile in the meeting-style Overview. */
 export function AgentCard({
@@ -49,15 +50,20 @@ export function AgentCard({
   const needs = urgent.some((i) => i.kind === 'approval' || i.kind === 'question');
   const highRisk = items.some((i) => i.highRisk);
 
+  // Images pasted or dropped on the tile's box go with the message, as on the agent's page.
+  const attach = useAttachments();
   const send = async (interrupt = false) => {
     const text = draft.trim();
-    if (!text || sending) return;
+    const images = attach.refs;
+    if ((!text && !images.length) || sending || attach.busy) return;
     setError('');
     setSending(true);
-    const r = await call('task:send', { taskId: task.taskId, text, via: 'card', interrupt }).catch((e) => ({ ok: false, error: errorText(e) }));
+    const r = await call('task:send', { taskId: task.taskId, text, via: 'card', interrupt, ...(images.length ? { images } : {}) }).catch((e) => ({ ok: false, error: errorText(e) }));
     setSending(false);
-    if (r.ok) setDraft('');
-    else setError(r.error ?? t('Not delivered'));
+    if (r.ok) {
+      setDraft('');
+      attach.clear();
+    } else setError(r.error ?? t('Not delivered'));
   };
 
   return (
@@ -175,7 +181,8 @@ export function AgentCard({
         ) : null}
       </div>
 
-      <footer className="tile-composer">
+      <footer className={`tile-composer${attach.dragging ? ' dropping' : ''}${attach.items.length || attach.busy ? ' has-images' : ''}`} {...attach.dropProps}>
+        <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
         <textarea
           ref={input}
           className="composer-input"
@@ -184,6 +191,7 @@ export function AgentCard({
           aria-label={t('Message {alias}', { alias: task.alias })}
           placeholder={task.status === 'running' ? t('Add to {alias}’s work… (⌘↵ stops it first)', { alias: task.alias }) : t('Message {alias}…', { alias: task.alias })}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={attach.onPaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -192,11 +200,11 @@ export function AgentCard({
             if (e.key === 'Escape') e.currentTarget.blur();
           }}
         />
-        <button className="send-btn" aria-label={t('Send to {alias}', { alias: task.alias })} disabled={!draft.trim() || sending} onClick={() => void send()}>
+        <button className="send-btn" aria-label={t('Send to {alias}', { alias: task.alias })} disabled={(!draft.trim() && !attach.items.length) || sending || attach.busy} onClick={() => void send()}>
           <Icon name="send" />
         </button>
       </footer>
-      {error ? <div className="error-text tile-error">{error}</div> : null}
+      {error || attach.error ? <div className="error-text tile-error">{error || attach.error}</div> : null}
     </article>
   );
 }
@@ -213,7 +221,10 @@ function stepText(a: TranscriptItem): string {
   }
   if (a.role === 'thought') return `${t('Thinking')}: ${first}`;
   if (a.role === 'plan') return `${t('Proposed a plan')}: ${first}`;
-  if (a.role === 'user') return `${a.via === 'main' ? t('Main agent') : t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${first}`;
+  if (a.role === 'user') {
+    const images = a.images?.length ? (a.images.length === 1 ? t('[image]') : t('[{n} images]', { n: a.images.length })) : '';
+    return `${a.via === 'main' ? t('Main agent') : t('You')}${a.via === 'voice' ? ` (${t('voice')})` : ''}: ${[images, first].filter(Boolean).join(' ')}`;
+  }
   return first;
 }
 

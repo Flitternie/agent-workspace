@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
@@ -10,7 +11,7 @@ import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import { CodexSubtasks } from './subtasks';
-import type { ApprovalResponse, Delivery, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ForkSessionOpts, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 import { cleanUserText } from './user-text';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
@@ -172,7 +173,7 @@ class AppServer {
 function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: string): ProviderEvent[] {
   const v = codexItem(value, { history, completed, cwd });
   if (!v) return [];
-  return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history }];
+  return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history, ...(v.images ? { images: v.images } : {}) }];
 }
 
 /** From `codex login status`; only the method is kept (e.g. "ChatGPT", "an API key"), never the key. */
@@ -212,6 +213,19 @@ function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsR
 }
 
 /** Codex features the main agent does without (thread-level config overrides). */
+/**
+ * A user message as app-server input. Images on this Mac go as files (`localImage`: Codex reads,
+ * shrinks and records the path, so its history keeps them). Over SSH the file is not on the host,
+ * so the image goes inline as a data URL, as Codex's own client does with a remote workspace.
+ */
+export async function codexInput(text: string, images: ImageInput[], remote: boolean): Promise<Array<Record<string, unknown>>> {
+  const input: Array<Record<string, unknown>> = [];
+  if (text.trim() || !images.length) input.push({ type: 'text', text, text_elements: [] });
+  for (const img of images)
+    input.push(remote ? { type: 'image', url: `data:${img.mediaType};base64,${(await readFile(img.path)).toString('base64')}` } : { type: 'localImage', path: img.path });
+  return input;
+}
+
 const MAIN_AGENT_CONFIG = {
   features: {
     shell_tool: false,
@@ -531,9 +545,9 @@ class CodexSession implements ProviderSession {
     this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed: !!resumeId });
   }
 
-  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
+  async send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery> {
     if (!this.server || this.server.closed || !this.threadId) throw new Error('Codex session is not connected.');
-    const input = [{ type: 'text', text, text_elements: [] }];
+    const input = await codexInput(text, opts?.images ?? [], !!this.args.host);
     if (this.working && this.turnId && !opts?.interrupt) {
       // turn/steer adds the message to the running turn; Codex reads it right away.
       try {

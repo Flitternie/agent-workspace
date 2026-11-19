@@ -3,7 +3,7 @@ import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ModelOption, ForkPoint, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
-import type { Delivery, ApprovalResponse, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { Delivery, ApprovalResponse, ForkSessionOpts, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 /**
  * Deterministic scripted agent used for UI tests and the demo. It behaves like a
@@ -142,8 +142,10 @@ class MockSession implements ProviderSession {
     this.emit({ type: 'sessionStarted', nativeSessionId: this.history.id, resumed: !!resumeId });
   }
 
-  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
+  async send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery> {
     if (this.closed || !this.history) throw new Error('Mock session is closed.');
+    // Images are not looked at; the message notes how many came, so tests can see they arrived.
+    if (opts?.images?.length) text = [text, `[${opts.images.length} image${opts.images.length === 1 ? '' : 's'}: ${opts.images.map((i) => i.mediaType).join(', ')}]`].filter(Boolean).join('\n');
     if (this.busy && !opts?.interrupt) {
       // Like Claude/Codex steering: noted now, acknowledged in this turn's reply.
       this.record('user', text);

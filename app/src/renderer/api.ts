@@ -7,6 +7,7 @@ import type {
   DispatchResult,
   FilePreview,
   ForkPoint,
+  ImageRef,
   MemoryBackup,
   MemoryCandidate,
   MemoryRecord,
@@ -47,6 +48,7 @@ export interface Outputs {
   'ssh:terminal': void;
   'task:create': Task;
   'task:send': DispatchResult;
+  'attachment:save': ImageRef;
   'task:interrupt': void;
   'task:models': ModelOption[];
   'task:setModel': void;

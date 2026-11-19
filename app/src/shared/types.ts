@@ -202,12 +202,23 @@ export interface AttentionItem {
 
 export type TranscriptRole = 'user' | 'assistant' | 'tool' | 'system' | 'thought' | 'plan';
 
+/** An image a message carries, stored once in the app's data folder (main/attachments.ts). */
+export interface ImageRef {
+  /** Content-addressed file name: 24 hex characters and the format's extension. */
+  id: string;
+  mediaType: string;
+  /** The file's name, when it came from one. */
+  name?: string;
+}
+
 export interface TranscriptItem {
   /** Stable id (provider item id where available) used for upsert / dedup. */
   id: string;
   taskId: string;
   role: TranscriptRole;
   text: string;
+  /** Images the user message carried (shown with it; an image that could not be kept shows as missing). */
+  images?: ImageRef[];
   /** How the user message arrived. */
   via?: 'text' | 'voice' | 'card' | 'initial' | 'main';
   /** User messages sent while the agent was working. */

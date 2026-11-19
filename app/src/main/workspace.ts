@@ -25,7 +25,7 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot, BtwEntry } from '../shared/types';
+  WorkspaceSnapshot, BtwEntry, ImageRef } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -34,7 +34,8 @@ import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMO
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
-import type { ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
+import type { HistoryImage, ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
+import { AttachmentStore, MAX_IMAGES } from './attachments';
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
@@ -124,6 +125,8 @@ export class Workspace {
   /** item === null means "the whole transcript was replaced; reload it". */
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
   private worktrees: WorktreeService;
+  /** Images sent with messages (and read back from history). */
+  readonly attachments: AttachmentStore;
   private log: (...args: unknown[]) => void;
   private retryPolicy: RetryPolicy;
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
@@ -138,6 +141,7 @@ export class Workspace {
     this.skills = new SkillLibrary(opts.dataDir);
     this.writeback = new MemoryWriteback(opts.dataDir, opts.home);
     this.worktrees = new WorktreeService(join(opts.dataDir, 'worktrees'));
+    this.attachments = new AttachmentStore(join(opts.dataDir, 'attachments'));
     this.log = opts.log ?? (() => {});
     this.retryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
     this.applyModels();
@@ -1074,7 +1078,8 @@ export class Workspace {
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
           const prev = history.findIndex((h) => h.id === event.itemId);
-          const item = mergeItem(prev === -1 ? undefined : history[prev], { id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() }, event.tool);
+          const images = this.historyImages(event.images, task.host);
+          const item = mergeItem(prev === -1 ? undefined : history[prev], { id: event.itemId, taskId, role: event.role, text: event.text, ...(images ? { images } : {}), toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() }, event.tool);
           if (prev === -1) history.push(item);
           else history[prev] = item;
           return;
@@ -1452,8 +1457,27 @@ export class Workspace {
   // ---------------------------------------------------------------- messaging
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
-  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
+  /**
+   * Images in a user message read back from a CLI's history, kept in the app's store so the
+   * conversation shows them. A file on an SSH host is not fetched (it shows as an image that
+   * could not be kept); bytes from history and files on this Mac are.
+   */
+  private historyImages(images: HistoryImage[] | undefined, host: string | undefined): ImageRef[] | undefined {
+    if (!images?.length) return undefined;
+    const refs = images
+      .map((img) => ('data' in img ? this.attachments.saveFromHistory(img) : host ? undefined : this.attachments.saveFromHistory(img)))
+      .map((r, i) => r ?? { id: '', mediaType: '', name: 'path' in images[i] ? basename((images[i] as { path: string }).path) : undefined });
+    return refs;
+  }
+
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[] } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
+    const images = opts.images?.length ? opts.images.slice(0, MAX_IMAGES) : undefined;
+    if (images && task === this.store.data.mainAgent) return { ok: false, taskId, error: 'The main agent does not take images; send them to an agent.' };
+    const missing = images?.find((r) => !this.attachments.has(r.id));
+    if (missing) return { ok: false, taskId, error: `Image ${missing.name ?? missing.id} is no longer stored; add it again.` };
+    // What an image-only message is about, where a line of text is needed (summary, title, replies).
+    const about = text.trim() || (images ? `[${images.length === 1 ? 'image' : `${images.length} images`}]` : '');
     if (task === this.store.data.mainAgent) {
       this.mainTurns++;
       // Back after a long pause, or a long chapter: start a new one before this message.
@@ -1470,7 +1494,7 @@ export class Workspace {
       const delta = memoryDelta(given, task.memorySeen ?? seenOf(given.filter((m) => task.injectedMemoryIds?.includes(m.id))));
       const update = deltaSize(delta) ? memoryUpdateText(delta) : '';
       if (update) this.appendSystem(taskId, `Memory sent with this message: ${deltaSize(delta)}`, { memoryUpdate: [...delta.added.map((m) => m.body), ...delta.changed.map((m) => m.body), ...delta.removed.map((b) => `✕ ${b}`)] });
-      const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
+      const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, ...(images ? { images } : {}), via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
       task.suggestion = undefined;
       // A new request starts a new set of sub-agents; ones still working (in the background) stay.
@@ -1482,7 +1506,10 @@ export class Workspace {
       // then any memory update, the commands run with `!`, and the message itself.
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
-      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), opts);
+      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), {
+        interrupt: opts.interrupt,
+        ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
+      });
       this.shellOutput.delete(taskId);
       if (update) {
         task.memorySeen = seenOf(given);
@@ -1493,18 +1520,18 @@ export class Workspace {
       // and takes the place of retrying a failed turn.
       for (const a of this.store.data.attention)
         if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
-          this.closeAttention(a, 'resolved', `Replied: ${clip(text, 80)}`);
+          this.closeAttention(a, 'resolved', `Replied: ${clip(about, 80)}`);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
       // Steering adds to the work in progress; the summary keeps describing it.
-      if (delivery !== 'steer') task.summary = `Working on: ${clip(text, 120)}`;
+      if (delivery !== 'steer') task.summary = `Working on: ${clip(about, 120)}`;
       task.updatedAt = now();
       // Everything sent here comes from the user (typed, spoken, the main agent on their behalf).
       this.touched(task);
       // Started without saying what for: this first message is what the task is, and what its label describes.
       if (!task.title.trim() && delivery !== 'steer') {
-        task.title = clip(text.replace(/\s+/g, ' ').trim(), 80);
-        if (task.nameSource !== 'user') this.autoLabel(task, task.title, text);
+        task.title = clip(about.replace(/\s+/g, ' ').trim(), 80);
+        if (task.nameSource !== 'user' && text.trim()) this.autoLabel(task, task.title, text);
       }
       // The first instruction is what the first label describes; later messages may change the work.
       if (via !== 'initial') task.saidSinceLabel = (task.saidSinceLabel ?? 0) + 1;
@@ -1760,14 +1787,16 @@ export class Workspace {
         }
         break;
       }
-      case 'transcriptItem':
+      case 'transcriptItem': {
+        const images = this.historyImages(event.images, task.host);
         this.upsertTranscript(
           taskId,
-          { id: event.itemId, taskId, role: event.role, text: event.text, toolLabel: event.toolLabel, toolStatus: event.toolStatus, streaming: false, createdAt: now() },
+          { id: event.itemId, taskId, role: event.role, text: event.text, ...(images ? { images } : {}), toolLabel: event.toolLabel, toolStatus: event.toolStatus, streaming: false, createdAt: now() },
           event.tool,
         );
         if (event.role === 'assistant' && !event.history) task.summary = summaryFor(event.text);
         return this.changedThrottled();
+      }
       case 'outputDelta': {
         const items = this.store.transcript(taskId);
         let item = items.find((i) => i.id === event.itemId);

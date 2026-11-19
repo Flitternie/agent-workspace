@@ -27,6 +27,7 @@ import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
+import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -826,7 +827,8 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
                   {/* What the user said themselves can become memory (not what the main agent relayed). */}
                   {item.via !== 'main' ? <RememberButton onClick={() => setRemember(item.id)} /> : null}
                 </div> : null}
-              {item.role === 'system' && item.memoryUpdate?.length ? (
+              {item.role === 'user' && item.images?.length ? <MessageImages images={item.images} /> : null}
+              {item.role === 'user' && !item.text.trim() && item.images?.length ? null : item.role === 'system' && item.memoryUpdate?.length ? (
                 <details className="msg-system memory-sent" data-testid="memory-sent">
                   <summary>
                     <Icon name="spark" size={11} /> {t('Memory sent with this message: {n}', { n: item.memoryUpdate.length })}
@@ -985,6 +987,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  // Images pasted, dropped or picked go with the next message (not to the main agent, which only coordinates).
+  const attach = useAttachments(isMainAgent(task) ? t('The main agent does not take images; send them to an agent.') : undefined);
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1011,7 +1015,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   const send = async (interrupt = false) => {
     const text = draft.trim();
-    if (!text || sending) return;
+    const images = shell ? [] : attach.refs;
+    if ((!text && !images.length) || sending || attach.busy) return;
     takeVoice();
     if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
@@ -1022,9 +1027,14 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
       // A command can run for a while (its row shows it running): the box is free at once, and
       // gets the command back if it could not run.
       if (shell) setDraft('');
-      const r = shell ? await call('task:shell', { taskId: task.taskId, command }) : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt });
+      const r = shell
+        ? await call('task:shell', { taskId: task.taskId, command })
+        : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt, ...(images.length ? { images } : {}) });
       if (r.ok) {
-        if (!shell) setDraft('');
+        if (!shell) {
+          setDraft('');
+          attach.clear();
+        }
       } else {
         if (shell) setDraft((d) => d || text);
         setError(r.error ?? t('Not delivered'));
@@ -1038,7 +1048,12 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
-      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}`} data-voice={voice !== null || undefined}>
+      <div
+        className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}${attach.dragging ? ' dropping' : ''}`}
+        data-voice={voice !== null || undefined}
+        {...attach.dropProps}
+      >
+        <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
         <textarea
           ref={box}
           className="composer-input"
@@ -1053,6 +1068,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           }}
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
+          onPaste={attach.onPaste}
           onKeyDown={(e) => {
             // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
@@ -1074,6 +1090,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
         <div className="composer-foot">
           {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
           <span id="composer-voice" className="composer-voice" />
+          {!isMainAgent(task) && !shell ? <AttachButton onFiles={(files) => void attach.add(files)} /> : null}
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>
@@ -1106,7 +1123,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             ) : null}
           </span>
           {working && !shell ? (
-            <button className="btn btn-sm" disabled={!draft.trim() || sending} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
+            <button className="btn btn-sm" disabled={(!draft.trim() && !attach.items.length) || sending || attach.busy} onClick={() => void send(true)} title={t('Stop the current turn and start over with this message')} data-testid="send-interrupt">
               {t('Stop & send')}
             </button>
           ) : null}
@@ -1115,12 +1132,12 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
               <Icon name="btw" />
             </button>
           ) : null}
-          <button className="send-btn" aria-label={t('Send')} disabled={!draft.trim() || sending} onClick={() => void send()}>
+          <button className="send-btn" aria-label={t('Send')} disabled={(!draft.trim() && !(attach.items.length && !shell)) || sending || attach.busy} onClick={() => void send()}>
             <Icon name="send" />
           </button>
         </div>
       </div>
-      {error ? <div className="error-text">{error}</div> : null}
+      {error || attach.error ? <div className="error-text">{error || attach.error}</div> : null}
     </div>
   );
 }
