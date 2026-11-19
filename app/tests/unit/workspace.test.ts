@@ -360,6 +360,23 @@ describe('worktrees', () => {
     expect(branches()).toBe('');
   });
 
+  it('a fork is created for its own worktree, and fork support shows as a provider capability', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const mock = new MockAdapter(join(dataDir, 'mock-sessions'), DELAY);
+    const ws = new Workspace({ dataDir, adapters: { mock } });
+    opened.push(ws);
+    await ws.refreshCapabilities({ localOnly: true });
+    expect(ws.snapshot().capabilities.find((c) => c.provider === 'mock')?.fork).toBe(true);
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'API', isolate: true, mockScript: 'work', instruction: 'First request.' });
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status));
+    const forkSession = vi.spyOn(mock, 'forkSession');
+    const b = await ws.forkTask(a.taskId, { isolate: true });
+    // Found where the original is; recorded where the fork works (Codex keeps a thread's folder).
+    expect(forkSession).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ cwd: a.cwd, targetCwd: b.cwd }));
+    expect(b.cwd).not.toBe(a.cwd);
+  });
+
   it('a fork of an agent working in a subfolder works in the same subfolder, with all the uncommitted work', async () => {
     const ws = open();
     const root = repo();

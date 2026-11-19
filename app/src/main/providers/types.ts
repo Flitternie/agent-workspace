@@ -153,6 +153,16 @@ export interface ProviderSession {
   close(): Promise<void>;
 }
 
+export interface ForkSessionOpts {
+  /** Where the original session is found. */
+  cwd: string;
+  /** Where the fork will work; unset = `cwd`. */
+  targetCwd?: string;
+  /** Last message (fork point id from forkPoints) kept in the fork; unset = the whole session. */
+  upToMessageId?: string;
+  title?: string;
+}
+
 export interface ProviderAdapter {
   readonly provider: AgentProvider;
   capabilities(): Promise<ProviderCapabilities>;
@@ -177,8 +187,10 @@ export interface ProviderAdapter {
   forkPoints?(nativeSessionId: string, cwd: string): Promise<ForkPoint[]>;
   /**
    * Copies a saved session (all of it, or up to and including `upToMessageId`) into a new
-   * session and returns its id; the original is left as it is. That id resumes from `cwd`
-   * or any git worktree of the same repository.
+   * session and returns its id; the original is left as it is. `cwd` is where the original is
+   * found; `targetCwd` is where the fork will work (its own worktree, or `cwd` when unset).
+   * Providers that record a session's folder (Codex) give the fork that folder; Claude Code's
+   * fork resumes from any git worktree of the same repository and ignores it.
    */
-  forkSession?(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string>;
+  forkSession?(nativeSessionId: string, opts: ForkSessionOpts): Promise<string>;
 }

@@ -268,8 +268,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // Claude Code conversations on this Mac (and the demo's mock agents) can be forked once saved.
-  const canFork = !isMainAgent(task) && !task.host && (task.provider === 'claude' || task.provider === 'mock') && !!session?.nativeSessionId;
+  // Conversations on this Mac can be forked once saved, when their provider supports it.
+  const canFork = !isMainAgent(task) && !task.host && !!snapshot.capabilities.find((c) => c.provider === task.provider)?.fork && !!session?.nativeSessionId;
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');
