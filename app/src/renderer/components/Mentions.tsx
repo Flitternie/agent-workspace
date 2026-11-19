@@ -10,7 +10,7 @@ import { Icon } from './bits';
  * puts @path in the message. Claude Code reads a mentioned file in with the message; Codex reads it
  * with its tools.
  */
-export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void) {
+export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void, opts: { browseOnly?: boolean } = {}) {
   const [at, setAt] = useState<{ start: number; query: string } | null>(null);
   const [items, setItems] = useState<FileMatch[]>([]);
   const [active, setActive] = useState(0);
@@ -21,7 +21,9 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
   const update = () => {
     const el = box.current;
     if (!el || !taskId) return setAt(null);
-    const m = mentionAt(el.value, el.selectionStart ?? el.value.length);
+    const found = mentionAt(el.value, el.selectionStart ?? el.value.length);
+    // Without a folder of its own (the main agent), @ lists nothing until a full path is typed (~/ or /).
+    const m = found && opts.browseOnly && !/^(~|\/)/.test(found.query) ? undefined : found;
     // Escape closed this one: it stays closed until another @ is typed.
     if (m && closedAt.current === m.start) return setAt(null);
     if (!m) closedAt.current = null;
@@ -50,7 +52,8 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
       return;
     }
     let stale = false;
-    setLoading(true);
+    // "Looking…" only for a slow list (an SSH host's, the first time): a quick one does not flash it.
+    const slow = setTimeout(() => !stale && setLoading(true), 300);
     const id = setTimeout(() => {
       call('files:search', { taskId, query: at.query })
         .then((r) => {
@@ -59,11 +62,15 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
           setActive(0);
         })
         .catch(() => !stale && setItems([]))
-        .finally(() => !stale && setLoading(false));
+        .finally(() => {
+          clearTimeout(slow);
+          if (!stale) setLoading(false);
+        });
     }, 80);
     return () => {
       stale = true;
       clearTimeout(id);
+      clearTimeout(slow);
     };
   }, [at?.start, at?.query, taskId]);
 

@@ -94,5 +94,10 @@ it('@ lists the agent’s files, filters as you type, and inserts the chosen pat
   await expect.poll(async () => (await inv('transcript:get', { taskId: a.taskId })).find((i: any) => i.role === 'user')?.text, { timeout: 5000 }).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css');
   await expect.poll(() => page.getByTestId('mention-chip').allInnerTexts(), { timeout: 5000 }).toEqual(['Button.tsx', 'tokens.css']);
   expect(await page.getByTestId('mention-chip').first().getAttribute('title')).toBe('src/checkout/Button.tsx');
+  // A word that matches nothing: the list does not open (no "Looking…" flash).
+  await box.fill('');
+  await box.pressSequentially('@zzzq');
+  await page.waitForTimeout(600);
+  expect(await page.getByTestId('mention-pop').count()).toBe(0);
   await app.close();
 }, 120000);
