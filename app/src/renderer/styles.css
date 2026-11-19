@@ -6541,39 +6541,55 @@ button.subtask-row:hover {
 }
 
 /* ------------------------------------------------------------------ voice on an agent's page */
-/* No voice bar here: the mic sits beside the agent's own box, what is said appears in it, and
-   the rare note (sent to someone else, choose a target) floats above the box. */
+/* No voice bar here: the mic is the first button in the agent's box, the size of the side-question
+   and send buttons on the right; what is said appears in the box; the rare note (sent to someone
+   else, choose a target) floats above it. */
 .composer {
   position: relative;
-}
-.composer-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-}
-.composer-row > .composer-box {
-  flex: 1;
-  min-width: 0;
 }
 .composer-voice:empty {
   display: none;
 }
+.composer-voice {
+  display: inline-flex;
+  flex: none;
+}
 .voice-inline {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding-bottom: 6px;
+  gap: 6px;
 }
 .voice-inline .mic {
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+}
+.voice-inline .mic:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.voice-inline .mic svg {
+  width: 15px;
+  height: 15px;
+}
+.voice-inline .mic-slash {
+  width: 17px;
+  height: 1.5px;
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+.voice-inline .mic-listening,
+.voice-inline .mic-speaking {
+  color: var(--live);
+  background: #eaf7ef;
+  border-color: #b9e3c8;
+  box-shadow: 0 0 0 calc(var(--level, 0) * 6px) rgba(22, 163, 74, 0.22);
 }
 .voice-inline-note {
-  max-width: 120px;
   font-size: 11px;
   color: var(--risk);
-  text-align: center;
+  white-space: nowrap;
 }
 .composer .captions {
   left: 0;
@@ -6590,7 +6606,4 @@ button.subtask-row:hover {
 .composer-box.voice-live {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.composer-box.voice-live .composer-input {
-  color: var(--text-2);
 }

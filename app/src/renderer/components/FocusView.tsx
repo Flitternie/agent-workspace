@@ -976,9 +976,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
-      <div className="composer-row">
-      {/* The voice bar's mic, on an agent's page: beside this box (VoiceDock renders into it). */}
-      <div id="composer-voice" className="composer-voice" />
       <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}`} data-voice={voice !== null || undefined}>
         <textarea
           ref={box}
@@ -1013,6 +1010,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           }}
         />
         <div className="composer-foot">
+          {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
+          <span id="composer-voice" className="composer-voice" />
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>
@@ -1058,7 +1057,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             <Icon name="send" />
           </button>
         </div>
-      </div>
       </div>
       {error ? <div className="error-text">{error}</div> : null}
     </div>
