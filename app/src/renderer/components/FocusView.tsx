@@ -114,6 +114,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
   const main = isMainAgent(task);
   const lanes = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
+  // Beside the conversation the room is narrow: fewer columns, and names only on hand-offs.
+  const lanesBeside = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects, 4) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
   const hasMap = main ? !!lanes?.lanes.length : mapTasks.length > 0;
   // Where each lane ends: how that agent is doing now.
   const outcomes = useMemo(() => Object.fromEntries(snapshot.tasks.map((x) => [x.taskId, { status: x.status, summary: x.summary }])), [snapshot.tasks]);
@@ -528,7 +530,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
                 {lanes ? (
-                  <MainLanes lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
+                  <MainLanes lanes={lanesBeside!.lanes} rows={lanesBeside!.rows} outcomes={outcomes} compact onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
                 ) : (
                   <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
                 )}

@@ -12,7 +12,8 @@ import { t } from '../i18n';
 // past the limit at once, extra agents share the last column, drawn plain but still named.
 // A long message shows as a few words (from the user's own CLI, kept), the whole on hover.
 
-const HUES = ['#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e', '#ef4444'];
+// Twelve distinct hues; lanes on screen together never share one (see Lane.hue).
+const HUES = ['#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#ec4899', '#22c55e', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#a855f7'];
 const STEP = 14; // between columns
 const PAD = 9; // left of the main lane
 const ROW = 28;
@@ -20,7 +21,7 @@ const LEGEND_MAX = 8;
 /** Messages longer than this get a short label. */
 const LONG = 16;
 
-export const laneColor = (lane: number) => (lane === 0 ? 'var(--text-3)' : HUES[(lane - 1) % HUES.length]);
+const hueColor = (hue: number) => HUES[hue % HUES.length];
 
 type Outcome = { status: TaskStatus; summary?: string };
 type Row = LaneRow | { kind: 'outcome'; lane: number; itemId: string };
@@ -40,7 +41,10 @@ export function MainLanes({
   outcomes = {},
   onJump,
   onOpenAgent,
+  compact,
 }: {
+  /** Beside the conversation (narrow): hand-offs name the agent only, leaving the room to your words. */
+  compact?: boolean;
   lanes: Lane[];
   rows: LaneRow[];
   /** How each agent is doing now, by task id. */
@@ -77,7 +81,7 @@ export function MainLanes({
         {legend.map((l) => {
           const k = lanes.indexOf(l);
           return (
-            <button key={l.alias} className="lane-chip" style={{ ['--lane' as string]: laneColor(k + 1) }} disabled={!l.taskId} onClick={() => l.taskId && onOpenAgent(l.taskId)} title={[l.alias, l.name, l.projectName].filter(Boolean).join(' · ')} data-testid="lane-chip">
+            <button key={l.alias} className="lane-chip" style={{ ['--lane' as string]: hueColor(l.hue) }} disabled={!l.taskId} onClick={() => l.taskId && onOpenAgent(l.taskId)} title={[l.alias, l.name, l.projectName].filter(Boolean).join(' · ')} data-testid="lane-chip">
               <span className="lane-dot" aria-hidden />
               {l.alias}
               {l.projectName ? <span className="lane-project">{l.projectName}</span> : null}
@@ -93,7 +97,7 @@ export function MainLanes({
       <ol className="lanes-rows">
         {display.out.map((r, n) => {
           const lane = lanes[r.lane - 1];
-          const color = laneColor(r.lane);
+          const color = r.lane === 0 ? 'var(--text-3)' : hueColor(lane?.hue ?? 0);
           const plain = lane?.shared;
           const handOff = r.kind === 'send' || r.kind === 'create' || r.kind === 'fork' || r.kind === 'failed';
           const outcome = r.kind === 'outcome' && lane?.taskId ? outcomes[lane.taskId] : undefined;
@@ -109,12 +113,12 @@ export function MainLanes({
               >
                 <svg width={width} height={ROW} aria-hidden className="lanes-svg">
                   {/* The main lane, from your first message to your last. */}
-                  {n <= lastAsk ? <line x1={x(0)} y1={n === 0 ? mid : 0} x2={x(0)} y2={n === lastAsk ? mid : ROW} stroke={laneColor(0)} strokeWidth={1.5} /> : null}
+                  {n <= lastAsk ? <line x1={x(0)} y1={n === 0 ? mid : 0} x2={x(0)} y2={n === lastAsk ? mid : ROW} stroke="var(--text-3)" strokeWidth={1.5} /> : null}
                   {lanes.map((l, k) => {
                     const { first, last } = display.span[k];
                     if (first === undefined || n < first || n > last) return null;
                     return (
-                      <line key={k} x1={x(k + 1)} y1={n === first ? mid : 0} x2={x(k + 1)} y2={n === last ? mid : ROW} stroke={l.shared ? 'var(--text-3)' : laneColor(k + 1)} strokeWidth={l.shared ? 1.5 : 2} strokeDasharray={l.shared ? '2 3' : undefined} />
+                      <line key={k} x1={x(k + 1)} y1={n === first ? mid : 0} x2={x(k + 1)} y2={n === last ? mid : ROW} stroke={l.shared ? 'var(--text-3)' : hueColor(l.hue)} strokeWidth={l.shared ? 1.5 : 2} strokeDasharray={l.shared ? '2 3' : undefined} />
                     );
                   })}
                   {handOff ? (
@@ -146,7 +150,7 @@ export function MainLanes({
                   <span className="lanes-label outcome">
                     <span className={`lanes-verb status-${outcome?.status}`}>{t(STATUS[outcome?.status ?? 'idle'] ?? 'done')}</span>
                     <span className="lanes-alias">{lane?.alias}</span>
-                    {outcome?.summary ? <span className="lanes-name truncate">{outcome.summary}</span> : null}
+                    {outcome?.summary && !compact ? <span className="lanes-name truncate">{outcome.summary}</span> : null}
                   </span>
                 ) : (
                   <span className="lanes-label">
@@ -154,7 +158,7 @@ export function MainLanes({
                       {r.kind === 'send' ? t('to') : r.kind === 'create' ? t('new') : r.kind === 'fork' ? t('fork') : r.kind === 'failed' ? t('not delivered') : r.kind === 'waiting' ? t('waiting on you') : t('done')}
                     </span>
                     <span className="lanes-alias">{lane?.alias ?? ('label' in r ? r.label : '')}</span>
-                    {handOff && lane?.name && lane.name !== lane.alias ? <span className="lanes-name truncate">{lane.name}</span> : null}
+                    {handOff && !compact && lane?.name && lane.name !== lane.alias ? <span className="lanes-name truncate">{lane.name}</span> : null}
                   </span>
                 )}
               </button>
@@ -194,9 +198,9 @@ export function MainLanesMini({ lanes, rows, onOpen }: { lanes: Lane[]; rows: La
   return (
     <button className="session-minimap lanes-mini" onClick={onOpen} title={t('Agents')} aria-label={t('Agents')} data-testid="lanes-mini">
       <svg width={8 + cols * 6} height={120} aria-hidden>
-        <line x1={4} y1={0} x2={4} y2={120} stroke={laneColor(0)} strokeWidth={1.5} />
+        <line x1={4} y1={0} x2={4} y2={120} stroke="var(--text-3)" strokeWidth={1.5} />
         {lanes.map((l, k) => (
-          <line key={l.alias} x1={10 + l.col * 6} y1={(l.first / h) * 120} x2={10 + l.col * 6} y2={Math.max((l.last / h) * 120, (l.first / h) * 120 + 4)} stroke={l.shared ? 'var(--text-3)' : laneColor(k + 1)} strokeWidth={2} strokeLinecap="round" />
+          <line key={l.alias} x1={10 + l.col * 6} y1={(l.first / h) * 120} x2={10 + l.col * 6} y2={Math.max((l.last / h) * 120, (l.first / h) * 120 + 4)} stroke={l.shared ? 'var(--text-3)' : hueColor(l.hue)} strokeWidth={2} strokeLinecap="round" />
         ))}
       </svg>
     </button>

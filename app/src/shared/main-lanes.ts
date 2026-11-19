@@ -29,9 +29,15 @@ export interface Lane {
    */
   col: number;
   shared?: boolean;
+  /**
+   * Its colour (index into the palette): none of the lanes drawn at the same time has it, so two
+   * lanes on screen together never look alike; a colour comes free when its lane ends.
+   */
+  hue: number;
 }
 
 export const MAX_COLUMNS = 6;
+export const HUE_COUNT = 12;
 
 export interface LaneRow {
   itemId: string;
@@ -64,7 +70,7 @@ const resultText = (i: TranscriptItem) =>
 
 type LaneTask = Pick<Task, 'taskId' | 'alias' | 'name' | 'projectId'>;
 
-export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: Array<{ projectId: string; name: string }> = []): { lanes: Lane[]; rows: LaneRow[] } {
+export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: Array<{ projectId: string; name: string }> = [], maxColumns = MAX_COLUMNS): { lanes: Lane[]; rows: LaneRow[] } {
   const raw: Array<Omit<LaneRow, 'lane' | 'from'> & { alias?: string; fromAlias?: string }> = [];
   let turnId = '';
   for (const i of items) {
@@ -100,7 +106,7 @@ export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: 
   const order: string[] = [];
   for (const r of rows) for (const a of [r.fromAlias, r.alias]) if (a && !order.includes(a)) order.push(a);
   const parentOf = new Map(rows.filter((r) => r.fromAlias && r.alias).map((r) => [r.alias!, r.fromAlias!]));
-  const info = (alias: string): Omit<Lane, 'first' | 'last' | 'col' | 'shared'> => {
+  const info = (alias: string): Omit<Lane, 'first' | 'last' | 'col' | 'shared' | 'hue'> => {
     const t = tasks.find((x) => x.alias === alias);
     const parent = parentOf.get(alias);
     const projectId = t?.projectId ?? (parent ? tasks.find((x) => x.alias === parent)?.projectId : undefined);
@@ -124,22 +130,33 @@ export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: 
   const out: LaneRow[] = rows.map(({ alias, fromAlias, ...r }) => ({ ...r, lane: laneOf(alias), ...(fromAlias ? { from: laneOf(fromAlias) } : {}) }));
   const lanes: Lane[] = sorted.map((alias, k) => {
     const idx = out.map((r, n) => (r.lane === k + 1 || r.from === k + 1 ? n : -1)).filter((n) => n >= 0);
-    return { ...info(alias), first: idx[0], last: idx[idx.length - 1], col: 0 };
+    return { ...info(alias), first: idx[0], last: idx[idx.length - 1], col: 0, hue: 0 };
   });
   // Columns, in time order: the lowest free one (a fork prefers the one right of its origin's).
   const ends: number[] = []; // per column: the last row of the lane in it
   for (const lane of [...lanes].sort((a, b) => a.first - b.first)) {
-    const free = (c: number) => c < MAX_COLUMNS && (ends[c] === undefined || ends[c] < lane.first);
+    const free = (c: number) => c < maxColumns && (ends[c] === undefined || ends[c] < lane.first);
     const parent = parentOf.get(lane.alias);
     const parentCol = parent ? lanes.find((l) => l.alias === parent)?.col : undefined;
     let col = parentCol !== undefined && free(parentCol + 1) ? parentCol + 1 : -1;
-    if (col < 0) for (let c = 0; c < MAX_COLUMNS && col < 0; c++) if (free(c)) col = c;
+    if (col < 0) for (let c = 0; c < maxColumns && col < 0; c++) if (free(c)) col = c;
     if (col < 0) {
-      col = MAX_COLUMNS - 1;
+      col = maxColumns - 1;
       lane.shared = true;
     }
     lane.col = col;
     ends[col] = Math.max(ends[col] ?? -1, lane.last);
+  }
+  // Colours, in time order: the first one no lane still being drawn has.
+  const byStart = [...lanes].sort((a, b) => a.first - b.first);
+  for (const lane of byStart) {
+    const taken = new Set(byStart.filter((o) => o !== lane && o.first < lane.first && o.last >= lane.first).map((o) => o.hue));
+    // Nor the lane just before it in its column: a new agent there must not read as the same lane going on.
+    const before = byStart.filter((o) => o !== lane && o.col === lane.col && o.last < lane.first).sort((a, b) => b.last - a.last)[0];
+    if (before) taken.add(before.hue);
+    let hue = 0;
+    while (taken.has(hue) && hue < HUE_COUNT - 1) hue++;
+    lane.hue = hue;
   }
   // A column once shared is drawn plain for every lane in it while they overlap.
   for (const l of lanes) if (!l.shared && lanes.some((o) => o.shared && o.col === l.col && o.first <= l.last && l.first <= o.last)) l.shared = true;

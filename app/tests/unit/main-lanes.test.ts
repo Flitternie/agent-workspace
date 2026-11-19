@@ -73,4 +73,21 @@ describe('the main agent as lanes', () => {
     // Every hand-off still names its own agent.
     expect(new Set(rows.filter((r) => r.kind === 'send').map((r) => lanes[r.lane - 1].alias)).size).toBe(8);
   });
+
+  it('never gives two lanes on screen at the same time the same colour; a colour comes free when its lane ends', () => {
+    const many = Array.from({ length: 14 }, (_, k) => ({ taskId: `t-${k}`, alias: `A${k}`, name: `Work ${k}`, projectId: 'p-shop' }));
+    const send = (a: string) => tool('send_to_agent', `Sent to ${a}; it is working on it.`);
+    // Ten at once, then they end; four more later.
+    const items = [user('ten at once'), ...many.slice(0, 10).map((a) => send(a.alias)), user('more for them'), ...many.slice(0, 10).map((a) => send(a.alias)), user('four new'), ...many.slice(10).map((a) => send(a.alias))];
+    const { lanes } = mainLanes(items, many, projects);
+    const first10 = lanes.filter((l) => Number(l.alias.slice(1)) < 10).map((l) => l.hue);
+    expect(new Set(first10).size).toBe(10);
+    // The later four reuse columns and colours of lanes that have ended, but one after another in a
+    // column never share a colour (they would read as one lane going on).
+    const byCol = new Map<number, typeof lanes>();
+    for (const l of [...lanes].sort((a, b) => a.first - b.first)) byCol.set(l.col, [...(byCol.get(l.col) ?? []), l]);
+    for (const col of byCol.values()) for (let i = 1; i < col.length; i++) expect(col[i].hue).not.toBe(col[i - 1].hue);
+    // Fewer columns when asked (beside the conversation).
+    expect(Math.max(...mainLanes(items, many, projects, 4).lanes.map((l) => l.col))).toBe(3);
+  });
 });
