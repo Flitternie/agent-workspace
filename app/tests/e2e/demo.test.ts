@@ -104,12 +104,12 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('route-preview').innerText()).toContain('Alice');
     await shot(page, '03-dock-route-preview');
     await page.getByTestId('route-send').click();
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Alice/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to (.+ · )?Alice/);
 
     // 7. Naming no one with Bob selected: it is for Bob, even though the words fit other agents' work.
     await dock.fill('look at that thing in the orders API schema');
     await dock.press('Enter');
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Bob/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to (.+ · )?Bob/);
     await page.locator('[data-testid="rail-item"][data-alias="Bob"]').click();
     await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('look at that thing in the orders API schema');
     expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
@@ -174,7 +174,7 @@ describe('end-to-end demo script (mock agents)', () => {
     expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend dashboard… · Bob');
     await bar.fill('Make the cards a bit bigger.');
     await bar.press('Enter');
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
     expect(await page.getByTestId('route-preview').count()).toBe(0);
     await shot(page, '06b-overview-selected');
     await card(page, 'Bob').getByTestId('card-summary').dblclick();

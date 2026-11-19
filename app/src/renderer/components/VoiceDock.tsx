@@ -664,6 +664,15 @@ export function VoiceDock({
   }, []);
   const active = entries.find((e) => e.id === activeId && (e.phase === 'review' || e.phase === 'sending'));
   // Captions fade out like subtitles; unresolved ones stay until handled.
+  const lastOut = [...entries].reverse().find((e) => !e.inBox && (e.phase === 'sent' || e.phase === 'error' || e.phase === 'routing' || e.phase === 'sending'));
+  const note =
+    lastOut?.phase === 'error'
+      ? { kind: 'error', text: lastOut.error ?? tr('Not delivered') }
+      : lastOut?.phase === 'sent' && now - Date.parse(lastOut.at) < 6000 && lastOut.outcome
+        ? { kind: 'ok', text: lastOut.outcome }
+        : lastOut?.phase === 'routing' || lastOut?.phase === 'sending'
+          ? { kind: 'busy', text: lastOut.phase === 'routing' ? tr('Finding the agent…') : tr('Sending…') }
+          : null;
   const recent = entries
     .filter((e) => !(e.inBox && e.phase !== 'error'))
     .filter((e) => e.id !== active?.id && (e.phase === 'review' || e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing' || e.phase === 'sending' || now - Date.parse(e.at) < 12_000))
@@ -735,7 +744,7 @@ export function VoiceDock({
       ? createPortal(
           <div className="voice-inline" data-testid="voice-dock">
       {/* The reply panel is for when the main agent's own conversation is not on screen. */}
-      {snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
+      {!composeTo && snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
         <div className="popover main-reply" data-testid="main-reply">
           <div className="popover-head">
             <span>
@@ -773,7 +782,7 @@ export function VoiceDock({
           <WaitingOnYou snapshot={snapshot} now={now} onOpen={onView} compact limit={2} />
         </div>
       ) : null}
-      {!snapshot.main && showLog && snapshot.coordinator.length ? (
+      {!composeTo && !snapshot.main && showLog && snapshot.coordinator.length ? (
         <div className="popover coord-log" data-testid="coordinator-log">
           <div className="popover-head">
             <span>
@@ -791,51 +800,8 @@ export function VoiceDock({
         </div>
       ) : null}
 
-      {recent.length || active ? (
+      {active ? (
         <div className="captions" aria-live="polite">
-          {recent.map((e) => (
-            <div key={e.id} className={`caption phase-${e.phase}`} data-testid="caption">
-              <span className="caption-src">{e.source === 'voice' ? <Icon name="mic" size={12} /> : '›'}</span>
-              <span className="caption-text">
-                {e.phase === 'transcribing' || (e.phase === 'listening' && !e.text) ? <span className="muted">{tr('Transcribing…')}</span> : e.text}
-              </span>
-              <span className="caption-out">
-                {e.phase === 'listening' ? (
-                  <>
-                    <span className="muted">{e.holdUntil ? tr('Keep talking, or press Enter to send now') : tr('Listening…')}</span>
-                    <button className="link" onClick={() => dismiss(e.id)}>
-                      {tr('Cancel')}
-                    </button>
-                  </>
-                ) : null}
-                {e.phase === 'routing' ? tr('Finding the agent…') : null}
-                {e.phase === 'sending' ? tr('Sending…') : null}
-                {e.phase === 'sent' ? (
-                  <>
-                    <Icon name="check" size={12} /> {e.outcome}
-                    {e.taskId && e.taskId !== focusedTaskId && focusedTaskId ? (
-                      <button className="link" onClick={() => onView(e.taskId!)}>
-                        {tr('View')}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-                {e.phase === 'dismissed' ? tr('Not sent') : null}
-                {e.phase === 'error' ? <span className="error-text">{e.error}</span> : null}
-                {e.phase === 'review' ? (
-                  <button className="link" onClick={() => setActiveId(e.id)}>
-                    {tr('Choose target')}
-                  </button>
-                ) : null}
-              </span>
-              <span className="caption-time">{timeAgo(e.at, now)}</span>
-              {e.phase === 'listening' && e.holdUntil ? (
-                // Restarts (key) each time the countdown restarts; empties as the send approaches.
-                <span key={e.holdUntil} className="hold-bar" data-testid="hold-bar" style={{ animationDuration: `${e.holdFor}ms` }} aria-hidden />
-              ) : null}
-            </div>
-          ))}
-
           {active?.decision ? (
             <RoutePreview
               entry={active}
@@ -858,7 +824,7 @@ export function VoiceDock({
       ) : null}
 
             {micButton}
-            {mic === 'denied' || hint ? <div className="voice-inline-note">{micLabel}</div> : null}
+            {mic === 'denied' || hint ? <div className="voice-inline-note error">{micLabel}</div> : note ? <div className={`voice-inline-note ${note.kind}`} data-testid="voice-note">{note.text}</div> : null}
           </div>,
           voiceSlot,
         )
@@ -867,7 +833,7 @@ export function VoiceDock({
   return (
     <div className="dock" data-testid="voice-dock">
       {/* The reply panel is for when the main agent's own conversation is not on screen. */}
-      {snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
+      {!composeTo && snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
         <div className="popover main-reply" data-testid="main-reply">
           <div className="popover-head">
             <span>
@@ -905,7 +871,7 @@ export function VoiceDock({
           <WaitingOnYou snapshot={snapshot} now={now} onOpen={onView} compact limit={2} />
         </div>
       ) : null}
-      {!snapshot.main && showLog && snapshot.coordinator.length ? (
+      {!composeTo && !snapshot.main && showLog && snapshot.coordinator.length ? (
         <div className="popover coord-log" data-testid="coordinator-log">
           <div className="popover-head">
             <span>
@@ -923,51 +889,8 @@ export function VoiceDock({
         </div>
       ) : null}
 
-      {recent.length || active ? (
+      {active ? (
         <div className="captions" aria-live="polite">
-          {recent.map((e) => (
-            <div key={e.id} className={`caption phase-${e.phase}`} data-testid="caption">
-              <span className="caption-src">{e.source === 'voice' ? <Icon name="mic" size={12} /> : '›'}</span>
-              <span className="caption-text">
-                {e.phase === 'transcribing' || (e.phase === 'listening' && !e.text) ? <span className="muted">{tr('Transcribing…')}</span> : e.text}
-              </span>
-              <span className="caption-out">
-                {e.phase === 'listening' ? (
-                  <>
-                    <span className="muted">{e.holdUntil ? tr('Keep talking, or press Enter to send now') : tr('Listening…')}</span>
-                    <button className="link" onClick={() => dismiss(e.id)}>
-                      {tr('Cancel')}
-                    </button>
-                  </>
-                ) : null}
-                {e.phase === 'routing' ? tr('Finding the agent…') : null}
-                {e.phase === 'sending' ? tr('Sending…') : null}
-                {e.phase === 'sent' ? (
-                  <>
-                    <Icon name="check" size={12} /> {e.outcome}
-                    {e.taskId && e.taskId !== focusedTaskId && focusedTaskId ? (
-                      <button className="link" onClick={() => onView(e.taskId!)}>
-                        {tr('View')}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-                {e.phase === 'dismissed' ? tr('Not sent') : null}
-                {e.phase === 'error' ? <span className="error-text">{e.error}</span> : null}
-                {e.phase === 'review' ? (
-                  <button className="link" onClick={() => setActiveId(e.id)}>
-                    {tr('Choose target')}
-                  </button>
-                ) : null}
-              </span>
-              <span className="caption-time">{timeAgo(e.at, now)}</span>
-              {e.phase === 'listening' && e.holdUntil ? (
-                // Restarts (key) each time the countdown restarts; empties as the send approaches.
-                <span key={e.holdUntil} className="hold-bar" data-testid="hold-bar" style={{ animationDuration: `${e.holdFor}ms` }} aria-hidden />
-              ) : null}
-            </div>
-          ))}
-
           {active?.decision ? (
             <RoutePreview
               entry={active}
@@ -1007,6 +930,7 @@ export function VoiceDock({
           ) : null}
         </div>
         <div className="dock-input">
+          {note ? <span className={`dock-note ${note.kind}`} data-testid="voice-note">{note.text}</span> : null}
           <textarea
             className="input"
             rows={1}

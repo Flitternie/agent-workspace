@@ -6607,3 +6607,38 @@ button.subtask-row:hover {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
+/* Where a message went (a few seconds), or what failed: one quiet line beside the box, no caption. */
+.dock-input {
+  position: relative;
+}
+.dock-note {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.voice-inline-note {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.dock-note.error,
+.voice-inline-note.error {
+  color: var(--risk);
+  pointer-events: auto;
+}
+.dock-note.ok::before,
+.voice-inline-note.ok::before {
+  content: '✓ ';
+  color: var(--ok);
+}

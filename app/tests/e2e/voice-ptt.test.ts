@@ -82,9 +82,17 @@ describe.runIf(enabled)('push to talk', () => {
     await page.keyboard.up('Alt');
     await expect.poll(() => mic.getAttribute('aria-pressed')).toBe('false');
 
-    const toasts = () => page.getByTestId('caption').allInnerTexts().then((t) => t.join('\n'));
+    // Push to talk: what was said waits in the box (not sent by itself); Enter sends it.
+    const dockBox = page.getByTestId('dock-input');
+    await expect.poll(() => dockBox.inputValue(), { timeout: 60_000 }).toMatch(/alice/i);
+    await page.screenshot({ path: join(shots, 'ptt-02-in-box.png') });
+    await dockBox.press('Enter');
+    // Naming Alice from the box: confirm the target if asked, then it goes.
+    const toasts = () => page.getByTestId('voice-note').allInnerTexts().then((t) => t.join('\n'));
+    await expect.poll(async () => (await page.getByTestId('route-send').count()) > 0 || /Sent to/.test(await toasts()), { timeout: 30_000 }).toBe(true);
+    if (await page.getByTestId('route-send').count()) await page.getByTestId('route-send').click();
     await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (.+ · )?Alice/);
-    await page.screenshot({ path: join(shots, 'ptt-02-sent.png') });
+    await page.screenshot({ path: join(shots, 'ptt-03-sent.png') });
 
     const voiceMessages = () =>
       page.evaluate(async () => {
