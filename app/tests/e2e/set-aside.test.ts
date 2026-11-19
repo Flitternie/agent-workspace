@@ -94,6 +94,24 @@ describe('seen and set aside', () => {
     await invoke(page, 'task:send', { taskId: a.taskId, text: 'One more thing.', via: 'text' });
     await expect.poll(async () => (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)?.setAside ?? false).toBe(false);
     await expect.poll(() => card('Orders').count(), { timeout: 30_000 }).toBe(1);
+    await expect.poll(async () => !['running', 'starting'].includes((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)!.status), { timeout: 30_000 }).toBe(true);
+
+    // Opened from its tile (the pointer over the Overview as it goes) and set aside there: back on the
+    // Overview it is gone (the Overview is not left holding still under a pointer that has moved on).
+    await card('Orders').locator('.tile-head').dblclick();
+    await page.getByTestId('set-aside').click();
+    await expect.poll(() => page.getByTestId('set-aside').getAttribute('aria-pressed')).toBe('true');
+    await page.getByRole('button', { name: /^Overview/ }).click();
+    await expect.poll(() => card('Orders').count()).toBe(0);
+    // Set aside while the pointer rests on the Overview (tiles hold still): it still leaves.
+    await invoke(page, 'task:send', { taskId: a.taskId, text: 'Back again.', via: 'text' });
+    await expect.poll(() => card('Orders').count(), { timeout: 30_000 }).toBe(1);
+    await card('Orders').hover();
+    await invoke(page, 'task:setAside', { taskId: a.taskId, on: true });
+    await expect.poll(() => card('Orders').count()).toBe(0);
+    await page.mouse.move(5, 5);
+    await invoke(page, 'task:send', { taskId: a.taskId, text: 'And back.', via: 'text' });
+    await expect.poll(() => card('Orders').count(), { timeout: 30_000 }).toBe(1);
 
     // One that ended its turn on a question (waiting on you): set aside, it leaves "Needs you", its
     // team and every count too; the question it ended on is hidden with it.

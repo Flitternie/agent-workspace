@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
@@ -25,10 +25,11 @@ interface Toast {
 
 const SIDEBAR_KEY = 'amw.sidebar.width';
 const SIDEBAR_WIDTH = 252;
-const clampSidebar = (w: number) => Math.min(460, Math.max(200, Math.round(w)));
+/** Never narrower than its header needs (the name beside the window buttons): `min`, measured once shown. */
+const clampSidebar = (w: number, min = 224) => Math.min(460, Math.max(min, Math.round(w)));
 
 /** The sidebar's edge: drag to widen (long labels), double-click for the default width. */
-function SidebarResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+function SidebarResizer({ width, min, onChange }: { width: number; min: number; onChange: (w: number) => void }) {
   const save = (w: number) => {
     onChange(w);
     localStorage.setItem(SIDEBAR_KEY, String(w));
@@ -41,7 +42,7 @@ function SidebarResizer({ width, onChange }: { width: number; onChange: (w: numb
       aria-label={t('Resize the sidebar')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="sidebar-resizer"
-      onDoubleClick={() => save(SIDEBAR_WIDTH)}
+      onDoubleClick={() => save(clampSidebar(SIDEBAR_WIDTH, min))}
       onPointerDown={(e) => {
         e.preventDefault();
         const startX = e.clientX;
@@ -50,7 +51,7 @@ function SidebarResizer({ width, onChange }: { width: number; onChange: (w: numb
         document.body.classList.add('resizing');
         // On the window, so a fast drag that outruns the thin bar keeps going.
         const move = (ev: PointerEvent) => {
-          w = clampSidebar(startW + ev.clientX - startX);
+          w = clampSidebar(startW + ev.clientX - startX, min);
           onChange(w);
         };
         const up = () => {
@@ -161,9 +162,30 @@ export function App() {
   const { expanded, toggle } = useTeamExpansion();
   // The sidebar's width: the user's own, kept on this machine.
   const [sidebarW, setSidebarW] = useState(() => clampSidebar(Number(localStorage.getItem(SIDEBAR_KEY)) || SIDEBAR_WIDTH));
+  // The sidebar's least width: what its header needs to show the app's name whole (beside the window
+  // buttons), measured as shown; a narrower saved width widens.
+  const [sidebarMin, setSidebarMin] = useState(224);
+  useLayoutEffect(() => {
+    const top = document.querySelector<HTMLElement>('.sidebar-top');
+    const brand = top?.querySelector<HTMLElement>('.brand');
+    const bar = top?.closest<HTMLElement>('.sidebar');
+    if (!top || !brand || !bar) return;
+    const px = (el: HTMLElement, k: 'paddingLeft' | 'paddingRight') => parseFloat(getComputedStyle(el)[k]) || 0;
+    // The name itself (a Demo badge after it may be cut short; the name may not).
+    const badge = brand.querySelector<HTMLElement>('.demo-badge');
+    const name = brand.scrollWidth - (badge ? badge.scrollWidth + (parseFloat(getComputedStyle(brand).columnGap) || 0) : 0);
+    const need = Math.ceil(px(top, 'paddingLeft') + name + px(bar, 'paddingLeft') + px(bar, 'paddingRight') + 16);
+    if (need !== sidebarMin) setSidebarMin(need);
+    if (sidebarW < need) setSidebarW(need);
+  });
   // The Overview holds still while the pointer is over it; tiles settle when it leaves.
   const [hovering, setHovering] = useState(false);
   const slotsRef = useRef<string[]>([]);
+  // Leaving the Overview (opening an agent, settings) unmounts it under the pointer without a mouseleave:
+  // not held still when you come back.
+  useEffect(() => {
+    setHovering(false);
+  }, [focusId, settingsOpen]);
   // The Overview's own width: columns follow it (window size, sidebar width).
   const [galleryEl, setGalleryEl] = useState<HTMLDivElement | null>(null);
   const galleryW = useElementWidth(galleryEl);
@@ -174,7 +196,9 @@ export function App() {
   const layout = snapshot?.settings.overviewSlots ?? 0;
   const candidates = snapshot ? overviewCandidates(snapshot.tasks, openAll, now) : [];
   const exists = new Set(snapshot?.tasks.map((t) => t.taskId) ?? []);
-  const shownIds = hovering ? slotsRef.current.filter((id) => exists.has(id)) : fillSlots(slotsRef.current, candidates, openAll, slotsFor(layout, candidates.length), selectedId);
+  // (Held still under the pointer, an agent still leaves at once when it is removed or set aside.)
+  const asideIds = new Set(snapshot?.tasks.filter((t) => t.setAside).map((t) => t.taskId) ?? []);
+  const shownIds = hovering ? slotsRef.current.filter((id) => exists.has(id) && !asideIds.has(id)) : fillSlots(slotsRef.current, candidates, openAll, slotsFor(layout, candidates.length), selectedId);
   slotsRef.current = shownIds;
   const shown = shownIds.map((id) => snapshot!.tasks.find((t) => t.taskId === id)!).filter(Boolean);
   const offscreen = candidates.filter((t) => !shownIds.includes(t.taskId));
@@ -278,7 +302,7 @@ export function App() {
 
   return (
     <div className="app" style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
-      <SidebarResizer width={sidebarW} onChange={setSidebarW} />
+      <SidebarResizer width={sidebarW} min={sidebarMin} onChange={setSidebarW} />
       <Sidebar
         snapshot={snapshot}
         focusId={focusTask ? focusId : null}

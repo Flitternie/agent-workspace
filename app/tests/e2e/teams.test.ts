@@ -87,6 +87,20 @@ describe('teams and overview layouts (mock agents)', () => {
     await page.screenshot({ path: join(shots, 'teams-00-wide-sidebar.png') });
     await page.getByTestId('sidebar-resizer').dblclick();
     expect(Math.round(await sidebarW())).toBe(252);
+    // Dragged as narrow as it goes, it stops where the app's name still shows whole beside the window buttons.
+    const edge2 = (await page.getByTestId('sidebar-resizer').boundingBox())!;
+    await page.mouse.move(edge2.x + edge2.width / 2, edge2.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(edge2.x - 200, edge2.y + 300, { steps: 5 });
+    await page.mouse.up();
+    expect(await sidebarW()).toBeLessThan(252);
+    const fit = await page.evaluate(() => {
+      const brand = document.querySelector('.sidebar .brand')!.getBoundingClientRect();
+      const bar = document.querySelector('.sidebar')!.getBoundingClientRect();
+      return brand.right <= bar.right - 8;
+    });
+    expect(fit).toBe(true);
+    await page.getByTestId('sidebar-resizer').dblclick();
 
     // Overview layout with one tile: the agent waiting longest gets it; the rest wait on the left.
     await page.getByTestId('layout-1').click();
