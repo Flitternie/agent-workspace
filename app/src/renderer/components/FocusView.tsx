@@ -19,10 +19,13 @@ import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
 import { SidePanel } from './SidePanel';
 import { SessionMap, SessionMiniMap } from './SessionMap';
+import { MainLanes, MainLanesMini } from './MainLanes';
+import { mainLanes } from '../../shared/main-lanes';
+import { chapters } from '../../shared/chapters';
 import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
-import { t } from '../i18n';
+import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
@@ -109,6 +112,21 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       return next;
     });
   const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
+  const main = isMainAgent(task);
+  // By chapter: the map draws the current one; earlier chapters fold to a line each.
+  const parts = useMemo(() => (main ? chapters(transcript) : []), [main, transcript]);
+  const current = parts.at(-1)?.items ?? [];
+  const lanes = useMemo(() => (main ? mainLanes(current, snapshot.tasks, snapshot.projects) : null), [main, current, snapshot.tasks, snapshot.projects]);
+  // Beside the conversation the room is narrow: fewer columns, and names only on hand-offs.
+  const lanesBeside = useMemo(() => (main ? mainLanes(current, snapshot.tasks, snapshot.projects, 4) : null), [main, current, snapshot.tasks, snapshot.projects]);
+  const earlier = useMemo(
+    () => parts.slice(0, -1).map((c) => ({ key: c.items[0]?.id ?? String(c.start), at: c.at || c.items[0]?.createdAt || '', items: c.items })),
+    [parts],
+  );
+  const hasMap = main ? !!lanes?.lanes.length || earlier.length > 0 : mapTasks.length > 0;
+  // Where each lane ends: how that agent is doing now.
+  const outcomes = useMemo(() => Object.fromEntries(snapshot.tasks.map((x) => [x.taskId, { status: x.status, summary: x.summary }])), [snapshot.tasks]);
   // Forked from another agent: where this trunk came in.
   const mapOrigin = useMemo(() => {
     const from = task.forkedFrom;
@@ -165,11 +183,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
    * (centred in what is left); else its outline at the edge, opening the full map in the side column.
    */
   const MAP_ROOM = 250;
-  const mapBeside = mapTasks.length > 0 && threadW - MAP_ROOM - 32 >= 720;
+  const mapBeside = hasMap && threadW - MAP_ROOM - 32 >= 720;
   // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
   // would leave too narrow a column; then nothing (nothing floats over the messages).
   const MINI_ROOM = 48;
-  const miniFits = !mapBeside && mapTasks.length > 0 && threadW - MINI_ROOM - 32 >= 520;
+  const miniFits = !mapBeside && hasMap && threadW - MINI_ROOM - 32 >= 520;
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -230,7 +248,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Which panel the side column shows: one at a time, the preview first.
   const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
     ? 'preview'
-    : showMap && !mapBeside && mapTasks.length
+    : showMap && !mapBeside && hasMap
       ? 'map'
       : showBtw && btw.length
         ? 'btw'
@@ -311,8 +329,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     sideKind === 'preview' ? (
       previewPanel
     ) : sideKind === 'map' ? (
-      <SidePanel title={t('Task index')} label={t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
-        <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+      <SidePanel title={main ? t('Agents') : t('Task index')} label={main ? t('Agents') : t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
+        {lanes ? (
+          <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
+        ) : (
+          <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+        )}
       </SidePanel>
     ) : sideKind === 'btw' ? (
       <BtwPanel
@@ -459,6 +481,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <Icon name="diff" />
               {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
             </button>
+            {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
+            {isMainAgent(task) ? (
+              <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
+                <Icon name="plus" />
+              </button>
+            ) : null}
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
             {isMainAgent(task) ? null : (
               <button
@@ -515,10 +543,18 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {/* The session map in the room right of the conversation; with no room, its outline, opening the side column. */}
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
-                <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+                {lanes ? (
+                  <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanesBeside!.lanes} rows={lanesBeside!.rows} outcomes={outcomes} compact onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
+                ) : (
+                  <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+                )}
               </div>
             ) : mapRoom ? (
-              <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              lanes ? (
+                <MainLanesMini lanes={lanes.lanes} rows={lanes.rows} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              ) : (
+                <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              )
             ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
@@ -747,6 +783,15 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
                 <Markdown text={item.text} />
               </details>
             );
+          if (item.role === 'system' && item.chapter)
+            return (
+              <div key={item.id} className="chapter-divider" data-testid="chapter-divider">
+                <span>
+                  {t('A new chapter')} · {new Date(item.createdAt).toLocaleString(language() === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {item.chapter.reason === 'idle' ? ` · ${t('after a long pause')}` : item.chapter.reason === 'long' ? ` · ${t('after a long stretch')}` : ''}
+                </span>
+              </div>
+            );
           if (item.role === 'plan')
             return (
               <div key={item.id} className="msg plan-proposal" data-testid="plan-proposal">
@@ -816,7 +861,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
       }}
     >
       <div className="transcript-inner" ref={inner}>
-        {items.length === 0 ? <div className="muted pad">{t('No messages yet. Type below to give this agent its first instruction.')}</div> : null}
+        {items.length === 0 ? <div className="muted pad">{t('No messages yet.')}</div> : null}
         {turns.map((turn, i) => {
           const entries = (list: TranscriptItem[]) => groupNotices(groupTranscript(list, main), main).map(renderEntry);
           if (!foldsTurn(turn, i, turns.length)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
@@ -901,6 +946,43 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   useEffect(() => {
     if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
   }, [inject?.n]);
+  // What is being said on this page shows here as it is transcribed (the voice bar has no box of
+  // its own on an agent's page). `base` is what was typed before; the spoken part follows it.
+  const [voice, setVoiceState] = useState<string | null>(null);
+  const voiceRef = useRef<string | null>(null);
+  const setVoice = (v: string | null) => {
+    voiceRef.current = v;
+    setVoiceState(v);
+  };
+  const base = useRef('');
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    const join = (a: string, b: string) => (a.trim() && b ? `${a.trimEnd()} ${b}` : a || b);
+    const onDraft = (ev: Event) => {
+      const { taskId, text, phase } = (ev as CustomEvent<{ taskId: string; text: string; phase: 'listening' | 'keep' | 'drop' }>).detail;
+      if (taskId !== task.taskId) return;
+      // A new spoken draft starts after whatever is in the box now.
+      if (voiceRef.current === null) base.current = draftRef.current;
+      if (phase === 'listening') {
+        setVoice(text);
+        setDraft(join(base.current, text));
+        return;
+      }
+      // Kept: it is part of the message now, to check and send. Dropped: back to what was typed.
+      setVoice(null);
+      setDraft(phase === 'keep' ? join(base.current, text) : base.current);
+      if (phase === 'keep') box.current?.focus();
+    };
+    window.addEventListener('amw:voice-draft', onDraft);
+    return () => window.removeEventListener('amw:voice-draft', onDraft);
+  }, [task.taskId]);
+  /** Typing into, or sending, a box that holds a spoken draft takes it over: it is not sent again. */
+  const takeVoice = () => {
+    if (voiceRef.current === null) return;
+    setVoice(null);
+    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task.taskId } }));
+  };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // While the agent works, Enter adds to what it is doing (read at its next step);
@@ -930,6 +1012,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
+    takeVoice();
     if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
     setError('');
@@ -955,7 +1038,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
-      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
+      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}`} data-voice={voice !== null || undefined}>
         <textarea
           ref={box}
           className="composer-input"
@@ -964,7 +1047,10 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           autoFocus={!task.title.trim()}
           value={draft}
           placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            takeVoice();
+            setDraft(e.target.value);
+          }}
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
           onKeyDown={(e) => {
@@ -986,6 +1072,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           }}
         />
         <div className="composer-foot">
+          {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
+          <span id="composer-voice" className="composer-voice" />
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>
@@ -1004,7 +1092,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           <span className="hint" data-testid="composer-hint">
             {suggestion ? (
               <>
-                <Kbd>→</Kbd> {t('use suggestion')} ·{' '}
+                <Kbd>→</Kbd> {t('use suggestion')}{shell || working ? ' · ' : ''}
               </>
             ) : null}
             {shell ? (
@@ -1014,16 +1102,6 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             ) : working ? (
               <>
                 <Kbd>↵</Kbd> {t('add to current work')} · <Kbd>⌘↵</Kbd> {t('stop and send')}
-              </>
-            ) : (
-              <>
-                <Kbd>↵</Kbd> {t('send')} · <Kbd>⇧↵</Kbd> {t('new line')}
-              </>
-            )}
-            {onBtw && !shell ? (
-              <>
-                {' '}
-                · <Kbd>⌥↵</Kbd> {t('side question')}
               </>
             ) : null}
           </span>

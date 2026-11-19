@@ -213,6 +213,8 @@ export interface TranscriptItem {
   /** A decision the user made here (role 'system'): an approval given or a question answered. */
   decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
   streaming?: boolean;
+  /** A system item that starts a new chapter of the main agent's conversation (and why). */
+  chapter?: { reason: 'manual' | 'idle' | 'long' };
   createdAt: string;
   /** A system note that memory went with the next message: what was sent (a removed note marked ✕). */
   memoryUpdate?: string[];
@@ -369,6 +371,8 @@ export interface Settings {
   permissionMode?: PermissionMode;
   /** Which CLI runs the main agent; unset = the first one installed and signed in. */
   mainAgent?: 'claude' | 'codex' | 'off';
+  /** Start a new chapter of the main agent's conversation by itself after a long pause or a long chapter (default on). */
+  mainChapters?: 'auto' | 'off';
   /** Speech-to-text model (OpenAI id). */
   sttModel?: string;
   /** Model that decides which agent a spoken message is for (and names roles). */

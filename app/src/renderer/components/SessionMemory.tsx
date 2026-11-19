@@ -44,7 +44,7 @@ export function MemoryChip({ snapshot, task, open, onToggle }: { snapshot: Works
   const { project, user } = sessionMemory(snapshot, task);
   const count = (l: Array<{ on: boolean }>) => l.filter((x) => x.on).length;
   return (
-    <button className={`memory-chip${open ? ' open' : ''}`} onClick={onToggle} aria-pressed={open} data-testid="memory-chip" title={`${t('The memory this agent works with')} · ${isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}`}>
+    <button className={`memory-chip${open ? ' open' : ''}`} onClick={onToggle} aria-pressed={open} data-testid="memory-chip" title={`${isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}`}>
       <Icon name="note" size={11} />
       {/* Narrow headers show the counts only (the full words are in the tooltip). */}
       <span className="chip-full">{isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}</span>
@@ -142,7 +142,7 @@ type Draft = Awaited<ReturnType<typeof call<'memory:distill'>>>;
  */
 export function RememberButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="remember-btn" onClick={onClick} data-testid="remember" title={t('Keep as memory… (or right-click the message)')} aria-label={t('Keep as memory…')}>
+    <button className="remember-btn" onClick={onClick} data-testid="remember" title={t('Keep as memory')} aria-label={t('Keep as memory…')}>
       <Icon name="remember" size={13} />
     </button>
   );
