@@ -92,21 +92,27 @@ describe('end-to-end demo script (mock agents)', () => {
     expect(await md.locator('a[href="https://example.com/orders"]').count()).toBe(1);
     await md.locator('h3').scrollIntoViewIfNeeded();
     await shot(page, '02b-focus-B-structured');
+    // On an agent's page there is no voice bar: the mic sits beside its own box.
+    expect(await page.getByTestId('dock-input').count()).toBe(0);
+    expect(await page.locator('.composer [data-testid="mic-button"]').count()).toBe(1);
+    // From the Overview, with Bob selected: a message naming Alice goes to Alice.
+    await page.getByRole('button', { name: /^Overview/ }).click();
+    await card(page, 'Bob').getByTestId('card-summary').click();
     const dock = page.getByTestId('dock-input');
     await dock.fill('Alice, add a regression test');
     await dock.press('Enter');
     await expect.poll(() => page.getByTestId('route-preview').innerText()).toContain('Alice');
     await shot(page, '03-dock-route-preview');
     await page.getByTestId('route-send').click();
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Alice/);
-    await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob'); // focus did not move
-    expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to (.+ · )?Alice/);
 
-    // 7. Naming no one while on Bob: it is for Bob, even though the words fit other agents' work.
+    // 7. Naming no one with Bob selected: it is for Bob, even though the words fit other agents' work.
     await dock.fill('look at that thing in the orders API schema');
     await dock.press('Enter');
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Bob/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to (.+ · )?Bob/);
+    await page.locator('[data-testid="rail-item"][data-alias="Bob"]').click();
     await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('look at that thing in the orders API schema');
+    expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
     await shot(page, '04-dock-to-focused');
 
     // `!command` runs in the agent's folder; its output shows as the user's own command.
@@ -127,12 +133,15 @@ describe('end-to-end demo script (mock agents)', () => {
     await input.press('Enter');
     await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('Use the shared Button component');
 
-    // 11. Memory: save a project convention via the coordinator.
+    // 11. Memory: save a project convention via the coordinator (from the Overview, Bob selected).
+    await page.getByRole('button', { name: /^Overview/ }).click();
+    await card(page, 'Bob').getByTestId('card-summary').click();
     await dock.fill('记住：这个项目总是先跑集成测试');
     await dock.press('Enter');
     await expect.poll(() => page.getByTestId('route-preview').getAttribute('data-route-kind')).toBe('coordinator');
     await page.getByTestId('route-send').click();
     await expect.poll(() => page.getByTestId('coordinator-log').innerText()).toContain('Saved to project');
+    await page.locator('[data-testid="rail-item"][data-alias="Bob"]').click();
     // The agent's header shows which memory it works with; this project's note is there, for its next start.
     await page.getByTestId('memory-chip').click();
     await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('总是先跑集成测试');
@@ -165,7 +174,7 @@ describe('end-to-end demo script (mock agents)', () => {
     expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend dashboard… · Bob');
     await bar.fill('Make the cards a bit bigger.');
     await bar.press('Enter');
-    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
     expect(await page.getByTestId('route-preview').count()).toBe(0);
     await shot(page, '06b-overview-selected');
     await card(page, 'Bob').getByTestId('card-summary').dblclick();

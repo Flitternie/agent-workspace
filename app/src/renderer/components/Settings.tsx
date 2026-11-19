@@ -712,9 +712,9 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
 
 const MIC_MODES: Array<{ id: MicMode; label: string; detail: string }> = [
   { id: 'open', label: 'Always on', detail: 'Always listening; a short pause sends. The shortcut mutes.' },
-  { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to start talking and press it again to send. The microphone is off the rest of the time.' },
-  { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; letting go sends. The microphone is off the rest of the time.' },
-  { id: 'both', label: 'Tap or hold', detail: 'Tap the shortcut to start and tap again to send, or hold it while you talk and let go to send.' },
+  { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to talk and again to stop; what you said waits in the box. The mic is off the rest of the time.' },
+  { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; what you said waits in the box. The mic is off the rest of the time.' },
+  { id: 'both', label: 'Tap or hold', detail: 'Tap to start and again to stop, or hold while you talk; what you said waits in the box.' },
 ];
 
 /** Shows the microphone shortcut; click it and press new keys to change it. */

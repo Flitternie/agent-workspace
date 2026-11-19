@@ -130,7 +130,7 @@ describe('preview and open with…', () => {
     expect(Math.round((await box('.perm')).height)).toBe(30);
     await page.getByTestId('task-permission').selectOption('ask');
     await expect.poll(async () => (await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)?.permissionMode).toBe('ask');
-    expect((await box('.dock')).left).toBeLessThan((await box('[data-testid="file-preview"]')).left);
+    expect((await box('[data-testid="mic-button"]')).left).toBeLessThan((await box('[data-testid="file-preview"]')).left);
 
     // The same file at its line in Cursor: the editor's own CLI with file:line.
     await page.getByTestId('file-preview').getByTestId('open-in-more').click();
