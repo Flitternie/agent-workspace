@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
-import type { ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import type { ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
@@ -10,7 +10,8 @@ import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import { CodexSubtasks } from './subtasks';
-import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import { cleanUserText } from './user-text';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
 // stdio, using the user's installed CLI and its existing login. Approvals and
@@ -104,6 +105,22 @@ class AppServer {
   write(msg: unknown): void {
     if (this.closed) throw new Error('Codex app-server is not running.');
     this.proc.stdin.write(`${JSON.stringify(msg)}\n`);
+  }
+
+  /** Stops the process and waits until it has exited: until then it holds the writer lock on the threads it opened. */
+  async stop(timeoutMs = 5000): Promise<void> {
+    const running = !!this.proc.pid && this.proc.exitCode === null && this.proc.signalCode === null;
+    const exited = running
+      ? new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, timeoutMs);
+          this.proc.once('exit', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        })
+      : undefined;
+    this.kill();
+    await exited;
   }
 
   kill(): void {
@@ -223,6 +240,34 @@ function workspaceSandbox(cwd: string, host?: string): Record<string, unknown> {
   if (!deny.length) return { sandbox: 'workspace-write' };
   const filesystem = Object.fromEntries(deny.map((dir) => [dir, 'deny']));
   return { config: { default_permissions: 'amw', permissions: { amw: { extends: ':workspace', filesystem } } } };
+}
+
+/**
+ * Fork points in a Codex thread's turns: each turn that starts with a prompt the user typed, after
+ * the first, can be forked away by keeping the turns through the one before it. Prompts steered into
+ * a turn under way are part of that turn, so they are not fork points of their own.
+ */
+export function codexForkPoints(turns: unknown[]): ForkPoint[] {
+  const points: ForkPoint[] = [];
+  let previous = '';
+  for (const t of turns.map(rec)) {
+    const items = Array.isArray(t.items) ? t.items.map(rec) : [];
+    // The first user message with visible text (Codex prepends AGENTS.md and environment context as user messages).
+    let prompt = '';
+    for (const item of items) {
+      if (item.type !== 'userMessage') continue;
+      prompt = cleanUserText(
+        (Array.isArray(item.content) ? item.content : [])
+          .map((c) => str(rec(c).text))
+          .filter(Boolean)
+          .join('\n'),
+      );
+      if (prompt) break;
+    }
+    if (previous && prompt) points.push({ upToMessageId: previous, prompt });
+    if (str(t.id)) previous = str(t.id);
+  }
+  return points;
 }
 
 export class CodexAdapter implements ProviderAdapter {
@@ -370,6 +415,42 @@ export class CodexAdapter implements ProviderAdapter {
       return turns.flatMap((turn) => (Array.isArray(rec(turn).items) ? (rec(turn).items as unknown[]) : []).flatMap((item) => itemEvents(item, true, true, cwd)));
     } finally {
       server.kill();
+    }
+  }
+
+  /** Before each of the user's prompts after the first: the fork keeps the turns before it (fork point id = the previous turn's id). */
+  async forkPoints(nativeSessionId: string, cwd: string): Promise<ForkPoint[]> {
+    const server = AppServer.spawn(existsSync(cwd) ? cwd : homedir());
+    try {
+      await server.initialize();
+      const thread = rec(rec(await server.rpc('thread/read', { threadId: nativeSessionId, includeTurns: true })).thread);
+      return codexForkPoints(Array.isArray(thread.turns) ? thread.turns : []);
+    } finally {
+      server.kill();
+    }
+  }
+
+  /**
+   * app-server `thread/fork`: a new thread with the original's turns through `upToMessageId` (a turn
+   * id, inclusive; all of them when unset), recorded in `targetCwd` so it resumes in the fork's worktree.
+   * The workspace forks only between turns, so that turn is never still in progress.
+   */
+  async forkSession(nativeSessionId: string, opts: ForkSessionOpts): Promise<string> {
+    const cwd = opts.targetCwd ?? opts.cwd;
+    const server = AppServer.spawn(existsSync(cwd) ? cwd : homedir());
+    try {
+      await server.initialize();
+      const result = rec(
+        await server.rpc('thread/fork', { threadId: nativeSessionId, cwd, excludeTurns: true, ...(opts.upToMessageId ? { lastTurnId: opts.upToMessageId } : {}) }),
+      );
+      const forkId = str(rec(result.thread).id);
+      if (!forkId) throw new Error('Codex did not return the forked thread.');
+      // The name is a nicety (thread pickers); the fork stands without it.
+      if (opts.title) await server.rpc('thread/name/set', { threadId: forkId, name: opts.title }).catch(() => undefined);
+      return forkId;
+    } finally {
+      // Resuming the fork right after ("already has an active writer") needs this process gone.
+      await server.stop();
     }
   }
 

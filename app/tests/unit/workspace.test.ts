@@ -373,6 +373,23 @@ describe('worktrees', () => {
     expect(branches()).toBe('');
   });
 
+  it('a fork is created for its own worktree, and fork support shows as a provider capability', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const mock = new MockAdapter(join(dataDir, 'mock-sessions'), DELAY);
+    const ws = new Workspace({ dataDir, adapters: { mock } });
+    opened.push(ws);
+    await ws.refreshCapabilities({ localOnly: true });
+    expect(ws.snapshot().capabilities.find((c) => c.provider === 'mock')?.fork).toBe(true);
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'API', isolate: true, mockScript: 'work', instruction: 'First request.' });
+    await until(() => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status));
+    const forkSession = vi.spyOn(mock, 'forkSession');
+    const b = await ws.forkTask(a.taskId, { isolate: true });
+    // Found where the original is; recorded where the fork works (Codex keeps a thread's folder).
+    expect(forkSession).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ cwd: a.cwd, targetCwd: b.cwd }));
+    expect(b.cwd).not.toBe(a.cwd);
+  });
+
   it('a fork of an agent working in a subfolder works in the same subfolder, with all the uncommitted work', async () => {
     const ws = open();
     const root = repo();
@@ -428,6 +445,60 @@ describe('worktrees', () => {
     await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'one', isolate: false });
     const two = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
     expect(two.sharedCwdWarning).toMatch(/not isolated/);
+  });
+
+  it('every agent in a shared folder names all the others, an imported session included, and a removed one drops out', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY) }, backgroundModel: async () => '' });
+    opened.push(ws);
+    const p = await ws.addProject(repo());
+    const one = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'one', isolate: false });
+    const two = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
+    const warning = (taskId: string) => ws.snapshot().tasks.find((t) => t.taskId === taskId)!.sharedCwdWarning;
+    const shares = (...names: string[]) => `Shares a writable directory with ${names.join(', ')} — edits are not isolated.`;
+    expect(warning(two.taskId)).toBe(shares(one.alias));
+    expect(warning(one.taskId)).toBe(shares(two.alias));
+
+    const imported = await ws.importSession({ projectId: p.projectId, provider: 'claude', nativeSessionId: 's1', cwd: p.rootPath, title: 'Old session' });
+    expect(imported.sessionLocalId).toBeTruthy();
+    expect(warning(imported.taskId)).toBe(`Uses its original directory, shared with ${one.alias}, ${two.alias} — not isolated.`);
+    expect(warning(one.taskId)).toBe(shares(two.alias, imported.alias));
+    expect(warning(two.taskId)).toBe(shares(one.alias, imported.alias));
+
+    await ws.remove(two.taskId);
+    expect(warning(one.taskId)).toBe(shares(imported.alias));
+    await ws.remove(imported.taskId);
+    expect(warning(one.taskId)).toBeUndefined();
+  });
+
+  it('warnings saved by an older version are rewritten on start, keeping an agent’s reason for having no worktree', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const first = open(dataDir);
+    const p = await first.addProject(repo());
+    const one = await first.createTask({ projectId: p.projectId, provider: 'mock', title: 'one', isolate: false });
+    const two = await first.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
+    const three = await first.createTask({ projectId: p.projectId, provider: 'mock', title: 'three', isolate: false });
+    // As older versions saved them: no cwdNote, the reason in the text, and stale or partial names.
+    const reason = `Worktree not created (boom); this task edits ${p.rootPath} directly.`;
+    const data = (first as unknown as { store: { data: { tasks: Record<string, unknown>[] } } }).store.data;
+    let tasks = data.tasks;
+    for (const t of tasks) {
+      delete t.cwdNote;
+      delete t.keptOriginalFolder;
+    }
+    tasks[0].sharedCwdWarning = `Shares a writable directory with ${three.alias} — edits are not isolated.`;
+    tasks[1].sharedCwdWarning = `Shares a writable directory with ${three.alias} — edits are not isolated.`;
+    tasks[2].sharedCwdWarning = reason;
+    await first.remove(three.taskId);
+    tasks = data.tasks;
+    tasks.push({ ...tasks[0], taskId: 't-elsewhere', alias: 'Z', cwd: '/elsewhere', sharedCwdWarning: reason });
+    await first.shutdown();
+    opened.splice(opened.indexOf(first), 1);
+
+    const ws = open(dataDir);
+    const warning = (taskId: string) => ws.snapshot().tasks.find((t) => t.taskId === taskId)!.sharedCwdWarning;
+    expect(warning(one.taskId)).toBe(`Shares a writable directory with ${two.alias} — edits are not isolated.`);
+    expect(warning('t-elsewhere')).toBe(reason);
   });
 });
 

@@ -19,7 +19,7 @@ import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-co
 import { ClaudeSubtasks } from './subtasks';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
-import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
 // installed `claude` binary (its login, settings, CLAUDE.md and permission rules).
@@ -296,7 +296,8 @@ export class ClaudeAdapter implements ProviderAdapter {
     return points;
   }
 
-  async forkSession(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string> {
+  async forkSession(nativeSessionId: string, opts: ForkSessionOpts): Promise<string> {
+    // Claude Code finds the fork from any worktree of the repository: `targetCwd` is not needed.
     const sdk = await loadSdk();
     const r = await sdk.forkSession(nativeSessionId, { dir: opts.cwd, upToMessageId: opts.upToMessageId, title: opts.title });
     return r.sessionId;
