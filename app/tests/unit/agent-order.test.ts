@@ -28,25 +28,64 @@ function ask(taskId: string, kind: AttentionItem['kind'], minutesAgo: number): A
 }
 
 describe('agent order', () => {
-  it('puts what waits on you first (longest waiting first), then work in progress, then what you touched last', () => {
+  it('puts what waits on you first (longest waiting first), then work in progress (first started on top), then the rest', () => {
     const tasks = [
-      task('idleRecent', { lastUserActivityAt: ago(1 * H) }),
-      task('running', { status: 'running' }),
+      task('idleLate', { statusSince: ago(1 * H) }),
+      task('runningLate', { status: 'running', statusSince: ago(2 * H) }),
       task('askedLate'),
+      task('runningEarly', { status: 'running', statusSince: ago(4 * H) }),
       task('askedEarly'),
-      task('unread', { status: 'done' }),
-      task('idleOld', { lastUserActivityAt: ago(5 * H) }),
+      task('unread', { status: 'done', statusSince: ago(3 * H) }),
+      task('idleEarly', { statusSince: ago(5 * H) }),
     ];
     const open = [ask('askedLate', 'question', 5), ask('askedEarly', 'approval', 30), ask('unread', 'completion', 1)];
-    expect(rank(tasks, open).map((t) => t.taskId)).toEqual(['askedEarly', 'askedLate', 'running', 'unread', 'idleRecent', 'idleOld']);
+    expect(rank(tasks, open).map((t) => t.taskId)).toEqual(['askedEarly', 'askedLate', 'runningEarly', 'runningLate', 'idleEarly', 'unread', 'idleLate']);
     expect(needsYou(tasks, open).map((t) => t.taskId)).toEqual(['askedEarly', 'askedLate']);
-    expect(tierOf(tasks[4], open)).toBe(2);
+    expect(tierOf(tasks[5], open)).toBe(2);
   });
 
-  it('does not reshuffle when an agent merely prints something: background output is not your activity', () => {
-    const a = task('a', { lastUserActivityAt: ago(1 * H), updatedAt: ago(2 * H) });
-    const b = task('b', { lastUserActivityAt: ago(3 * H), updatedAt: ago(0) });
+  it('two agents start one after the other: the first stays on top, also across projects', () => {
+    const projects = [
+      { projectId: 'shop', name: 'shop' },
+      { projectId: 'legal', name: 'legal' },
+    ];
+    const first = task('first', { projectId: 'shop', status: 'running', statusSince: ago(10 * 60_000), lastUserActivityAt: ago(10 * 60_000) });
+    // Just started, and just touched by the user, in another project.
+    const next = task('next', { projectId: 'legal', status: 'starting', createdAt: ago(0), statusSince: ago(0), lastUserActivityAt: ago(0) });
+    expect(rank([next, first], []).map((t) => t.taskId)).toEqual(['first', 'next']);
+    expect(teams([next, first], projects, [], NOW).map((t) => t.project.name)).toEqual(['shop', 'legal']);
+  });
+
+  it('an agent that starts waiting on you rises to the top; one that finishes drops to the next group', () => {
+    const projects = [
+      { projectId: 'shop', name: 'shop' },
+      { projectId: 'legal', name: 'legal' },
+    ];
+    const a = task('a', { projectId: 'shop', status: 'running', statusSince: ago(3 * H) });
+    const b = task('b', { projectId: 'legal', status: 'running', statusSince: ago(2 * H) });
+    const c = task('c', { projectId: 'legal', status: 'running', statusSince: ago(1 * H) });
+    const idle = task('idle', { projectId: 'shop', statusSince: ago(5 * H) });
+    expect(rank([a, b, c, idle], []).map((t) => t.taskId)).toEqual(['a', 'b', 'c', 'idle']);
+    // c asks something: it goes first, and its team with it.
+    const asking = { ...c, status: 'waiting_for_user' as const, statusSince: ago(0) };
+    const open = [ask('c', 'approval', 0)];
+    expect(rank([a, b, asking, idle], open).map((t) => t.taskId)).toEqual(['c', 'a', 'b', 'idle']);
+    expect(teams([a, b, asking, idle], projects, open, NOW).map((t) => t.project.name)).toEqual(['legal', 'shop']);
+    // a finishes: it joins the end of the rest, b now leads, so does b's team.
+    const done = { ...a, status: 'done' as const, statusSince: ago(0) };
+    expect(rank([done, b, c, idle], []).map((t) => t.taskId)).toEqual(['b', 'c', 'idle', 'a']);
+    expect(teams([done, b, c, idle], projects, [], NOW).map((t) => t.project.name)).toEqual(['legal', 'shop']);
+  });
+
+  it('does not reshuffle on output, messages or reading a report: only a change of group moves an agent', () => {
+    const a = task('a', { status: 'running', statusSince: ago(2 * H), updatedAt: ago(2 * H) });
+    const b = task('b', { status: 'running', statusSince: ago(1 * H), updatedAt: ago(0), lastUserActivityAt: ago(0) });
     expect(rank([b, a], []).map((t) => t.taskId)).toEqual(['a', 'b']);
+    // An unread report and a read one sit in the same group: reading it moves nothing.
+    const x = task('x', { status: 'done', statusSince: ago(2 * H) });
+    const y = task('y', { status: 'done', statusSince: ago(1 * H) });
+    expect(rank([y, x], [ask('y', 'completion', 60)]).map((t) => t.taskId)).toEqual(['x', 'y']);
+    expect(rank([y, x], []).map((t) => t.taskId)).toEqual(['x', 'y']);
   });
 
   it('groups agents into project teams; idle members fold away; the team with someone waiting comes first', () => {
@@ -56,8 +95,8 @@ describe('agent order', () => {
       { projectId: 'old', name: 'old' },
     ];
     const tasks = [
-      task('s1', { projectId: 'shop', lastUserActivityAt: ago(1 * H) }),
-      task('s2', { projectId: 'shop', updatedAt: ago(IDLE_AFTER_MS + H) }),
+      task('s1', { projectId: 'shop', lastUserActivityAt: ago(1 * H), statusSince: ago(10 * 24 * H) }),
+      task('s2', { projectId: 'shop', updatedAt: ago(IDLE_AFTER_MS + H), statusSince: ago(IDLE_AFTER_MS + H) }),
       task('l1', { projectId: 'legal', lastUserActivityAt: ago(5 * H) }),
       task('o1', { projectId: 'old' }),
     ];
@@ -82,11 +121,11 @@ describe('agent order', () => {
   });
 
   it('keeps tiles in place; a more urgent agent takes the least urgent tile; the selected tile stays', () => {
-    const r1 = task('r1', { status: 'running', lastUserActivityAt: ago(1 * H) });
-    const r2 = task('r2', { status: 'running', lastUserActivityAt: ago(2 * H) });
-    const r3 = task('r3', { status: 'running', lastUserActivityAt: ago(3 * H) });
+    const r1 = task('r1', { status: 'running', statusSince: ago(3 * H) });
+    const r2 = task('r2', { status: 'running', statusSince: ago(2 * H) });
+    const r3 = task('r3', { status: 'running', statusSince: ago(1 * H) });
     const asking = task('asking');
-    // Two tiles, three working: the two you touched last.
+    // Two tiles, three working: the two that started first.
     let shown = fillSlots([], [r1, r2, r3], [], 2);
     expect(shown).toEqual(['r1', 'r2']);
     // Same tier coming and going does not swap tiles: r3 (just touched) waits for a free one.

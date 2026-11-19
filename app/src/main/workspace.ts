@@ -27,6 +27,7 @@ import type { ModelOption,
   TransientKind,
   WorkspaceSnapshot, BtwEntry } from '../shared/types';
 import { clipOutput } from '../shared/content';
+import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { instructionsFor, memoryForTask } from './memory';
 import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
@@ -419,12 +420,32 @@ export class Workspace {
     this.changedThrottled();
   }
 
+  /** Each task's status group as last seen, to stamp `statusSince` when it changes. */
+  private seenGroup = new Map<string, Group>();
+
+  /**
+   * Stamps `statusSince` on tasks whose status moved to another group (waiting / working / rest).
+   * Runs before every save and snapshot, so the many places that set a status need not know.
+   * The first look after launch only records the group: a stamp from the last run stays valid.
+   */
+  private stampStatus(): void {
+    for (const t of this.store.data.tasks) {
+      const g = statusGroup(t.status);
+      const seen = this.seenGroup.get(t.taskId);
+      if (seen !== undefined && seen !== g) t.statusSince = now();
+      else if (!t.statusSince) t.statusSince = t.updatedAt || t.createdAt;
+      this.seenGroup.set(t.taskId, g);
+    }
+  }
+
   private changed(): void {
+    this.stampStatus();
     this.store.save();
     for (const cb of this.changeListeners) cb();
   }
 
   snapshot(): WorkspaceSnapshot {
+    this.stampStatus();
     const d = this.store.data;
     return {
       projects: d.projects,
