@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
-import type { PermissionMode, Settings, TranscriptItem } from '../shared/types';
+import type { ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
@@ -113,13 +113,25 @@ const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline' data:; img-sr
 // Documents (Word, via textutil) get no scripts at all; PDFs open in Chromium's own viewer.
 const DOCUMENT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
 const previewDocs = new Map<string, { body: string | Uint8Array; type: string; csp?: string }>();
-protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true } }]);
+// Images in messages load from amw-image://img/<id>: only stored images, by their content name.
+const IMAGE_SCHEME = 'amw-image';
+protocol.registerSchemesAsPrivileged([
+  { scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true } },
+]);
 
 function servePreviews(): void {
   protocol.handle(PREVIEW_SCHEME, (req) => {
     const doc = previewDocs.get(new URL(req.url).pathname.slice(1));
     if (doc === undefined) return new Response('Preview expired. Refresh it.', { status: 404 });
     return new Response(doc.body as BodyInit, { headers: { 'content-type': doc.type, ...(doc.csp ? { 'content-security-policy': doc.csp } : {}) } });
+  });
+  protocol.handle(IMAGE_SCHEME, (req) => {
+    const id = new URL(req.url).pathname.slice(1);
+    const ref = workspace.attachments.has(id) ? workspace.attachments.read(id) : undefined;
+    if (!ref) return new Response('Image not found.', { status: 404 });
+    const type = id.endsWith('.png') ? 'image/png' : id.endsWith('.gif') ? 'image/gif' : id.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    return new Response(new Uint8Array(ref), { headers: { 'content-type': type, 'cache-control': 'max-age=31536000, immutable' } });
   });
 }
 
@@ -155,7 +167,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
-  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt }),
+  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[] }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images }),
+  'attachment:save': (i: { bytes: Uint8Array; name?: string }) => workspace.attachments.save(i.bytes, i.name),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
   'task:models': (i: { taskId: string }) => workspace.listModels(i.taskId),
   'task:setModel': (i: { taskId: string; model: string | null }) => workspace.setModel(i.taskId, i.model ?? undefined),

@@ -8,6 +8,8 @@ const id = z.string().min(1).max(200);
 /** An SSH alias from ~/.ssh/config (same rule as util/ssh HOST_RE). */
 const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
+/** A stored image (main/attachments.ts names them by their content). */
+const imageRef = z.object({ id: z.string().regex(/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/), mediaType: z.string().max(50), name: z.string().max(200).optional() });
 
 export const ipcSchemas = {
   'workspace:snapshot': z.object({}),
@@ -33,7 +35,11 @@ export const ipcSchemas = {
     isolate: z.boolean(),
     mockScript: z.string().max(50).optional(),
   }),
-  'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),
+  'task:send': z
+    .object({ taskId: id, text, via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), images: z.array(imageRef).max(10).optional() })
+    .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
+  /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
+  'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),
   'task:interrupt': z.object({ taskId: id }),
   'task:models': z.object({ taskId: id }),
   'task:setModel': z.object({ taskId: id, model: z.string().min(1).max(200).nullable() }),

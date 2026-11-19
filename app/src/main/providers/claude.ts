@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { open, readdir } from 'node:fs/promises';
+import { open, readFile, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -19,7 +19,7 @@ import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-co
 import { ClaudeSubtasks } from './subtasks';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
-import type { ApprovalResponse, Delivery, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { ApprovalResponse, Delivery, ForkSessionOpts, HistoryImage, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Claude Code integration through the official Agent SDK, driving the user's own
 // installed `claude` binary (its login, settings, CLAUDE.md and permission rules).
@@ -318,6 +318,28 @@ export class ClaudeAdapter implements ProviderAdapter {
 const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
 
 /** What the user typed in a saved user message; '' for tool results. */
+/**
+ * A user message with images, as the Agent SDK takes it: each image as a base64 block (it travels
+ * in the message itself, so this works the same for a session over SSH), then the text.
+ */
+export async function claudeUserContent(text: string, images: ImageInput[]): Promise<Array<Record<string, unknown>>> {
+  const blocks: Array<Record<string, unknown>> = [];
+  for (const img of images) blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: (await readFile(img.path)).toString('base64') } });
+  if (text.trim()) blocks.push({ type: 'text', text });
+  return blocks;
+}
+
+/** Base64 image blocks in a user message of a saved session. */
+export function historyImages(blocks: unknown[]): HistoryImage[] {
+  const out: HistoryImage[] = [];
+  for (const b of blocks) {
+    const block = rec(b);
+    const source = rec(block.source);
+    if (block.type === 'image' && source.type === 'base64' && typeof source.data === 'string') out.push({ data: source.data, mediaType: str(source.media_type) || undefined });
+  }
+  return out;
+}
+
 function promptText(content: unknown): string {
   if (typeof content === 'string') return content;
   const blocks = Array.isArray(content) ? content.map(rec) : [];
@@ -445,8 +467,10 @@ class ClaudeSession implements ProviderSession {
     }
   }
 
-  async send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery> {
+  async send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery> {
     if (this.closed || !this.query) throw new Error('Claude session is not connected.');
+    // Read before anything changes, so an image that cannot be read leaves the turn as it was.
+    const content = opts?.images?.length ? await claudeUserContent(text, opts.images) : text;
     let delivery: Delivery = 'turn';
     if (this.active && opts?.interrupt) {
       // Stop now; the message below then starts the next turn.
@@ -461,7 +485,7 @@ class ClaudeSession implements ProviderSession {
     }
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
     } as SDKUserMessage);
     this.wake?.();
@@ -745,6 +769,9 @@ class ClaudeSession implements ProviderSession {
         return;
       }
       const blocks = Array.isArray(content) ? content : [];
+      // Images the user sent, read back with the message they came in (live ones the workspace already shows).
+      const images: HistoryImage[] = history ? historyImages(blocks) : [];
+      let imagesShown = false;
       // Structured output belongs to the message; it is unambiguous only with one tool_result.
       const structured = blocks.filter((b) => rec(b).type === 'tool_result').length === 1 ? (m as { tool_use_result?: unknown }).tool_use_result : undefined;
       for (const b of blocks) {
@@ -772,9 +799,13 @@ class ClaudeSession implements ProviderSession {
           }
         } else if (block.type === 'text' && history) {
           const text = cleanUserText(str(block.text));
-          if (text) this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:t`, role: 'user', text, history });
+          if (text) {
+            this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:t`, role: 'user', text, history, ...(images.length && !imagesShown ? { images } : {}) });
+            imagesShown = true;
+          }
         }
       }
+      if (images.length && !imagesShown) this.emit({ type: 'transcriptItem', itemId: `${str(m.uuid)}:t`, role: 'user', text: '', history, images });
       return;
     }
     if (type === 'result') {
