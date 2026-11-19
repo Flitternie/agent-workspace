@@ -66,8 +66,12 @@ export interface Task {
   /** SSH alias the agent runs on (its project's host); unset = this Mac. */
   host?: string;
   worktree?: WorktreeInfo;
-  /** Set when another task shares this writable directory. */
+  /** Set when another task shares this writable directory, or when the task has no worktree (cwdNote). */
   sharedCwdWarning?: string;
+  /** Why the task edits its folder directly (no worktree on an SSH host, or creating one failed). */
+  cwdNote?: string;
+  /** An imported session that kept the folder it was started in. */
+  keptOriginalFolder?: boolean;
   sessionLocalId?: string;
   lastError?: string;
   /** Latest checklist the agent published (TodoWrite / tasks / Codex turn plan). */
