@@ -28,7 +28,7 @@ import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
-import { MentionMenu, useMentions } from './Mentions';
+import { MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -845,7 +845,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               ) : item.role === 'system' ? (
                 <div className="msg-system">{systemText(item.text)}</div>
               ) : (
-                <Markdown text={item.text} streaming={item.streaming} />
+                <Markdown text={item.text} streaming={item.streaming} mentions={item.role === 'user'} />
               )}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
@@ -1058,6 +1058,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
         {...attach.dropProps}
       >
         <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
+        <div className="composer-field">
+        <MentionHighlight text={draft} box={box} />
         <textarea
           ref={box}
           className="composer-input"
@@ -1075,7 +1077,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           onPaste={attach.onPaste}
           onSelect={mention.update}
           onKeyDown={(e) => {
-            if (mention.onKeyDown(e)) return;
+            if (mention.onKeyDown(e) || mention.onBackspace(e)) return;
             // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
               e.preventDefault();
@@ -1093,6 +1095,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             }
           }}
         />
+        </div>
         <div className="composer-foot">
           {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
           <span id="composer-voice" className="composer-voice" />

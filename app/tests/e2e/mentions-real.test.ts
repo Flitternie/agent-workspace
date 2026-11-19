@@ -72,5 +72,8 @@ describe.runIf(enabled)('@-mentions with real agents', () => {
     // Not a git repository: the walk, without node_modules.
     expect((await invoke<Array<{ path: string }>>(page, 'files:search', { taskId: t.taskId, query: 'button' })).map((m) => m.path)).toEqual(['src/checkout/Button.tsx']);
     expect((await invoke<Array<{ path: string }>>(page, 'files:search', { taskId: t.taskId, query: '' })).map((m) => m.path)).toEqual(['src/', 'README.md']);
+    // ../ and ~/ browse folders there, one level at a time.
+    expect((await invoke<Array<{ path: string }>>(page, 'files:search', { taskId: t.taskId, query: `../${scratch.slice(0, 10)}` })).map((m) => m.path)).toContain(`../${scratch}/`);
+    expect((await invoke<Array<{ path: string }>>(page, 'files:search', { taskId: t.taskId, query: `~/${scratch}/src/` })).map((m) => m.path)).toEqual([`~/${scratch}/src/checkout/`, `~/${scratch}/src/index.ts`]);
   }, 120_000);
 });

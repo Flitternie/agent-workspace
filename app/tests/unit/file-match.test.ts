@@ -70,3 +70,26 @@ describe('files in an agent’s folder', () => {
     }
   });
 });
+
+describe('@-mentions in text', () => {
+  it('splits path-like mentions out of a message, leaving people and punctuation', async () => {
+    const { splitMentions, mentionBefore, browsePath } = await import('../../src/shared/file-match');
+    expect(splitMentions('Fix @src/a.ts and @"docs/my notes.md", ask @Alice.')).toEqual([
+      { text: 'Fix ' },
+      { text: '@src/a.ts', path: 'src/a.ts' },
+      { text: ' and ' },
+      { text: '@"docs/my notes.md"', path: 'docs/my notes.md' },
+      { text: ', ask @Alice.' },
+    ]);
+    expect(splitMentions('see @README.md.')).toEqual([{ text: 'see ' }, { text: '@README.md', path: 'README.md' }, { text: '.' }]);
+    expect(splitMentions('mail a@b.com')).toEqual([{ text: 'mail a@b.com' }]);
+    expect(mentionBefore('Fix @src/a.ts', 13)).toBe(4);
+    expect(mentionBefore('Fix @src/a.ts ', 14)).toBeUndefined();
+    expect(mentionBefore('hi @Alice', 9)).toBeUndefined();
+    expect(browsePath('../sh')).toEqual({ parent: '../', prefix: 'sh' });
+    expect(browsePath('../../lib/')).toEqual({ parent: '../../lib/', prefix: '' });
+    expect(browsePath('~')).toEqual({ parent: '~/', prefix: '' });
+    expect(browsePath('/etc/ho')).toEqual({ parent: '/etc/', prefix: 'ho' });
+    expect(browsePath('src/')).toBeUndefined();
+  });
+});

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { mentionAt, mentionText, type FileMatch } from '../../shared/file-match';
+import { browsePath, mentionAt, mentionBefore, mentionText, splitMentions, type FileMatch } from '../../shared/file-match';
 import { call } from '../api';
 import { t } from '../i18n';
 import { Icon } from './bits';
@@ -25,8 +25,13 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
     // Escape closed this one: it stays closed until another @ is typed.
     if (m && closedAt.current === m.start) return setAt(null);
     if (!m) closedAt.current = null;
+    // Deleting back into a mention does not open the list (typing does; one already open follows).
+    if (m && deleting.current && atRef.current?.start !== m.start) return setAt(null);
     setAt((prev) => (prev?.start === m?.start && prev?.query === m?.query ? prev : (m ?? null)));
   };
+  const deleting = useRef(false);
+  const atRef = useRef(at);
+  atRef.current = at;
   // The caret goes after an inserted path as soon as the box shows it (before the next key is typed).
   const caretAfter = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -75,6 +80,7 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
   const open = !!at && (items.length > 0 || loading);
   /** Keys for the list while it is open; true when the key was used here. */
   const onKeyDown = (e: KeyboardEvent): boolean => {
+    deleting.current = e.key === 'Backspace' || e.key === 'Delete';
     if (!open || e.nativeEvent.isComposing) return false;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -96,7 +102,19 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
     return false;
   };
 
-  return { open, items, active, loading, query: at?.query ?? '', choose, setActive, onKeyDown, update };
+  /** Backspace right after a whole @path removes it at once, as a chip would go (not while the list is editing it). */
+  const onBackspace = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    const el = e.currentTarget;
+    if (e.key !== 'Backspace' || open || e.metaKey || e.altKey || el.selectionStart !== el.selectionEnd) return false;
+    const start = mentionBefore(el.value, el.selectionStart);
+    if (start === undefined) return false;
+    e.preventDefault();
+    caretAfter.current = start;
+    setDraft(el.value.slice(0, start) + el.value.slice(el.selectionStart));
+    return true;
+  };
+
+  return { open, items, active, loading, query: at?.query ?? '', choose, setActive, onKeyDown, onBackspace, update };
 }
 
 /** The list above the message box. */
@@ -108,7 +126,9 @@ export function MentionMenu({ m }: { m: ReturnType<typeof useMentions> }) {
   if (!m.open) return null;
   return (
     <div className="mention-pop" data-testid="mention-pop" role="listbox">
-      <div className="project-group">{m.query ? t('Files matching “{q}”', { q: m.query }) : t('Files in this agent’s folder')}</div>
+      <div className="project-group">
+        {browsePath(m.query) ? t('In {dir}', { dir: browsePath(m.query)!.parent }) : m.query ? t('Files matching “{q}”', { q: m.query }) : t('Files in this agent’s folder')}
+      </div>
       <div className="project-list" ref={list}>
         {m.items.map((it, i) => {
           const slash = it.path.replace(/\/$/, '').lastIndexOf('/');
@@ -136,6 +156,33 @@ export function MentionMenu({ m }: { m: ReturnType<typeof useMentions> }) {
         })}
         {!m.items.length && m.loading ? <div className="muted small pad">{t('Looking…')}</div> : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Behind the message box, the same text with each @path marked, so the mentions show as chips in
+ * the box itself (the box stays a plain textarea: voice drafts, suggestions and IME keep working).
+ * It copies the box's text metrics and follows its scrolling.
+ */
+export function MentionHighlight({ text, box }: { text: string; box: RefObject<HTMLTextAreaElement | null> }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const mirror = ref.current;
+    if (!el || !mirror) return;
+    const cs = getComputedStyle(el);
+    for (const k of ['font', 'letterSpacing', 'lineHeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'tabSize', 'wordSpacing'] as const) mirror.style[k] = cs[k];
+    mirror.scrollTop = el.scrollTop;
+    const follow = () => (mirror.scrollTop = el.scrollTop);
+    el.addEventListener('scroll', follow);
+    return () => el.removeEventListener('scroll', follow);
+  });
+  if (!text.includes('@')) return null;
+  return (
+    <div className="composer-mirror" ref={ref} aria-hidden>
+      {splitMentions(text).map((p, i) => (p.path ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+      {'\u200b'}
     </div>
   );
 }

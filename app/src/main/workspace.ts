@@ -47,7 +47,7 @@ import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from '.
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
 import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
-import { matchFiles, type FileMatch } from '../shared/file-match';
+import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1212,6 +1212,8 @@ export class Workspace {
   async searchFiles(taskId: string, query: string): Promise<FileMatch[]> {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) return [];
+    const browse = browsePath(query);
+    if (browse) return this.browseFiles(task.cwd, task.host, browse.parent, browse.prefix);
     const key = `${task.host ?? ''}|${task.cwd}`;
     let entry = this.fileLists.get(key);
     if (!entry || Date.now() - entry.at > 15_000) {
@@ -1220,6 +1222,39 @@ export class Workspace {
       entry.files.catch(() => this.fileLists.delete(key));
     }
     return matchFiles(await entry.files, query);
+  }
+
+  /**
+   * A folder outside the agent's own, browsed one level at a time from what is typed after @
+   * (../, /, ~/): its entries starting with `prefix`, folders first, written as typed (../lib/a.ts).
+   * Hidden entries only when the prefix starts with a dot.
+   */
+  private async browseFiles(cwd: string, host: string | undefined, parent: string, prefix: string): Promise<FileMatch[]> {
+    let entries: Array<{ name: string; dir: boolean }> = [];
+    if (host) {
+      this.requireHost(host);
+      const script = `cd -- ${shq(cwd)} 2>/dev/null; d=${shq(parent)}; case "$d" in "~"|"~/"*) d="$HOME\${d#?}";; esac; cd -- "$d" 2>/dev/null || exit 3; ls -1Ap | head -2000`;
+      const r = await sshRun(host, `sh -c ${shq(script)}`, 15_000);
+      if (r.code === 3) return [];
+      if (r.code !== 0) throw new Error(sshError(host, r.stderr));
+      entries = r.stdout.split('\n').filter(Boolean).map((l) => ({ name: l.replace(/\/$/, ''), dir: l.endsWith('/') }));
+    } else {
+      const abs = parent.startsWith('~/') ? join(homedir(), parent.slice(2)) : resolve(cwd, parent);
+      try {
+        entries = readdirSync(abs, { withFileTypes: true }).map((e) => ({
+          name: e.name,
+          dir: e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(abs, e.name)).isDirectory(); } catch { return false; } })()),
+        }));
+      } catch {
+        return [];
+      }
+    }
+    const want = prefix.toLowerCase();
+    return entries
+      .filter((e) => e.name.toLowerCase().startsWith(want) && (want.startsWith('.') || !e.name.startsWith('.')))
+      .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name))
+      .slice(0, 50)
+      .map((e) => ({ path: `${parent}${e.name}${e.dir ? '/' : ''}`, dir: e.dir }));
   }
 
   private async listFiles(cwd: string, host?: string): Promise<string[]> {

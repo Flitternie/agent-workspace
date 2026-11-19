@@ -78,3 +78,56 @@ export function mentionText(m: FileMatch): string {
   const ref = /\s/.test(m.path) ? `@"${m.path}"` : `@${m.path}`;
   return m.dir ? ref : `${ref} `;
 }
+
+/** Looks like a file or folder (has a / or an extension), not a person: "@src/a.ts", "@README.md", "@../docs/" but not "@Alice". */
+export function pathLike(ref: string): boolean {
+  return ref.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(ref);
+}
+
+/**
+ * The @-mentions in a message: @path or @"path with spaces", at the start or after a space or
+ * bracket, path-like only. Trailing punctuation ("see @a.ts.") is not part of the path.
+ */
+export function splitMentions(text: string): Array<{ text: string; path?: string }> {
+  const out: Array<{ text: string; path?: string }> = [];
+  const re = /(^|[\s(（])@(?:"([^"\n]+)"|([^\s"@]+))/g;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    let raw = m[3] ?? m[2];
+    let tail = '';
+    if (m[3]) {
+      const t = /[.,;:!?)）。，；：！？]+$/.exec(raw);
+      if (t && t[0].length < raw.length) {
+        tail = t[0];
+        raw = raw.slice(0, -tail.length);
+      }
+    }
+    if (!pathLike(raw)) continue;
+    const start = (m.index ?? 0) + m[1].length;
+    const token = m[0].slice(m[1].length, m[0].length - tail.length);
+    if (start > last) out.push({ text: text.slice(last, start) });
+    out.push({ text: token, path: raw });
+    last = start + token.length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/** A whole @-mention just before the caret (Backspace there removes it at once): its start, or undefined. */
+export function mentionBefore(text: string, caret: number): number | undefined {
+  const m = /(^|\s)(@(?:"[^"\n]+"|[^\s"@]+))$/.exec(text.slice(0, caret));
+  if (!m) return undefined;
+  const ref = m[2].slice(1).replace(/^"|"$/g, '');
+  return pathLike(ref) ? caret - m[2].length : undefined;
+}
+
+/**
+ * What is typed after @ that browses folders instead of searching the agent's own: a path starting
+ * with ../, /, ~/ (or just ~). Split into the folder to list (as typed) and the start of a name in it.
+ */
+export function browsePath(query: string): { parent: string; prefix: string } | undefined {
+  if (!/^(\.\.\/|\/|~\/|~$)/.test(query)) return undefined;
+  if (query === '~') return { parent: '~/', prefix: '' };
+  const slash = query.lastIndexOf('/');
+  return { parent: query.slice(0, slash + 1), prefix: query.slice(slash + 1) };
+}

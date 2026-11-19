@@ -26,6 +26,9 @@ it('@ lists the agent’s files, filters as you type, and inserts the chosen pat
   writeFileSync(join(dir, 'src', 'checkout', 'Cart.tsx'), 'x');
   writeFileSync(join(dir, 'src', 'index.ts'), 'x');
   execFileSync('git', ['init', '-q'], { cwd: dir });
+  // A folder beside the project, reached with ../
+  mkdirSync(join(home, 'shared'));
+  writeFileSync(join(home, 'shared', 'tokens.css'), 'x');
   const p = await inv('project:add', { rootPath: dir, name: 'shop' });
   const a = await inv('task:create', { projectId: p.projectId, provider: 'mock', title: 'checkout', name: 'checkout', mockScript: 'quick', isolate: false });
   await page.getByTestId('agent-card').first().dblclick();
@@ -50,9 +53,26 @@ it('@ lists the agent’s files, filters as you type, and inserts the chosen pat
   await expect.poll(() => page.getByTestId('mention-pop').count(), { timeout: 5000 }).toBe(1);
   await box.press('Escape');
   await expect.poll(() => page.getByTestId('mention-pop').count()).toBe(0);
-  // Enter now sends; the path goes as written.
   await box.press('Backspace');
+  // The mentions are marked in the box; Backspace right after one removes it whole.
+  await expect.poll(() => page.locator('.composer-mirror mark').allInnerTexts()).toEqual(['@src/checkout/Button.tsx', '@src/index.ts']);
+  await box.press('Backspace'); // the space after it
+  await box.press('Backspace'); // the whole @src/index.ts
+  await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and ');
+
+  // ../ browses the folder above, one level at a time.
+  await box.pressSequentially('@../');
+  await expect.poll(() => page.getByTestId('mention-item').allInnerTexts(), { timeout: 5000 }).toEqual(expect.arrayContaining([expect.stringMatching(/^shared\//)]));
+  await box.pressSequentially('sha');
   await box.press('Enter');
-  await expect.poll(async () => (await inv('transcript:get', { taskId: a.taskId })).find((i: any) => i.role === 'user')?.text, { timeout: 5000 }).toBe('Fix @src/checkout/Button.tsx and @src/index.ts');
+  await expect.poll(() => page.getByTestId('mention-item').allInnerTexts(), { timeout: 5000 }).toEqual([expect.stringMatching(/tokens\.css/)]);
+  await box.press('Enter');
+  await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css ');
+
+  // Sent: the path goes as written, and shows as chips in the conversation.
+  await box.press('Enter');
+  await expect.poll(async () => (await inv('transcript:get', { taskId: a.taskId })).find((i: any) => i.role === 'user')?.text, { timeout: 5000 }).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css');
+  await expect.poll(() => page.getByTestId('mention-chip').allInnerTexts(), { timeout: 5000 }).toEqual(['Button.tsx', 'tokens.css']);
+  expect(await page.getByTestId('mention-chip').first().getAttribute('title')).toBe('src/checkout/Button.tsx');
   await app.close();
 }, 120000);
