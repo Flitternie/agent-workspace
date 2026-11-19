@@ -7001,3 +7001,14 @@ button.subtask-row:hover {
   border-radius: 6px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
 }
+
+/* A project in the archive: a quiet label over its agents (nothing to unfold). */
+.team-head.archived-head {
+  cursor: default;
+  padding-left: 22px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.team-head.archived-head:hover {
+  background: none;
+}

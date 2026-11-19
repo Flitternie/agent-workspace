@@ -32,6 +32,11 @@ it('folds inactive projects into Archived and brings one back when it is used', 
   expect(await page.getByTestId('team-archive').count()).toBe(1);
   expect(await page.locator('.agent-list > [data-testid="team"]').count()).toBe(2);
   await page.getByTestId('team-archive-head').click(); await page.waitForTimeout(300);
+  // One click shows every archived agent: no second fold per project, no idle row (all of them are idle).
+  const archive = page.getByTestId('team-archive');
+  expect(await archive.getByTestId('rail-item').count()).toBe(4);
+  expect(await archive.getByTestId('team-idle').count()).toBe(0);
+  expect(await archive.getByTestId('team-head').allInnerTexts()).toEqual([expect.stringContaining('2'), expect.stringContaining('2')]);
   await page.screenshot({ path: join(appDir, 'test-results', 'archive-2.png'), clip: { x: 0, y: 0, width: 252, height: 900 } });
   // An agent in an archived project gets a message: the project comes back.
   await inv('task:send', { taskId: made['old-site'][0], text: 'One more thing.', via: 'text' });

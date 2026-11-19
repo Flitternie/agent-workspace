@@ -118,6 +118,22 @@ export function Sidebar({
             </div>
           );
           };
+  // In the archive every agent is idle: no second fold per project, nor an idle row; each project is a
+  // label over all its agents, so opening the archive shows them.
+  const renderArchived = (team: Team) => {
+    const agents = [...team.members, ...team.idle];
+    return (
+      <div key={team.project.projectId} className="team archived open" data-testid="team" data-project={team.project.name}>
+        <div className="team-head archived-head" data-testid="team-head">
+          <span className="team-name truncate">{team.project.name}</span>
+          <span className="team-counts">
+            <span className="team-count idle">{agents.length === 1 ? tr('1 agent') : tr('{n} agents', { n: agents.length })}</span>
+          </span>
+        </div>
+        {agents.map((t) => row(t))}
+      </div>
+    );
+  };
   const row = (t: Task, opts: { project?: string; needs?: boolean } = {}) => {
     const pending = open.filter((a) => a.taskId === t.taskId);
     const n = opts.needs ? undefined : number.get(t.taskId);
@@ -226,7 +242,7 @@ export function Sidebar({
               <span className="team-name truncate">{tr('Archived')}</span>
               <span className="team-count idle">{tr('{n} projects', { n: archived.length })}</span>
             </button>
-            {archiveShown ? archived.map(renderTeam) : null}
+            {archiveShown ? archived.map(renderArchived) : null}
           </div>
         ) : null}
       </nav>
