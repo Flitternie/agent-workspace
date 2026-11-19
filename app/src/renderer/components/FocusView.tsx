@@ -21,10 +21,11 @@ import { SidePanel } from './SidePanel';
 import { SessionMap, SessionMiniMap } from './SessionMap';
 import { MainLanes, MainLanesMini } from './MainLanes';
 import { mainLanes } from '../../shared/main-lanes';
+import { chapters } from '../../shared/chapters';
 import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
-import { t } from '../i18n';
+import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
@@ -113,10 +114,17 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
   // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
   const main = isMainAgent(task);
-  const lanes = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
+  // By chapter: the map draws the current one; earlier chapters fold to a line each.
+  const parts = useMemo(() => (main ? chapters(transcript) : []), [main, transcript]);
+  const current = parts.at(-1)?.items ?? [];
+  const lanes = useMemo(() => (main ? mainLanes(current, snapshot.tasks, snapshot.projects) : null), [main, current, snapshot.tasks, snapshot.projects]);
   // Beside the conversation the room is narrow: fewer columns, and names only on hand-offs.
-  const lanesBeside = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects, 4) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
-  const hasMap = main ? !!lanes?.lanes.length : mapTasks.length > 0;
+  const lanesBeside = useMemo(() => (main ? mainLanes(current, snapshot.tasks, snapshot.projects, 4) : null), [main, current, snapshot.tasks, snapshot.projects]);
+  const earlier = useMemo(
+    () => parts.slice(0, -1).map((c) => ({ key: c.items[0]?.id ?? String(c.start), at: c.at || c.items[0]?.createdAt || '', items: c.items })),
+    [parts],
+  );
+  const hasMap = main ? !!lanes?.lanes.length || earlier.length > 0 : mapTasks.length > 0;
   // Where each lane ends: how that agent is doing now.
   const outcomes = useMemo(() => Object.fromEntries(snapshot.tasks.map((x) => [x.taskId, { status: x.status, summary: x.summary }])), [snapshot.tasks]);
   // Forked from another agent: where this trunk came in.
@@ -323,7 +331,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     ) : sideKind === 'map' ? (
       <SidePanel title={main ? t('Agents') : t('Task index')} label={main ? t('Agents') : t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
         {lanes ? (
-          <MainLanes lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
+          <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
         ) : (
           <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
         )}
@@ -473,6 +481,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <Icon name="diff" />
               {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
             </button>
+            {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
+            {isMainAgent(task) ? (
+              <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
+                <Icon name="plus" />
+              </button>
+            ) : null}
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
             {isMainAgent(task) ? null : (
               <button
@@ -530,7 +544,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
                 {lanes ? (
-                  <MainLanes lanes={lanesBeside!.lanes} rows={lanesBeside!.rows} outcomes={outcomes} compact onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
+                  <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanesBeside!.lanes} rows={lanesBeside!.rows} outcomes={outcomes} compact onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
                 ) : (
                   <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
                 )}
@@ -768,6 +782,15 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
                 </summary>
                 <Markdown text={item.text} />
               </details>
+            );
+          if (item.role === 'system' && item.chapter)
+            return (
+              <div key={item.id} className="chapter-divider" data-testid="chapter-divider">
+                <span>
+                  {t('A new chapter')} · {new Date(item.createdAt).toLocaleString(language() === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {item.chapter.reason === 'idle' ? ` · ${t('after a long pause')}` : item.chapter.reason === 'long' ? ` · ${t('after a long stretch')}` : ''}
+                </span>
+              </div>
             );
           if (item.role === 'plan')
             return (

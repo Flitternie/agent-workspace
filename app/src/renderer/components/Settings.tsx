@@ -951,6 +951,15 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             ? t('Changing it starts a new main-agent conversation.')
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
+        {snapshot.main ? (
+          <label className="check">
+            <input type="checkbox" checked={s.mainChapters !== 'off'} onChange={(e) => update({ mainChapters: e.target.checked ? 'auto' : 'off' })} data-testid="setting-main-chapters" />
+            <span>
+              {t('Start a new chapter by itself')}
+              <span className="muted small"> — {t('after a night away, or a long stretch')}</span>
+            </span>
+          </label>
+        ) : null}
       </Section>
       <Section id="permissions" query={query}>
         <p className="muted small">{t('Default for new agents; each agent can change its own.')}</p>

@@ -44,6 +44,7 @@ import { GROUPING_PROMPT, GROUPING_UPDATE_NOTE, GROUPING_VERSION, mergeGrouping,
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
+import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1326,7 +1327,12 @@ export class Workspace {
   /** Delivers text to exactly this task's native session. Never re-routed. */
   async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
-    if (task === this.store.data.mainAgent) this.mainTurns++;
+    if (task === this.store.data.mainAgent) {
+      this.mainTurns++;
+      // Back after a long pause, or a long chapter: start a new one before this message.
+      const due = this.store.data.settings.mainChapters !== 'off' ? chapterDue(this.store.transcript(taskId), Date.now()) : null;
+      if (due) await this.newMainChapter(due);
+    }
     // A new message carries on from a failed turn by itself; no retry on top of it.
     this.cancelRetry(taskId);
     try {
@@ -1337,7 +1343,11 @@ export class Workspace {
       task.suggestion = undefined;
       // Commands the user ran with `!` since the last message reach the agent with this one.
       const ran = this.shellOutput.get(taskId) ?? [];
-      const delivery = await live.session.send(ran.length ? `${ran.join('\n')}\n\n${text}` : text, opts);
+      // The first message of a new chapter carries the hand-over (what is going on now) to the fresh session.
+      const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
+      this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
+      const body = ran.length ? `${ran.join('\n')}\n\n${text}` : text;
+      const delivery = await live.session.send(handover ? `${handover}\n\n${body}` : body, opts);
       this.shellOutput.delete(taskId);
       if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
@@ -2445,6 +2455,39 @@ export class Workspace {
 
   // MainAgentHost: what the main agent's tools can do.
   private mainTurns = 0;
+  private pendingHandover?: string;
+
+  /**
+   * A new chapter of the main agent's conversation: its session ends (the next message starts a
+   * fresh one), a marker goes in the conversation (the earlier part stays to read), and the
+   * next message carries a hand-over of what is going on now, not the whole past.
+   */
+  async newMainChapter(reason: 'manual' | 'idle' | 'long'): Promise<void> {
+    const main = this.store.data.mainAgent;
+    if (!main) throw new Error('The main agent is off.');
+    const items = this.store.transcript(main.taskId);
+    if (!items.slice(chapterStart(items)).some((x) => x.role === 'user')) return; // nothing to close
+    await this.stop(main.taskId).catch(() => {});
+    main.sessionLocalId = undefined;
+    main.summary = '';
+    this.appendSystem(main.taskId, 'New chapter', { chapter: { reason } });
+    this.pendingHandover = this.handover();
+    this.changed();
+  }
+
+  /** What is going on now, for the main agent's fresh session. */
+  private handover(): string {
+    const d = this.store.data;
+    const open = d.attention.filter((a) => a.state === 'open' && a.kind !== 'completion');
+    const now = Date.now();
+    const going = d.tasks.filter((t) => !t.setAside && (t.status === 'running' || t.status === 'starting' || open.some((a) => a.taskId === t.taskId) || now - Date.parse(t.updatedAt) < IDLE_NEW));
+    const project = (id: string) => d.projects.find((p) => p.projectId === id)?.name ?? '';
+    const lines = going.map((t) => `- ${t.alias} (${project(t.projectId)}, ${t.name || t.title}): ${t.status}${open.some((a) => a.taskId === t.taskId) ? ', waiting on the user' : ''}${t.summary ? ` — ${clip(t.summary, 140)}` : ''}`);
+    return [
+      '[A new chapter of your conversation with the user starts here. The earlier conversation is not carried over; use the workspace tools for anything else.]',
+      lines.length ? `What is going on now:\n${lines.join('\n')}` : 'No agent is working or waiting right now.',
+    ].join('\n');
+  }
 
   mainTurn(): number {
     return this.mainTurns;
