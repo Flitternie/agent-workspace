@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import { PREVIEW_EXTENSIONS, previewKind } from '../../shared/preview';
+import { splitMentions } from '../../shared/file-match';
 
 /** Set by the agent view: what a click on a file (a tool row's Preview, a path in a message) does. */
 export const PreviewContext = createContext<{ preview(path: string, opts?: { line?: number }): void; openExternal?: (path: string) => void } | null>(null);
@@ -13,6 +14,8 @@ export const PreviewContext = createContext<{ preview(path: string, opts?: { lin
 
 /** The scheme the links carry inside the Markdown tree (never a real URL). */
 export const FILE_SCHEME = 'amw-file:';
+/** @-mentions the user wrote (shown as file chips); also never a real URL. */
+export const MENTION_SCHEME = 'amw-mention:';
 
 // Longest first, so "tsx" is not read as "ts" followed by a letter.
 const EXT = `(?:${[...PREVIEW_EXTENSIONS].sort((a, b) => b.length - a.length).join('|')})`;
@@ -84,7 +87,9 @@ export function remarkFilePaths() {
     if (!node.children) return;
     const next: Node[] = [];
     for (const child of node.children) {
-      if (child.type === 'link') {
+      if (child.type === 'link' && child.url?.startsWith(MENTION_SCHEME)) {
+        next.push(child);
+      } else if (child.type === 'link') {
         const target = fileTarget(child.url ?? '');
         if (target) child.url = fileHref(target, fileLine(child.url ?? ''));
         walk(child, true);
@@ -103,4 +108,26 @@ export function remarkFilePaths() {
     node.children = next;
   };
   return (tree: Node) => walk(tree, false);
+}
+
+/**
+ * remark plugin for what the user wrote: @path mentions (as typed with the @ list) become chips.
+ * Runs before remarkFilePaths, which leaves them alone; code stays as it is.
+ */
+export function remarkMentions() {
+  const walk = (node: Node) => {
+    if (!node.children) return;
+    const next: Node[] = [];
+    for (const child of node.children) {
+      if (child.type === 'text' && child.value) {
+        for (const piece of splitMentions(child.value))
+          next.push(piece.path ? { type: 'link', url: MENTION_SCHEME + encodeURIComponent(piece.path), children: [{ type: 'text', value: piece.text }] } : { type: 'text', value: piece.text });
+      } else {
+        if (child.type !== 'code' && child.type !== 'inlineCode' && child.type !== 'link') walk(child);
+        next.push(child);
+      }
+    }
+    node.children = next;
+  };
+  return (tree: Node) => walk(tree);
 }

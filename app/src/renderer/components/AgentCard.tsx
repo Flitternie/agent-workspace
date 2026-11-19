@@ -9,6 +9,7 @@ import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, 
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 import { AttachmentStrip, useAttachments } from './Attachments';
+import { dropMentions } from './Mentions';
 
 /** One participant tile in the meeting-style Overview. */
 export function AgentCard({
@@ -51,7 +52,10 @@ export function AgentCard({
   const highRisk = items.some((i) => i.highRisk);
 
   // Images pasted or dropped on the tile's box go with the message, as on the agent's page.
-  const attach = useAttachments();
+  const attach = useAttachments(async (files) => {
+    const text = await dropMentions(task.taskId, files);
+    if (text) setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + text);
+  });
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = attach.refs;

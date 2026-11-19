@@ -7001,3 +7001,90 @@ button.subtask-row:hover {
   border-radius: 6px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
 }
+
+/* @-mentions: the agent's files, listed above its message box (the project chooser's list items). */
+.mention-pop {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.12);
+}
+.mention-pop .project-list {
+  max-height: 260px;
+}
+.mention-pop .project-item {
+  padding: 5px 8px;
+}
+.mention-pop .project-item-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mention-pop .project-item-name {
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* A file the user mentioned with @, in their message. */
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  margin: 0 1px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92em;
+  line-height: 1.45;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+.mention-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-chip .icon {
+  flex: none;
+  color: var(--text-2);
+}
+.mention-chip:hover:not(.static) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mention-chip.static {
+  cursor: default;
+}
+/* The @-mentions in the box, marked on a copy of its text behind it (Mentions.tsx MentionHighlight). */
+.composer-field {
+  position: relative;
+}
+.composer-field .composer-input {
+  position: relative;
+  background: transparent;
+}
+.composer-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: transparent;
+  pointer-events: none;
+}
+.composer-mirror mark {
+  color: transparent;
+  background: var(--accent-soft);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1.5px var(--accent-soft);
+}

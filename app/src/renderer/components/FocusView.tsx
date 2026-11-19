@@ -28,6 +28,7 @@ import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
+import { dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -851,7 +852,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               ) : item.role === 'system' ? (
                 <div className="msg-system">{systemText(item.text)}</div>
               ) : (
-                <Markdown text={item.text} streaming={item.streaming} />
+                <Markdown text={item.text} streaming={item.streaming} mentions={item.role === 'user'} />
               )}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
@@ -995,7 +996,14 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
-  const attach = useAttachments();
+  // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
+  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task) });
+  // Other files dropped here are mentioned with @, as if picked from the list.
+  const attach = useAttachments(async (files) => {
+    const text = await dropMentions(task.taskId, files);
+    if (text) mention.insert(text);
+    box.current?.focus();
+  });
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1055,12 +1063,15 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
+      <MentionMenu m={mention} />
       <div
         className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}${attach.dragging ? ' dropping' : ''}`}
         data-voice={voice !== null || undefined}
         {...attach.dropProps}
       >
         <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
+        <div className="composer-field">
+        <MentionHighlight text={draft} box={box} />
         <textarea
           ref={box}
           className="composer-input"
@@ -1076,7 +1087,9 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
           onPaste={attach.onPaste}
+          onSelect={mention.update}
           onKeyDown={(e) => {
+            if (mention.onKeyDown(e) || mention.onBackspace(e)) return;
             // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
               e.preventDefault();
@@ -1094,6 +1107,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             }
           }}
         />
+        </div>
         <div className="composer-foot">
           {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
           <span id="composer-voice" className="composer-voice" />
