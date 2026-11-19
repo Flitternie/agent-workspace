@@ -134,6 +134,9 @@ describe('session map', () => {
     await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(0);
     await expect.poll(() => page.getByTestId('mini-task').count()).toBe(1);
+    // The trunk only: each task's node and its decisions (what branched off, like the dropped attempt in
+    // this task, is for the full map).
+    expect(await page.locator('[data-testid="mini-task"] > *').evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute('class')))].sort())).toEqual(['mini-mark', 'mini-node']);
     expect(await page.getByTestId('session-minimap').innerText()).toBe('');
     // It sits in the margin, clear of the messages.
     const clear = await page.evaluate(() => {
