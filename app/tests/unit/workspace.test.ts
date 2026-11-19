@@ -416,6 +416,23 @@ describe('worktrees', () => {
     const two = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
     expect(two.sharedCwdWarning).toMatch(/not isolated/);
   });
+
+  it('a new agent in a shared folder warns the agents already there; an imported session keeps its own words and tells no one', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY) }, backgroundModel: async () => '' });
+    opened.push(ws);
+    const p = await ws.addProject(repo());
+    const one = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'one', isolate: false });
+    const two = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'two', isolate: false });
+    const warning = (taskId: string) => ws.snapshot().tasks.find((t) => t.taskId === taskId)!.sharedCwdWarning;
+    expect(warning(two.taskId)).toBe(`Shares a writable directory with ${one.alias} — edits are not isolated.`);
+    expect(warning(one.taskId)).toBe(`Shares a writable directory with ${two.alias} — edits are not isolated.`);
+
+    const imported = await ws.importSession({ projectId: p.projectId, provider: 'claude', nativeSessionId: 's1', cwd: p.rootPath, title: 'Old session' });
+    expect(imported.sessionLocalId).toBeTruthy();
+    expect(warning(imported.taskId)).toBe(`Uses its original directory, shared with ${one.alias}, ${two.alias} — not isolated.`);
+    expect(warning(one.taskId)).toBe(`Shares a writable directory with ${two.alias} — edits are not isolated.`);
+  });
 });
 
 describe('main agent tools', () => {
