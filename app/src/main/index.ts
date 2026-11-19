@@ -167,7 +167,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
-  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[] }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images }),
+  'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[]; about?: string }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images, openRequest: i.about }),
   'attachment:save': (i: { bytes: Uint8Array; name?: string }) => workspace.attachments.save(i.bytes, i.name),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
   'task:models': (i: { taskId: string }) => workspace.listModels(i.taskId),
@@ -207,6 +207,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'btw:ask': (i: { taskId: string; question: string }) => workspace.askBtw(i.taskId, i.question),
   'btw:clear': (i: { taskId: string }) => workspace.clearBtw(i.taskId),
   // Typing a folder path in the project chooser: its subfolders, here or on a machine.
+  'files:search': (i: { taskId: string; query: string }) => workspace.searchFiles(i.taskId, i.query),
+  'files:dropped': (i: { taskId: string; paths: string[] }) => workspace.droppedFiles(i.taskId, i.paths),
   'fs:listDirs': (i: { dir: string; host?: string }) => workspace.listDirs(i.dir, i.host),
   'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),
   'task:importSession': (i: Parameters<Workspace['importSession']>[0]) => workspace.importSession(i),

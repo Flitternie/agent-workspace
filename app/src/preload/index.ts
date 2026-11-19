@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, IPC_CHANNELS } from '../shared/ipc';
 
 // Narrow bridge: only named, validated channels; no Node, no generic exec.
@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('amw', {
     const listener = (_e: unknown, s: unknown) => cb(s);
     ipcRenderer.on(EVENT_WORKSPACE, listener);
     return () => ipcRenderer.removeListener(EVENT_WORKSPACE, listener);
+  },
+  /** Where a file dropped on the window is on disk (empty for one that is not a file, e.g. pasted bytes). */
+  pathForFile(file: File): string {
+    return webUtils.getPathForFile(file);
   },
   onTranscript(cb: (update: unknown) => void) {
     const listener = (_e: unknown, items: unknown) => cb(items);

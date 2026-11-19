@@ -47,6 +47,7 @@ import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from '.
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
 import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
+import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1200,6 +1201,124 @@ export class Workspace {
    * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
    * the caller decides). A path that is not a folder gives no names.
    */
+  /** Each agent folder's file list, kept briefly: an @-mention searches it on every keystroke. */
+  private fileLists = new Map<string, { at: number; files: Promise<string[]> }>();
+
+  /**
+   * Files in an agent's folder (on its host) matching what is typed after @ in its message box. In a
+   * git repository the files git knows (tracked and untracked, not ignored), otherwise a walk that
+   * skips dependency and build folders; at most 50,000.
+   */
+  async searchFiles(taskId: string, query: string): Promise<FileMatch[]> {
+    const task = this.task(taskId);
+    const browse = browsePath(query);
+    // The main agent has no folder of its own to search; it can still be given a file by its full path (~/ or /) to pass on.
+    if (task === this.store.data.mainAgent) return browse && !browse.parent.startsWith('..') ? this.browseFiles(homedir(), undefined, browse.parent, browse.prefix) : [];
+    if (browse) return this.browseFiles(task.cwd, task.host, browse.parent, browse.prefix);
+    const key = `${task.host ?? ''}|${task.cwd}`;
+    let entry = this.fileLists.get(key);
+    if (!entry || Date.now() - entry.at > 15_000) {
+      entry = { at: Date.now(), files: this.listFiles(task.cwd, task.host) };
+      this.fileLists.set(key, entry);
+      entry.files.catch(() => this.fileLists.delete(key));
+    }
+    // ./ is the agent's own folder, written explicitly: the same list, the paths kept as typed.
+    if (query.startsWith('./')) return matchFiles(await entry.files, query.slice(2)).map((m) => ({ ...m, path: `./${m.path}` }));
+    return matchFiles(await entry.files, query);
+  }
+
+  /**
+   * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
+   * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
+   * on an SSH host (the files are on this Mac) refuses. The main agent gets full paths, to pass on.
+   */
+  droppedFiles(taskId: string, paths: string[]): FileMatch[] {
+    const task = this.task(taskId);
+    const main = task === this.store.data.mainAgent;
+    if (task.host) throw new Error(`These files are on this Mac; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
+    const home = homedir();
+    return paths.map((p) => {
+      const abs = resolve(p);
+      let dir = false;
+      try {
+        dir = statSync(abs).isDirectory();
+      } catch {
+        /* gone already: mentioned as a file */
+      }
+      const inside = main ? undefined : abs === task.cwd ? '.' : abs.startsWith(task.cwd + sep) ? abs.slice(task.cwd.length + 1) : undefined;
+      const shown = inside ?? (abs === home || abs.startsWith(home + sep) ? `~${abs.slice(home.length)}` : abs);
+      const path = shown.split(sep).join('/');
+      return { path: dir && !path.endsWith('/') ? `${path}/` : path, dir };
+    });
+  }
+
+  /**
+   * A folder outside the agent's own, browsed one level at a time from what is typed after @
+   * (../, /, ~/): its entries starting with `prefix`, folders first, written as typed (../lib/a.ts).
+   * Hidden entries only when the prefix starts with a dot.
+   */
+  private async browseFiles(cwd: string, host: string | undefined, parent: string, prefix: string): Promise<FileMatch[]> {
+    let entries: Array<{ name: string; dir: boolean }> = [];
+    if (host) {
+      this.requireHost(host);
+      const script = `cd -- ${shq(cwd)} 2>/dev/null; d=${shq(parent)}; case "$d" in "~"|"~/"*) d="$HOME\${d#?}";; esac; cd -- "$d" 2>/dev/null || exit 3; ls -1Ap | head -2000`;
+      const r = await sshRun(host, `sh -c ${shq(script)}`, 15_000);
+      if (r.code === 3) return [];
+      if (r.code !== 0) throw new Error(sshError(host, r.stderr));
+      entries = r.stdout.split('\n').filter(Boolean).map((l) => ({ name: l.replace(/\/$/, ''), dir: l.endsWith('/') }));
+    } else {
+      const abs = parent.startsWith('~/') ? join(homedir(), parent.slice(2)) : resolve(cwd, parent);
+      try {
+        entries = readdirSync(abs, { withFileTypes: true }).map((e) => ({
+          name: e.name,
+          dir: e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(abs, e.name)).isDirectory(); } catch { return false; } })()),
+        }));
+      } catch {
+        return [];
+      }
+    }
+    const want = prefix.toLowerCase();
+    return entries
+      .filter((e) => e.name.toLowerCase().startsWith(want) && (want.startsWith('.') || !e.name.startsWith('.')))
+      .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name))
+      .slice(0, 50)
+      .map((e) => ({ path: `${parent}${e.name}${e.dir ? '/' : ''}`, dir: e.dir }));
+  }
+
+  private async listFiles(cwd: string, host?: string): Promise<string[]> {
+    const MAX = 50_000;
+    const SKIP = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', 'venv', '__pycache__', 'target', '.cache'];
+    if (host) {
+      this.requireHost(host);
+      const prune = SKIP.map((d) => `-name ${shq(d)}`).join(' -o ');
+      const script = `cd -- ${shq(cwd)} || exit 3; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git ls-files -co --exclude-standard | head -${MAX}; else find . \\( ${prune} \\) -prune -o -type f -print 2>/dev/null | sed 's|^\\./||' | head -${MAX}; fi`;
+      const r = await sshRun(host, `sh -c ${shq(script)}`, 20_000);
+      if (r.code === 3) return [];
+      if (r.code !== 0 && !r.stdout) throw new Error(sshError(host, r.stderr));
+      return r.stdout.split('\n').filter(Boolean);
+    }
+    const git = await run('git', ['ls-files', '-co', '--exclude-standard'], { cwd, timeoutMs: 15_000 });
+    if (git.code === 0) return git.stdout.split('\n').filter(Boolean).slice(0, MAX);
+    const out: string[] = [];
+    const walk = (dir: string, rel: string) => {
+      if (out.length >= MAX) return;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (out.length >= MAX) return;
+        if (e.isDirectory()) {
+          if (!SKIP.includes(e.name)) walk(join(dir, e.name), `${rel}${e.name}/`);
+        } else if (e.isFile()) out.push(`${rel}${e.name}`);
+      }
+    };
+    walk(cwd, '');
+    return out;
+  }
+
   async listDirs(dir: string, host?: string): Promise<{ dir: string; names: string[] }> {
     if (!host) {
       const home = homedir();
@@ -1458,7 +1577,19 @@ export class Workspace {
 
   // ---------------------------------------------------------------- messaging
 
-  /** Delivers text to exactly this task's native session. Never re-routed. */
+  /**
+   * To the main agent: the request the user had unfolded in "waiting on you" while writing, as a hint
+   * of what the message answers. Not shown in the conversation; never an approval.
+   */
+  private openRequestNote(task: Task, attentionId?: string): string {
+    if (!attentionId || task !== this.store.data.mainAgent) return '';
+    const a = this.store.data.attention.find((x) => x.id === attentionId && x.state === 'open');
+    const agent = a && this.findTask(a.taskId);
+    if (!a || !agent || agent === task) return '';
+    const kind = a.kind === 'approval' ? 'permission request' : a.kind;
+    return `[Open request: the user had this unfolded while writing: request_id ${a.id} · ${agent.alias} · ${kind}: ${clip(a.headline, 200)}. Their message is most likely about it. This note is not their words and is not an approval.]`;
+  }
+
   /**
    * Images in a user message read back from a CLI's history, kept in the app's store so the
    * conversation shows them. A file on an SSH host is not fetched (it shows as an image that
@@ -1472,7 +1603,8 @@ export class Workspace {
     return refs;
   }
 
-  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[] } = {}): Promise<DispatchResult> {
+  /** Delivers text to exactly this task's native session. Never re-routed. */
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[]; openRequest?: string } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     const images = opts.images?.length ? opts.images.slice(0, MAX_IMAGES) : undefined;
     const missing = images?.find((r) => !this.attachments.has(r.id));
@@ -1507,7 +1639,8 @@ export class Workspace {
       // then any memory update, the commands run with `!`, and the message itself.
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
-      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), {
+      const openNote = this.openRequestNote(task, opts.openRequest);
+      const delivery = await live.session.send([handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n'), {
         interrupt: opts.interrupt,
         ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
       });

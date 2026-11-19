@@ -36,7 +36,7 @@ export const ipcSchemas = {
     mockScript: z.string().max(50).optional(),
   }),
   'task:send': z
-    .object({ taskId: id, text, via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), images: z.array(imageRef).max(10).optional() })
+    .object({ taskId: id, text, via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), images: z.array(imageRef).max(10).optional(), about: id.optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
   /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
   'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),
@@ -73,6 +73,10 @@ export const ipcSchemas = {
   'btw:list': z.object({ taskId: z.string() }),
   'btw:ask': z.object({ taskId: z.string(), question: z.string().min(1).max(20_000) }),
   'btw:clear': z.object({ taskId: z.string() }),
+  /** Files in an agent's folder matching what is typed after @ in its message box. */
+  'files:search': z.object({ taskId: id, query: z.string().max(500) }),
+  /** Files dropped on an agent's message box (their paths on this Mac): how to mention each. */
+  'files:dropped': z.object({ taskId: id, paths: z.array(z.string().min(1).max(4096)).max(20) }),
   'fs:listDirs': z.object({ dir: z.string().min(1).max(2000), host: z.string().max(200).optional() }),
   'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({

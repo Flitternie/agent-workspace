@@ -5,7 +5,8 @@ import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { t } from '../i18n';
 import { Icon } from './bits';
-import { FILE_SCHEME, parseFileHref, PreviewContext, remarkFilePaths } from './filePaths';
+import { FILE_SCHEME, MENTION_SCHEME, parseFileHref, PreviewContext, remarkFilePaths, remarkMentions } from './filePaths';
+import { previewKind } from '../../shared/preview';
 
 // Agent text is untrusted Markdown (GFM: tables, task lists, strikethrough).
 // Safety rules follow Parallel Code's chat renderer (MIT): raw HTML stays text
@@ -15,7 +16,21 @@ import { FILE_SCHEME, parseFileHref, PreviewContext, remarkFilePaths } from './f
 
 const SAFE_URL = /^(https?:|mailto:)/i;
 // File paths become FILE_SCHEME links (remarkFilePaths); they open the preview, never navigate.
-const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) ? url : '');
+const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) || url.startsWith(MENTION_SCHEME) ? url : '');
+
+/** A file or folder the user mentioned with @: a chip with its name (the full path on hover); a file the preview can show opens on click. */
+function MentionChip({ path }: { path: string }) {
+  const ctx = useContext(PreviewContext);
+  const dir = path.endsWith('/');
+  const name = path.replace(/\/$/, '').split('/').pop() || path;
+  const open = ctx && !dir && previewKind(path) ? () => ctx.preview(path) : undefined;
+  return (
+    <button type="button" className={`mention-chip${open ? '' : ' static'}`} title={path} data-testid="mention-chip" data-path={path} onClick={open} tabIndex={open ? 0 : -1}>
+      <Icon name={dir ? 'folder' : 'file'} size={11} />
+      <span>{name}</span>
+    </button>
+  );
+}
 
 /** A path in a message: a button that opens the preview (in the agent view), else just the text. */
 function FileLink({ path, line, children }: { path: string; line?: number; children: ReactNode }) {
@@ -57,7 +72,9 @@ function CodeBlock({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
 const components: Components = {
   pre: CodeBlock,
   a: ({ href, children }) =>
-    href?.startsWith(FILE_SCHEME) ? (
+    href?.startsWith(MENTION_SCHEME) ? (
+      <MentionChip path={decodeURIComponent(href.slice(MENTION_SCHEME.length))} />
+    ) : href?.startsWith(FILE_SCHEME) ? (
       <FileLink {...parseFileHref(href)}>{children}</FileLink>
     ) : href ? (
       <a href={href} target="_blank" rel="noreferrer" title={href}>
@@ -93,6 +110,8 @@ function remarkHtmlAsText() {
 
 // Chat text uses single newlines as line breaks, as the CLIs display them.
 const remarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText, remarkFilePaths];
+/** What the user wrote: their @-mentions show as chips too. */
+const userRemarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText, remarkMentions, remarkFilePaths];
 const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
 
 /** Streaming text re-renders at most this often; the final text renders at once. */
@@ -123,7 +142,7 @@ function useThrottled(text: string, streaming: boolean): string {
  * `image`: a file preview shows its own images (the caller loads them through the
  * checked file reader); chat text keeps images as links.
  */
-export const Markdown = memo(function Markdown({ text, streaming = false, children, image }: { text: string; streaming?: boolean; children?: ReactNode; image?: (src: string, alt: string) => ReactNode }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, children, image, mentions = false }: { text: string; streaming?: boolean; children?: ReactNode; image?: (src: string, alt: string) => ReactNode; mentions?: boolean }) {
   const shown = useThrottled(text, streaming);
   const [comps, transform] = useMemo(
     () =>
@@ -134,7 +153,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, childr
   );
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={comps} urlTransform={transform}>
+      <ReactMarkdown remarkPlugins={mentions ? userRemarkPlugins : remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={comps} urlTransform={transform}>
         {shown}
       </ReactMarkdown>
       {children}

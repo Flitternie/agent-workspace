@@ -20,10 +20,16 @@ export function AttentionView({
   onReply,
   shown,
   now,
+  flat,
+  skipOptions,
 }: {
   item: AttentionItem;
   task: Task;
   compact?: boolean;
+  /** Under a row that already names the agent, the kind and the request: no frame, label or headline. */
+  flat?: boolean;
+  /** Decisions the row already offers as buttons. */
+  skipOptions?: string[];
   /** The agent's message with this request is already on screen (its own conversation): don't repeat it. */
   shown?: boolean;
   onReply?: () => void;
@@ -52,19 +58,19 @@ export function AttentionView({
   const label = item.kind === 'approval' ? t('{name} asks permission', { name: PROVIDER_LABEL[task.provider] }) : t(KIND_LABEL[item.kind]);
   return (
     <div
-      className={`attention kind-${item.kind} state-${item.state}${item.highRisk ? ' high-risk' : ''}${shown ? ' slim' : ''}`}
+      className={`attention kind-${item.kind} state-${item.state}${item.highRisk ? ' high-risk' : ''}${shown ? ' slim' : ''}${flat ? ' flat' : ''}`}
       data-testid="attention-item"
       data-attention-kind={item.kind}
     >
-      <div className="attention-head">
+      {flat ? null : <div className="attention-head">
         <span className="attention-kind">
           <Icon name={item.kind === 'approval' || item.kind === 'error' ? 'alert' : 'reply'} size={12} />
           {label}
           {item.highRisk ? <span className="risk-tag">{t('high risk')}</span> : null}
         </span>
         <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${t(item.state)} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
-      </div>
-      {shown ? null : <div className="attention-headline">{item.headline}</div>}
+      </div>}
+      {shown || flat ? null : <div className="attention-headline">{item.headline}</div>}
       {item.preview?.length ? <ToolContentView content={item.preview} compact={compact && !expanded} /> : null}
       {details && !shown ? (
         <div className={`attention-details${compact && !expanded ? ' clamp' : ''}`}>
@@ -79,9 +85,9 @@ export function AttentionView({
       {!openState && item.resolution ? <div className="attention-resolution">{item.resolution}</div> : null}
       {openState && item.transient ? <SwitchModelHint provider={task.provider} /> : null}
 
-      {openState && native && item.kind === 'approval' ? (
+      {openState && native && item.kind === 'approval' && (item.options ?? []).some((o) => !skipOptions?.includes(o.id)) ? (
         <div className="attention-actions">
-          {(item.options ?? []).map((o) => (
+          {(item.options ?? []).filter((o) => !skipOptions?.includes(o.id)).map((o) => (
             <button
               key={o.id}
               className={(o.kind ? o.kind.startsWith('reject') : /deny|decline/.test(o.id)) ? 'btn' : o.kind === 'allow_always' ? 'btn' : 'btn btn-primary'}
@@ -93,7 +99,7 @@ export function AttentionView({
               {t(o.label)}
             </button>
           ))}
-          <span className="hint">{t('Answered natively in {name}', { name: PROVIDER_LABEL[task.provider] })}</span>
+          {flat ? null : <span className="hint">{t('Answered natively in {name}', { name: PROVIDER_LABEL[task.provider] })}</span>}
         </div>
       ) : null}
 
