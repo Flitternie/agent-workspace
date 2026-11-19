@@ -47,6 +47,7 @@ import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from '.
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
 import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
+import { matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1200,6 +1201,61 @@ export class Workspace {
    * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
    * the caller decides). A path that is not a folder gives no names.
    */
+  /** Each agent folder's file list, kept briefly: an @-mention searches it on every keystroke. */
+  private fileLists = new Map<string, { at: number; files: Promise<string[]> }>();
+
+  /**
+   * Files in an agent's folder (on its host) matching what is typed after @ in its message box. In a
+   * git repository the files git knows (tracked and untracked, not ignored), otherwise a walk that
+   * skips dependency and build folders; at most 50,000.
+   */
+  async searchFiles(taskId: string, query: string): Promise<FileMatch[]> {
+    const task = this.task(taskId);
+    if (task === this.store.data.mainAgent) return [];
+    const key = `${task.host ?? ''}|${task.cwd}`;
+    let entry = this.fileLists.get(key);
+    if (!entry || Date.now() - entry.at > 15_000) {
+      entry = { at: Date.now(), files: this.listFiles(task.cwd, task.host) };
+      this.fileLists.set(key, entry);
+      entry.files.catch(() => this.fileLists.delete(key));
+    }
+    return matchFiles(await entry.files, query);
+  }
+
+  private async listFiles(cwd: string, host?: string): Promise<string[]> {
+    const MAX = 50_000;
+    const SKIP = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', 'venv', '__pycache__', 'target', '.cache'];
+    if (host) {
+      this.requireHost(host);
+      const prune = SKIP.map((d) => `-name ${shq(d)}`).join(' -o ');
+      const script = `cd -- ${shq(cwd)} || exit 3; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git ls-files -co --exclude-standard | head -${MAX}; else find . \\( ${prune} \\) -prune -o -type f -print 2>/dev/null | sed 's|^\\./||' | head -${MAX}; fi`;
+      const r = await sshRun(host, `sh -c ${shq(script)}`, 20_000);
+      if (r.code === 3) return [];
+      if (r.code !== 0 && !r.stdout) throw new Error(sshError(host, r.stderr));
+      return r.stdout.split('\n').filter(Boolean);
+    }
+    const git = await run('git', ['ls-files', '-co', '--exclude-standard'], { cwd, timeoutMs: 15_000 });
+    if (git.code === 0) return git.stdout.split('\n').filter(Boolean).slice(0, MAX);
+    const out: string[] = [];
+    const walk = (dir: string, rel: string) => {
+      if (out.length >= MAX) return;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (out.length >= MAX) return;
+        if (e.isDirectory()) {
+          if (!SKIP.includes(e.name)) walk(join(dir, e.name), `${rel}${e.name}/`);
+        } else if (e.isFile()) out.push(`${rel}${e.name}`);
+      }
+    };
+    walk(cwd, '');
+    return out;
+  }
+
   async listDirs(dir: string, host?: string): Promise<{ dir: string; names: string[] }> {
     if (!host) {
       const home = homedir();

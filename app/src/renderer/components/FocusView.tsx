@@ -28,6 +28,7 @@ import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
+import { MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -989,6 +990,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
   const attach = useAttachments();
+  // @ lists the files in the agent's folder (the main agent has none).
+  const mention = useMentions(isMainAgent(task) ? undefined : task.taskId, box, draft, setDraft);
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1048,6 +1051,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
+      <MentionMenu m={mention} />
       <div
         className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}${attach.dragging ? ' dropping' : ''}`}
         data-voice={voice !== null || undefined}
@@ -1069,7 +1073,9 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
           onPaste={attach.onPaste}
+          onSelect={mention.update}
           onKeyDown={(e) => {
+            if (mention.onKeyDown(e)) return;
             // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
               e.preventDefault();

@@ -7016,3 +7016,33 @@ button.subtask-row:hover {
   border-radius: 6px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
 }
+
+/* @-mentions: the agent's files, listed above its message box (the project chooser's list items). */
+.mention-pop {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.12);
+}
+.mention-pop .project-list {
+  max-height: 260px;
+}
+.mention-pop .project-item {
+  padding: 5px 8px;
+}
+.mention-pop .project-item-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mention-pop .project-item-name {
+  font-weight: 500;
+  white-space: nowrap;
+}

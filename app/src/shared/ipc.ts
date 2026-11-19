@@ -73,6 +73,8 @@ export const ipcSchemas = {
   'btw:list': z.object({ taskId: z.string() }),
   'btw:ask': z.object({ taskId: z.string(), question: z.string().min(1).max(20_000) }),
   'btw:clear': z.object({ taskId: z.string() }),
+  /** Files in an agent's folder matching what is typed after @ in its message box. */
+  'files:search': z.object({ taskId: id, query: z.string().max(500) }),
   'fs:listDirs': z.object({ dir: z.string().min(1).max(2000), host: z.string().max(200).optional() }),
   'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({

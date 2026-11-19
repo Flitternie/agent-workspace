@@ -207,6 +207,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'btw:ask': (i: { taskId: string; question: string }) => workspace.askBtw(i.taskId, i.question),
   'btw:clear': (i: { taskId: string }) => workspace.clearBtw(i.taskId),
   // Typing a folder path in the project chooser: its subfolders, here or on a machine.
+  'files:search': (i: { taskId: string; query: string }) => workspace.searchFiles(i.taskId, i.query),
   'fs:listDirs': (i: { dir: string; host?: string }) => workspace.listDirs(i.dir, i.host),
   'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),
   'task:importSession': (i: Parameters<Workspace['importSession']>[0]) => workspace.importSession(i),

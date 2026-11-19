@@ -1,4 +1,5 @@
 import type { MapGrouping } from '../shared/session-map';
+import type { FileMatch } from '../shared/file-match';
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
@@ -82,6 +83,7 @@ export interface Outputs {
   'btw:list': BtwEntry[];
   'btw:ask': BtwEntry;
   'btw:clear': void;
+  'files:search': FileMatch[];
   'fs:listDirs': { dir: string; names: string[] };
   'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;

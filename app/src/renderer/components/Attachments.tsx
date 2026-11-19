@@ -69,8 +69,10 @@ export function useAttachments() {
 
   const add = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif|heic|tiff?)$/i.test(f.name));
+    // Other files are not attached: the agent reads files where it runs, named with @.
+    if (images.length < files.length) setError(t('Only images can be attached. To point the agent at a file, type @ and its name.'));
     if (!images.length) return;
-    setError('');
+    if (images.length === files.length) setError('');
     const room = Math.max(0, MAX_IMAGES - count.current - pending.current);
     if (images.length > room) setError(t('At most {n} images per message.', { n: MAX_IMAGES }));
     for (const file of images.slice(0, room)) {
