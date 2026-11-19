@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Lane, LaneRow } from '../../shared/main-lanes';
+import { mainLanes, type Lane, type LaneRow } from '../../shared/main-lanes';
+import type { Project, TranscriptItem } from '../../shared/types';
 import type { Task } from '../../shared/types';
 type TaskStatus = Task['status'];
 import { call } from '../api';
-import { t } from '../i18n';
+import { language, t } from '../i18n';
 
 // The main agent's conversation, git-graph style: time runs down, its own lane on the left (your
 // messages), one lane (one colour) per agent it handed work to. A hand-off curves from the main
@@ -42,7 +43,14 @@ export function MainLanes({
   onJump,
   onOpenAgent,
   compact,
+  earlier = [],
+  tasks = [],
+  projects = [],
 }: {
+  /** Earlier chapters of the conversation: a line each, opening to its own lanes. */
+  earlier?: Array<{ key: string; at: string; items: TranscriptItem[] }>;
+  tasks?: Task[];
+  projects?: Pick<Project, 'projectId' | 'name'>[];
   /** Beside the conversation (narrow): hand-offs name the agent only, leaving the room to your words. */
   compact?: boolean;
   lanes: Lane[];
@@ -77,6 +85,7 @@ export function MainLanes({
   const legend = allLegend ? lanes : lanes.slice(0, LEGEND_MAX);
   return (
     <div className="main-lanes" data-testid="main-lanes">
+      {earlier.length ? <EarlierChapters chapters={earlier} tasks={tasks} projects={projects} outcomes={outcomes} compact={compact} onJump={onJump} onOpenAgent={onOpenAgent} /> : null}
       <div className="lanes-legend">
         {legend.map((l) => {
           const k = lanes.indexOf(l);
@@ -204,5 +213,45 @@ export function MainLanesMini({ lanes, rows, onOpen }: { lanes: Lane[]; rows: La
         ))}
       </svg>
     </button>
+  );
+}
+
+/** Earlier chapters: one line each (when, how many agents, who), opening to that chapter's lanes. */
+function EarlierChapters({
+  chapters,
+  tasks,
+  projects,
+  outcomes,
+  compact,
+  onJump,
+  onOpenAgent,
+}: {
+  chapters: Array<{ key: string; at: string; items: TranscriptItem[] }>;
+  tasks: Task[];
+  projects: Pick<Project, 'projectId' | 'name'>[];
+  outcomes: Record<string, Outcome>;
+  compact?: boolean;
+  onJump: (itemId: string) => void;
+  onOpenAgent: (taskId: string) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div className="lanes-earlier" data-testid="lanes-earlier">
+      {chapters.map((c) => {
+        const data = mainLanes(c.items, tasks, projects, compact ? 4 : undefined);
+        const when = c.at ? new Date(c.at).toLocaleString(language() === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' }) : '';
+        const names = data.lanes.map((l) => l.alias);
+        return (
+          <div key={c.key} className={`lanes-chapter${open === c.key ? ' open' : ''}`}>
+            <button className="lanes-chapter-head" onClick={() => setOpen(open === c.key ? null : c.key)} title={names.join(', ')} data-testid="lanes-chapter">
+              <span className="lanes-chapter-caret" aria-hidden>›</span>
+              <span>{t('Earlier')} · {when}</span>
+              <span className="lanes-chapter-meta truncate">{names.length ? t('{n} agents', { n: names.length }) + ' · ' + names.slice(0, 4).join(' ') + (names.length > 4 ? ' …' : '') : t('no hand-offs')}</span>
+            </button>
+            {open === c.key ? <MainLanes lanes={data.lanes} rows={data.rows} outcomes={outcomes} compact={compact} onJump={onJump} onOpenAgent={onOpenAgent} /> : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }

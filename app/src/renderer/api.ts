@@ -94,6 +94,7 @@ export interface Outputs {
   'memory:add': MemoryRecord;
   'memory:distill': { title: string; body: string; scope: 'global' | 'project'; worth: boolean; reason: string; similar?: { id: string; title: string; body: string }; fallback?: string };
   'label:short': string | undefined;
+  'main:newChapter': void;
   'memory:update': void;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
