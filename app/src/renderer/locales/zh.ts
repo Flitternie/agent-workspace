@@ -1017,4 +1017,8 @@ export const zh: Record<string, string> = {
   'Image not available': '图片已不可用',
   '[image]': '[图片]',
   '[{n} images]': '[{n} 张图片]',
+  'Only images can be attached. To point the agent at a file, type @ and its name.': '只能附加图片。要让 agent 看某个文件，请输入 @ 加文件名。',
+  'Files matching “{q}”': '匹配“{q}”的文件',
+  'Files in this agent’s folder': '这个 agent 目录里的文件',
+  'In {dir}': '{dir} 里',
 };

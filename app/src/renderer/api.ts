@@ -1,4 +1,5 @@
 import type { MapGrouping } from '../shared/session-map';
+import type { FileMatch } from '../shared/file-match';
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type { FoundSkill, LibrarySkill } from '../shared/skills';
 import type {
@@ -22,6 +23,7 @@ import type {
 
 interface Bridge {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
+  pathForFile(file: File): string;
   onWorkspace(cb: (s: WorkspaceSnapshot) => void): () => void;
   onTranscript(cb: (update: { items: TranscriptItem[]; resets: string[] }) => void): () => void;
 }
@@ -82,6 +84,8 @@ export interface Outputs {
   'btw:list': BtwEntry[];
   'btw:ask': BtwEntry;
   'btw:clear': void;
+  'files:search': FileMatch[];
+  'files:dropped': FileMatch[];
   'fs:listDirs': { dir: string; names: string[] };
   'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;

@@ -28,6 +28,7 @@ import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
+import { dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
@@ -190,7 +191,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
    * (centred in what is left); else its outline at the edge, opening the full map in the side column.
    */
   const MAP_ROOM = 250;
-  const mapBeside = hasMap && threadW - MAP_ROOM - 32 >= 720;
+  // Opened in the side column by the user, it stays there (dragging the column narrower does not move it
+  // beside the conversation under the pointer); closed, it comes back beside when there is room.
+  const mapBeside = hasMap && !showMap && threadW - MAP_ROOM - 32 >= 720;
   // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
   // would leave too narrow a column; then nothing (nothing floats over the messages).
   const MINI_ROOM = 48;
@@ -255,7 +258,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Which panel the side column shows: one at a time, the preview first.
   const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
     ? 'preview'
-    : showMap && !mapBeside && hasMap
+    : showMap && hasMap
       ? 'map'
       : showBtw && btw.length
         ? 'btw'
@@ -623,6 +626,9 @@ function restored(taskId: string): ShownPreview | null {
 
 /** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
 function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
+  // A drag in progress ends with the bar too: if the panel goes while dragging, the pointer is not left as a resize cursor.
+  const stop = useRef<(() => void) | null>(null);
+  useEffect(() => () => stop.current?.(), []);
   return (
     <div
       className="panel-resizer"
@@ -633,24 +639,26 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
       data-testid="panel-resizer"
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}
       onPointerDown={(e) => {
-        const bar = e.currentTarget;
+        e.preventDefault();
         const startX = e.clientX;
         const startW = width;
-        bar.setPointerCapture(e.pointerId);
         document.body.classList.add('resizing');
+        // On the window, so a fast drag that outruns the thin bar (or outlives it) still ends.
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
           onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
         };
         const up = () => {
-          bar.removeEventListener('pointermove', move);
-          bar.removeEventListener('pointerup', up);
-          bar.removeEventListener('pointercancel', up);
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', up);
           document.body.classList.remove('resizing');
+          stop.current = null;
         };
-        bar.addEventListener('pointermove', move);
-        bar.addEventListener('pointerup', up);
-        bar.addEventListener('pointercancel', up);
+        stop.current = up;
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
       }}
     />
   );
@@ -1004,7 +1012,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               ) : item.role === 'system' ? (
                 <div className="msg-system">{systemText(item.text)}</div>
               ) : (
-                <Markdown text={item.text} streaming={item.streaming} />
+                <Markdown text={item.text} streaming={item.streaming} mentions={item.role === 'user'} />
               )}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
@@ -1163,7 +1171,14 @@ function Composer({
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
-  const attach = useAttachments();
+  // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
+  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task) });
+  // Other files dropped here are mentioned with @, as if picked from the list.
+  const attach = useAttachments(async (files) => {
+    const text = await dropMentions(task.taskId, files);
+    if (text) mention.insert(text);
+    box.current?.focus();
+  });
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1232,12 +1247,15 @@ function Composer({
           </button>
         </div>
       ) : null}
+      <MentionMenu m={mention} />
       <div
         className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}${attach.dragging ? ' dropping' : ''}`}
         data-voice={voice !== null || undefined}
         {...attach.dropProps}
       >
         <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
+        <div className="composer-field">
+        <MentionHighlight text={draft} box={box} />
         <textarea
           ref={box}
           className="composer-input"
@@ -1253,7 +1271,9 @@ function Composer({
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
           onPaste={attach.onPaste}
+          onSelect={mention.update}
           onKeyDown={(e) => {
+            if (mention.onKeyDown(e) || mention.onBackspace(e)) return;
             // → or Tab takes the suggested reply into the box (edit it, or Enter to send).
             if (suggestion && (e.key === 'ArrowRight' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) {
               e.preventDefault();
@@ -1271,6 +1291,7 @@ function Composer({
             }
           }}
         />
+        </div>
         <div className="composer-foot">
           {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
           <span id="composer-voice" className="composer-voice" />

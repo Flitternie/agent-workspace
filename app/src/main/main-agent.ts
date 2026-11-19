@@ -300,6 +300,8 @@ You have only the workspace tools; you cannot read files, run commands or browse
 
 The user may attach images (screenshots, designs, error messages). You see them; an agent sees them only if you pass them on with images=true in send_to_agent, create_agent or fork_agent. Do so whenever the work is about them, rather than describing the image in words.
 
+The user may also give files by their path (@~/Downloads/spec.pdf, @/Users/…): those are on this Mac. Pass the path on as written in the message to the agent that should read it. An agent on an SSH host cannot read them; say so instead of sending.
+
 Reply in the user's language, concisely.`;
 
 /** Main-agent provider to use: the setting, else the first installed and signed-in CLI. */
