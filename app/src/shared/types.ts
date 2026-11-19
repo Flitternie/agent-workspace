@@ -311,6 +311,8 @@ export interface ProviderCapabilities {
   readOnlyMonitor: boolean;
   structuredApprovals: boolean;
   structuredQuestions: boolean;
+  /** Saved conversations on this Mac can be forked (the adapter implements forkPoints / forkSession). */
+  fork?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */
   auth?: { loggedIn: boolean; method?: string };
 }

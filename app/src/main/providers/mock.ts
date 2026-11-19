@@ -3,7 +3,7 @@ import { makeDiff, parseUnifiedHunks } from '../../shared/content';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ModelOption, ForkPoint, NativeSessionInfo, ProviderCapabilities } from '../../shared/types';
-import type { Delivery, ApprovalResponse, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import type { Delivery, ApprovalResponse, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 /**
  * Deterministic scripted agent used for UI tests and the demo. It behaves like a
@@ -75,14 +75,14 @@ export class MockAdapter implements ProviderAdapter {
     return messages.flatMap((m, i) => (i > 0 && m.role === 'user' ? [{ upToMessageId: messages[i - 1].itemId, prompt: m.text }] : []));
   }
 
-  async forkSession(nativeSessionId: string, opts: { cwd: string; upToMessageId?: string; title?: string }): Promise<string> {
+  async forkSession(nativeSessionId: string, opts: ForkSessionOpts): Promise<string> {
     const source = this.load(nativeSessionId);
     const end = opts.upToMessageId ? source.messages.findIndex((m) => m.itemId === opts.upToMessageId) : source.messages.length - 1;
     if (end === -1) throw new Error(`Message ${opts.upToMessageId} is not in mock session ${nativeSessionId}.`);
     const id = `mock-${randomUUID()}`;
     // Fresh item ids, as Claude Code gives a fork fresh message UUIDs.
     const messages = source.messages.slice(0, end + 1).map((m, i) => ({ ...m, itemId: `${id}:${i}` }));
-    const fork: MockHistory = { id, cwd: opts.cwd, title: opts.title ?? `${source.title} (fork)`, updatedAt: new Date().toISOString(), messages };
+    const fork: MockHistory = { id, cwd: opts.targetCwd ?? opts.cwd, title: opts.title ?? `${source.title} (fork)`, updatedAt: new Date().toISOString(), messages };
     writeFileSync(sessionFile(this.dir, id), JSON.stringify(fork, null, 2));
     return id;
   }

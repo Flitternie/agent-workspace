@@ -323,7 +323,8 @@ export class Workspace {
     for (const a of Object.values(this.opts.adapters)) {
       if (!a) continue;
       try {
-        caps.push(await a.capabilities());
+        // Fork support comes from the adapter itself, so the renderer offers it for every provider that has it.
+        caps.push({ ...(await a.capabilities()), fork: !!(a.forkSession && a.forkPoints) });
       } catch (error) {
         this.log('capabilities failed', a.provider, error);
       }
@@ -1347,7 +1348,7 @@ export class Workspace {
     }
     let forkId: string;
     try {
-      forkId = await adapter.forkSession(nativeSessionId, { cwd: src.cwd, upToMessageId: opts.upToMessageId, title });
+      forkId = await adapter.forkSession(nativeSessionId, { cwd: src.cwd, targetCwd: cwd, upToMessageId: opts.upToMessageId, title });
     } catch (error) {
       if (worktree) await this.worktrees.removeIfClean(worktree);
       throw error;
