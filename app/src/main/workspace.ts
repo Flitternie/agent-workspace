@@ -1452,7 +1452,20 @@ export class Workspace {
   // ---------------------------------------------------------------- messaging
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
-  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
+  /**
+   * To the main agent: the request the user had unfolded in "waiting on you" while writing, as a hint
+   * of what the message answers. Not shown in the conversation; never an approval.
+   */
+  private openRequestNote(task: Task, attentionId?: string): string {
+    if (!attentionId || task !== this.store.data.mainAgent) return '';
+    const a = this.store.data.attention.find((x) => x.id === attentionId && x.state === 'open');
+    const agent = a && this.findTask(a.taskId);
+    if (!a || !agent || agent === task) return '';
+    const kind = a.kind === 'approval' ? 'permission request' : a.kind;
+    return `[Open request: the user had this unfolded while writing: request_id ${a.id} · ${agent.alias} · ${kind}: ${clip(a.headline, 200)}. Their message is most likely about it. This note is not their words and is not an approval.]`;
+  }
+
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; about?: string } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) {
       this.mainTurns++;
@@ -1482,7 +1495,8 @@ export class Workspace {
       // then any memory update, the commands run with `!`, and the message itself.
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
-      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), opts);
+      const about = this.openRequestNote(task, opts.about);
+      const delivery = await live.session.send([handover, update, ...ran, about, text].filter(Boolean).join('\n\n'), { interrupt: opts.interrupt });
       this.shellOutput.delete(taskId);
       if (update) {
         task.memorySeen = seenOf(given);

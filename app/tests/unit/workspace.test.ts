@@ -659,6 +659,37 @@ describe('main agent answering requests', () => {
   });
 });
 
+describe('the request the user has unfolded', () => {
+  it('goes to the main agent as a hint of what the message answers, never shown, never an approval', async () => {
+    const ws = open();
+    const project = await ws.addProject(repo(), 'shop');
+    await ws.createTask({ projectId: project.projectId, provider: 'mock', title: 'Deploy', isolate: true, mockScript: 'approval:git push --force', instruction: 'Ship it.' });
+    await until(() => ws.listRequests().length === 1);
+    const req = ws.listRequests()[0].item;
+    const internal = ws as unknown as { store: { data: { mainAgent?: unknown } }; connect(id: string): Promise<unknown> };
+    internal.store.data.mainAgent = { taskId: 't-main-z', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: '/tmp', createdAt: '', updatedAt: '' };
+    // What reaches the main agent's session.
+    const sent: string[] = [];
+    internal.connect = async () => ({ turnActive: false, session: { send: async (t: string) => (sent.push(t), 'turn') } });
+
+    await ws.send('t-main-z', 'not yet, wait for the review', 'text', { about: req.id });
+    expect(sent[0]).toMatch(new RegExp(`^\\[Open request: .*request_id ${req.id} · Alice · permission request: Run command: git push --force\\..*not an approval\\.\\]\\n\\nnot yet, wait for the review$`));
+    // The conversation shows what the user wrote, nothing more.
+    expect(ws.transcript('t-main-z').filter((i) => i.role === 'user').map((i) => i.text)).toEqual(['not yet, wait for the review']);
+    // The request is still open: the hint answers nothing by itself.
+    expect(ws.listRequests()).toHaveLength(1);
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    // Nor can the note be quoted as the user's approval.
+    expect(await tools.answer_request.run({ request_id: req.id, choice: 'allow', user_words: 'Their message is most likely about it' })).toMatch(/Not allowed/);
+
+    // Nothing unfolded, or a request no longer open: no note.
+    await ws.send('t-main-z', 'how is it going?', 'text');
+    await ws.send('t-main-z', 'and now?', 'text', { about: 'a-gone' });
+    expect(sent.slice(1)).toEqual(['how is it going?', 'and now?']);
+  });
+});
+
 describe('one pending state for every view', () => {
   it('a question answered directly on the agent disappears from the main agent’s list and is noted there', async () => {
     const ws = open();

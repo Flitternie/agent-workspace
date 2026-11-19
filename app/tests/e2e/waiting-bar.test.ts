@@ -131,28 +131,45 @@ describe.runIf(hasClaude)('main agent: waiting on you', () => {
     await page.mouse.move(700, 300);
     await page.screenshot({ path: join(shots, 'waiting-01-wide-folded.png') });
 
-    // Unfolded: one row per request (four of them), each opening to its own buttons.
+    // Unfolded: one row per request (who, what kind, what), the same however many there are.
     await toggle.click();
-    await expect.poll(() => page.getByTestId('waiting-bar-list').getByTestId('waiting-row').count()).toBe(4);
+    const rows = page.getByTestId('waiting-bar-list').getByTestId('waiting-row');
+    await expect.poll(() => rows.count()).toBe(4);
+    expect(await page.getByTestId('waiting-detail').count()).toBe(0);
     aligned(await edges());
     await page.screenshot({ path: join(shots, 'waiting-02-wide-unfolded.png') });
-    // The permission request: allowed right here.
-    await page.getByTestId('waiting-row').filter({ hasText: 'deploy --prod' }).getByRole('button').first().click();
-    await page.getByTestId('waiting-item').getByRole('button', { name: 'Allow once' }).click();
+    // The permission request: allowed right on its row, nothing to unfold.
+    await rows.filter({ hasText: 'deploy --prod' }).getByRole('button', { name: 'Allow once' }).click();
     await expect.poll(openCount).toBe(3);
     await expect.poll(() => toggle.innerText()).toMatch(/^3 waiting on you/);
-    // The question with options: answered right here.
-    await page.getByTestId('waiting-row').filter({ hasText: 'cache use' }).getByRole('button').first().click();
-    await page.getByTestId('waiting-item').getByRole('button', { name: 'Option B' }).click();
-    await page.getByTestId('waiting-item').getByRole('button', { name: 'Send answer' }).click();
+    // The question with options: "Answer" unfolds it under its row, flat (no card inside the bar), lined up with the name.
+    await rows.filter({ hasText: 'cache use' }).getByRole('button', { name: 'Answer' }).click();
+    const detail = page.getByTestId('waiting-detail');
+    await expect.poll(() => detail.count()).toBe(1);
+    const look = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="waiting-detail"] .attention')!;
+      const row = card.closest('.wb-row')!;
+      return { border: getComputedStyle(card).borderTopWidth, card: Math.round(card.getBoundingClientRect().left), name: Math.round(row.querySelector('.wb-name')!.getBoundingClientRect().left) };
+    });
+    expect(look.border).toBe('0px');
+    expect(Math.abs(look.card - look.name)).toBeLessThanOrEqual(1);
+    // Unfolded by the user: the reply box says what a message will be taken as answering; × says it is not.
+    const chip = page.getByTestId('composer-about');
+    await expect.poll(() => chip.innerText()).toMatch(/About Ethan’s request\s*Which database should the cache use\?/);
+    await page.getByTestId('composer-about-clear').click();
+    await expect.poll(() => chip.count()).toBe(0);
+    expect(await detail.count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'waiting-03-answer.png') });
+    await detail.getByRole('button', { name: 'Option B' }).click();
+    await detail.getByRole('button', { name: 'Send answer' }).click();
     await expect.poll(openCount).toBe(2);
-    // Two left: shown whole (no rows), still unfolded.
-    await expect.poll(() => page.getByTestId('waiting-bar-list').getByTestId('waiting-item').count()).toBe(2);
-    expect(await page.getByTestId('waiting-row').count()).toBe(0);
-    await page.screenshot({ path: join(shots, 'waiting-03-two.png') });
+    // Two left: still one row each, none open.
+    await expect.poll(() => rows.count()).toBe(2);
+    expect(await detail.count()).toBe(0);
 
-    // One: dismissed down to a single request; folded it reads "1 waiting on you".
-    await page.getByTestId('waiting-item').first().getByRole('button', { name: 'Dismiss' }).click();
+    // One: a question opened from its row and dismissed; folded it reads "1 waiting on you".
+    await rows.first().locator('.wb-main').click();
+    await detail.getByRole('button', { name: 'Dismiss' }).click();
     await expect.poll(openCount).toBe(1);
     await toggle.click();
     await expect.poll(() => toggle.innerText()).toMatch(/^1 waiting on you/);
@@ -166,13 +183,15 @@ describe.runIf(hasClaude)('main agent: waiting on you', () => {
     console.log('narrow', JSON.stringify(narrow));
     aligned(narrow);
     await page.screenshot({ path: join(shots, 'waiting-05-narrow.png') });
+    // A lone request opens by itself when unfolded; not picked by the user, so no "about" hint.
     await toggle.click();
-    await expect.poll(() => page.getByTestId('waiting-bar-list').getByTestId('waiting-item').count()).toBe(1);
+    await expect.poll(() => detail.count()).toBe(1);
+    expect(await page.getByTestId('composer-about').count()).toBe(0);
     aligned(await edges());
     await page.screenshot({ path: join(shots, 'waiting-06-narrow-unfolded.png') });
 
     // Zero: the line goes and leaves no room behind (the reply box sits right under the conversation).
-    await page.getByTestId('waiting-item').first().getByRole('button', { name: 'Dismiss' }).click();
+    await detail.getByRole('button', { name: 'Dismiss' }).click();
     await expect.poll(openCount).toBe(0);
     await expect.poll(() => bar.count()).toBe(0);
     const gap = await page.evaluate(() => {

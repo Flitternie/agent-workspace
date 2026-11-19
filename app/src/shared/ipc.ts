@@ -33,7 +33,7 @@ export const ipcSchemas = {
     isolate: z.boolean(),
     mockScript: z.string().max(50).optional(),
   }),
-  'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional() }),
+  'task:send': z.object({ taskId: id, text: text.min(1), via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), about: id.optional() }),
   'task:interrupt': z.object({ taskId: id }),
   'task:models': z.object({ taskId: id }),
   'task:setModel': z.object({ taskId: id, model: z.string().min(1).max(200).nullable() }),
