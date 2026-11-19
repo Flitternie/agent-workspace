@@ -38,6 +38,26 @@ describe('Claude Code sub-agents', () => {
     ]);
   });
 
+  it('as Claude Code really reports a background one: ended by task_updated, then the report in task_notification; the handback is no step', () => {
+    const c = new ClaudeSubtasks();
+    c.toolUse('toolu_3', { description: 'Read alpha.txt', subagent_type: 'general-purpose' });
+    c.system({ type: 'system', subtype: 'task_started', task_id: 't3', tool_use_id: 'toolu_3', description: 'Read alpha.txt', subagent_type: 'general-purpose', is_backgrounded: true, task_type: 'local_agent' });
+    expect(c.toolResult('toolu_3', 'Async agent launched', false)).toEqual([]);
+    // The report is the handback's message; the notification only points at it.
+    expect(c.inner('toolu_3', { type: 'assistant', parent_tool_use_id: 'toolu_3', message: { content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: 'Alpha: retries three times.' } }] } }, title)).toEqual([
+      { type: 'subtask', id: 'toolu_3', result: 'Alpha: retries three times.' },
+    ]);
+    expect(c.system({ type: 'system', subtype: 'task_updated', task_id: 't3', patch: { status: 'completed', end_time: 1 } })).toEqual([{ type: 'subtask', id: 'toolu_3', status: 'done', step: '' }]);
+    expect(c.system({ type: 'system', subtype: 'task_notification', task_id: 't3', tool_use_id: 'toolu_3', status: 'completed', summary: 'This agent\'s report was delivered to you as a message from "a1" (its SubagentHandback call).' })).toEqual([]);
+  });
+
+  it('a background one without a handback: the notification summary is its report', () => {
+    const c = new ClaudeSubtasks();
+    c.system({ type: 'system', subtype: 'task_started', task_id: 't4', tool_use_id: 'toolu_4', description: 'Run tests', task_type: 'local_agent', is_backgrounded: true });
+    c.system({ type: 'system', subtype: 'task_updated', task_id: 't4', patch: { status: 'completed' } });
+    expect(c.system({ type: 'system', subtype: 'task_notification', task_id: 't4', status: 'completed', summary: 'All green.' })).toEqual([{ type: 'subtask', id: 'toolu_4', result: 'All green.' }]);
+  });
+
   it('ignores background shells and housekeeping tasks; a stopped sub-agent ends as failed', () => {
     const c = new ClaudeSubtasks();
     expect(c.system({ type: 'system', subtype: 'task_started', task_id: 'sh', description: 'npm test', task_type: 'local_bash' })).toEqual([]);
@@ -85,10 +105,11 @@ describe('Codex sub-agents', () => {
     expect(c.item({ type: 'collabAgentToolCall', id: 'c3', tool: 'closeAgent', status: 'completed', receiverThreadIds: ['th-1'], agentsStates: { 'th-1': { status: 'shutdown', message: null } } })).toEqual([]);
   });
 
-  it('subAgentActivity items mark starts and ends', () => {
+  it('subAgentActivity items mark starts and ends (what codex-cli 0.162 sends, without spawnAgent items)', () => {
     const c = new CodexSubtasks();
+    expect(c.item({ type: 'subAgentActivity', id: 'a', kind: 'started', agentThreadId: 'th-8', agentPath: '/root/read_alpha' })[0]).toMatchObject({ description: 'Read alpha' });
     expect(c.item({ type: 'subAgentActivity', id: 'x', kind: 'started', agentThreadId: 'th-9', agentPath: 'root/reviewer' })).toEqual([
-      { type: 'subtask', id: 'th-9', description: 'reviewer', status: 'running' },
+      { type: 'subtask', id: 'th-9', description: 'Reviewer', status: 'running' },
     ]);
     expect(c.item({ type: 'subAgentActivity', id: 'y', kind: 'interrupted', agentThreadId: 'th-9', agentPath: 'root/reviewer' })).toEqual([
       { type: 'subtask', id: 'th-9', status: 'failed', step: '', result: 'Interrupted.' },
@@ -100,9 +121,9 @@ describe('many sub-agents', () => {
   const at = (min: number) => new Date(Date.UTC(2026, 10, 18, 12, min)).toISOString();
   const sub = (id: string, status: SubtaskInfo['status'], started: number, ended?: number): SubtaskInfo => ({ id, description: id, status, startedAt: at(started), ...(ended !== undefined ? { endedAt: at(ended) } : {}) });
 
-  it('lists the working ones first (in start order), then failures, then the latest finished; counts the rest', () => {
-    const list = [sub('d-old', 'done', 0, 1), sub('r-late', 'running', 5), sub('f', 'failed', 2, 3), sub('r-early', 'running', 1), sub('d-new', 'done', 2, 6)];
-    expect(orderSubtasks(list).map((s) => s.id)).toEqual(['r-early', 'r-late', 'f', 'd-new', 'd-old']);
+  it('lists the working ones first, then failures, then the finished, each in start order; counts the rest', () => {
+    const list = [sub('d-old', 'done', 0, 7), sub('r-late', 'running', 5), sub('f', 'failed', 2, 3), sub('r-early', 'running', 1), sub('d-new', 'done', 2, 6)];
+    expect(orderSubtasks(list).map((s) => s.id)).toEqual(['r-early', 'r-late', 'f', 'd-old', 'd-new']);
     const d = digestSubtasks(list, 3);
     expect(d.shown.map((s) => s.id)).toEqual(['r-early', 'r-late', 'f']);
     expect(d.hidden).toEqual({ total: 2, running: 0, failed: 0, done: 2 });

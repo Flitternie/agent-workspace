@@ -14,7 +14,7 @@ const common = {
 };
 await build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'out/main/index.cjs' });
 await build({ ...common, entryPoints: ['src/preload/index.ts'], outfile: 'out/preload/index.cjs' });
-for (const name of ['providers', 'voice', 'content'])
+for (const name of ['providers', 'voice', 'content', 'subtasks'])
   if (existsSync(`src/smoke/${name}.ts`))
     await build({ ...common, entryPoints: [`src/smoke/${name}.ts`], outfile: `out/smoke/${name}.cjs` });
 console.log('main/preload built');

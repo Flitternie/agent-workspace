@@ -1399,6 +1399,9 @@ export class Workspace {
       const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
       task.suggestion = undefined;
+      // A new request starts a new set of sub-agents; ones still working (in the background) stay.
+      // Not on every turn start: Claude Code starts turns of its own to report background sub-agents.
+      if (!busy && task.subtasks) task.subtasks = task.subtasks.filter((s) => s.status === 'running').length ? task.subtasks.filter((s) => s.status === 'running') : undefined;
       // Commands the user ran with `!` since the last message reach the agent with this one.
       const ran = this.shellOutput.get(taskId) ?? [];
       // The first message of a new chapter carries the hand-over (what is going on now) to the fresh session;
@@ -1715,7 +1718,6 @@ export class Workspace {
         // Working again: back among the active.
         task.setAside = undefined;
         task.suggestion = undefined;
-        task.subtasks = undefined;
         live.turnActive = true;
         if (!this.hasOpenNative(taskId)) task.status = 'running';
         break;

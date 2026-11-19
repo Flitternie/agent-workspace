@@ -13,9 +13,17 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 /** A one-line description from a prompt or label. */
 const oneLine = (text: string): string => text.trim().split('\n')[0].trim();
 
+/** Codex names a sub-agent by a path the model picks ("/root/read_alpha"): "Read alpha". */
+function agentName(path: string): string {
+  const name = (path.split('/').pop() ?? '').replace(/[_-]+/g, ' ').trim();
+  return name ? name[0].toUpperCase() + name.slice(1) : '';
+}
+
 /** Shared state: which sub-agents are known and how they stand, so an ending is never undone. */
 class Ledger {
   private status = new Map<string, Status>();
+  /** Has reported back (a result is shown). */
+  private reported = new Set<string>();
 
   has(id: string): boolean {
     return this.status.has(id);
@@ -35,9 +43,24 @@ class Ledger {
     return this.running(id) && step ? [{ type: 'subtask', id, step }] : [];
   }
 
-  /** Ends a running sub-agent; later reports of the same ending (or a vaguer one) change nothing. */
+  /** Its report, as soon as it hands it back (it may still be finishing up). */
+  report(id: string, text: string): SubtaskEvent[] {
+    if (!this.status.has(id) || !text || this.reported.has(id)) return [];
+    this.reported.add(id);
+    return [{ type: 'subtask', id, result: text }];
+  }
+
+  /**
+   * Ends a running sub-agent; later reports of the ending change nothing, except to add the report
+   * when the first one came without it (Claude Code: task_updated, then task_notification's summary).
+   */
   end(id: string, status: Exclude<Status, 'running'>, result?: string): SubtaskEvent[] {
-    if (!this.running(id)) return [];
+    if (!this.status.has(id)) return [];
+    if (result) {
+      if (this.reported.has(id)) result = undefined;
+      else this.reported.add(id);
+    }
+    if (!this.running(id)) return result ? [{ type: 'subtask', id, result }] : [];
     this.status.set(id, status);
     return [{ type: 'subtask', id, status, step: '', ...(result ? { result } : {}) }];
   }
@@ -80,7 +103,10 @@ export class ClaudeSubtasks {
     const out: SubtaskEvent[] = [];
     for (const b of Array.isArray(blocks) ? blocks : []) {
       const block = rec(b);
-      if (block.type === 'tool_use') out.push(...this.ledger.step(parentId, title(str(block.name), rec(block.input))));
+      if (block.type !== 'tool_use') continue;
+      // SubagentHandback is how it returns its report (task_notification then only points at it): not a step.
+      if (block.name === 'SubagentHandback') out.push(...this.ledger.report(parentId, str(rec(block.input).message)));
+      else out.push(...this.ledger.step(parentId, title(str(block.name), rec(block.input))));
     }
     return out;
   }
@@ -147,7 +173,7 @@ export class CodexSubtasks {
       const id = str(item.agentThreadId);
       if (!id) return [];
       const kind = str(item.kind);
-      if (kind === 'started') return this.ledger.start(id, oneLine(str(item.agentPath).split('/').pop() ?? ''));
+      if (kind === 'started') return this.ledger.start(id, agentName(str(item.agentPath)));
       if (kind === 'completed') return this.ledger.end(id, 'done', this.lastText.get(id));
       if (kind === 'interrupted') return this.ledger.end(id, 'failed', 'Interrupted.');
       return [];

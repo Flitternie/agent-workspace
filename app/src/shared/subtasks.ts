@@ -1,6 +1,6 @@
-// How an agent's sub-agents are listed when there may be dozens: the ones still working first (in
-// the order they started, so rows do not jump while they run), then failures, then the latest
-// finished. Lists that only have room for a few show the head and count the rest.
+// How an agent's sub-agents are listed when there may be dozens: the ones still working first, then
+// failures, then the finished ones; each group in the order they started, so a batch reads in order
+// and rows never swap among themselves. Lists that only have room for a few show the head and count the rest.
 
 import type { SubtaskInfo } from './types';
 
@@ -10,9 +10,7 @@ const RANK: Record<SubtaskInfo['status'], number> = { running: 0, failed: 1, don
 export function orderSubtasks(list: SubtaskInfo[]): SubtaskInfo[] {
   return [...list].sort((a, b) => {
     const d = RANK[a.status] - RANK[b.status];
-    if (d) return d;
-    if (a.status === 'running') return ms(a.startedAt) - ms(b.startedAt);
-    return ms(b.endedAt ?? b.startedAt) - ms(a.endedAt ?? a.startedAt);
+    return d || ms(a.startedAt) - ms(b.startedAt);
   });
 }
 
