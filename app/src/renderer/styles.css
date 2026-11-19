@@ -6719,3 +6719,106 @@ button.subtask-row:hover {
 .lanes-chapter .main-lanes {
   margin: 4px 0 8px;
 }
+
+/* ------------------------------------------------------------------ voice on an agent's page */
+/* No voice bar here: the mic is the first button in the agent's box, the size of the side-question
+   and send buttons on the right; what is said appears in the box; the rare note (sent to someone
+   else, choose a target) floats above it. */
+.composer {
+  position: relative;
+}
+.composer-voice:empty {
+  display: none;
+}
+.composer-voice {
+  display: inline-flex;
+  flex: none;
+}
+.voice-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.voice-inline .mic {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+}
+.voice-inline .mic:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.voice-inline .mic svg {
+  width: 15px;
+  height: 15px;
+}
+.voice-inline .mic-slash {
+  width: 17px;
+  height: 1.5px;
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+.voice-inline .mic-listening,
+.voice-inline .mic-speaking {
+  color: var(--live);
+  background: #eaf7ef;
+  border-color: #b9e3c8;
+  box-shadow: 0 0 0 calc(var(--level, 0) * 6px) rgba(22, 163, 74, 0.22);
+}
+.voice-inline-note {
+  font-size: 11px;
+  color: var(--risk);
+  white-space: nowrap;
+}
+.composer .captions {
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+}
+.composer .popover {
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+}
+/* Something is being said into the box. */
+.composer-box.voice-live {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+/* Where a message went (a few seconds), or what failed: one quiet line beside the box, no caption. */
+.dock-input {
+  position: relative;
+}
+.dock-note {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.voice-inline-note {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.dock-note.error,
+.voice-inline-note.error {
+  color: var(--risk);
+  pointer-events: auto;
+}
+.dock-note.ok::before,
+.voice-inline-note.ok::before {
+  content: '✓ ';
+  color: var(--ok);
+}
