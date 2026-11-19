@@ -76,6 +76,11 @@ describe('files in an agent’s folder', () => {
         { path: join(outside, 'spec.pdf'), dir: false },
       ]);
       expect(ws.droppedFiles(t.taskId, [join(homedir(), 'Downloads', 'x.pdf')])[0].path).toBe('~/Downloads/x.pdf');
+      // The main agent gets full paths (to pass on), and browses only ~/ and /.
+      (ws as unknown as { store: { data: { mainAgent?: unknown } } }).store.data.mainAgent = { taskId: 't-main-x', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: cwd, createdAt: '', updatedAt: '' };
+      expect(ws.droppedFiles('t-main-x', [join(cwd, 'src', 'checkout.ts')])[0].path).toBe(join(cwd, 'src', 'checkout.ts'));
+      expect(await ws.searchFiles('t-main-x', 'check')).toEqual([]);
+      expect((await ws.searchFiles('t-main-x', `${cwd}/src/`)).map((m) => m.path)).toEqual([`${cwd}/src/checkout.ts`]);
 
       const plain = mkdtempSync(join(tmpdir(), 'amw-fm-plain-'));
       mkdirSync(join(plain, 'lib'));

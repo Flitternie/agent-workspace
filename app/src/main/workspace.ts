@@ -1211,8 +1211,9 @@ export class Workspace {
    */
   async searchFiles(taskId: string, query: string): Promise<FileMatch[]> {
     const task = this.task(taskId);
-    if (task === this.store.data.mainAgent) return [];
     const browse = browsePath(query);
+    // The main agent has no folder of its own to search; it can still be given a file by its full path (~/ or /) to pass on.
+    if (task === this.store.data.mainAgent) return browse && !browse.parent.startsWith('..') ? this.browseFiles(homedir(), undefined, browse.parent, browse.prefix) : [];
     if (browse) return this.browseFiles(task.cwd, task.host, browse.parent, browse.prefix);
     const key = `${task.host ?? ''}|${task.cwd}`;
     let entry = this.fileLists.get(key);
@@ -1229,11 +1230,11 @@ export class Workspace {
   /**
    * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
    * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
-   * on an SSH host (the files are on this Mac) and the main agent (which reads no files) refuse.
+   * on an SSH host (the files are on this Mac) refuses. The main agent gets full paths, to pass on.
    */
   droppedFiles(taskId: string, paths: string[]): FileMatch[] {
     const task = this.task(taskId);
-    if (task === this.store.data.mainAgent) throw new Error('The main agent does not read files; drop them on the agent that should.');
+    const main = task === this.store.data.mainAgent;
     if (task.host) throw new Error(`These files are on this Mac; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
     const home = homedir();
     return paths.map((p) => {
@@ -1244,7 +1245,7 @@ export class Workspace {
       } catch {
         /* gone already: mentioned as a file */
       }
-      const inside = abs === task.cwd ? '.' : abs.startsWith(task.cwd + sep) ? abs.slice(task.cwd.length + 1) : undefined;
+      const inside = main ? undefined : abs === task.cwd ? '.' : abs.startsWith(task.cwd + sep) ? abs.slice(task.cwd.length + 1) : undefined;
       const shown = inside ?? (abs === home || abs.startsWith(home + sep) ? `~${abs.slice(home.length)}` : abs);
       const path = shown.split(sep).join('/');
       return { path: dir && !path.endsWith('/') ? `${path}/` : path, dir };

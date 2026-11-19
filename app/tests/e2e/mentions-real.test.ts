@@ -61,6 +61,34 @@ describe.runIf(enabled)('@-mentions with real agents', () => {
     }, 300_000);
   }
 
+  it('the main agent passes on a file given by its path', async () => {
+    mkdirSync(join(appDir, '.cache'), { recursive: true });
+    const root = mkdtempSync(join(appDir, '.cache', 'at-main-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const spec = join(mkdtempSync(join(tmpdir(), 'amw-at-spec-')), 'checkout spec.md');
+    writeFileSync(spec, '# Checkout\nThe button is green.\n');
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !['ELECTRON_RUN_AS_NODE', 'CLAUDECODE'].includes(k)) env[k] = v;
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MAIN_AGENT: 'claude', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-atm-')), AMW_NO_AUTOLISTEN: '1', AMW_NO_OPENAI: '1' } });
+    const page = await app.firstWindow();
+    await page.waitForSelector('.app');
+    await invoke(page, 'settings:update', { onboarding: { dismissed: true } });
+    const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
+    const mainOf = async () => ((await snap()) as unknown as { main?: { taskId: string } }).main;
+    await expect.poll(async () => !!(await mainOf()), { timeout: 30_000 }).toBe(true);
+    const main = (await mainOf())!;
+    const project = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: root, name: 'shop' });
+    const ui = await invoke<Task>(page, 'task:create', { projectId: project.projectId, provider: 'mock', name: 'checkout-ui', title: 'Checkout page UI', mockScript: 'quick', isolate: false });
+    // As a drop on the main agent's box writes it.
+    const [m] = await invoke<Array<{ path: string }>>(page, 'files:dropped', { taskId: main.taskId, paths: [spec] });
+    expect(m.path).toBe(spec);
+    await invoke(page, 'task:send', { taskId: main.taskId, text: `Ask the checkout-ui agent to follow @"${m.path}" for the button.`, via: 'text' });
+    await expect.poll(async () => (await invoke<TranscriptItem[]>(page, 'transcript:get', { taskId: ui.taskId })).filter((i) => i.role === 'user' && i.via === 'main').length, { timeout: 180_000, interval: 1000 }).toBeGreaterThan(0);
+    const got = (await invoke<TranscriptItem[]>(page, 'transcript:get', { taskId: ui.taskId })).filter((i) => i.role === 'user' && i.via === 'main');
+    console.log('[main] sent to agent:', got.map((i) => i.text).join(' | '));
+    expect(got.some((i) => i.text.includes(spec))).toBe(true);
+  }, 300_000);
+
   it.runIf(host)('lists the files of an agent’s folder on an SSH host', async () => {
     remote(`mkdir -p ~/${scratch}/src/checkout ~/${scratch}/node_modules/x && cd ~/${scratch} && touch src/checkout/Button.tsx src/index.ts node_modules/x/Button.js README.md`);
     const page = await launch();

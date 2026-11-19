@@ -989,8 +989,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
-  // @ lists the files in the agent's folder (the main agent has none).
-  const mention = useMentions(isMainAgent(task) ? undefined : task.taskId, box, draft, setDraft);
+  // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
+  const mention = useMentions(task.taskId, box, draft, setDraft);
   // Other files dropped here are mentioned with @, as if picked from the list.
   const attach = useAttachments(async (files) => {
     const text = await dropMentions(task.taskId, files);
