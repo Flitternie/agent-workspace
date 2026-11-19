@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../../shared/types';
+import { digestSubtasks, orderSubtasks, type SubtaskDigest } from '../../shared/subtasks';
 import { t, t as tr } from '../i18n';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -180,15 +181,25 @@ export function liveSubtasks(t: { status: AgentStatus; subtasks?: SubtaskInfo[] 
   return t.subtasks?.length ? t.subtasks : undefined;
 }
 
+/** Rows the hover card lists before counting the rest. */
+const POP_ROWS = 8;
+
+/** "+12 more · 3 running" for what a short list leaves out. */
+function moreText(d: SubtaskDigest): string {
+  return d.hidden.running ? tr('+{n} more · {r} running', { n: d.hidden.total, r: d.hidden.running }) : tr('+{n} more', { n: d.hidden.total });
+}
+
 /**
  * An agent's sub-agents as a few dots beside its status: no extra height. Running ones pulse,
  * finished ones are grey, failed ones red. Hover for what each is doing; click to unfold the thread.
  */
 export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskInfo[]; open: boolean; onToggle: () => void }) {
   // The hover card floats above everything (rows clip their text), next to the dots.
-  const [pop, setPop] = useState<{ left: number; top: number } | null>(null);
+  // Below the mark, or above it when the card would run past the window's bottom (rows low in the sidebar).
+  const [pop, setPop] = useState<{ left: number; top: number; above: number } | null>(null);
   if (!subtasks?.length) return null;
-  const running = subtasks.filter((s) => s.status === 'running').length;
+  const digest = digestSubtasks(subtasks, POP_ROWS);
+  const running = digest.running;
   const state = subtasks.some((s) => s.status === 'failed') ? 'failed' : running ? 'running' : 'done';
   const toggle = (e: { stopPropagation: () => void; preventDefault: () => void }) => {
     e.preventDefault();
@@ -210,17 +221,27 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
       onMouseEnter={(e) => {
         if (open) return;
         const r = e.currentTarget.getBoundingClientRect();
-        setPop({ left: Math.min(r.left, window.innerWidth - 240), top: r.bottom + 4 });
+        setPop({ left: Math.min(r.left, window.innerWidth - 240), top: r.bottom + 4, above: r.top - 4 });
       }}
       onMouseLeave={() => setPop(null)}
     >
-      {/* Same width however many there are: a branch mark and the count, coloured by state. */}
+      {/* Short however many there are: a branch mark and the count (working / all while some work), coloured by state. */}
       <Icon name="subtasks" size={11} />
-      <span className="subtask-count">{subtasks.length}</span>
+      <span className="subtask-count">{running && running < subtasks.length ? `${running}/${subtasks.length}` : subtasks.length}</span>
       {pop
         ? createPortal(
-            <div className="subtask-pop" role="tooltip" style={{ left: pop.left, top: pop.top }} data-testid="subtask-pop">
-              {subtasks.map((s) => (
+            <div
+              className="subtask-pop"
+              role="tooltip"
+              style={{ left: pop.left, top: pop.top }}
+              data-testid="subtask-pop"
+              ref={(el) => {
+                if (!el) return;
+                const h = el.offsetHeight;
+                el.style.top = `${pop.top + h > window.innerHeight - 8 ? Math.max(8, pop.above - h) : pop.top}px`;
+              }}
+            >
+              {digest.shown.map((s) => (
                 <div key={s.id} className="subtask-pop-row">
                   <span className={`sdot sdot-${s.status}`} />
                   <span className="subtask-pop-text">
@@ -229,6 +250,7 @@ export function SubtaskDots({ subtasks, open, onToggle }: { subtasks?: SubtaskIn
                   </span>
                 </div>
               ))}
+              {digest.hidden.total ? <div className="subtask-pop-more">{moreText(digest)}</div> : null}
             </div>,
             document.body,
           )
@@ -255,9 +277,12 @@ export function SubtaskThread({
   heading?: boolean;
   onOpen: (id: string) => void;
 }) {
-  const shown = subtasks.slice(0, max);
+  // Working ones first, so a long list still shows what is going on; the rest unfold in place.
+  const [all, setAll] = useState(false);
+  const digest = digestSubtasks(subtasks, max);
+  const shown = all ? orderSubtasks(subtasks) : digest.shown;
   return (
-    <div className={`subtask-thread${heading ? ' with-heading' : ''}`} data-testid="subtask-thread">
+    <div className={`subtask-thread${heading ? ' with-heading' : ''}${all ? ' all' : ''}`} data-testid="subtask-thread">
       {heading ? <div className="section-label">{tr('Sub-agents {n}', { n: subtasks.length })}</div> : null}
       {shown.map((s) => (
         <button key={s.id} className={`subtask-row st-${s.status}`} data-testid="subtask-row" title={tr('See what it did')} onClick={() => onOpen(s.id)}>
@@ -269,7 +294,11 @@ export function SubtaskThread({
           <span className="subtask-time">{s.status === 'done' ? <StatusIcon status="completed" /> : s.status === 'failed' ? <StatusIcon status="failed" /> : elapsed(s, now)}</span>
         </button>
       ))}
-      {subtasks.length > shown.length ? <div className="subtask-more">{tr('{n} more in the conversation', { n: subtasks.length - shown.length })}</div> : null}
+      {digest.hidden.total ? (
+        <button className="subtask-more" data-testid="subtask-more" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? tr('Show fewer') : moreText(digest)}
+        </button>
+      ) : null}
     </div>
   );
 }

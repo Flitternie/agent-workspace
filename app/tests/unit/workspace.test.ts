@@ -205,6 +205,19 @@ describe('sidebar order', () => {
   }, 15_000);
 });
 
+describe('sub-agents', () => {
+  it('stay through turns the agent starts by itself (to report background ones)', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo());
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'fan out', isolate: false, mockScript: 'swarm:4', instruction: 'go' });
+    const task = () => ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!;
+    await until(() => (task().subtasks?.length ?? 0) === 4);
+    // Claude Code reports finished background sub-agents in a turn of its own.
+    ws.handleEvent(t.taskId, task().sessionLocalId!, { type: 'turnStarted' });
+    expect(task().subtasks).toHaveLength(4);
+  });
+});
+
 describe('voice dispatch', () => {
   it('off-focus dispatch reaches only the target; the focused task history is unchanged', async () => {
     const { ws, A, B } = await demo(open());

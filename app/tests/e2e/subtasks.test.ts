@@ -59,8 +59,8 @@ describe('sub-agents (mock agents)', () => {
 
     const row = page.locator(`[data-testid="rail-item"][data-alias="${orders.alias}"]`);
     // Folded: a small mark on the agent's own row, nothing more.
-    // One fixed-width mark: the count, coloured while any is running.
-    await expect.poll(() => row.getByTestId('subtask-dots').innerText(), { timeout: 30_000 }).toBe('3');
+    // One short mark: working / all while some work, coloured while any is running (one of the three finishes early).
+    await expect.poll(() => row.getByTestId('subtask-dots').innerText(), { timeout: 30_000 }).toBe('2/3');
     expect(await row.getByTestId('subtask-dots').getAttribute('data-state')).toBe('running');
     expect(await page.getByTestId('subtask-row').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'subtasks-01-folded.png') });
@@ -132,5 +132,46 @@ describe('sub-agents (mock agents)', () => {
     await page.getByTestId('subtask-back').click();
     await expect.poll(() => page.getByTestId('subtask-view').count()).toBe(0);
     console.log(`row ${rowH}px, sub-agent row ${subH}px`);
+
+    // Dozens of sub-agents: the mark stays short, the lists show the working ones and count the rest.
+    const swarm = await mk(legal.projectId, '模块体检', 'swarm:40', '把所有模块查一遍。');
+    const srow = page.locator(`[data-testid="rail-item"][data-alias="${swarm.alias}"]`);
+    // 40: every fourth done (10), one failed, 29 working.
+    await expect.poll(() => srow.getByTestId('subtask-dots').innerText(), { timeout: 30_000 }).toBe('29/40');
+    const markW = (await srow.getByTestId('subtask-dots').boundingBox())!.width;
+    expect(markW).toBeLessThanOrEqual(60);
+    await srow.getByTestId('subtask-dots').hover();
+    await expect.poll(() => page.getByTestId('subtask-pop').locator('.subtask-pop-row').count()).toBe(8);
+    expect(await page.getByTestId('subtask-pop').innerText()).toContain('另有 32 个 · 21 个在跑');
+    const popBox = (await page.getByTestId('subtask-pop').boundingBox())!;
+    expect(popBox.y + popBox.height).toBeLessThanOrEqual(920);
+    const popPng = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    writeFileSync(join(shots, 'subtasks-06-many-hover.png'), Buffer.from(popPng, 'base64'));
+
+    // Unfolded: three rows, all working (the earliest started), and a line that unfolds the rest in place.
+    await srow.getByTestId('subtask-dots').click();
+    const item = page.locator('.sidebar .agent-item').filter({ has: srow });
+    await expect.poll(() => item.getByTestId('subtask-row').count()).toBe(3);
+    expect(await item.locator('.subtask-row.st-running').count()).toBe(3);
+    expect(await item.getByTestId('subtask-more').innerText()).toBe('另有 37 个 · 26 个在跑');
+    await page.mouse.move(800, 30);
+    await page.locator('.sidebar').screenshot({ path: join(shots, 'subtasks-07-many-unfolded.png') });
+    await item.getByTestId('subtask-more').click();
+    await expect.poll(() => item.getByTestId('subtask-row').count()).toBe(40);
+    // Running first, then the failure, then the finished ones.
+    const states = await item.getByTestId('subtask-row').evaluateAll((rows) => rows.map((r) => (r.className.match(/st-(\w+)/) ?? [])[1]));
+    expect(states.slice(0, 29).every((x) => x === 'running')).toBe(true);
+    expect(states[29]).toBe('failed');
+    expect(states.slice(30).every((x) => x === 'done')).toBe(true);
+    // The long list scrolls in place; the sidebar does not grow by forty rows.
+    const thread = item.getByTestId('subtask-thread');
+    const fit = await thread.evaluate((e) => ({ h: e.clientHeight, sh: e.scrollHeight }));
+    expect(fit.h).toBeLessThanOrEqual(240);
+    expect(fit.sh).toBeGreaterThan(fit.h);
+    await page.mouse.move(800, 30);
+    await page.locator('.sidebar').screenshot({ path: join(shots, 'subtasks-08-many-all.png') });
+    await item.getByTestId('subtask-more').click();
+    await expect.poll(() => item.getByTestId('subtask-row').count()).toBe(3);
+    expect(await item.getByTestId('subtask-more').innerText()).toContain('另有 37 个');
   }, 120_000);
 });

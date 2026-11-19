@@ -16,6 +16,7 @@ import { sshError, sshRun } from '../util/ssh';
 import { privateFolders } from '../private-folders';
 import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteExitError, remoteSessionStore, remoteSpawn, scanRemoteSessions, type RemoteExit } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
+import { ClaudeSubtasks } from './subtasks';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
@@ -353,6 +354,8 @@ class ClaudeSession implements ProviderSession {
   /** tool_use id → call, to interpret its result. */
   private tools = new Map<string, { name: string; input: Record<string, unknown> }>();
   private plans = new ClaudePlanTracker();
+  /** Sub-agents started by the Agent tool, for the sidebar's sub-agent marks. */
+  private subtasks = new ClaudeSubtasks();
 
   constructor(
     private args: StartArgs,
@@ -647,8 +650,16 @@ class ClaudeSession implements ProviderSession {
 
   private receive(value: unknown, history: boolean): void {
     const m = rec(value);
-    if (m.parent_tool_use_id) return; // subagent internals are summarized by the parent tool item
+    if (m.parent_tool_use_id) {
+      // Sub-agent internals stay out of the transcript (the parent tool item sums them up); their tool calls are its steps.
+      if (!history) for (const e of this.subtasks.inner(str(m.parent_tool_use_id), m, (name, input) => claudeToolCall(name, input, this.args.cwd).title)) this.emit(e);
+      return;
+    }
     const type = str(m.type);
+    if (type === 'system' && str(m.subtype).startsWith('task_')) {
+      if (!history) for (const e of this.subtasks.system(m)) this.emit(e);
+      return;
+    }
     if (type === 'system' && m.subtype === 'init') {
       const id = str(m.session_id);
       if (id && id !== this.sessionId) {
@@ -719,6 +730,7 @@ class ClaudeSession implements ProviderSession {
           // Don't downgrade a row that is already waiting on the user's approval.
           this.emit({ type: 'transcriptItem', itemId: id, role: 'tool', text: '', toolStatus: history ? 'completed' : undefined, tool: call, history });
           if (!history) this.emit({ type: 'progress', text: call.title });
+          if (!history && ClaudeSubtasks.isAgentTool(tool)) for (const e of this.subtasks.toolUse(id, input)) this.emit(e);
           const plan = this.plans.onToolUse(id, tool, input);
           if (plan && !history) this.emit({ type: 'planUpdated', entries: plan });
         }
@@ -753,6 +765,7 @@ class ClaudeSession implements ProviderSession {
             tool: result && !denied ? { content: result } : undefined,
             history,
           });
+          if (call && !history && ClaudeSubtasks.isAgentTool(call.name)) for (const e of this.subtasks.toolResult(id, text, isError)) this.emit(e);
           if (call) {
             const plan = this.plans.onToolResult(id, call.name, structured);
             if (plan && !history) this.emit({ type: 'planUpdated', entries: plan });

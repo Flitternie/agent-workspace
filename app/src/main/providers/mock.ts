@@ -197,6 +197,22 @@ class MockSession implements ProviderSession {
       }, 1);
       return;
     }
+    // Many sub-agents ("swarm:30"): every fourth finishes, one fails, the rest keep working (a long turn).
+    const swarm = /^swarm:(\d+)$/.exec(script);
+    if (swarm) {
+      const n = Math.min(Number(swarm[1]), 200);
+      for (let i = 0; i < n; i++) {
+        const id = `w${i}`;
+        this.later(() => this.emit({ type: 'subtask', id, description: this.zh ? `检查第 ${i + 1} 个模块` : `Check module ${i + 1}`, step: this.zh ? `读 src/module-${i + 1}.ts` : `Reading src/module-${i + 1}.ts`, status: 'running' }), 1 + i * 0.05);
+        if (i % 4 === 0) this.later(() => this.emit({ type: 'subtask', id, status: 'done', step: '', result: this.zh ? '没有问题。' : 'Looks fine.' }), 3 + i * 0.05);
+        if (i === 1) this.later(() => this.emit({ type: 'subtask', id, status: 'failed', step: '', result: this.zh ? '测试没过。' : 'Tests failed.' }), 3);
+      }
+      this.later(() => {
+        this.busy = false;
+        this.emit({ type: 'turnCompleted', status: 'completed', finalText: this.zh ? '模块都查完了。' : 'All modules checked.' });
+      }, 400);
+      return;
+    }
     // Sub-agents: three helpers, one finishes, two keep working (a long turn, to look at).
     if (script === 'subagents') {
       const zh = this.zh;
