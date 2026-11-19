@@ -4,7 +4,7 @@
   "private": true,
   "description": "Run Claude Code and Codex agents in parallel from one meeting-style workspace, with a main agent and always-on voice.",
   "main": "out/main/index.cjs",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "build:main": "node scripts/build-main.mjs",
