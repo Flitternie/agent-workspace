@@ -341,8 +341,8 @@ export function App() {
                       role="radio"
                       aria-checked={layout === n}
                       className={`layout-opt${layout === n ? ' on' : ''}`}
-                      title={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Every agent that is busy or recently was')}
-                      aria-label={n ? t('Up to {n} tiles ({grid}); the most urgent agents fill them', { n, grid: GRID_LABEL[n] }) : t('Auto')}
+                      title={n ? t('{n} tiles ({grid})', { n, grid: GRID_LABEL[n] }) : t('Every agent that is busy or recently was')}
+                      aria-label={n ? t('{n} tiles ({grid})', { n, grid: GRID_LABEL[n] }) : t('Auto')}
                       onClick={() => void call('settings:update', { overviewSlots: n }).catch((e) => setError(errorText(e)))}
                       data-testid={`layout-${n}`}
                     >
@@ -363,7 +363,6 @@ export function App() {
                     <Icon name="grid" size={22} />
                   </div>
                   <h2>{t('Your agents meet here')}</h2>
-                  <p>{t('Each coding agent joins as a tile that reports what it did and what it needs from you. Requests stay on the tile until you answer, however long you talk to another agent.')}</p>
                   <div className="setup-check" data-testid="setup-check">
                     {(['claude', 'codex'] as const).map((p) => {
                       const c = snapshot.capabilities.find((x) => x.provider === p);
@@ -379,20 +378,9 @@ export function App() {
                       <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
                     </div>
                     <button className="link small" onClick={() => setSettingsOpen(true)}>
-                      {t('Settings, language and sign-in help')}
+                      {t('Settings')}
                     </button>
                   </div>
-                  <ol className="empty-steps">
-                    <li>
-                      <strong>{t('Add agents')}</strong> — {t('pick a project folder and Claude Code or Codex; each agent gets its own worktree.')}
-                    </li>
-                    <li>
-                      <strong>{t('Just talk')}</strong> — {t('the mic is on like in a call. Say “Bob, …” and it goes to Bob without changing your view.')}
-                    </li>
-                    <li>
-                      <strong>{t('Answer from the tile')}</strong> — {t('questions and permission requests wait on their tile.')}
-                    </li>
-                  </ol>
                   <div className="row center">
                     <button className="btn btn-primary" onClick={() => setDialog('new')}>
                       <Icon name="plus" /> {t('New agent')}
@@ -409,7 +397,7 @@ export function App() {
               <>
               {shown.length === 0 ? (
                 <div className="empty overview-quiet" data-testid="overview-quiet">
-                  <p className="muted">{t('Nothing is running or waiting on you right now. Every agent is in its team on the left.')}</p>
+                  <p className="muted">{t('Nothing needs you right now.')}</p>
                 </div>
               ) : (
               <div
@@ -446,7 +434,7 @@ export function App() {
               )}
               {offscreen.length ? (
                 <div className="overview-more muted small" data-testid="overview-more">
-                  {t('{n} more active agents are in their teams on the left', { n: offscreen.length })}
+                  {t('+{n} more on the left', { n: offscreen.length })}
                 </div>
               ) : null}
               </>
