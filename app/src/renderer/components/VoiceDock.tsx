@@ -50,6 +50,8 @@ interface Draft {
   stoppedTaskId?: string;
   /** The mic was closed (muted, or push to talk let go): send as soon as it is transcribed. */
   closed?: boolean;
+  /** What the segment still being spoken says so far (shown live; replaced when it ends). */
+  partial?: string;
 }
 
 const DEFAULT_PAUSE_MS = 2500;
@@ -154,8 +156,10 @@ export function VoiceDock({
         onDispatched(target.kind === 'coordinator' ? undefined : r.taskId);
         if (target.kind === 'coordinator') setShowLog(true);
         setActiveId((a) => (a === entry.id ? null : a));
+        return true;
       } catch (e) {
         patch(entry.id, { phase: 'review', error: errorText(e) });
+        return false;
       }
     },
     [onDispatched, patch],
@@ -207,8 +211,9 @@ export function VoiceDock({
             setEntries((list) => list.filter((x) => x.id !== entry.id));
             return;
           }
-          voiceToBox(box, '', 'drop');
-          await dispatch(entry, { kind: 'existing', taskId: box });
+          voiceToBox(box, entry.text, 'listening');
+          const sent = await dispatch(entry, { kind: 'existing', taskId: box });
+          voiceToBox(box, sent ? '' : entry.text, sent ? 'drop' : 'keep');
           return;
         }
         // For someone else (named, a new task, the coordinator): out of the box, into a caption.
@@ -246,6 +251,7 @@ export function VoiceDock({
   const draft = useRef<Draft | null>(null);
   const speaking = useRef(false);
   const draftText = (d: Draft) => d.parts.reduce<string>((acc, p) => joinSpeech(acc, p ?? ''), '');
+  const liveText = (d: Draft) => joinSpeech(draftText(d), d.partial ?? '');
 
   const commitDraft = useCallback(() => {
     const d = draft.current;
@@ -268,7 +274,7 @@ export function VoiceDock({
       }
       const entry: Entry = { id: d.id, source: 'voice', text: rest, phase: 'sending', at: d.at };
       patch(d.id, { text: said, holdUntil: undefined });
-      queue.current = queue.current.then(() => dispatch(entry, { kind: 'existing', taskId: d.stoppedTaskId! }));
+      queue.current = queue.current.then(async () => void (await dispatch(entry, { kind: 'existing', taskId: d.stoppedTaskId! })));
       return;
     }
     // "Stop, …" without a known agent yet: route the rest, and stop whoever gets it.
@@ -358,6 +364,8 @@ export function VoiceDock({
         addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: !!composeRef.current });
       }
       const current = d;
+      partialGen.current++;
+      current.partial = undefined;
       const index = current.parts.push(null) - 1;
       call('voice:transcribe', { audio: wav, mimeType: 'audio/wav' })
         .then(({ text: heard }) => {
@@ -369,13 +377,54 @@ export function VoiceDock({
         })
         .finally(() => {
           if (draft.current !== current) return; // already sent or discarded
-          patch(current.id, { text: draftText(current) });
+          patch(current.id, { text: liveText(current) });
           checkStop(current);
           scheduleCommit();
         });
     },
     [checkStop, patch, scheduleCommit],
   );
+
+  // While talking: the speech so far is transcribed (one at a time, the latest wins) and shown
+  // after what is already in. Only with an on-device model: a cloud model would bill every pass.
+  const partialGen = useRef(0);
+  const partialBusy = useRef(false);
+  const partialNext = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const onPartial = useCallback(
+    (wav: Uint8Array<ArrayBuffer>) => {
+      if (!(snapRef.current.settings.sttModel ?? '').startsWith('local:')) return;
+      if (partialBusy.current) {
+        partialNext.current = wav;
+        return;
+      }
+      let d = draft.current;
+      if (!d) {
+        d = { id: nextId++, at: new Date().toISOString(), parts: [] };
+        draft.current = d;
+        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: !!composeRef.current });
+      }
+      const current = d;
+      const gen = partialGen.current;
+      partialBusy.current = true;
+      call('voice:transcribe', { audio: wav, mimeType: 'audio/wav' })
+        .then(({ text: heard }) => {
+          // Still the same segment, still this draft: show it.
+          if (draft.current !== current || partialGen.current !== gen || !heard || isLikelyNoise(heard)) return;
+          current.partial = heard;
+          patch(current.id, { text: liveText(current) });
+        })
+        .catch(() => {})
+        .finally(() => {
+          partialBusy.current = false;
+          const next = partialNext.current;
+          partialNext.current = null;
+          if (next && partialGen.current === gen) onPartialRef.current?.(next);
+        });
+    },
+    [patch],
+  );
+  const onPartialRef = useRef(onPartial);
+  onPartialRef.current = onPartial;
 
   const onSilence = useCallback(() => {
     speaking.current = false;
@@ -405,6 +454,7 @@ export function VoiceDock({
             onUtterance(wav);
           },
           onDiscard: onSilence,
+          onPartial: (wav) => onPartialRef.current(wav),
         });
       listener.current = l;
       await l.start();
@@ -566,7 +616,7 @@ export function VoiceDock({
   const active = entries.find((e) => e.id === activeId && (e.phase === 'review' || e.phase === 'sending'));
   // Captions fade out like subtitles; unresolved ones stay until handled.
   const recent = entries
-    .filter((e) => !(e.inBox && e.phase !== 'sent' && e.phase !== 'error'))
+    .filter((e) => !(e.inBox && e.phase !== 'error'))
     .filter((e) => e.id !== active?.id && (e.phase === 'review' || e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing' || e.phase === 'sending' || now - Date.parse(e.at) < 12_000))
     .slice(-3);
   const busy = active?.phase === 'sending';
