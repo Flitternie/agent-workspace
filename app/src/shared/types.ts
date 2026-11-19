@@ -72,6 +72,9 @@ export interface Task {
   plan?: PlanInfo;
   /** Memory records injected into the current native session at start/resume (provenance). */
   injectedMemoryIds?: string[];
+  /** The memory this session has been given and at which version (its updatedAt), and what it said: what
+   *  the next message brings it is the difference (new, changed, no longer applying). */
+  memorySeen?: Record<string, { at: string; body: string }>;
   /** Mock-provider script name; ignored by native providers. */
   mockScript?: string;
   /** Overrides settings.permissionMode for this agent. */
@@ -213,6 +216,8 @@ export interface TranscriptItem {
   /** A system item that starts a new chapter of the main agent's conversation (and why). */
   chapter?: { reason: 'manual' | 'idle' | 'long' };
   createdAt: string;
+  /** A system note that memory went with the next message: what was sent (a removed note marked ✕). */
+  memoryUpdate?: string[];
 }
 
 export type ToolStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'declined' | 'interrupted';

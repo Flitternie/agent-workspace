@@ -826,7 +826,24 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
                   {/* What the user said themselves can become memory (not what the main agent relayed). */}
                   {item.via !== 'main' ? <RememberButton onClick={() => setRemember(item.id)} /> : null}
                 </div> : null}
-              {item.role === 'system' ? <div className="msg-system">{systemText(item.text)}</div> : <Markdown text={item.text} streaming={item.streaming} />}
+              {item.role === 'system' && item.memoryUpdate?.length ? (
+                <details className="msg-system memory-sent" data-testid="memory-sent">
+                  <summary>
+                    <Icon name="spark" size={11} /> {t('Memory sent with this message: {n}', { n: item.memoryUpdate.length })}
+                  </summary>
+                  <ul>
+                    {item.memoryUpdate.map((b, i) => (
+                      <li key={i} className={b.startsWith('✕ ') ? 'gone' : ''}>
+                        {b.startsWith('✕ ') ? `${t('No longer applies')}: ${b.slice(2)}` : b}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : item.role === 'system' ? (
+                <div className="msg-system">{systemText(item.text)}</div>
+              ) : (
+                <Markdown text={item.text} streaming={item.streaming} />
+              )}
               {item.streaming ? <span className="cursor" aria-hidden /> : null}
             </div>
           );

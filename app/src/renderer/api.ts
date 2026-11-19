@@ -96,6 +96,8 @@ export interface Outputs {
   'label:short': string | undefined;
   'main:newChapter': void;
   'memory:update': void;
+  'memory:reach': Array<{ taskId: string; alias: string; idle: boolean }>;
+  'memory:tellNow': number;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
   'memory:scanImports': { candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> };

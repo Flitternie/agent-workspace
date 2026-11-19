@@ -130,6 +130,8 @@ export const ipcSchemas = {
     approvedForReuse: z.boolean().optional(),
   }),
   'memory:delete': z.object({ id }),
+  'memory:reach': z.object({ id }),
+  'memory:tellNow': z.object({ id }),
   'memory:promote': z.object({ id, scope: z.enum(['project', 'global']) }),
   'memory:scanImports': z.object({}),
   'memory:import': z.object({ items: z.array(z.object({ key: z.string().min(1).max(5000), scope: z.enum(['global', 'project']), projectId: id.optional() })).min(1).max(1000) }),

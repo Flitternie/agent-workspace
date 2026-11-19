@@ -6540,6 +6540,41 @@ button.subtask-row:hover {
   opacity: 0.85;
 }
 
+/* Memory that went with a message: one quiet line, the notes on a click. */
+.memory-sent summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.memory-sent summary::-webkit-details-marker {
+  display: none;
+}
+.memory-sent ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.memory-sent li::before {
+  content: '· ';
+}
+.memory-sent li.gone {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.remember-saved p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.remember-saved .row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ------------------------------------------------------------------ the main agent's lanes */
 .main-lanes {
   display: flex;
