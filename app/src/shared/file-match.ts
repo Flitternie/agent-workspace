@@ -65,12 +65,19 @@ export function matchFiles(files: string[], query: string, limit = 50): FileMatc
     .map((x) => x.e);
 }
 
-/** The @-mention being typed just before the caret: its start (the @) and what follows it; none when the caret is not in one. */
+/**
+ * Full-width punctuation a Chinese (or Japanese) input method types in place of a path's: ＠ for @,
+ * 。．for ., 、／ for /, ～ for ~. After @ they mean the path's own, so nobody has to switch input methods.
+ */
+const FULL_WIDTH: Record<string, string> = { '。': '.', '．': '.', '、': '/', '／': '/', '～': '~', '＿': '_', '－': '-' };
+export const halfWidth = (s: string) => s.replace(/[。．、／～＿－]/g, (c) => FULL_WIDTH[c]);
+
+/** The @-mention being typed just before the caret: its start (the @ or ＠) and what follows it (full-width punctuation as half-width); none when the caret is not in one. */
 export function mentionAt(text: string, caret: number): { start: number; query: string } | undefined {
   const before = text.slice(0, caret);
-  const m = /(^|\s)@([^\s@"]*)$/.exec(before);
+  const m = /(^|\s)[@＠]([^\s@＠"]*)$/.exec(before);
   if (!m) return undefined;
-  return { start: caret - m[2].length - 1, query: m[2] };
+  return { start: caret - m[2].length - 1, query: halfWidth(m[2]) };
 }
 
 /** How a chosen path goes into the message: @path, quoted when it has spaces; a file is followed by a space. */

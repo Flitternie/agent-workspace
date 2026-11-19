@@ -60,6 +60,21 @@ it('@ lists the agent’s files, filters as you type, and inserts the chosen pat
   await box.press('Backspace'); // the whole @src/index.ts
   await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and ');
 
+  // ./ is the agent's own folder, written explicitly.
+  await box.pressSequentially('@./');
+  await expect.poll(() => page.getByTestId('mention-item').allInnerTexts(), { timeout: 5000 }).toEqual(['src/', 'README.md']);
+  await box.press('Escape');
+  await box.press('Backspace'); // the whole @./
+  await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and ');
+
+  // Typed with a Chinese input method: ＠。、 means @./ and the path goes in half-width.
+  await box.pressSequentially('＠。、src、ind');
+  await expect.poll(() => page.getByTestId('mention-item').allInnerTexts(), { timeout: 5000 }).toEqual([expect.stringMatching(/^index\.ts/)]);
+  await box.press('Enter');
+  await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and @./src/index.ts ');
+  for (let i = 0; i < 2; i++) await box.press('Backspace');
+  await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and ');
+
   // ../ browses the folder above, one level at a time.
   await box.pressSequentially('@../');
   await expect.poll(() => page.getByTestId('mention-item').allInnerTexts(), { timeout: 5000 }).toEqual(expect.arrayContaining([expect.stringMatching(/^shared\//)]));

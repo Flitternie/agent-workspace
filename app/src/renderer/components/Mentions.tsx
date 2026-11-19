@@ -127,7 +127,13 @@ export function MentionMenu({ m }: { m: ReturnType<typeof useMentions> }) {
   return (
     <div className="mention-pop" data-testid="mention-pop" role="listbox">
       <div className="project-group">
-        {browsePath(m.query) ? t('In {dir}', { dir: browsePath(m.query)!.parent }) : m.query ? t('Files matching “{q}”', { q: m.query }) : t('Files in this agent’s folder')}
+        {browsePath(m.query)
+          ? t('In {dir}', { dir: browsePath(m.query)!.parent })
+          : m.query.endsWith('/')
+            ? t('In {dir}', { dir: m.query })
+            : m.query && m.query !== '.'
+              ? t('Files matching “{q}”', { q: m.query.replace(/^\.\//, '') })
+              : t('Files in this agent’s folder')}
       </div>
       <div className="project-list" ref={list}>
         {m.items.map((it, i) => {
@@ -149,7 +155,7 @@ export function MentionMenu({ m }: { m: ReturnType<typeof useMentions> }) {
               <Icon name={it.dir ? 'folder' : 'file'} />
               <span className="project-item-text">
                 <span className="project-item-name mono">{name}</span>
-                {dir ? <span className="project-item-path mono truncate">{dir}</span> : null}
+                {dir && dir !== './' ? <span className="project-item-path mono truncate">{dir}</span> : null}
               </span>
             </button>
           );

@@ -1221,6 +1221,8 @@ export class Workspace {
       this.fileLists.set(key, entry);
       entry.files.catch(() => this.fileLists.delete(key));
     }
+    // ./ is the agent's own folder, written explicitly: the same list, the paths kept as typed.
+    if (query.startsWith('./')) return matchFiles(await entry.files, query.slice(2)).map((m) => ({ ...m, path: `./${m.path}` }));
     return matchFiles(await entry.files, query);
   }
 

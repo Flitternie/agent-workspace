@@ -26,6 +26,9 @@ describe('@-mentions', () => {
     expect(mentionAt('@', 1)).toEqual({ start: 0, query: '' });
     expect(mentionAt('mail me at a@b.com', 18)).toBeUndefined();
     expect(mentionAt('look at @src now', 16)).toBeUndefined();
+    // A Chinese input method's punctuation after @ (or ＠) means the path's own.
+    expect(mentionAt('看看 ＠。、src', 9)).toEqual({ start: 3, query: './src' });
+    expect(mentionAt('@～／notes．md', 11)).toEqual({ start: 0, query: '~/notes.md' });
   });
 
   it('writes the chosen path as @path, quoted with spaces; a file ends the mention with a space', () => {
@@ -56,6 +59,10 @@ describe('files in an agent’s folder', () => {
       const p = await ws.addProject(repo);
       const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });
       expect((await ws.searchFiles(t.taskId, 'checkout')).map((m) => m.path)).toEqual(['src/checkout.ts']);
+      // ./ is the same folder, written explicitly.
+      expect((await ws.searchFiles(t.taskId, './')).map((m) => m.path)).toEqual(['./src/', './.gitignore']);
+      expect((await ws.searchFiles(t.taskId, './src/')).map((m) => m.path)).toEqual(['./src/checkout.ts']);
+      expect((await ws.searchFiles(t.taskId, './check')).map((m) => m.path)).toEqual(['./src/checkout.ts']);
 
       const plain = mkdtempSync(join(tmpdir(), 'amw-fm-plain-'));
       mkdirSync(join(plain, 'lib'));
