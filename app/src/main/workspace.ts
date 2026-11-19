@@ -556,6 +556,96 @@ export class Workspace {
     return p;
   }
 
+  /** A new agent's id and alias, taken when its caller first needs them (create names a worktree after the id). */
+  private newTaskIds(): { taskId: string; alias: string } {
+    const d = this.store.data;
+    const alias = aliasFor(d.aliasCounter++, d.settings.language);
+    return { taskId: `t-${randomUUID().slice(0, 8)}`, alias };
+  }
+
+  /**
+   * Adds a new agent, and the session record of the saved conversation it continues, if any. Create,
+   * import and fork all come through here, so aliases, session records and shared-folder warnings stay
+   * the same for each; what differs between them is passed in. The caller saves (`changed`) once it
+   * has said what it needs to.
+   */
+  private addTask(
+    ids: { taskId: string; alias: string },
+    o: {
+      projectId: string;
+      provider: AgentProvider;
+      host?: string;
+      cwd: string;
+      worktree?: Task['worktree'];
+      name: string;
+      nameSource?: Task['nameSource'];
+      title: string;
+      status: Task['status'];
+      summary: string;
+      /** The saved conversation it continues; none for an agent that starts fresh. */
+      session?: { nativeSessionId: string; integrationMode: SessionRecord['integrationMode'] };
+      /** Why it edits a folder it did not ask to share (no worktree); a sharer's warning replaces it, as the larger risk. */
+      cwdWarning?: string;
+      /**
+       * An imported session keeps the folder it was started in: it is warned in its own words, and the
+       * agents already there are not told, since nothing about their folder was chosen here.
+       */
+      keepsOriginalFolder?: boolean;
+      /** Names an unnamed agent after its work (create and import); a fork takes its name from the original. */
+      label?: { title: string; instruction?: string; refine?: boolean };
+      permissionMode?: PermissionMode;
+      forkedFrom?: Task['forkedFrom'];
+      mockScript?: string;
+    },
+  ): Task {
+    const d = this.store.data;
+    const { taskId, alias } = ids;
+    const record: SessionRecord | undefined = o.session && {
+      localId: `s-${randomUUID().slice(0, 8)}`,
+      taskId,
+      provider: o.provider,
+      nativeSessionId: o.session.nativeSessionId,
+      cwd: o.cwd,
+      integrationMode: o.session.integrationMode,
+      createdAt: now(),
+    };
+    let sharedCwdWarning = o.cwdWarning;
+    const sharers = d.tasks.filter((t) => t.cwd === o.cwd && t.host === o.host);
+    if (sharers.length) {
+      const others = sharers.map((t) => t.alias).join(', ');
+      if (o.keepsOriginalFolder) sharedCwdWarning = `Uses its original directory, shared with ${others} — not isolated.`;
+      else {
+        sharedCwdWarning = `Shares a writable directory with ${others} — edits are not isolated.`;
+        for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
+      }
+    }
+    const task: Task = {
+      taskId,
+      alias,
+      name: o.name,
+      nameSource: o.nameSource,
+      projectId: o.projectId,
+      title: o.title,
+      provider: o.provider,
+      status: o.status,
+      summary: o.summary,
+      cwd: o.cwd,
+      host: o.host,
+      worktree: o.worktree,
+      sharedCwdWarning,
+      sessionLocalId: record?.localId,
+      permissionMode: o.permissionMode,
+      forkedFrom: o.forkedFrom,
+      mockScript: o.mockScript,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    if (record) d.sessions.push(record);
+    d.tasks.push(task);
+    if (o.label) this.autoLabel(task, o.label.title, o.label.instruction, { refine: o.label.refine });
+    return task;
+  }
+
   async createTask(args: {
     projectId: string;
     provider: AgentProvider;
@@ -571,9 +661,8 @@ export class Workspace {
     const project = this.project(args.projectId);
     if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
     if (project.host) this.requireOnHost(args.provider, project.host);
-    const d = this.store.data;
-    const alias = aliasFor(d.aliasCounter++, d.settings.language);
-    const taskId = `t-${randomUUID().slice(0, 8)}`;
+    const ids = this.newTaskIds();
+    const { taskId } = ids;
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
@@ -587,31 +676,22 @@ export class Workspace {
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
       }
     }
-    const sharers = d.tasks.filter((t) => t.cwd === cwd && t.host === project.host);
-    if (sharers.length) {
-      sharedCwdWarning = `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.`;
-      for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
-    }
-    const task: Task = {
-      taskId,
-      alias,
-      name: args.name?.trim() || alias,
-      nameSource: args.name?.trim() ? (args.nameSource ?? 'user') : 'auto',
+    const title = (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80);
+    const task = this.addTask(ids, {
       projectId: project.projectId,
-      title: (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80),
       provider: args.provider,
+      host: project.host,
+      cwd,
+      worktree,
+      name: args.name?.trim() || ids.alias,
+      nameSource: args.name?.trim() ? (args.nameSource ?? 'user') : 'auto',
+      title,
       status: 'idle',
       summary: 'Not started yet.',
-      cwd,
-      host: project.host,
-      worktree,
-      sharedCwdWarning,
+      cwdWarning: sharedCwdWarning,
+      label: !args.name?.trim() && title ? { title: args.title ?? '', instruction: args.instruction } : undefined,
       mockScript: args.mockScript,
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    d.tasks.push(task);
-    if (!args.name?.trim() && task.title) this.autoLabel(task, args.title ?? '', args.instruction);
+    });
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial');
@@ -1170,40 +1250,22 @@ export class Workspace {
       const inside = this.store.data.projects.find((p) => !p.host && (args.cwd === p.rootPath || args.cwd.startsWith(p.rootPath + sep)));
       args = { ...args, projectId: (inside ?? (await this.addProject(args.cwd))).projectId };
     }
-    const projectId = args.projectId!;
-    const d = this.store.data;
-    const alias = aliasFor(d.aliasCounter++, d.settings.language);
-    const taskId = `t-${randomUUID().slice(0, 8)}`;
-    const record: SessionRecord = {
-      localId: `s-${randomUUID().slice(0, 8)}`,
-      taskId,
+    const ids = this.newTaskIds();
+    const title = clip(args.title, 120);
+    const task = this.addTask(ids, {
+      projectId: args.projectId!,
       provider: args.provider,
-      nativeSessionId: args.nativeSessionId,
+      host: args.host,
       cwd: args.cwd,
-      integrationMode: 'resumed',
-      createdAt: now(),
-    };
-    const sharers = d.tasks.filter((t) => t.cwd === args.cwd && t.host === args.host);
-    const task: Task = {
-      taskId,
-      alias,
-      name: alias,
-      projectId,
-      title: clip(args.title, 120),
-      provider: args.provider,
+      name: ids.alias,
+      title,
       status: 'disconnected',
       summary: 'Imported with its full history. Send a message to continue.',
-      cwd: args.cwd,
-      host: args.host,
-      sharedCwdWarning: sharers.length ? `Uses its original directory, shared with ${sharers.map((t) => t.alias).join(', ')} — not isolated.` : undefined,
-      sessionLocalId: record.localId,
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    d.sessions.push(record);
-    d.tasks.push(task);
-    // A keyword guess (or the project's name) now; the model refines it once it can read the conversation.
-    this.autoLabel(task, task.title, '', { refine: false });
+      session: { nativeSessionId: args.nativeSessionId, integrationMode: 'resumed' },
+      keepsOriginalFolder: true,
+      // A keyword guess (or the project's name) now; the model refines it once it can read the conversation.
+      label: { title, instruction: '', refine: false },
+    });
     this.changed();
     void this.previewHistory(task, args.provider, args.nativeSessionId).then((items) => {
       const said = (items ?? [])
@@ -1250,7 +1312,6 @@ export class Workspace {
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
       throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
     const project = this.project(src.projectId);
-    const d = this.store.data;
     const title = clip(`${src.title} (fork)`, 120);
     let cwd = src.cwd;
     let worktree: Task['worktree'];
@@ -1273,35 +1334,26 @@ export class Workspace {
     // After the fork exists, so a failed fork still leaves a clean worktree to remove. Its conversation
     // remembers the original's edits, so its files must have them too.
     const copied = worktree ? await this.worktrees.copyChanges(src.cwd, worktree.path) : undefined;
-    const alias = aliasFor(d.aliasCounter++, d.settings.language);
-    const newId = `t-${randomUUID().slice(0, 8)}`;
-    const record: SessionRecord = { localId: `s-${randomUUID().slice(0, 8)}`, taskId: newId, provider: src.provider, nativeSessionId: forkId, cwd, integrationMode: 'resumed', createdAt: now() };
-    const sharers = d.tasks.filter((t) => t.cwd === cwd && t.host === src.host);
-    for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
+    const ids = this.newTaskIds();
+    const { taskId: newId, alias } = ids;
     const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';
-    const task: Task = {
-      taskId: newId,
-      alias,
+    const task = this.addTask(ids, {
+      projectId: src.projectId,
+      provider: src.provider,
+      host: src.host,
+      cwd,
+      worktree,
       // A custom name is a voice handle, so the fork gets its own.
       name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name, labelLang(alias))),
       nameSource: 'auto',
-      projectId: src.projectId,
       title,
-      provider: src.provider,
       status: 'disconnected',
       summary: `Forked from ${src.alias}'s conversation ${point}. Send a message to continue.`,
-      cwd,
-      worktree,
-      sharedCwdWarning: sharers.length ? `Shares a writable directory with ${sharers.map((t) => t.alias).join(', ')} — edits are not isolated.` : undefined,
-      sessionLocalId: record.localId,
+      session: { nativeSessionId: forkId, integrationMode: 'resumed' },
       permissionMode: 'permissionMode' in opts ? opts.permissionMode : src.permissionMode,
       forkedFrom: { taskId: src.taskId, alias: src.alias },
       mockScript: src.mockScript,
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    d.sessions.push(record);
-    d.tasks.push(task);
+    });
     const notes = [
       `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
       ...(copied?.error
