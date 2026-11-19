@@ -148,6 +148,10 @@ describe('end-to-end demo script (mock agents)', () => {
     await shot(page, '05b-remember-dialog');
     await page.getByTestId('remember-save').click();
     await expect.poll(() => page.getByTestId('remember-title').count()).toBe(0);
+    // Kept: it says which running agents get it with their next message (the project's three).
+    await expect.poll(() => page.getByTestId('remember-saved').count()).toBe(1);
+    expect(await page.getByTestId('remember-saved').innerText()).toMatch(/Alice|Bob|Charlie/);
+    await page.getByTestId('remember-done').click();
     await page.getByTestId('memory-chip').click();
     await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('Use the shared Button component');
     await page.getByTestId('side-close').click();

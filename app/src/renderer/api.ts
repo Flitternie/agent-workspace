@@ -94,6 +94,8 @@ export interface Outputs {
   'memory:add': MemoryRecord;
   'memory:distill': { title: string; body: string; scope: 'global' | 'project'; worth: boolean; reason: string; similar?: { id: string; title: string; body: string }; fallback?: string };
   'memory:update': void;
+  'memory:reach': Array<{ taskId: string; alias: string; idle: boolean }>;
+  'memory:tellNow': number;
   'memory:delete': void;
   'memory:promote': MemoryRecord;
   'memory:scanImports': { candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> };

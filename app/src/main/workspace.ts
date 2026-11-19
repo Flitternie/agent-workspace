@@ -28,7 +28,7 @@ import type { ModelOption,
   WorkspaceSnapshot, BtwEntry } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
-import { instructionsFor, memoryForTask } from './memory';
+import { deltaSize, instructionsFor, memoryDelta, memoryForTask, memoryUpdateText, seenOf } from './memory';
 import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
@@ -902,15 +902,9 @@ export class Workspace {
     task.sessionLocalId = record.localId;
     task.status = 'starting';
     task.lastError = undefined;
-    // On a linked machine the CLI reads user memory from its own files: not given twice
-    // (unless a file there is paused and may be out of date: then rather twice than missing).
-    const machine = task.host ?? LOCAL;
-    const link = this.store.data.settings.memoryLinks?.[machine];
-    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
-    // Only the notes that fit in those files: the rest (over the size limit) are given here.
-    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
-    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
+    const injected = this.memoryGiven(task);
     task.injectedMemoryIds = injected.map((m) => m.id);
+    task.memorySeen = seenOf(injected);
     this.changed();
 
     const isMain = task === this.store.data.mainAgent;
@@ -1300,6 +1294,36 @@ export class Workspace {
     return candidate;
   }
 
+  /**
+   * The memory a session of this task is given: its scope's notes, less user notes the CLI already reads
+   * from its own files on a linked machine (unless a file there is paused and may be out of date: then
+   * rather twice than missing; and only the notes that fit in those files).
+   */
+  private memoryGiven(task: Task): MemoryRecord[] {
+    const machine = task.host ?? LOCAL;
+    const link = this.store.data.settings.memoryLinks?.[machine];
+    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
+    return memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
+  }
+
+  /** The agents a note reaches from their next message: those of its scope with a session to give it to. */
+  memoryReach(id: string): Array<{ taskId: string; alias: string; idle: boolean }> {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) return [];
+    return [...this.store.data.tasks, ...(this.store.data.mainAgent ? [this.store.data.mainAgent] : [])]
+      .filter((t) => !t.setAside && t.memorySeen && this.memoryGiven(t).some((x) => x.id === id) && (!t.memorySeen[id] || t.memorySeen[id].at !== m.updatedAt))
+      .map((t) => ({ taskId: t.taskId, alias: t.alias, idle: t.status !== 'running' && t.status !== 'starting' && !this.hasOpenNative(t.taskId) }));
+  }
+
+  /** "Tell them now": idle agents a note reaches get a short message (the update rides along with it). */
+  async tellMemoryNow(id: string): Promise<number> {
+    const zh = this.store.data.settings.language === 'zh';
+    const idle = this.memoryReach(id).filter((r) => r.idle);
+    for (const r of idle) await this.send(r.taskId, zh ? '我更新了工作区记忆，记下即可，不用做别的。' : 'I updated the workspace memory. Just note it; nothing else to do.', 'text');
+    return idle.length;
+  }
+
   // ---------------------------------------------------------------- messaging
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
@@ -1311,13 +1335,22 @@ export class Workspace {
     try {
       const live = await this.connect(taskId);
       const busy = live.turnActive;
+      // Memory saved, changed or removed since the session was given its notes reaches it with this message.
+      const given = this.memoryGiven(task);
+      const delta = memoryDelta(given, task.memorySeen ?? seenOf(given.filter((m) => task.injectedMemoryIds?.includes(m.id))));
+      const update = deltaSize(delta) ? memoryUpdateText(delta) : '';
+      if (update) this.appendSystem(taskId, `Memory sent with this message: ${deltaSize(delta)}`, { memoryUpdate: [...delta.added.map((m) => m.body), ...delta.changed.map((m) => m.body), ...delta.removed.map((b) => `✕ ${b}`)] });
       const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
       task.suggestion = undefined;
       // Commands the user ran with `!` since the last message reach the agent with this one.
       const ran = this.shellOutput.get(taskId) ?? [];
-      const delivery = await live.session.send(ran.length ? `${ran.join('\n')}\n\n${text}` : text, opts);
+      const delivery = await live.session.send([update, ...ran, text].filter(Boolean).join('\n\n'), opts);
       this.shellOutput.delete(taskId);
+      if (update) {
+        task.memorySeen = seenOf(given);
+        task.injectedMemoryIds = given.map((m) => m.id);
+      }
       if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.

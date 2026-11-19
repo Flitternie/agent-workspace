@@ -258,6 +258,11 @@ class MockSession implements ProviderSession {
       }, 1);
       return;
     }
+    // A memory update ahead of the message (saved notes changed since the session began): acknowledged
+    // with its notes, so tests can see what reached the agent; the message is what follows it.
+    const update = /^## Workspace memory update[\s\S]*?\n\n(?=[^-\s])/.exec(text);
+    if (update) text = text.slice(update[0].length);
+    const noted = update ? `Memory update received: ${update[0].split('\n').filter((l) => l.startsWith('- ')).join(' ')}\n\n` : '';
     this.later(() => {
       let reply: string;
       const memory = this.args.developerInstructions
@@ -339,7 +344,7 @@ class MockSession implements ProviderSession {
             ? `Done: “${said}”. Changes are in my worktree. (Request ${userTurns + 1} in this session.)`
             : `On it: “${said}”. Want me to add a test for this as well? (Request ${userTurns + 1} in this session.)`;
       }
-      this.finish(first ? memory + reply : reply);
+      this.finish((first ? memory : '') + noted + reply);
     }, 1);
   }
 
