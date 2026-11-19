@@ -9,6 +9,7 @@ import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
 import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
+import { CodexSubtasks } from './subtasks';
 import type { ApprovalResponse, Delivery, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 
 // Codex integration through the official `codex app-server` JSON-RPC protocol over
@@ -395,6 +396,8 @@ class CodexSession implements ProviderSession {
   private requests = new Map<string, { rpcId: string | number; method: string; questionIds?: string[] }>();
   /** fileChange itemId → latest changes, for approval previews. */
   private fileChanges = new Map<string, unknown>();
+  /** Sub-agents spawned by this thread, for the sidebar's sub-agent marks. */
+  private subtasks = new CodexSubtasks();
 
   constructor(
     private args: StartArgs,
@@ -684,6 +687,12 @@ class CodexSession implements ProviderSession {
   private notification(method: string, p: Rec): void {
     if (process.env.AMW_DEBUG_CODEX) console.error('[codex]', method, method.includes('plan') ? JSON.stringify(p).slice(0, 300) : '');
     if (this.side && p.threadId === this.side.threadId) return this.sideNotification(method, p);
+    if (p.threadId && this.subtasks.owns(str(p.threadId))) {
+      // A sub-agent's own thread: its tool calls are its steps, never the main conversation's.
+      const title = (item: Record<string, unknown>) => (item.type === 'agentMessage' || item.type === 'userMessage' || item.type === 'reasoning' ? undefined : codexItem(item, { history: false, completed: false, cwd: this.args.cwd })?.tool?.title);
+      for (const e of this.subtasks.inner(str(p.threadId), method, p, title)) this.emit(e);
+      return;
+    }
     if (p.threadId && this.threadId && p.threadId !== this.threadId) return;
     switch (method) {
       case 'turn/started':
@@ -701,6 +710,7 @@ class CodexSession implements ProviderSession {
         const item = rec(p.item);
         if (item.type === 'agentMessage' && str(item.text)) this.lastAgentText = str(item.text);
         if (item.type === 'fileChange') this.fileChanges.set(str(item.id), item.changes);
+        for (const e of this.subtasks.item(item)) this.emit(e);
         for (const e of itemEvents(item, false, method === 'item/completed', this.args.cwd)) {
           this.emit(e);
           if (method === 'item/started' && e.type === 'transcriptItem' && e.tool?.title) this.emit({ type: 'progress', text: e.tool.title });

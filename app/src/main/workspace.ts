@@ -263,6 +263,7 @@ export class Workspace {
     const d = this.store.data;
     for (const t of [...d.tasks, ...(d.mainAgent ? [d.mainAgent] : [])]) {
       this.handBackRetry(t);
+      this.endSubtasks(t, 'The app restarted.');
       if (['running', 'starting'].includes(t.status) || (t.status === 'waiting_for_user' && this.hasOpenNative(t.taskId))) {
         t.status = 'disconnected';
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
@@ -1651,6 +1652,17 @@ export class Workspace {
 
   // ---------------------------------------------------------------- provider events
 
+  /** Sub-agents still marked running end (as failed) when their agent's turn or session does. */
+  private endSubtasks(task: Task, why: string): void {
+    for (const s of task.subtasks ?? [])
+      if (s.status === 'running') {
+        s.status = 'failed';
+        s.step = '';
+        s.result ??= why;
+        s.endedAt = now();
+      }
+  }
+
   handleEvent(taskId: string, sessionLocalId: string, event: ProviderEvent): void {
     const task = this.findTask(taskId);
     const live = this.live.get(taskId);
@@ -1779,6 +1791,8 @@ export class Workspace {
       }
       case 'turnCompleted': {
         live.turnActive = false;
+        // Stopped or failed turns take their sub-agents with them (background ones that outlive a finished turn report their own end).
+        if (event.status !== 'completed') this.endSubtasks(task, event.status === 'interrupted' ? 'Stopped with the turn.' : 'Ended with the failed turn.');
         if (task !== this.store.data.mainAgent) this.maybeRefreshLabel(task);
         // Text that was still streaming when the turn ended (e.g. cut off by a steer) is final now; tell the UI.
         for (const it of this.store.transcript(taskId))
@@ -1823,6 +1837,7 @@ export class Workspace {
       }
       case 'sessionFailed':
       case 'sessionDisconnected': {
+        this.endSubtasks(task, 'The agent disconnected.');
         this.live.delete(taskId);
         this.handBackRetry(task);
         const reason = event.type === 'sessionFailed' ? event.error : event.reason;
