@@ -1299,11 +1299,17 @@ export class Workspace {
    * from its own files on a linked machine (unless a file there is paused and may be out of date: then
    * rather twice than missing; and only the notes that fit in those files).
    */
-  private memoryGiven(task: Task): MemoryRecord[] {
+  private memoryGiven(task: Task, covered = new Map<string, Set<string>>()): MemoryRecord[] {
     const machine = task.host ?? LOCAL;
-    const link = this.store.data.settings.memoryLinks?.[machine];
-    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
-    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
+    const file = task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md';
+    // (Worked out once per machine and file when asked for many agents at once.)
+    let inFiles = covered.get(`${machine}|${file}`);
+    if (!inFiles) {
+      const link = this.store.data.settings.memoryLinks?.[machine];
+      const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+      inFiles = viaFiles ? notesFor(machine, file, this.store.data.memory).covered : new Set<string>();
+      covered.set(`${machine}|${file}`, inFiles);
+    }
     return memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
   }
 
@@ -1311,8 +1317,9 @@ export class Workspace {
   memoryReach(id: string): Array<{ taskId: string; alias: string; idle: boolean }> {
     const m = this.store.data.memory.find((x) => x.id === id);
     if (!m) return [];
+    const covered = new Map<string, Set<string>>();
     return [...this.store.data.tasks, ...(this.store.data.mainAgent ? [this.store.data.mainAgent] : [])]
-      .filter((t) => !t.setAside && t.memorySeen && this.memoryGiven(t).some((x) => x.id === id) && (!t.memorySeen[id] || t.memorySeen[id].at !== m.updatedAt))
+      .filter((t) => !t.setAside && t.memorySeen && this.memoryGiven(t, covered).some((x) => x.id === id) && (!t.memorySeen[id] || t.memorySeen[id].at !== m.updatedAt))
       .map((t) => ({ taskId: t.taskId, alias: t.alias, idle: t.status !== 'running' && t.status !== 'starting' && !this.hasOpenNative(t.taskId) }));
   }
 
