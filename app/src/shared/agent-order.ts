@@ -2,7 +2,7 @@
 // ⌘1–9 all read from here, so they always agree. Pure functions of the snapshot, no model involved:
 // the order must react at once and stay predictable.
 
-import type { AttentionItem, Project, Task } from './types';
+import type { AgentStatus, AttentionItem, Project, Task } from './types';
 
 /** A member who has done nothing (and been asked nothing) for this long folds into its team's idle row. */
 export const IDLE_AFTER_MS = 3 * 24 * 3600_000;
@@ -46,24 +46,56 @@ export function tierOf(t: Task, open: AttentionItem[]): Tier {
   return 3;
 }
 
+/**
+ * The sidebar's three groups: 0 waiting on you · 1 working · 2 everything else (idle, done, failed,
+ * disconnected, an unread report). The main process stamps `statusSince` when a task's status moves
+ * between these groups, so new output or messages never move an agent; only a change of group does.
+ */
+export type Group = 0 | 1 | 2;
+
+/** The group a status belongs to (what the main process stamps `statusSince` on). */
+export function statusGroup(status: AgentStatus): Group {
+  if (status === 'waiting_for_user') return 0;
+  if (status === 'running' || status === 'starting') return 1;
+  return 2;
+}
+
+/** The group an agent is shown in: an open request puts it among those waiting on you. */
+export function groupOf(t: Task, open: AttentionItem[]): Group {
+  const tier = tierOf(t, open);
+  return tier === 0 ? 0 : tier === 1 ? 1 : 2;
+}
+
 /** Since when the agent has been waiting on the user (its oldest open request). */
 function waitingSince(t: Task, open: AttentionItem[]): number {
   const times = open.filter((a) => a.taskId === t.taskId && a.state === 'open' && a.kind !== 'completion').map((a) => ms(a.createdAt));
   return times.length ? Math.min(...times) : Infinity;
 }
 
+/** When the agent entered the group it is shown in (older tasks without a stamp: when they were created). */
+function enteredAt(t: Task, group: Group, open: AttentionItem[]): number {
+  const since = ms(t.statusSince) || ms(t.createdAt);
+  if (group !== 0) return since;
+  const asked = waitingSince(t, open);
+  return asked === Infinity ? since : asked;
+}
+
 /**
- * Most urgent first: by tier; waiting longest first among those waiting on you; then the ones you
- * touched most recently (not the ones that merely printed something last, so background output
- * does not reshuffle the list).
+ * Waiting on you first, then working, then the rest; within a group, whoever entered it first stays
+ * on top, so an agent that just started (or just finished) joins the end of its group and nothing
+ * above it moves.
  */
 export function rank(tasks: Task[], open: AttentionItem[]): Task[] {
-  const tier = new Map(tasks.map((t) => [t.taskId, tierOf(t, open)]));
+  const key = new Map(
+    tasks.map((t) => {
+      const g = groupOf(t, open);
+      return [t.taskId, { g, at: enteredAt(t, g, open) }];
+    }),
+  );
   return [...tasks].sort((a, b) => {
-    const d = tier.get(a.taskId)! - tier.get(b.taskId)!;
-    if (d) return d;
-    if (tier.get(a.taskId) === 0) return waitingSince(a, open) - waitingSince(b, open);
-    return userActiveAt(b) - userActiveAt(a) || a.taskId.localeCompare(b.taskId);
+    const ka = key.get(a.taskId)!;
+    const kb = key.get(b.taskId)!;
+    return ka.g - kb.g || ka.at - kb.at || ms(a.createdAt) - ms(b.createdAt) || a.taskId.localeCompare(b.taskId);
   });
 }
 
@@ -83,9 +115,19 @@ export interface Team {
   active: boolean;
 }
 
-/** One team per project, the team with someone waiting on you first, then the one you used last. */
+/** A team sorts by its top shown member (one set aside does not lift it). */
+function leadKey(t: Task, open: AttentionItem[]): { g: Group; at: number } {
+  const g = groupOf(t, open);
+  return { g, at: enteredAt(t, g, open) };
+}
+
+/**
+ * One team per project, ordered like agents by its top member: a team with someone waiting on you
+ * first, then teams with someone working (the one that started first on top), then the rest, teams
+ * whose members have all gone idle (folded) last.
+ */
 export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' | 'name'>>, open: AttentionItem[], now: number): Team[] {
-  const out: Array<Team & { last: number }> = [];
+  const out: Array<Team & { lead: { g: Group; at: number } }> = [];
   for (const project of projects) {
     const all = rank(
       tasks.filter((t) => t.projectId === project.projectId),
@@ -104,12 +146,12 @@ export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' |
         failed: all.filter((t) => t.status === 'failed').length,
       },
       active: members.length > 0,
-      last: Math.max(...all.map(userActiveAt)),
+      lead: leadKey(members[0] ?? all[0], open),
     });
   }
   return out
-    .sort((a, b) => Number(b.counts.waiting > 0) - Number(a.counts.waiting > 0) || b.last - a.last || a.project.name.localeCompare(b.project.name))
-    .map(({ last: _last, ...team }) => team);
+    .sort((a, b) => a.lead.g - b.lead.g || Number(b.active) - Number(a.active) || a.lead.at - b.lead.at || a.project.name.localeCompare(b.project.name))
+    .map(({ lead: _lead, ...team }) => team);
 }
 
 /** Agents in sidebar order as shown (expanded teams' members): what ⌘1–9 point at. */

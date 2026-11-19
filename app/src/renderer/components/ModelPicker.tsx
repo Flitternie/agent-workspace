@@ -70,7 +70,7 @@ export function ModelPicker({ task }: { task: Task }) {
   };
   return (
     <span className="model-picker" ref={ref}>
-      <button className={`model-chip${open ? ' open' : ''}`} onClick={() => setOpen(!open)} title={t('The model {name} runs on. Click to switch.', { name: PROVIDER_LABEL[task.provider] })} data-testid="model-chip">
+      <button className={`model-chip${open ? ' open' : ''}`} onClick={() => setOpen(!open)} title={t('Switch model')} data-testid="model-chip">
         {label}
         {pending ? <span className="model-pending">{t('next turn')}</span> : null}
         <Icon name="chevron" size={10} />

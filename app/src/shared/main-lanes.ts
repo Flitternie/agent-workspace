@@ -1,0 +1,164 @@
+import type { Task, TranscriptItem } from './types';
+
+// The main agent's conversation as parallel lanes, git-graph style: time runs down; the main agent's
+// own lane is on the left (each of your messages to it is a point on it), and every agent it handed
+// work to has a lane of its own. A hand-off curves from the main lane to that agent's lane; later
+// hand-offs to the same agent land on the same lane, so work going on side by side reads as
+// parallel lines. An agent coming back (waiting on you, or done with a request) is a point on its
+// lane. Lanes of one project sit together.
+//
+// Who got what is read from the results the app's own workspace tools return ("Sent to Bob; …",
+// "Started Bob (claude) on shop: …", "Forked Ann as Bob …") and the app's own notices: fixed
+// strings, not the model's or the user's words.
+
+export type LaneEventKind = 'ask' | 'send' | 'create' | 'fork' | 'failed' | 'waiting' | 'settled';
+
+export interface Lane {
+  alias: string;
+  taskId?: string;
+  name: string;
+  projectId?: string;
+  projectName?: string;
+  /** Rows where the lane starts and ends (it is drawn between them). */
+  first: number;
+  last: number;
+  /**
+   * Its column (0 = the first right of the main lane). A column is reused once its lane has ended,
+   * so the width follows how many agents work at once, not how many there were. Past MAX_COLUMNS
+   * at once, the rest share the last column (`shared`): still named on their rows, drawn plainer.
+   */
+  col: number;
+  shared?: boolean;
+  /**
+   * Its colour (index into the palette): none of the lanes drawn at the same time has it, so two
+   * lanes on screen together never look alike; a colour comes free when its lane ends.
+   */
+  hue: number;
+}
+
+export const MAX_COLUMNS = 6;
+export const HUE_COUNT = 12;
+
+export interface LaneRow {
+  itemId: string;
+  /** Your message to the main agent this happened under (where to jump). */
+  turnId: string;
+  kind: LaneEventKind;
+  /** 0 = the main agent's lane; otherwise 1 + the index in `lanes`. */
+  lane: number;
+  /** A fork: the lane it branched off. */
+  from?: number;
+  /** Your message (for an ask), or the agent's name. */
+  label: string;
+  at: string;
+}
+
+const RESULT: Array<[LaneEventKind, RegExp, 'to' | 'fork']> = [
+  ['failed', /^Not delivered to (.+?):/, 'to'],
+  ['send', /^(?:Sent to (.+?);|Added to (.+?)'s current work|Stopped (.+?)'s current turn)/, 'to'],
+  ['create', /^Started (.+?) \(/, 'to'],
+  ['fork', /^Forked (.+?) as (.+?)(?: in its own worktree|, sharing|[;,])/, 'fork'],
+];
+const NOTICE = /^(.+?)(?: is waiting on you \((?:permission|question)\): |'s request is settled: )/;
+
+const toolName = (i: TranscriptItem) => (i.tool?.title ?? '').split(' / ').pop() ?? '';
+const resultText = (i: TranscriptItem) =>
+  (i.tool?.content ?? [])
+    .map((c) => ('text' in c && typeof c.text === 'string' ? c.text : ''))
+    .join(' ')
+    .trim();
+
+type LaneTask = Pick<Task, 'taskId' | 'alias' | 'name' | 'projectId'>;
+
+export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: Array<{ projectId: string; name: string }> = [], maxColumns = MAX_COLUMNS): { lanes: Lane[]; rows: LaneRow[] } {
+  const raw: Array<Omit<LaneRow, 'lane' | 'from'> & { alias?: string; fromAlias?: string }> = [];
+  let turnId = '';
+  for (const i of items) {
+    if (i.role === 'user') {
+      turnId = i.id;
+      raw.push({ itemId: i.id, turnId, kind: 'ask', label: i.text.trim().split('\n')[0], at: i.createdAt });
+      continue;
+    }
+    if (i.role === 'tool' && /^(send_to_agent|create_agent|fork_agent)$/.test(toolName(i))) {
+      const text = resultText(i);
+      for (const [kind, re, shape] of RESULT) {
+        const m = re.exec(text);
+        if (!m) continue;
+        if (shape === 'fork') raw.push({ itemId: i.id, turnId, kind, alias: m[2], fromAlias: m[1], label: m[2], at: i.createdAt });
+        else {
+          const alias = m.slice(1).find(Boolean)!;
+          raw.push({ itemId: i.id, turnId, kind, alias, label: alias, at: i.createdAt });
+        }
+        break;
+      }
+      continue;
+    }
+    if (i.role === 'system') {
+      const m = NOTICE.exec(i.text);
+      if (m) raw.push({ itemId: i.id, turnId, kind: / is waiting on you /.test(i.text) ? 'waiting' : 'settled', alias: m[1], label: m[1], at: i.createdAt });
+    }
+  }
+  // Only agents the main agent handed work to get a lane (a notice alone does not make one).
+  const handed = new Set(raw.filter((r) => r.kind !== 'waiting' && r.kind !== 'settled' && r.alias).map((r) => r.alias!));
+  for (const r of raw) if (r.fromAlias) handed.add(r.fromAlias);
+  const rows = raw.filter((r) => r.kind === 'ask' || (r.alias && handed.has(r.alias)));
+  // Lanes in order of first appearance, then gathered by project (keeping that order inside each).
+  const order: string[] = [];
+  for (const r of rows) for (const a of [r.fromAlias, r.alias]) if (a && !order.includes(a)) order.push(a);
+  const parentOf = new Map(rows.filter((r) => r.fromAlias && r.alias).map((r) => [r.alias!, r.fromAlias!]));
+  const info = (alias: string): Omit<Lane, 'first' | 'last' | 'col' | 'shared' | 'hue'> => {
+    const t = tasks.find((x) => x.alias === alias);
+    const parent = parentOf.get(alias);
+    const projectId = t?.projectId ?? (parent ? tasks.find((x) => x.alias === parent)?.projectId : undefined);
+    return { alias, taskId: t?.taskId, name: t?.name ?? alias, projectId, projectName: projects.find((p) => p.projectId === projectId)?.name };
+  };
+  const projectsInOrder: Array<string | undefined> = [];
+  for (const a of order) {
+    const p = info(a).projectId;
+    if (!projectsInOrder.includes(p)) projectsInOrder.push(p);
+  }
+  const byProject = projectsInOrder.flatMap((p) => order.filter((a) => info(a).projectId === p && !parentOf.has(a)));
+  // Each fork right after the lane it came from (forks of forks after theirs): its branch is short.
+  const sorted: string[] = [];
+  const place = (a: string) => {
+    sorted.push(a);
+    for (const [child, parent] of parentOf) if (parent === a && !sorted.includes(child)) place(child);
+  };
+  for (const a of byProject) place(a);
+  for (const a of order) if (!sorted.includes(a)) place(a);
+  const laneOf = (alias?: string) => (alias ? sorted.indexOf(alias) + 1 : 0);
+  const out: LaneRow[] = rows.map(({ alias, fromAlias, ...r }) => ({ ...r, lane: laneOf(alias), ...(fromAlias ? { from: laneOf(fromAlias) } : {}) }));
+  const lanes: Lane[] = sorted.map((alias, k) => {
+    const idx = out.map((r, n) => (r.lane === k + 1 || r.from === k + 1 ? n : -1)).filter((n) => n >= 0);
+    return { ...info(alias), first: idx[0], last: idx[idx.length - 1], col: 0, hue: 0 };
+  });
+  // Columns, in time order: the lowest free one (a fork prefers the one right of its origin's).
+  const ends: number[] = []; // per column: the last row of the lane in it
+  for (const lane of [...lanes].sort((a, b) => a.first - b.first)) {
+    const free = (c: number) => c < maxColumns && (ends[c] === undefined || ends[c] < lane.first);
+    const parent = parentOf.get(lane.alias);
+    const parentCol = parent ? lanes.find((l) => l.alias === parent)?.col : undefined;
+    let col = parentCol !== undefined && free(parentCol + 1) ? parentCol + 1 : -1;
+    if (col < 0) for (let c = 0; c < maxColumns && col < 0; c++) if (free(c)) col = c;
+    if (col < 0) {
+      col = maxColumns - 1;
+      lane.shared = true;
+    }
+    lane.col = col;
+    ends[col] = Math.max(ends[col] ?? -1, lane.last);
+  }
+  // Colours, in time order: the first one no lane still being drawn has.
+  const byStart = [...lanes].sort((a, b) => a.first - b.first);
+  for (const lane of byStart) {
+    const taken = new Set(byStart.filter((o) => o !== lane && o.first < lane.first && o.last >= lane.first).map((o) => o.hue));
+    // Nor the lane just before it in its column: a new agent there must not read as the same lane going on.
+    const before = byStart.filter((o) => o !== lane && o.col === lane.col && o.last < lane.first).sort((a, b) => b.last - a.last)[0];
+    if (before) taken.add(before.hue);
+    let hue = 0;
+    while (taken.has(hue) && hue < HUE_COUNT - 1) hue++;
+    lane.hue = hue;
+  }
+  // A column once shared is drawn plain for every lane in it while they overlap.
+  for (const l of lanes) if (!l.shared && lanes.some((o) => o.shared && o.col === l.col && o.first <= l.last && l.first <= o.last)) l.shared = true;
+  return { lanes, rows: out };
+}

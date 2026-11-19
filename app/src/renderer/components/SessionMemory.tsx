@@ -44,7 +44,7 @@ export function MemoryChip({ snapshot, task, open, onToggle }: { snapshot: Works
   const { project, user } = sessionMemory(snapshot, task);
   const count = (l: Array<{ on: boolean }>) => l.filter((x) => x.on).length;
   return (
-    <button className={`memory-chip${open ? ' open' : ''}`} onClick={onToggle} aria-pressed={open} data-testid="memory-chip" title={`${t('The memory this agent works with')} · ${isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}`}>
+    <button className={`memory-chip${open ? ' open' : ''}`} onClick={onToggle} aria-pressed={open} data-testid="memory-chip" title={`${isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}`}>
       <Icon name="note" size={11} />
       {/* Narrow headers show the counts only (the full words are in the tooltip). */}
       <span className="chip-full">{isMainAgent(task) ? t('Memory: user {u}', { u: count(user) }) : t('Memory: project {p} · user {u}', { p: count(project), u: count(user) })}</span>
@@ -142,7 +142,7 @@ type Draft = Awaited<ReturnType<typeof call<'memory:distill'>>>;
  */
 export function RememberButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="remember-btn" onClick={onClick} data-testid="remember" title={t('Keep as memory… (or right-click the message)')} aria-label={t('Keep as memory…')}>
+    <button className="remember-btn" onClick={onClick} data-testid="remember" title={t('Keep as memory')} aria-label={t('Keep as memory…')}>
       <Icon name="remember" size={13} />
     </button>
   );
@@ -186,6 +186,8 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
   const [target, setTarget] = useState<'update' | 'new'>('update');
   const [busy, setBusy] = useState(false);
   const [round, setRound] = useState(0);
+  /** Saved: who it reaches from their next message, and telling the idle ones now. */
+  const [saved, setSaved] = useState<{ id: string; reach: Array<{ taskId: string; alias: string; idle: boolean }>; told?: number } | null>(null);
   const canProject = !isMainAgent(task) && !!task.projectId;
   const projectName = snapshot.projects.find((p) => p.projectId === task.projectId)?.name ?? '';
   useEffect(() => {
@@ -213,9 +215,17 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
     setBusy(true);
     setError('');
     try {
-      if (draft?.similar && target === 'update') await call('memory:update', { id: draft.similar.id, title: title.trim() || undefined, body: body.trim() });
-      else await call('memory:add', { scope, scopeId: scope === 'project' ? task.projectId : 'global', title: title.trim() || undefined, body: body.trim(), originTaskId: isMainAgent(task) ? undefined : task.taskId, approvedForReuse: true });
-      onClose();
+      let id: string;
+      if (draft?.similar && target === 'update') {
+        await call('memory:update', { id: draft.similar.id, title: title.trim() || undefined, body: body.trim() });
+        id = draft.similar.id;
+      } else id = (await call('memory:add', { scope, scopeId: scope === 'project' ? task.projectId : 'global', title: title.trim() || undefined, body: body.trim(), originTaskId: isMainAgent(task) ? undefined : task.taskId, approvedForReuse: true })).id;
+      // Where it takes effect: the agents it reaches with their next message (this one included).
+      const reach = await call('memory:reach', { id }).catch(() => []);
+      if (reach.length) {
+        setSaved({ id, reach });
+        setBusy(false);
+      } else onClose();
     } catch (e) {
       setError(errorText(e));
       setBusy(false);
@@ -225,7 +235,37 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
   return createPortal(
     <Modal title={t('Keep as memory')} onClose={onClose}>
       <div className="remember-dialog" data-testid="remember-dialog">
-        {!draft && !error ? (
+        {saved ? (
+          <div className="remember-saved" data-testid="remember-saved">
+            <p>
+              <Icon name="check" size={13} /> {t('Kept. It reaches {names} with their next message.', { names: saved.reach.map((r) => r.alias).join(t(', ')) })}
+            </p>
+            {saved.told !== undefined ? <p className="muted small">{t('Told {n} idle agents now.', { n: saved.told })}</p> : null}
+            <div className="row">
+              {saved.told === undefined && saved.reach.some((r) => r.idle) ? (
+                <button
+                  className="btn"
+                  disabled={busy}
+                  data-testid="remember-tell-now"
+                  title={t('Each idle agent gets a short message now (it starts a turn)')}
+                  onClick={() => {
+                    setBusy(true);
+                    void call('memory:tellNow', { id: saved.id })
+                      .then((n) => setSaved({ ...saved, told: n }))
+                      .catch((e) => setError(errorText(e)))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  {t('Tell the idle ones now')}
+                </button>
+              ) : null}
+              <button className="btn btn-primary" onClick={onClose} data-testid="remember-done">
+                {t('Got it')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {saved ? null : !draft && !error ? (
           <div className="remember-loading" data-testid="remember-loading">
             <div className="skeleton w60" />
             <div className="skeleton" />
@@ -235,7 +275,7 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
             </div>
           </div>
         ) : null}
-        {draft ? (
+        {draft && !saved ? (
           <>
             {draft.fallback ? <div className="warn-text small">{t(draft.fallback)}</div> : null}
             {!draft.worth && !draft.fallback ? (

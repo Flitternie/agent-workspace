@@ -42,7 +42,7 @@ export function ChangesPanel({ task, changes, follow, onFollow, onOpen, frame }:
           ))}
         </ul>
       ) : (
-        <p className="muted small">{t('No file changes yet. With Follow on, each file the agent changes opens here.')}</p>
+        <p className="muted small">{t('No file changes yet.')}</p>
       )}
     </SidePanel>
   );

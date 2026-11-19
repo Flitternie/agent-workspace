@@ -16,6 +16,11 @@ export interface ListenerHandlers {
   onUtterance: (wav: Uint8Array<ArrayBuffer>, durationMs: number) => void;
   /** Speech was too short to be a command (cough, click). */
   onDiscard?: () => void;
+  /**
+   * While someone is still talking: the speech so far in this segment, every PARTIAL_MS, so
+   * what is being said can be shown before the pause (a fast on-device model transcribes it).
+   */
+  onPartial?: (wav: Uint8Array<ArrayBuffer>) => void;
 }
 
 const FRAME = 1024; // samples per analysis frame (~64 ms at 16 kHz)
@@ -24,6 +29,7 @@ const START_FRAMES = 2; // consecutive loud frames to open a segment
 const END_SILENCE_MS = 850; // pause that ends an utterance
 const MIN_VOICED_MS = 350; // shorter than this is noise
 const MAX_UTTERANCE_MS = 30_000;
+const PARTIAL_MS = 700; // how often the speech so far is handed over while talking
 
 export class ContinuousListener {
   private stream?: MediaStream;
@@ -37,6 +43,7 @@ export class ContinuousListener {
   private silentFrames = 0;
   private voicedFrames = 0;
   private levelTick = 0;
+  private sincePartialMs = 0;
 
   constructor(private h: ListenerHandlers) {}
 
@@ -85,6 +92,7 @@ export class ContinuousListener {
   private reset(): void {
     this.preRoll = [];
     this.segment = null;
+    this.sincePartialMs = 0;
     this.loudRun = 0;
     this.silentFrames = 0;
     this.voicedFrames = 0;
@@ -124,7 +132,16 @@ export class ContinuousListener {
     } else this.silentFrames++;
 
     const total = this.segment.length * frameMs;
-    if (this.silentFrames * frameMs >= END_SILENCE_MS || total >= MAX_UTTERANCE_MS) this.finish(this.segment, frameMs);
+    if (this.silentFrames * frameMs >= END_SILENCE_MS || total >= MAX_UTTERANCE_MS) {
+      this.finish(this.segment, frameMs);
+      return;
+    }
+    // Still talking: the speech so far, now and then (only once there is enough to read).
+    this.sincePartialMs += frameMs;
+    if (this.h.onPartial && this.sincePartialMs >= PARTIAL_MS && this.voicedFrames * frameMs >= MIN_VOICED_MS) {
+      this.sincePartialMs = 0;
+      this.h.onPartial(encodeWav(this.segment, rate));
+    }
   }
 
   private finish(segment: Float32Array[], frameMs: number): void {

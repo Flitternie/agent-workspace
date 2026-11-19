@@ -47,7 +47,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
     <div className="onboarding" data-testid="onboarding">
       <div className="onboarding-inner">
         <h1>{t('Welcome to Agent Workspace')}</h1>
-        <p className="muted">{t('A few steps to get going: connect a coding agent on this Mac or on another machine; the rest can wait.')}</p>
+        <p className="muted">{t('Connect a coding agent here or on another machine; the rest can wait.')}</p>
 
         <Step n={1} title="Language · 语言" done={!!ob.languageChosen} summary={LANGUAGES.find((l) => l.id === (snapshot.settings.language ?? 'en'))?.label}>
           <div className="segmented" role="radiogroup" aria-label="Language · 语言">
@@ -70,8 +70,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
         </Step>
 
         <Step n={2} title={t('Connect a coding agent on this Mac')} done={local} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} tag={either(local)}>
-          <p className="muted small">{t('Agents run through Claude Code or Codex on this Mac, with the account you sign in with there. The app never sees your password or key.')}</p>
-          <p className="muted small">{t('What agents do counts against that account’s plan (your Claude or ChatGPT subscription, or API usage).')}</p>
+          <p className="muted small">{t('Uses Claude Code or Codex signed in on this Mac; usage counts against that account.')}</p>
           {(['claude', 'codex'] as const).map((p) => (
             <ProviderRow key={p} provider={p} cap={cap(p)} signingIn={!!signingIn[p]} onSigningIn={(v) => setSigningIn((s) => ({ ...s, [p]: v }))} />
           ))}
@@ -79,7 +78,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
         </Step>
 
         <Step n={3} title={t('Connect other machines')} done={remote || (local && !!ob.remoteSkipped)} summary={remoteReady.length ? t('{n} machines', { n: remoteReady.length }) : t('Skipped')} tag={either(remote)}>
-          <p className="muted small">{t('Agents can run on machines in your ~/.ssh/config, with Claude Code or Codex installed and signed in there; their sessions stay on those machines.')}</p>
+          <p className="muted small">{t('Optional: run agents on machines from your ~/.ssh/config.')}</p>
           <RemoteHosts snapshot={snapshot} autoRecheck />
           {remoteReady.length || !local ? null : (
             <div className="row">
@@ -365,7 +364,7 @@ function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: nu
         <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your Claude Code and Codex sessions on this Mac…')}</p>
       ) : folders.length ? (
         <>
-          <p className="muted small">{t('Pick the conversations to continue here. Each folder becomes a project team; each conversation an agent, named by its work.')}</p>
+          <p className="muted small">{t('Pick the conversations to continue here.')}</p>
           {folders.map((f) => {
             const shown = more.has(f.cwd) ? f.list : f.list.slice(0, 4);
             const all = f.list.every((s) => picked.has(key(s)));

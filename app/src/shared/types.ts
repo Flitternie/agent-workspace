@@ -52,6 +52,8 @@ export interface Task {
   setAside?: boolean;
   /** Finished a turn the user has not looked at since (a green dot); opening the agent clears it. */
   unread?: boolean;
+  /** When the agent entered its current status group (waiting on you / working / anything else); orders the sidebar. */
+  statusSince?: string;
   /** Sub-agents of the latest turn, kept after it ends; replaced when the next turn starts. */
   subtasks?: SubtaskInfo[];
   projectId: string;
@@ -72,6 +74,9 @@ export interface Task {
   plan?: PlanInfo;
   /** Memory records injected into the current native session at start/resume (provenance). */
   injectedMemoryIds?: string[];
+  /** The memory this session has been given and at which version (its updatedAt), and what it said: what
+   *  the next message brings it is the difference (new, changed, no longer applying). */
+  memorySeen?: Record<string, { at: string; body: string }>;
   /** Mock-provider script name; ignored by native providers. */
   mockScript?: string;
   /** Overrides settings.permissionMode for this agent. */
@@ -210,7 +215,11 @@ export interface TranscriptItem {
   /** A decision the user made here (role 'system'): an approval given or a question answered. */
   decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
   streaming?: boolean;
+  /** A system item that starts a new chapter of the main agent's conversation (and why). */
+  chapter?: { reason: 'manual' | 'idle' | 'long' };
   createdAt: string;
+  /** A system note that memory went with the next message: what was sent (a removed note marked ✕). */
+  memoryUpdate?: string[];
 }
 
 export type ToolStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'declined' | 'interrupted';
@@ -364,6 +373,8 @@ export interface Settings {
   permissionMode?: PermissionMode;
   /** Which CLI runs the main agent; unset = the first one installed and signed in. */
   mainAgent?: 'claude' | 'codex' | 'off';
+  /** Start a new chapter of the main agent's conversation by itself after a long pause or a long chapter (default on). */
+  mainChapters?: 'auto' | 'off';
   /** Speech-to-text model (OpenAI id). */
   sttModel?: string;
   /** Model that decides which agent a spoken message is for (and names roles). */

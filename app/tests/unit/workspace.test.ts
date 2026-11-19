@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MockAdapter } from '../../src/main/providers/mock';
 import { Workspace } from '../../src/main/workspace';
+import { rank, teams } from '../../src/shared/agent-order';
 
 const DELAY = 5;
 const opened: Workspace[] = [];
@@ -143,6 +144,65 @@ describe('restart and resume', () => {
     expect(resumed.integrationMode).toBe('resumed');
     expect(ws2.transcript(A.taskId).some((i) => i.role === 'system' && /Resumed native/.test(i.text))).toBe(true);
   });
+});
+
+describe('sidebar order', () => {
+  it('moves an agent only when its status group changes, and keeps the order across a restart', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = open(dataDir);
+    const shop = await ws.addProject(repo(), 'shop');
+    const legal = await ws.addProject(repo(), 'legal');
+    const s = () => ws.snapshot();
+    const task = (id: string) => s().tasks.find((t) => t.taskId === id)!;
+    const openNow = () => s().attention.filter((a) => a.state === 'open');
+    const order = () => rank(s().tasks, openNow()).map((t) => t.alias);
+    const teamOrder = () => teams(s().tasks, s().projects, openNow(), Date.now()).map((t) => t.project.name);
+
+    // Two long turns started one after the other, in different projects: the first stays on top.
+    const A = await ws.createTask({ projectId: shop.projectId, provider: 'mock', title: 'A', isolate: false, mockScript: 'subagents', instruction: 'go' });
+    await until(() => task(A.taskId).status === 'running');
+    await settle();
+    const B = await ws.createTask({ projectId: legal.projectId, provider: 'mock', title: 'B', isolate: false, mockScript: 'subagents', instruction: 'go' });
+    await until(() => task(B.taskId).status === 'running');
+    expect(order()).toEqual([A.alias, B.alias]);
+    expect(teamOrder()).toEqual(['shop', 'legal']);
+
+    // New output while running (sub-agent steps, progress) changes nothing.
+    const sinceA = task(A.taskId).statusSince;
+    const sinceB = task(B.taskId).statusSince;
+    const updated = task(B.taskId).updatedAt;
+    await until(() => task(B.taskId).updatedAt !== updated && (task(B.taskId).subtasks?.length ?? 0) >= 2);
+    expect(task(A.taskId).statusSince).toBe(sinceA);
+    expect(task(B.taskId).statusSince).toBe(sinceB);
+    expect(order()).toEqual([A.alias, B.alias]);
+
+    // A third agent asks for approval: it and its team go to the top.
+    await settle();
+    const C = await ws.createTask({ projectId: legal.projectId, provider: 'mock', title: 'C', isolate: false, mockScript: 'approval:deploy', instruction: 'deploy' });
+    await until(() => openNow().some((a) => a.taskId === C.taskId && a.kind === 'approval'));
+    expect(order()).toEqual([C.alias, A.alias, B.alias]);
+    expect(teamOrder()).toEqual(['legal', 'shop']);
+
+    // Answered, C works and finishes: it drops below those still working.
+    await ws.respondAttention(openNow().find((a) => a.taskId === C.taskId)!.id, 'allow');
+    await until(() => ['done', 'idle'].includes(task(C.taskId).status));
+    expect(order()).toEqual([A.alias, B.alias, C.alias]);
+    expect(teamOrder()).toEqual(['shop', 'legal']);
+
+    // A finishes: it joins the end of the rest; B (and its team) now leads.
+    await until(() => task(A.taskId).status === 'done', 5000);
+    expect(order()).toEqual([B.alias, C.alias, A.alias]);
+    expect(teamOrder()).toEqual(['legal', 'shop']);
+
+    // Restart: B was cut off mid-turn (now disconnected); every stamp is kept, so is the order.
+    const before = Object.fromEntries(s().tasks.map((t) => [t.taskId, t.statusSince]));
+    await ws.shutdown();
+    const ws2 = open(dataDir);
+    const s2 = ws2.snapshot();
+    expect(s2.tasks.find((t) => t.taskId === B.taskId)!.status).toBe('disconnected');
+    expect(Object.fromEntries(s2.tasks.map((t) => [t.taskId, t.statusSince]))).toEqual(before);
+    expect(rank(s2.tasks, s2.attention.filter((a) => a.state === 'open')).map((t) => t.alias)).toEqual([B.alias, C.alias, A.alias]);
+  }, 15_000);
 });
 
 describe('voice dispatch', () => {
