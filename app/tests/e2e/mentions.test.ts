@@ -84,6 +84,11 @@ it('@ lists the agent’s files, filters as you type, and inserts the chosen pat
   await box.press('Enter');
   await expect.poll(() => box.inputValue()).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css ');
 
+  // A file (not an image) given to the box, as when dropped or picked: its @path goes in at the caret.
+  await page.locator('.composer input[type="file"]').setInputFiles([join(dir, 'src', 'checkout', 'Cart.tsx'), join(home, 'shared', 'tokens.css')]);
+  await expect.poll(() => box.inputValue(), { timeout: 5000 }).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css @src/checkout/Cart.tsx @~/shared/tokens.css ');
+  await box.fill('Fix @src/checkout/Button.tsx and @../shared/tokens.css ');
+
   // Sent: the path goes as written, and shows as chips in the conversation.
   await box.press('Enter');
   await expect.poll(async () => (await inv('transcript:get', { taskId: a.taskId })).find((i: any) => i.role === 'user')?.text, { timeout: 5000 }).toBe('Fix @src/checkout/Button.tsx and @../shared/tokens.css');
