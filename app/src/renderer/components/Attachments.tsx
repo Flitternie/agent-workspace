@@ -55,8 +55,8 @@ export interface Attachment {
   ref: ImageRef;
 }
 
-/** A message box's images until it is sent: add (paste, drop, pick), remove, clear. `refuse` says why images are not taken here. */
-export function useAttachments(refuse?: string) {
+/** A message box's images until it is sent: add (paste, drop, pick), remove, clear. */
+export function useAttachments() {
   const [items, setItems] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(0);
   const [error, setError] = useState('');
@@ -70,7 +70,6 @@ export function useAttachments(refuse?: string) {
   const add = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif|heic|tiff?)$/i.test(f.name));
     if (!images.length) return;
-    if (refuse) return setError(refuse);
     setError('');
     const room = Math.max(0, MAX_IMAGES - count.current - pending.current);
     if (images.length > room) setError(t('At most {n} images per message.', { n: MAX_IMAGES }));

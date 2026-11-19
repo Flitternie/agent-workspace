@@ -987,8 +987,8 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  // Images pasted, dropped or picked go with the next message (not to the main agent, which only coordinates).
-  const attach = useAttachments(isMainAgent(task) ? t('The main agent does not take images; send them to an agent.') : undefined);
+  // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
+  const attach = useAttachments();
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1090,7 +1090,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
         <div className="composer-foot">
           {/* The mic, on an agent's page: here, like the buttons on the right (VoiceDock renders into it). */}
           <span id="composer-voice" className="composer-voice" />
-          {!isMainAgent(task) && !shell ? <AttachButton onFiles={(files) => void attach.add(files)} /> : null}
+          {!shell ? <AttachButton onFiles={(files) => void attach.add(files)} /> : null}
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>

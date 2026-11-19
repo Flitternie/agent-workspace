@@ -123,6 +123,26 @@ describe('sending images', () => {
     expect(session.history!.messages.find((m) => m.role === 'user')!.text).toBe('[1 image: image/png]');
   });
 
+  it('the main agent takes images and passes them on only when it says so', async () => {
+    const { ws, p } = await setup();
+    const B = await ws.createTask({ projectId: p.projectId, provider: 'mock', name: 'frontend', title: 'Dashboard', isolate: false });
+    // A main agent on the mock CLI (the real one runs on Claude Code or Codex).
+    const data = (ws as unknown as { store: { data: { mainAgent?: unknown } } }).store.data;
+    data.mainAgent = { taskId: 't-main-test', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: p.rootPath, createdAt: '', updatedAt: '' };
+    const ref = ws.attachments.save(PNG, 'bug.png');
+    expect(await ws.send('t-main-test', 'This button is misaligned, have the dashboard agent fix it.', 'text', { images: [ref] })).toMatchObject({ ok: true });
+    const { workspaceTools } = await import('../../src/main/main-agent');
+    const tools = Object.fromEntries(workspaceTools(ws).map((t) => [t.name, t]));
+    await tools.send_to_agent.run({ agent: 'frontend', message: 'Context first.' });
+    await tools.send_to_agent.run({ agent: 'frontend', message: 'Fix the button in this screenshot.', images: true });
+    const sent = ws.transcript(B.taskId).filter((i) => i.role === 'user');
+    expect(sent.map((i) => [i.text, i.images?.length ?? 0])).toEqual([
+      ['Context first.', 0],
+      ['Fix the button in this screenshot.', 1],
+    ]);
+    expect(sent[1].images![0].id).toBe(ref.id);
+  });
+
   it('refuses images that are no longer stored', async () => {
     const { ws, p } = await setup();
     const task = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });

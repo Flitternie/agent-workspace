@@ -1002,7 +1002,6 @@ export const zh: Record<string, string> = {
   'This image format cannot be read here; save it as PNG or JPEG and add it again.': '这种图片格式读不了，请另存为 PNG 或 JPEG 再添加。',
   'The image is too large.': '图片太大了。',
   'At most {n} images per message.': '每条消息最多 {n} 张图片。',
-  'The main agent does not take images; send them to an agent.': '主 agent 不接收图片，请发给具体的 agent。',
   'Image': '图片',
   'Remove image': '移除图片',
   'Adding image…': '正在添加图片…',

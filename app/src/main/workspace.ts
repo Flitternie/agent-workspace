@@ -683,6 +683,8 @@ export class Workspace {
     instruction?: string;
     isolate: boolean;
     mockScript?: string;
+    /** Images that go with the first instruction (the main agent passing on the user's). */
+    images?: ImageRef[];
   }): Promise<Task> {
     const project = this.project(args.projectId);
     if (!this.opts.adapters[args.provider]) throw new Error(`Provider ${args.provider} is not available.`);
@@ -720,7 +722,7 @@ export class Workspace {
     });
     this.changed();
     if (args.instruction?.trim()) {
-      const r = await this.send(taskId, args.instruction, 'initial');
+      const r = await this.send(taskId, args.instruction, 'initial', { images: args.images });
       if (!r.ok) throw new Error(r.error);
     }
     return task;
@@ -1473,7 +1475,6 @@ export class Workspace {
   async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[] } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     const images = opts.images?.length ? opts.images.slice(0, MAX_IMAGES) : undefined;
-    if (images && task === this.store.data.mainAgent) return { ok: false, taskId, error: 'The main agent does not take images; send them to an agent.' };
     const missing = images?.find((r) => !this.attachments.has(r.id));
     if (missing) return { ok: false, taskId, error: `Image ${missing.name ?? missing.id} is no longer stored; add it again.` };
     // What an image-only message is about, where a line of text is needed (summary, title, replies).
@@ -2767,8 +2768,16 @@ export class Workspace {
       .join('\n\n');
   }
 
-  sendFromMain(taskId: string, text: string, interrupt: boolean) {
-    return this.send(taskId, text, 'main', { interrupt });
+  sendFromMain(taskId: string, text: string, interrupt: boolean, withImages = false) {
+    return this.send(taskId, text, 'main', { interrupt, images: withImages ? this.userImages() : undefined });
+  }
+
+  /** The images in the user's latest message to the main agent: what it passes on when it says so (send_to_agent / create_agent / fork_agent with images). */
+  private userImages(): ImageRef[] | undefined {
+    const main = this.store.data.mainAgent;
+    if (!main) return undefined;
+    const last = this.store.transcript(main.taskId).findLast((i) => i.role === 'user' && i.via !== 'main');
+    return last?.images?.filter((r) => r.id && this.attachments.has(r.id));
   }
 
   /**
@@ -2776,7 +2785,7 @@ export class Workspace {
    * just before an earlier prompt (matched by its start). In its own worktree when the project is a
    * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
-  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string }): Promise<{ task: Task; delivery: DispatchResult }> {
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
     // Whitespace as read_agent and the error below show it: collapsed.
@@ -2798,11 +2807,12 @@ export class Workspace {
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
     const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
     if (!args.label?.trim()) void this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
-    return { task, delivery: await this.send(task.taskId, args.instruction, 'main') };
+    return { task, delivery: await this.send(task.taskId, args.instruction, 'main', { images: args.withImages ? this.userImages() : undefined }) };
   }
 
-  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string }): Promise<Task> {
-    return this.createTask({ ...args, name: args.label, nameSource: 'auto', isolate: true });
+  async createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string; withImages?: boolean }): Promise<Task> {
+    const { withImages, ...rest } = args;
+    return this.createTask({ ...rest, name: args.label, nameSource: 'auto', isolate: true, images: withImages ? this.userImages() : undefined });
   }
 
   async stopFromMain(taskId: string): Promise<void> {
