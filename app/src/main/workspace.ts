@@ -75,7 +75,12 @@ const SHELL_TIMEOUT_MS = 10 * 60_000;
 /** How much of a command's output goes to the agent with the next message. */
 const SHELL_CONTEXT_CHARS = 20_000;
 
+/** The two shared-folder warnings; the renderer translates them by the same shapes (bits.tsx warningText). */
+const SHARES_FOLDER = /^Shares a writable directory with .+ — edits are not isolated\.$/;
+const ORIGINAL_FOLDER = /^Uses its original directory, shared with .+ — not isolated\.$/;
+
 /** Claude Code's own markup for a `!command` and its output in a user turn. */
+
 export function shellContext(command: string, stdout: string, stderr: string): string {
   const cut = (s: string) => (s.length > SHELL_CONTEXT_CHARS ? `…${s.slice(-SHELL_CONTEXT_CHARS)}` : s);
   return `<bash-input>${command}</bash-input>\n<bash-stdout>${cut(stdout.trimEnd())}</bash-stdout><bash-stderr>${cut(stderr.trimEnd())}</bash-stderr>`;
@@ -138,9 +143,35 @@ export class Workspace {
     this.applyModels();
     this.recoverAfterRestart();
     this.migrateLabels();
+    this.refreshSharedFolders();
     // Relabelling waits for the CLIs to be detected (refreshCapabilities), so the user's own Claude Code
     // or Codex writes the labels rather than a fallback; tests hand in a model directly.
     if (opts.backgroundModel) setTimeout(() => this.relabelStale(), 0);
+  }
+
+  /**
+   * Rewrites every agent's shared-folder warning from who is in its folder now, so all sharers are
+   * named on every side (an imported session too) and an agent that was removed is no longer named.
+   * With nobody else there, the agent's own reason for having no worktree (cwdNote) shows instead.
+   * Warnings saved by older versions carry that reason in the text itself: it is moved to cwdNote once.
+   */
+  private refreshSharedFolders(): void {
+    const tasks = this.store.data.tasks;
+    for (const t of tasks) {
+      const w = t.sharedCwdWarning;
+      if (!w || t.cwdNote) continue;
+      if (ORIGINAL_FOLDER.test(w)) t.keptOriginalFolder = true;
+      else if (!SHARES_FOLDER.test(w)) t.cwdNote = w;
+    }
+    for (const t of tasks) {
+      const others = tasks.filter((o) => o !== t && o.cwd === t.cwd && o.host === t.host).map((o) => o.alias);
+      const names = others.join(', ');
+      t.sharedCwdWarning = !others.length
+        ? t.cwdNote
+        : t.keptOriginalFolder
+          ? `Uses its original directory, shared with ${names} — not isolated.`
+          : `Shares a writable directory with ${names} — edits are not isolated.`;
+    }
   }
 
   /** A label stands this long before the agent's newer work may rewrite it. */
@@ -586,10 +617,7 @@ export class Workspace {
       session?: { nativeSessionId: string; integrationMode: SessionRecord['integrationMode'] };
       /** Why it edits a folder it did not ask to share (no worktree); a sharer's warning replaces it, as the larger risk. */
       cwdWarning?: string;
-      /**
-       * An imported session keeps the folder it was started in: it is warned in its own words, and the
-       * agents already there are not told, since nothing about their folder was chosen here.
-       */
+      /** An imported session keeps the folder it was started in, and is warned about sharing in those words. */
       keepsOriginalFolder?: boolean;
       /** Names an unnamed agent after its work (create and import); a fork takes its name from the original. */
       label?: { title: string; instruction?: string; refine?: boolean };
@@ -609,16 +637,6 @@ export class Workspace {
       integrationMode: o.session.integrationMode,
       createdAt: now(),
     };
-    let sharedCwdWarning = o.cwdWarning;
-    const sharers = d.tasks.filter((t) => t.cwd === o.cwd && t.host === o.host);
-    if (sharers.length) {
-      const others = sharers.map((t) => t.alias).join(', ');
-      if (o.keepsOriginalFolder) sharedCwdWarning = `Uses its original directory, shared with ${others} — not isolated.`;
-      else {
-        sharedCwdWarning = `Shares a writable directory with ${others} — edits are not isolated.`;
-        for (const s of sharers) s.sharedCwdWarning = `Shares a writable directory with ${alias} — edits are not isolated.`;
-      }
-    }
     const task: Task = {
       taskId,
       alias,
@@ -632,7 +650,8 @@ export class Workspace {
       cwd: o.cwd,
       host: o.host,
       worktree: o.worktree,
-      sharedCwdWarning,
+      cwdNote: o.cwdWarning,
+      keptOriginalFolder: o.keepsOriginalFolder || undefined,
       sessionLocalId: record?.localId,
       permissionMode: o.permissionMode,
       forkedFrom: o.forkedFrom,
@@ -642,6 +661,7 @@ export class Workspace {
     };
     if (record) d.sessions.push(record);
     d.tasks.push(task);
+    this.refreshSharedFolders();
     if (o.label) this.autoLabel(task, o.label.title, o.label.instruction, { refine: o.label.refine });
     return task;
   }
@@ -982,6 +1002,7 @@ export class Workspace {
     }
     const d = this.store.data;
     d.tasks = d.tasks.filter((x) => x.taskId !== taskId);
+    this.refreshSharedFolders();
     d.attention = d.attention.filter((a) => a.taskId !== taskId);
     d.memory = d.memory.filter((m) => !(m.scope === 'task' && m.scopeId === taskId));
     this.coordinatorSay(note);
