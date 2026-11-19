@@ -950,4 +950,9 @@ export const zh: Record<string, string> = {
   'Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里，随时可以用「接入已有会话…」找回来。',
   'Archived': '已归档',
   'Projects where nothing is going on: no agent working or waiting, none used for 3 days. One comes back by itself when an agent in it does something or you message it.': '没有动静的项目：没有 agent 在工作或等你，且都 3 天没用过。项目里的 agent 一有动静，或者你给它发消息，项目就会自动回到上面。',
+  'to': '交给',
+  'fork': '分叉',
+  'not delivered': '未送达',
+  'waiting on you': '在等你',
+  'done': '完成',
 };

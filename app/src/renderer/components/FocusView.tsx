@@ -19,6 +19,8 @@ import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
 import { SidePanel } from './SidePanel';
 import { SessionMap, SessionMiniMap } from './SessionMap';
+import { MainLanes, MainLanesMini } from './MainLanes';
+import { mainLanes } from '../../shared/main-lanes';
 import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
@@ -109,6 +111,10 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       return next;
     });
   const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
+  const main = isMainAgent(task);
+  const lanes = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
+  const hasMap = main ? !!lanes?.lanes.length : mapTasks.length > 0;
   // Forked from another agent: where this trunk came in.
   const mapOrigin = useMemo(() => {
     const from = task.forkedFrom;
@@ -165,11 +171,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
    * (centred in what is left); else its outline at the edge, opening the full map in the side column.
    */
   const MAP_ROOM = 250;
-  const mapBeside = mapTasks.length > 0 && threadW - MAP_ROOM - 32 >= 720;
+  const mapBeside = hasMap && threadW - MAP_ROOM - 32 >= 720;
   // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
   // would leave too narrow a column; then nothing (nothing floats over the messages).
   const MINI_ROOM = 48;
-  const miniFits = !mapBeside && mapTasks.length > 0 && threadW - MINI_ROOM - 32 >= 520;
+  const miniFits = !mapBeside && hasMap && threadW - MINI_ROOM - 32 >= 520;
   const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
   const setShowChanges = (on: boolean) => {
     localStorage.setItem('amw.showChanges', on ? '1' : '0');
@@ -230,7 +236,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Which panel the side column shows: one at a time, the preview first.
   const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
     ? 'preview'
-    : showMap && !mapBeside && mapTasks.length
+    : showMap && !mapBeside && hasMap
       ? 'map'
       : showBtw && btw.length
         ? 'btw'
@@ -311,8 +317,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     sideKind === 'preview' ? (
       previewPanel
     ) : sideKind === 'map' ? (
-      <SidePanel title={t('Task index')} label={t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
-        <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+      <SidePanel title={main ? t('Agents') : t('Task index')} label={main ? t('Agents') : t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
+        {lanes ? (
+          <MainLanes lanes={lanes.lanes} rows={lanes.rows} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
+        ) : (
+          <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+        )}
       </SidePanel>
     ) : sideKind === 'btw' ? (
       <BtwPanel
@@ -515,10 +525,18 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {/* The session map in the room right of the conversation; with no room, its outline, opening the side column. */}
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
-                <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+                {lanes ? (
+                  <MainLanes lanes={lanes.lanes} rows={lanes.rows} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
+                ) : (
+                  <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+                )}
               </div>
             ) : mapRoom ? (
-              <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              lanes ? (
+                <MainLanesMini lanes={lanes.lanes} rows={lanes.rows} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              ) : (
+                <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
+              )
             ) : null}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} /> : null}
             <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
