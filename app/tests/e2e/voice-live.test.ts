@@ -75,7 +75,7 @@ describe.runIf(enabled)('always-on microphone', () => {
     // Nobody clicked the mic: it is open because the app joined "the meeting" listening.
     await expect.poll(() => page.getByTestId('mic-button').getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true');
 
-    const toasts = () => page.getByTestId('caption').allInnerTexts().then((t) => t.join('\n'));
+    const toasts = () => page.getByTestId('voice-note').allInnerTexts().then((t) => t.join('\n'));
     await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (.+ · )?Alice/);
     await page.screenshot({ path: join(shots, 'voice-01-live-caption.png') });
     await expect.poll(toasts, { timeout: 60_000 }).toMatch(/Sent to (.+ · )?Charlie/);

@@ -73,6 +73,8 @@ export function tokens(text: string): Set<string> {
 
 const DEICTIC = /这个|这里|这段|这块|当前|現在這|this (function|file|change|code|one|test|bug|error|output|diff)|\bhere\b|\bit\b|这一步|上面/i;
 const REFERENCE = /那个|刚才|刚刚|之前那|the .{1,30}? (agent|task|one)|that .{1,30}? (agent|task)/i;
+/** Pointing at another agent by what it does, without its name: "那个数据库 Agent", "the backend agent". */
+const AGENT_REFERENCE = /(那个|刚才|刚刚|之前那|另一个|另外那|别的).{0,16}(agent|代理|助手|任务)|\b(the|that|other) .{1,30}? (agent|task)\b/i;
 const NEW_TASK =
   /(开|新建|创建|起|启动)(一个|个)?(新的?)?.{0,12}(任务|agent|代理|会话|session|claude|codex)|\bnew (task|agent|session)\b|\bstart (a )?new\b|\bspin up\b|\bcreate (a )?(new )?(task|agent)\b/i;
 const COORDINATOR =
@@ -166,24 +168,28 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
   if (MEMORY.test(u)) return { kind: 'coordinator', reason: 'save to scoped memory' };
   if (COORDINATOR.test(u)) return { kind: 'coordinator', reason: 'workspace status question' };
 
-  // 3. Strong semantic reference to exactly one task overrides focus.
+  // 3. An agent is open or selected: it is for that one, unless another agent was named (above)
+  // or pointed at by what it does ("那个数据库 Agent") and only one fits. Words that merely
+  // overlap another agent's title do not switch.
+  if (focused) {
+    if (AGENT_REFERENCE.test(u)) {
+      const hits = ctx.tasks.map((t) => ({ t, s: score(t, tokens(u)) })).filter((x) => x.s >= 2).sort((a, b) => b.s - a.s);
+      const close = hits.filter((x) => x.s >= (hits[0]?.s ?? 0) * 0.6);
+      if (close.length === 1 && close[0].t.taskId !== focused.taskId)
+        return sensitive({ kind: 'existing', taskId: close[0].t.taskId, confidence: 'high', reason: `refers to "${close[0].t.title}" (${close[0].t.alias})` }, u);
+    }
+    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `no agent named; for ${focused.alias}, the one you are on`, context: true }, u);
+  }
+
+  // 4. Nothing open: a strong reference to exactly one task.
   const utter = tokens(u);
   const scored = ctx.tasks.map((t) => ({ t, s: score(t, utter) })).filter((x) => x.s >= 2).sort((a, b) => b.s - a.s);
   if (scored.length) {
     const top = scored[0];
     const close = scored.filter((x) => x.s >= top.s * 0.6);
     if (close.length === 1) {
-      const isFocused = top.t.taskId === focused?.taskId;
-      const high = top.s >= 4 || REFERENCE.test(u) || isFocused;
-      return sensitive(
-        {
-          kind: 'existing',
-          taskId: top.t.taskId,
-          confidence: high ? 'high' : 'medium',
-          reason: isFocused ? `matches the focused task "${top.t.title}"` : `refers to "${top.t.title}" (${top.t.alias})`,
-        },
-        u,
-      );
+      const high = top.s >= 4 || REFERENCE.test(u);
+      return sensitive({ kind: 'existing', taskId: top.t.taskId, confidence: high ? 'high' : 'medium', reason: `refers to "${top.t.title}" (${top.t.alias})` }, u);
     }
     // 5. Several plausible tasks: ask before sending anything.
     return {
@@ -193,9 +199,6 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
     };
   }
 
-  // 4. Deictic local reference defaults to the focused task.
-  if (focused && DEICTIC.test(u))
-    return sensitive({ kind: 'existing', taskId: focused.taskId, confidence: 'high', reason: `"this/这个" refers to the focused agent ${focused.alias}`, context: true }, u);
   return null;
 }
 

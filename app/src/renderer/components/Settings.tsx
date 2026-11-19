@@ -712,9 +712,9 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
 
 const MIC_MODES: Array<{ id: MicMode; label: string; detail: string }> = [
   { id: 'open', label: 'Always on', detail: 'Always listening; a short pause sends. The shortcut mutes.' },
-  { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to start talking and press it again to send. The microphone is off the rest of the time.' },
-  { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; letting go sends. The microphone is off the rest of the time.' },
-  { id: 'both', label: 'Tap or hold', detail: 'Tap the shortcut to start and tap again to send, or hold it while you talk and let go to send.' },
+  { id: 'toggle', label: 'Press to toggle', detail: 'Press the shortcut to talk and again to stop; what you said waits in the box. The mic is off the rest of the time.' },
+  { id: 'hold', label: 'Hold to talk', detail: 'Hold the shortcut while you talk; what you said waits in the box. The mic is off the rest of the time.' },
+  { id: 'both', label: 'Tap or hold', detail: 'Tap to start and again to stop, or hold while you talk; what you said waits in the box.' },
 ];
 
 /** Shows the microphone shortcut; click it and press new keys to change it. */
@@ -951,6 +951,15 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             ? t('Changing it starts a new main-agent conversation.')
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
+        {snapshot.main ? (
+          <label className="check">
+            <input type="checkbox" checked={s.mainChapters !== 'off'} onChange={(e) => update({ mainChapters: e.target.checked ? 'auto' : 'off' })} data-testid="setting-main-chapters" />
+            <span>
+              {t('Start a new chapter by itself')}
+              <span className="muted small"> — {t('after a night away, or a long stretch')}</span>
+            </span>
+          </label>
+        ) : null}
       </Section>
       <Section id="permissions" query={query}>
         <p className="muted small">{t('Default for new agents; each agent can change its own.')}</p>

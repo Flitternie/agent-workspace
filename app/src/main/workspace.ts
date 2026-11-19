@@ -29,7 +29,7 @@ import type { ModelOption,
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
-import { instructionsFor, memoryForTask } from './memory';
+import { deltaSize, instructionsFor, memoryDelta, memoryForTask, memoryUpdateText, seenOf } from './memory';
 import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
 import type { LocalStt } from './stt/local';
@@ -45,6 +45,7 @@ import { GROUPING_PROMPT, GROUPING_UPDATE_NOTE, GROUPING_VERSION, mergeGrouping,
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
+import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -684,6 +685,27 @@ export class Workspace {
       });
   }
 
+  /**
+   * A few words for one of the user's long messages to the main agent (its lanes show them),
+   * from the user's own CLI in the background, kept so each message is asked about once.
+   * Undefined when no model can answer (the lanes show the message, shortened).
+   */
+  async shortLabel(text: string): Promise<string | undefined> {
+    const key = text.trim().slice(0, 2000);
+    const kept = this.store.data.shortLabels?.[key];
+    if (kept) return kept;
+    if (this.opts.demo) return undefined;
+    const lang = this.store.data.settings.language === 'zh' ? 'zh' : 'en';
+    const label = await this.suggestLabel(key, lang).catch(() => undefined);
+    if (!label) return undefined;
+    const all = { ...(this.store.data.shortLabels ?? {}), [key]: label };
+    // Bounded: the oldest go first.
+    const keys = Object.keys(all);
+    this.store.data.shortLabels = keys.length > 500 ? Object.fromEntries(keys.slice(-500).map((k) => [k, all[k]])) : all;
+    this.store.save();
+    return label;
+  }
+
   /** A label from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
   private async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
     const ask = this.backgroundAsk();
@@ -923,15 +945,9 @@ export class Workspace {
     task.sessionLocalId = record.localId;
     task.status = 'starting';
     task.lastError = undefined;
-    // On a linked machine the CLI reads user memory from its own files: not given twice
-    // (unless a file there is paused and may be out of date: then rather twice than missing).
-    const machine = task.host ?? LOCAL;
-    const link = this.store.data.settings.memoryLinks?.[machine];
-    const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
-    // Only the notes that fit in those files: the rest (over the size limit) are given here.
-    const inFiles = viaFiles ? notesFor(machine, task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md', this.store.data.memory).covered : new Set<string>();
-    const injected = memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
+    const injected = this.memoryGiven(task);
     task.injectedMemoryIds = injected.map((m) => m.id);
+    task.memorySeen = seenOf(injected);
     this.changed();
 
     const isMain = task === this.store.data.mainAgent;
@@ -1321,24 +1337,79 @@ export class Workspace {
     return candidate;
   }
 
+  /**
+   * The memory a session of this task is given: its scope's notes, less user notes the CLI already reads
+   * from its own files on a linked machine (unless a file there is paused and may be out of date: then
+   * rather twice than missing; and only the notes that fit in those files).
+   */
+  private memoryGiven(task: Task, covered = new Map<string, Set<string>>()): MemoryRecord[] {
+    const machine = task.host ?? LOCAL;
+    const file = task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md';
+    // (Worked out once per machine and file when asked for many agents at once.)
+    let inFiles = covered.get(`${machine}|${file}`);
+    if (!inFiles) {
+      const link = this.store.data.settings.memoryLinks?.[machine];
+      const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+      inFiles = viaFiles ? notesFor(machine, file, this.store.data.memory).covered : new Set<string>();
+      covered.set(`${machine}|${file}`, inFiles);
+    }
+    return memoryForTask(task, this.store.data.memory).filter((m) => !(m.scope === 'global' && inFiles.has(m.id)));
+  }
+
+  /** The agents a note reaches from their next message: those of its scope with a session to give it to. */
+  memoryReach(id: string): Array<{ taskId: string; alias: string; idle: boolean }> {
+    const m = this.store.data.memory.find((x) => x.id === id);
+    if (!m) return [];
+    const covered = new Map<string, Set<string>>();
+    return [...this.store.data.tasks, ...(this.store.data.mainAgent ? [this.store.data.mainAgent] : [])]
+      .filter((t) => !t.setAside && t.memorySeen && this.memoryGiven(t, covered).some((x) => x.id === id) && (!t.memorySeen[id] || t.memorySeen[id].at !== m.updatedAt))
+      .map((t) => ({ taskId: t.taskId, alias: t.alias, idle: t.status !== 'running' && t.status !== 'starting' && !this.hasOpenNative(t.taskId) }));
+  }
+
+  /** "Tell them now": idle agents a note reaches get a short message (the update rides along with it). */
+  async tellMemoryNow(id: string): Promise<number> {
+    const zh = this.store.data.settings.language === 'zh';
+    const idle = this.memoryReach(id).filter((r) => r.idle);
+    for (const r of idle) await this.send(r.taskId, zh ? '我更新了工作区记忆，记下即可，不用做别的。' : 'I updated the workspace memory. Just note it; nothing else to do.', 'text');
+    return idle.length;
+  }
+
   // ---------------------------------------------------------------- messaging
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
   async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
-    if (task === this.store.data.mainAgent) this.mainTurns++;
+    if (task === this.store.data.mainAgent) {
+      this.mainTurns++;
+      // Back after a long pause, or a long chapter: start a new one before this message.
+      const due = this.store.data.settings.mainChapters !== 'off' ? chapterDue(this.store.transcript(taskId), Date.now()) : null;
+      if (due) await this.newMainChapter(due);
+    }
     // A new message carries on from a failed turn by itself; no retry on top of it.
     this.cancelRetry(taskId);
     try {
       const live = await this.connect(taskId);
       const busy = live.turnActive;
+      // Memory saved, changed or removed since the session was given its notes reaches it with this message.
+      const given = this.memoryGiven(task);
+      const delta = memoryDelta(given, task.memorySeen ?? seenOf(given.filter((m) => task.injectedMemoryIds?.includes(m.id))));
+      const update = deltaSize(delta) ? memoryUpdateText(delta) : '';
+      if (update) this.appendSystem(taskId, `Memory sent with this message: ${deltaSize(delta)}`, { memoryUpdate: [...delta.added.map((m) => m.body), ...delta.changed.map((m) => m.body), ...delta.removed.map((b) => `✕ ${b}`)] });
       const item: TranscriptItem = { id: `u-${randomUUID()}`, taskId, role: 'user', text, via, createdAt: now(), ...(busy ? { delivery: opts.interrupt ? 'interrupt' : 'steer' } : {}) };
       this.upsertTranscript(taskId, item);
       task.suggestion = undefined;
       // Commands the user ran with `!` since the last message reach the agent with this one.
       const ran = this.shellOutput.get(taskId) ?? [];
-      const delivery = await live.session.send(ran.length ? `${ran.join('\n')}\n\n${text}` : text, opts);
+      // The first message of a new chapter carries the hand-over (what is going on now) to the fresh session;
+      // then any memory update, the commands run with `!`, and the message itself.
+      const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
+      this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
+      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), opts);
       this.shellOutput.delete(taskId);
+      if (update) {
+        task.memorySeen = seenOf(given);
+        task.injectedMemoryIds = given.map((m) => m.id);
+      }
       if (delivery === 'turn' && item.delivery) this.upsertTranscript(taskId, { ...item, delivery: undefined });
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.
@@ -2445,6 +2516,39 @@ export class Workspace {
 
   // MainAgentHost: what the main agent's tools can do.
   private mainTurns = 0;
+  private pendingHandover?: string;
+
+  /**
+   * A new chapter of the main agent's conversation: its session ends (the next message starts a
+   * fresh one), a marker goes in the conversation (the earlier part stays to read), and the
+   * next message carries a hand-over of what is going on now, not the whole past.
+   */
+  async newMainChapter(reason: 'manual' | 'idle' | 'long'): Promise<void> {
+    const main = this.store.data.mainAgent;
+    if (!main) throw new Error('The main agent is off.');
+    const items = this.store.transcript(main.taskId);
+    if (!items.slice(chapterStart(items)).some((x) => x.role === 'user')) return; // nothing to close
+    await this.stop(main.taskId).catch(() => {});
+    main.sessionLocalId = undefined;
+    main.summary = '';
+    this.appendSystem(main.taskId, 'New chapter', { chapter: { reason } });
+    this.pendingHandover = this.handover();
+    this.changed();
+  }
+
+  /** What is going on now, for the main agent's fresh session. */
+  private handover(): string {
+    const d = this.store.data;
+    const open = d.attention.filter((a) => a.state === 'open' && a.kind !== 'completion');
+    const now = Date.now();
+    const going = d.tasks.filter((t) => !t.setAside && (t.status === 'running' || t.status === 'starting' || open.some((a) => a.taskId === t.taskId) || now - Date.parse(t.updatedAt) < IDLE_NEW));
+    const project = (id: string) => d.projects.find((p) => p.projectId === id)?.name ?? '';
+    const lines = going.map((t) => `- ${t.alias} (${project(t.projectId)}, ${t.name || t.title}): ${t.status}${open.some((a) => a.taskId === t.taskId) ? ', waiting on the user' : ''}${t.summary ? ` — ${clip(t.summary, 140)}` : ''}`);
+    return [
+      '[A new chapter of your conversation with the user starts here. The earlier conversation is not carried over; use the workspace tools for anything else.]',
+      lines.length ? `What is going on now:\n${lines.join('\n')}` : 'No agent is working or waiting right now.',
+    ].join('\n');
+  }
 
   mainTurn(): number {
     return this.mainTurns;

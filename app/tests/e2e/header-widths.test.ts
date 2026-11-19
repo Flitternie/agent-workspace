@@ -35,7 +35,7 @@ describe('agent header across widths', () => {
         out.push(await page.evaluate(([w, preview]) => {
           const r = (q: string) => { const e = document.querySelector(q); if (!e) return null; const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
           const acts = [...document.querySelectorAll('.focus-actions > *')].map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.right)]; });
-          const lab = document.querySelector('[data-testid="mic-label"]')!.getBoundingClientRect();
+          const lab = document.querySelector('[data-testid="mic-label"]')?.getBoundingClientRect() ?? { height: 0 };
           return { w, preview, micLabelH: Math.round(lab.height), dockInput: r('.dock-input'), head: r('.focus-head'), ident: r('.focus-ident'), name: r('.focus-name'), nameScroll: (document.querySelector('.focus-name') as HTMLElement).scrollWidth, actions: r('.focus-actions'), acts, sidebar: r('.sidebar') ?? r('aside'), stage: r('.stage'), win: innerWidth };
         }, [w, preview] as const));
       }
@@ -52,20 +52,18 @@ describe('agent header across widths', () => {
       // One row, or two (buttons under the name, starting where the name starts).
       expect(hh, where).toBeLessThanOrEqual(100);
       if (!sameRow) expect(Math.abs(g.actions[0] - g.ident[0]), where).toBeLessThanOrEqual(2);
-      // The voice bar: its status stays one short line, and the text box keeps a usable width.
-      expect((g as unknown as { micLabelH: number }).micLabelH, where).toBeLessThanOrEqual(22);
-      expect((g as unknown as { dockInput: number[] }).dockInput[2], where).toBeGreaterThanOrEqual(160);
+      // No voice bar on an agent's page: its box is the only one (the mic sits beside it).
+      expect((g as unknown as { dockInput: number[] | null }).dockInput, where).toBeNull();
       // The name shortens (ellipsis) instead of overflowing its column.
       expect(g.nameScroll, where).toBeLessThanOrEqual(g.ident[2] + 1);
     }    await page.setViewportSize({ width: 1100, height: 800 });
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(appDir, 'test-results', 'widths-dock-narrow.png') });
-    // "Set up" in the voice bar opens Settings.
+    // Voice not set up: no words, the slashed mic is the way in (it opens Settings).
     await page.setViewportSize({ width: 1280, height: 800 });
-    // Narrow (beside the preview) it is just the link; the explanation is its tooltip.
-    expect(await page.getByTestId('mic-label').innerText()).toContain('Set up');
-    expect(await page.getByTestId('mic-label').getAttribute('title')).toContain('speech model');
-    await page.getByTestId('voice-setup').click();
+    expect(await page.getByTestId('mic-label').count()).toBe(0);
+    expect(await page.getByTestId('mic-button').getAttribute('title')).toBe('Set up voice');
+    await page.getByTestId('mic-button').click();
     await expect.poll(() => page.locator('[data-testid="settings-page"], .settings').count()).toBeGreaterThan(0);
     await app.close();
   }, 120000);
