@@ -81,6 +81,8 @@ describe.runIf(enabled).each(['claude', 'codex'])('main agent on %s', (provider)
     await say(page, 'About the question on the old /v1/orders tests: keep the compatibility adapter for one release, then update the tests to v2. Pass that on as my answer.');
     await expect.poll(async () => (await transcriptOf(page, 'Alice')).some((i) => i.role === 'user' && i.via === 'main' && /compatib|adapter/i.test(i.text)), { timeout: 240_000 }).toBe(true);
     await page.getByTestId('main-agent-row').click();
+    // One line above the reply box; unfolded, the requests themselves.
+    await page.getByTestId('waiting-bar-toggle').click();
     await expect.poll(() => page.getByTestId('waiting-on-you').innerText()).toMatch(/Charlie/);
     await page.screenshot({ path: join(shots, `main-${provider}-01b-waiting.png`) });
     await page.keyboard.press('Escape');

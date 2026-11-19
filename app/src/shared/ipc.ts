@@ -36,7 +36,7 @@ export const ipcSchemas = {
     mockScript: z.string().max(50).optional(),
   }),
   'task:send': z
-    .object({ taskId: id, text, via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), images: z.array(imageRef).max(10).optional() })
+    .object({ taskId: id, text, via: z.enum(['text', 'card']), interrupt: z.boolean().optional(), images: z.array(imageRef).max(10).optional(), about: id.optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
   /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
   'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),

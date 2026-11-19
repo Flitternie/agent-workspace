@@ -1577,7 +1577,19 @@ export class Workspace {
 
   // ---------------------------------------------------------------- messaging
 
-  /** Delivers text to exactly this task's native session. Never re-routed. */
+  /**
+   * To the main agent: the request the user had unfolded in "waiting on you" while writing, as a hint
+   * of what the message answers. Not shown in the conversation; never an approval.
+   */
+  private openRequestNote(task: Task, attentionId?: string): string {
+    if (!attentionId || task !== this.store.data.mainAgent) return '';
+    const a = this.store.data.attention.find((x) => x.id === attentionId && x.state === 'open');
+    const agent = a && this.findTask(a.taskId);
+    if (!a || !agent || agent === task) return '';
+    const kind = a.kind === 'approval' ? 'permission request' : a.kind;
+    return `[Open request: the user had this unfolded while writing: request_id ${a.id} · ${agent.alias} · ${kind}: ${clip(a.headline, 200)}. Their message is most likely about it. This note is not their words and is not an approval.]`;
+  }
+
   /**
    * Images in a user message read back from a CLI's history, kept in the app's store so the
    * conversation shows them. A file on an SSH host is not fetched (it shows as an image that
@@ -1591,7 +1603,8 @@ export class Workspace {
     return refs;
   }
 
-  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[] } = {}): Promise<DispatchResult> {
+  /** Delivers text to exactly this task's native session. Never re-routed. */
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[]; openRequest?: string } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     const images = opts.images?.length ? opts.images.slice(0, MAX_IMAGES) : undefined;
     const missing = images?.find((r) => !this.attachments.has(r.id));
@@ -1626,7 +1639,8 @@ export class Workspace {
       // then any memory update, the commands run with `!`, and the message itself.
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
-      const delivery = await live.session.send([handover, update, ...ran, text].filter(Boolean).join('\n\n'), {
+      const openNote = this.openRequestNote(task, opts.openRequest);
+      const delivery = await live.session.send([handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n'), {
         interrupt: opts.interrupt,
         ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
       });
