@@ -102,12 +102,12 @@ describe('end-to-end demo script (mock agents)', () => {
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob'); // focus did not move
     expect(await page.getByTestId('transcript').innerText()).not.toContain('regression test');
 
-    // 7. Ambiguous instruction: confirmation shown, nothing sent before selection.
+    // 7. Naming no one while on Bob: it is for Bob, even though the words fit other agents' work.
     await dock.fill('look at that thing in the orders API schema');
     await dock.press('Enter');
-    await expect.poll(() => page.getByTestId('route-preview').getAttribute('data-route-kind')).toMatch(/clarify|existing/);
-    await shot(page, '04-dock-ambiguity');
-    await dock.press('Escape');
+    await expect.poll(() => page.getByTestId('caption').last().innerText()).toMatch(/Sent to (.+ · )?Bob/);
+    await expect.poll(() => page.getByTestId('transcript').innerText()).toContain('look at that thing in the orders API schema');
+    await shot(page, '04-dock-to-focused');
 
     // `!command` runs in the agent's folder; its output shows as the user's own command.
     await input.fill('!echo shell-$((6*7))');
