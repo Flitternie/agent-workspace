@@ -1227,6 +1227,31 @@ export class Workspace {
   }
 
   /**
+   * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
+   * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
+   * on an SSH host (the files are on this Mac) and the main agent (which reads no files) refuse.
+   */
+  droppedFiles(taskId: string, paths: string[]): FileMatch[] {
+    const task = this.task(taskId);
+    if (task === this.store.data.mainAgent) throw new Error('The main agent does not read files; drop them on the agent that should.');
+    if (task.host) throw new Error(`These files are on this Mac; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
+    const home = homedir();
+    return paths.map((p) => {
+      const abs = resolve(p);
+      let dir = false;
+      try {
+        dir = statSync(abs).isDirectory();
+      } catch {
+        /* gone already: mentioned as a file */
+      }
+      const inside = abs === task.cwd ? '.' : abs.startsWith(task.cwd + sep) ? abs.slice(task.cwd.length + 1) : undefined;
+      const shown = inside ?? (abs === home || abs.startsWith(home + sep) ? `~${abs.slice(home.length)}` : abs);
+      const path = shown.split(sep).join('/');
+      return { path: dir && !path.endsWith('/') ? `${path}/` : path, dir };
+    });
+  }
+
+  /**
    * A folder outside the agent's own, browsed one level at a time from what is typed after @
    * (../, /, ~/): its entries starting with `prefix`, folders first, written as typed (../lib/a.ts).
    * Hidden entries only when the prefix starts with a dot.

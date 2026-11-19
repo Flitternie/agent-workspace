@@ -55,8 +55,11 @@ export interface Attachment {
   ref: ImageRef;
 }
 
-/** A message box's images until it is sent: add (paste, drop, pick), remove, clear. */
-export function useAttachments() {
+/**
+ * A message box's images until it is sent: add (paste, drop, pick), remove, clear. Other files are
+ * not attached: `onOtherFiles` mentions them instead (the agent reads files where it runs).
+ */
+export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>) {
   const [items, setItems] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(0);
   const [error, setError] = useState('');
@@ -68,11 +71,15 @@ export function useAttachments() {
   const pending = useRef(0);
 
   const add = async (files: File[]) => {
-    const images = files.filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif|heic|tiff?)$/i.test(f.name));
-    // Other files are not attached: the agent reads files where it runs, named with @.
-    if (images.length < files.length) setError(t('Only images can be attached. To point the agent at a file, type @ and its name.'));
+    const isImage = (f: File) => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif|heic|tiff?)$/i.test(f.name);
+    const images = files.filter(isImage);
+    const others = files.filter((f) => !isImage(f));
+    setError('');
+    if (others.length) {
+      if (onOtherFiles) await onOtherFiles(others).catch((e) => setError(errorText(e)));
+      else setError(t('Only images can be attached. To point the agent at a file, type @ and its name.'));
+    }
     if (!images.length) return;
-    if (images.length === files.length) setError('');
     const room = Math.max(0, MAX_IMAGES - count.current - pending.current);
     if (images.length > room) setError(t('At most {n} images per message.', { n: MAX_IMAGES }));
     for (const file of images.slice(0, room)) {
@@ -96,8 +103,9 @@ export function useAttachments() {
 
   /** Pasted images are added; pasted text still goes into the box (an image copied from a page often carries both). */
   const onPaste = (e: ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
-    if (!files.length) return;
+    // Images, and files copied in Finder (mentioned, as when dropped).
+    const files = Array.from(e.clipboardData.files);
+    if (!files.length || (!onOtherFiles && !files.some((f) => f.type.startsWith('image/')))) return;
     if (!e.clipboardData.getData('text/plain')) e.preventDefault();
     void add(files);
   };

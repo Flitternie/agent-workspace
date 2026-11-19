@@ -114,7 +114,18 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
     return true;
   };
 
-  return { open, items, active, loading, query: at?.query ?? '', choose, setActive, onKeyDown, onBackspace, update };
+  /** Puts text at the caret (with a space before it when needed), the caret after it. */
+  const insert = (text: string) => {
+    const el = box.current;
+    const value = el?.value ?? draft;
+    const caret = el?.selectionStart ?? value.length;
+    const before = value.slice(0, caret);
+    const add = (before && !/\s$/.test(before) ? ' ' : '') + text;
+    caretAfter.current = caret + add.length;
+    setDraft(before + add + value.slice(el?.selectionEnd ?? caret));
+  };
+
+  return { open, items, active, loading, query: at?.query ?? '', choose, setActive, onKeyDown, onBackspace, update, insert };
 }
 
 /** The list above the message box. */
@@ -191,4 +202,12 @@ export function MentionHighlight({ text, box }: { text: string; box: RefObject<H
       {'\u200b'}
     </div>
   );
+}
+
+/** Files dropped (or pasted from Finder) on an agent's box, as @-mentions of where they are. */
+export async function dropMentions(taskId: string, files: File[]): Promise<string> {
+  const paths = files.map((f) => window.amw.pathForFile(f)).filter(Boolean);
+  if (!paths.length) return '';
+  const found = await call('files:dropped', { taskId, paths });
+  return found.map((m) => mentionText({ ...m, dir: false })).join('');
 }

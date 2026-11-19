@@ -64,6 +64,19 @@ describe('files in an agent’s folder', () => {
       expect((await ws.searchFiles(t.taskId, './src/')).map((m) => m.path)).toEqual(['./src/checkout.ts']);
       expect((await ws.searchFiles(t.taskId, './check')).map((m) => m.path)).toEqual(['./src/checkout.ts']);
 
+      // Files dropped on its box: relative inside its folder, from ~ or / outside, folders ending in /.
+      const { homedir } = await import('node:os');
+      const { realpathSync } = await import('node:fs');
+      const cwd = realpathSync(repo);
+      const outside = realpathSync(mkdtempSync(join(tmpdir(), 'amw-fm-out-')));
+      writeFileSync(join(outside, 'spec.pdf'), '');
+      expect(ws.droppedFiles(t.taskId, [join(cwd, 'src', 'checkout.ts'), join(cwd, 'src'), join(outside, 'spec.pdf')])).toEqual([
+        { path: 'src/checkout.ts', dir: false },
+        { path: 'src/', dir: true },
+        { path: join(outside, 'spec.pdf'), dir: false },
+      ]);
+      expect(ws.droppedFiles(t.taskId, [join(homedir(), 'Downloads', 'x.pdf')])[0].path).toBe('~/Downloads/x.pdf');
+
       const plain = mkdtempSync(join(tmpdir(), 'amw-fm-plain-'));
       mkdirSync(join(plain, 'lib'));
       mkdirSync(join(plain, 'node_modules'));
