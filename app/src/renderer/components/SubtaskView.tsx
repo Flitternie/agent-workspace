@@ -27,7 +27,6 @@ export function SubtaskView({ task, subtask, now, onBack }: { task: Task; subtas
               {subtask.status === 'running' ? t('Working · {time}', { time: elapsed(subtask, now) }) : subtask.status === 'done' ? t('Done in {time}', { time: elapsed(subtask, now) }) : t('Failed')}
             </span>
           </div>
-          <p className="muted small">{t('A helper {name} started for this turn: you can follow it here, not talk to it.', { name: task.alias })}</p>
           <ol className="subtask-steps" data-testid="subtask-steps">
             {(subtask.steps ?? []).map((step, i, all) => (
               <li key={`${step.at}-${i}`} className={subtask.status === 'running' && i === all.length - 1 ? 'current' : ''}>
