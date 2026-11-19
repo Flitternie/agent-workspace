@@ -20,9 +20,9 @@ export interface MainAgentHost {
   listProjects(): Array<{ projectId: string; name: string; rootPath: string }>;
   findAgent(name: string): Task | undefined;
   transcriptText(taskId: string, limit: number): string;
-  sendFromMain(taskId: string, text: string, interrupt: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
-  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string }): Promise<Task>;
-  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
+  sendFromMain(taskId: string, text: string, interrupt: boolean, withImages?: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
+  createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string; withImages?: boolean }): Promise<Task>;
+  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
   stopFromMain(taskId: string): Promise<void>;
   saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void;
   availableProviders(): AgentProvider[];
@@ -65,6 +65,11 @@ function guard(host: MainAgentHost, tools: WorkspaceTool[]): WorkspaceTool[] {
   }));
 }
 
+/** Images reach an agent only when the main agent says so: the user's screenshot is usually what the agent needs to see. */
+const imagesArg = z
+  .boolean()
+  .optional()
+  .describe('true to pass along the images the user attached to their latest message (the agent sees them as you do). Use it whenever the work is about those images.');
 const agentArg = z.string().describe('The agent’s name, e.g. "Alice" or "小王" (case-insensitive). Its work label, e.g. "Order API migration", also works when it is unique.');
 
 export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
@@ -109,10 +114,10 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
       name: 'send_to_agent',
       description:
         'Send a message to one agent on the user’s behalf. If the agent is busy, the message joins its current work at the next step (steer); set interrupt=true only when the user wants it to stop what it is doing first. Write the message as clear instructions for that agent.',
-      schema: z.object({ agent: agentArg, message: z.string().min(1), interrupt: z.boolean().optional() }),
+      schema: z.object({ agent: agentArg, message: z.string().min(1), interrupt: z.boolean().optional(), images: imagesArg }),
       run: async (a) => {
         const t = agent(a.agent);
-        const r = await host.sendFromMain(t.taskId, String(a.message), a.interrupt === true);
+        const r = await host.sendFromMain(t.taskId, String(a.message), a.interrupt === true, a.images === true);
         if (!r.ok) return `Not delivered to ${t.alias}: ${r.error}`;
         return r.delivery === 'steer'
           ? `Added to ${t.alias}'s current work; it will read it at its next step.`
@@ -131,6 +136,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         instruction: z.string().min(1).describe('The first instruction for the new agent.'),
         provider: z.enum(['claude', 'codex']).optional().describe('Defaults to the first available.'),
         label: z.string().optional().describe('Optional short label for the work, e.g. "Order API migration"; otherwise one is written from the instruction.'),
+        images: imagesArg,
       }),
       run: async (a) => {
         const projects = host.listProjects();
@@ -140,7 +146,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         const providers = host.availableProviders();
         const provider = (a.provider as AgentProvider | undefined) ?? providers[0];
         if (!provider || !providers.includes(provider)) return `Provider ${String(a.provider)} is not available here. Available: ${providers.join(', ') || 'none'}.`;
-        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), label: a.label ? String(a.label) : undefined });
+        const t = await host.createFromMain({ projectId: p.projectId, provider, title: String(a.title), instruction: String(a.instruction), label: a.label ? String(a.label) : undefined, withImages: a.images === true });
         return `Started ${t.alias} (${provider}) on ${p.name}: "${t.title}".`;
       },
     },
@@ -156,6 +162,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           .optional()
           .describe('Fork from just before one of the user’s earlier prompts to this agent, given by its first words (as read_agent shows them). Omit to fork the whole conversation as it is now.'),
         label: z.string().optional().describe('Optional short label for this branch’s work, e.g. "Index-based fix"; otherwise one is written from the instruction.'),
+        images: imagesArg,
       }),
       run: async (a) => {
         const t = agent(a.agent);
@@ -172,6 +179,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
             instruction: String(a.instruction),
             beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
             label: a.label ? String(a.label) : undefined,
+            withImages: a.images === true,
           });
         } catch (error) {
           forks--;
@@ -289,6 +297,8 @@ What you always hand off, however small: anything that needs reading or changing
 - With no projects yet, tell the user to add a project folder first (New task).
 
 You have only the workspace tools; you cannot read files, run commands or browse. Never use built-in sub-agent or collaboration tools (spawn_agent, followup_task, send_message, wait_agent and the like) even if you see them: those helpers are invisible to the user. Every agent is started with create_agent (or branched off one with fork_agent) and reached with send_to_agent. project_overview gives a quick look at a project to decide where work belongs; it is not for doing the work.
+
+The user may attach images (screenshots, designs, error messages). You see them; an agent sees them only if you pass them on with images=true in send_to_agent, create_agent or fork_agent. Do so whenever the work is about them, rather than describing the image in words.
 
 Reply in the user's language, concisely.`;
 

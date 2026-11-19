@@ -7101,3 +7101,138 @@ button.subtask-row:hover {
   content: '✓ ';
   color: var(--ok);
 }
+
+/* Images in a message: thumbnails while writing, then with the message in the conversation. */
+.attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.attach-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.attach-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+.attach-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attach-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+}
+.attach-thumb:hover .attach-remove,
+.attach-remove:focus-visible {
+  opacity: 1;
+}
+.attach-loading {
+  background: linear-gradient(90deg, var(--panel-2), var(--hover), var(--panel-2));
+  background-size: 200% 100%;
+  animation: attach-shimmer 1.2s linear infinite;
+}
+@keyframes attach-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.composer-box.dropping,
+.tile-composer.dropping {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.tile-composer.has-images {
+  flex-wrap: wrap;
+}
+.tile-composer .attach-strip {
+  flex-basis: 100%;
+  padding-bottom: 2px;
+}
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+/* Every image the same square tile, cropped to fill it; the whole image opens on click. */
+.msg-image {
+  width: 120px;
+  height: 120px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+  cursor: zoom-in;
+}
+.msg-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.msg-image.missing {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: default;
+}
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: zoom-out;
+}
+.image-lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 6px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}

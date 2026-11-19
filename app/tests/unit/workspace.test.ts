@@ -672,7 +672,7 @@ describe('the request the user has unfolded', () => {
     const sent: string[] = [];
     internal.connect = async () => ({ turnActive: false, session: { send: async (t: string) => (sent.push(t), 'turn') } });
 
-    await ws.send('t-main-z', 'not yet, wait for the review', 'text', { about: req.id });
+    await ws.send('t-main-z', 'not yet, wait for the review', 'text', { openRequest: req.id });
     expect(sent[0]).toMatch(new RegExp(`^\\[Open request: .*request_id ${req.id} · Alice · permission request: Run command: git push --force\\..*not an approval\\.\\]\\n\\nnot yet, wait for the review$`));
     // The conversation shows what the user wrote, nothing more.
     expect(ws.transcript('t-main-z').filter((i) => i.role === 'user').map((i) => i.text)).toEqual(['not yet, wait for the review']);
@@ -685,7 +685,7 @@ describe('the request the user has unfolded', () => {
 
     // Nothing unfolded, or a request no longer open: no note.
     await ws.send('t-main-z', 'how is it going?', 'text');
-    await ws.send('t-main-z', 'and now?', 'text', { about: 'a-gone' });
+    await ws.send('t-main-z', 'and now?', 'text', { openRequest: 'a-gone' });
     expect(sent.slice(1)).toEqual(['how is it going?', 'and now?']);
   });
 });

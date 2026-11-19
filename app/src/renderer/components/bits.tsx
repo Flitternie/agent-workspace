@@ -150,6 +150,7 @@ const ICONS = {
   moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z',
   shield: 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z',
   btw: 'M4 5h16v11H9l-5 4z M8 9h8 M8 12h5',
+  image: 'M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15 9h.01',
 } as const;
 
 export type IconName = keyof typeof ICONS;

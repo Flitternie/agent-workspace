@@ -17,6 +17,15 @@ import type {
 } from '../../shared/types';
 import type { WorkspaceTool } from '../main-agent';
 
+/** An image sent with a message: a file on this Mac (the app's stored copy) and its format. */
+export interface ImageInput {
+  path: string;
+  mediaType: string;
+}
+
+/** An image in a user message of a saved conversation. */
+export type HistoryImage = { data: string; mediaType?: string } | { path: string };
+
 /**
  * Normalized provider events. Each event is emitted by one ProviderSession, which
  * the workspace binds to exactly one (taskId, sessionLocalId) when it is created,
@@ -36,6 +45,8 @@ export type ProviderEvent =
       tool?: Partial<ToolCallInfo>;
       /** true when replaying history on resume, not new activity */
       history?: boolean;
+      /** Images in a user message read back from history: base64 bytes, or a file on the agent's machine. */
+      images?: HistoryImage[];
     }
   /** Streaming text. For tool items it extends the terminal output. */
   | { type: 'outputDelta'; itemId: string; role: 'assistant' | 'tool' | 'thought'; delta: string }
@@ -124,7 +135,7 @@ export interface ProviderSession {
    * (read at the next safe point, no restart), or with `interrupt` stops the turn
    * and starts a new one with this message. Resolves with what actually happened.
    */
-  send(text: string, opts?: { interrupt?: boolean }): Promise<Delivery>;
+  send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery>;
   /** Answers a native approval / question by its provider request id. */
   respond(requestId: string, response: ApprovalResponse): Promise<void>;
   interrupt(): Promise<void>;

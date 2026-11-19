@@ -167,8 +167,11 @@ describe.runIf(hasClaude)('main agent: waiting on you', () => {
     await expect.poll(() => rows.count()).toBe(2);
     expect(await detail.count()).toBe(0);
 
-    // One: a question opened from its row and dismissed; folded it reads "1 waiting on you".
+    // One: a question opened from its row, shown whole (nothing to "Show more"), and dismissed; folded it reads "1 waiting on you".
     await rows.first().locator('.wb-main').click();
+    await expect.poll(() => detail.count()).toBe(1);
+    expect(await detail.getByRole('button', { name: 'Show more' }).count()).toBe(0);
+    expect(await detail.locator('.attention-details.clamp').count()).toBe(0);
     await detail.getByRole('button', { name: 'Dismiss' }).click();
     await expect.poll(openCount).toBe(1);
     await toggle.click();
