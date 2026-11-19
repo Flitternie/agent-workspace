@@ -121,6 +121,7 @@ export const ipcSchemas = {
     approvedForReuse: z.boolean(),
   }),
   'memory:distill': z.object({ taskId: id, itemId: id }),
+  'label:short': z.object({ text: z.string().min(1).max(4000) }),
   'memory:update': z.object({
     id,
     title: z.string().max(200).optional(),

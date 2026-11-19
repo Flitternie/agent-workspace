@@ -6650,3 +6650,13 @@ button.subtask-row:hover {
 .map-node {
   cursor: pointer;
 }
+.lane-chip.more {
+  font-weight: 500;
+  color: var(--text-3);
+}
+.lanes-label.outcome .lanes-verb.status-failed {
+  color: var(--risk);
+}
+.lanes-label.outcome .lanes-verb.status-waiting_for_user {
+  color: var(--needs);
+}

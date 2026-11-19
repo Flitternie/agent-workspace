@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mainLanes } from '../../src/shared/main-lanes';
+import { MAX_COLUMNS, mainLanes } from '../../src/shared/main-lanes';
 import type { TranscriptItem } from '../../src/shared/types';
 
 let n = 0;
@@ -53,5 +53,24 @@ describe('the main agent as lanes', () => {
     expect(lanes.map((l) => [l.alias, l.first, l.last])).toEqual([['Ann', 1, 8], ['Dan', 8, 8], ['Cat', 5, 5], ['Bob', 3, 9]]);
     expect(rows[1].turnId).toBe(rows[0].itemId);
     expect(lanes[0].taskId).toBe('t-ann');
+  });
+
+  it('reuses a column once its lane has ended: width follows agents at once, not agents ever', () => {
+    const many = Array.from({ length: 4 }, (_, k) => ({ taskId: `t-${k}`, alias: `A${k}`, name: `Work ${k}`, projectId: 'p-shop' }));
+    // One after another: each lane is over before the next starts, so they all fit in one column.
+    const one = mainLanes(many.flatMap((a) => [user(`do ${a.alias}`), tool('send_to_agent', `Sent to ${a.alias}; it is working on it.`)]), many, projects);
+    expect(one.lanes.map((l) => l.col)).toEqual([0, 0, 0, 0]);
+  });
+
+  it(`draws at most ${MAX_COLUMNS} columns at once; the rest share the last, named on their rows`, () => {
+    const many = Array.from({ length: 8 }, (_, k) => ({ taskId: `t-${k}`, alias: `A${k}`, name: `Work ${k}`, projectId: 'p-shop' }));
+    const send = (a: string) => tool('send_to_agent', `Sent to ${a}; it is working on it.`);
+    // All eight start, then all eight get more: all overlap.
+    const items = [user('start all'), ...many.map((a) => send(a.alias)), user('more for all'), ...many.map((a) => send(a.alias))];
+    const { lanes, rows } = mainLanes(items, many, projects);
+    expect(lanes.map((l) => l.col)).toEqual([0, 1, 2, 3, 4, 5, 5, 5]);
+    expect(lanes.map((l) => !!l.shared)).toEqual([false, false, false, false, false, true, true, true]);
+    // Every hand-off still names its own agent.
+    expect(new Set(rows.filter((r) => r.kind === 'send').map((r) => lanes[r.lane - 1].alias)).size).toBe(8);
   });
 });

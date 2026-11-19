@@ -115,6 +115,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const main = isMainAgent(task);
   const lanes = useMemo(() => (main ? mainLanes(transcript, snapshot.tasks, snapshot.projects) : null), [main, transcript, snapshot.tasks, snapshot.projects]);
   const hasMap = main ? !!lanes?.lanes.length : mapTasks.length > 0;
+  // Where each lane ends: how that agent is doing now.
+  const outcomes = useMemo(() => Object.fromEntries(snapshot.tasks.map((x) => [x.taskId, { status: x.status, summary: x.summary }])), [snapshot.tasks]);
   // Forked from another agent: where this trunk came in.
   const mapOrigin = useMemo(() => {
     const from = task.forkedFrom;
@@ -319,7 +321,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     ) : sideKind === 'map' ? (
       <SidePanel title={main ? t('Agents') : t('Task index')} label={main ? t('Agents') : t('Task index')} testId="session-map-panel" frame={frame(() => setShowMap(false))}>
         {lanes ? (
-          <MainLanes lanes={lanes.lanes} rows={lanes.rows} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
+          <MainLanes lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
         ) : (
           <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
         )}
@@ -526,7 +528,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {mapBeside ? (
               <div className="session-map-beside" style={{ width: MAP_ROOM - 44 }} data-testid="session-map-beside">
                 {lanes ? (
-                  <MainLanes lanes={lanes.lanes} rows={lanes.rows} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
+                  <MainLanes lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
                 ) : (
                   <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
                 )}

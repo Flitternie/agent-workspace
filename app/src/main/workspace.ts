@@ -663,6 +663,27 @@ export class Workspace {
       });
   }
 
+  /**
+   * A few words for one of the user's long messages to the main agent (its lanes show them),
+   * from the user's own CLI in the background, kept so each message is asked about once.
+   * Undefined when no model can answer (the lanes show the message, shortened).
+   */
+  async shortLabel(text: string): Promise<string | undefined> {
+    const key = text.trim().slice(0, 2000);
+    const kept = this.store.data.shortLabels?.[key];
+    if (kept) return kept;
+    if (this.opts.demo) return undefined;
+    const lang = this.store.data.settings.language === 'zh' ? 'zh' : 'en';
+    const label = await this.suggestLabel(key, lang).catch(() => undefined);
+    if (!label) return undefined;
+    const all = { ...(this.store.data.shortLabels ?? {}), [key]: label };
+    // Bounded: the oldest go first.
+    const keys = Object.keys(all);
+    this.store.data.shortLabels = keys.length > 500 ? Object.fromEntries(keys.slice(-500).map((k) => [k, all[k]])) : all;
+    this.store.save();
+    return label;
+  }
+
   /** A label from the user's own Claude Code or Codex (no extra key), else OpenAI when configured. */
   private async suggestLabel(text: string, lang: 'en' | 'zh'): Promise<string | undefined> {
     const ask = this.backgroundAsk();

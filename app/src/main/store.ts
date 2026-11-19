@@ -29,6 +29,8 @@ export interface WorkspaceData {
   aliasCounter: number;
   /** 1: agents are named by work labels (older role names were migrated once). */
   labelsVersion?: number;
+  /** Short labels for long messages to the main agent (its lanes), by the message's text. */
+  shortLabels?: Record<string, string>;
   /** The main agent's task record (kept apart from `tasks`: not a worker). */
   mainAgent?: Task;
   /** Side questions per agent (newest last, the latest few kept). */

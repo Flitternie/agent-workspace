@@ -955,4 +955,6 @@ export const zh: Record<string, string> = {
   'not delivered': '未送达',
   'waiting on you': '在等你',
   'done': '完成',
+  'working': '在干活',
+  'Fewer': '收起',
 };
