@@ -6539,3 +6539,58 @@ button.subtask-row:hover {
 .team-archive .team {
   opacity: 0.85;
 }
+
+/* ------------------------------------------------------------------ voice on an agent's page */
+/* No voice bar here: the mic sits beside the agent's own box, what is said appears in it, and
+   the rare note (sent to someone else, choose a target) floats above the box. */
+.composer {
+  position: relative;
+}
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.composer-row > .composer-box {
+  flex: 1;
+  min-width: 0;
+}
+.composer-voice:empty {
+  display: none;
+}
+.voice-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+}
+.voice-inline .mic {
+  width: 38px;
+  height: 38px;
+}
+.voice-inline-note {
+  max-width: 120px;
+  font-size: 11px;
+  color: var(--risk);
+  text-align: center;
+}
+.composer .captions {
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+}
+.composer .popover {
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+}
+/* Something is being said into the box. */
+.composer-box.voice-live {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.composer-box.voice-live .composer-input {
+  color: var(--text-2);
+}

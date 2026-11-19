@@ -884,6 +884,43 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   useEffect(() => {
     if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
   }, [inject?.n]);
+  // What is being said on this page shows here as it is transcribed (the voice bar has no box of
+  // its own on an agent's page). `base` is what was typed before; the spoken part follows it.
+  const [voice, setVoiceState] = useState<string | null>(null);
+  const voiceRef = useRef<string | null>(null);
+  const setVoice = (v: string | null) => {
+    voiceRef.current = v;
+    setVoiceState(v);
+  };
+  const base = useRef('');
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    const join = (a: string, b: string) => (a.trim() && b ? `${a.trimEnd()} ${b}` : a || b);
+    const onDraft = (ev: Event) => {
+      const { taskId, text, phase } = (ev as CustomEvent<{ taskId: string; text: string; phase: 'listening' | 'keep' | 'drop' }>).detail;
+      if (taskId !== task.taskId) return;
+      // A new spoken draft starts after whatever is in the box now.
+      if (voiceRef.current === null) base.current = draftRef.current;
+      if (phase === 'listening') {
+        setVoice(text);
+        setDraft(join(base.current, text));
+        return;
+      }
+      // Kept: it is part of the message now, to check and send. Dropped: back to what was typed.
+      setVoice(null);
+      setDraft(phase === 'keep' ? join(base.current, text) : base.current);
+      if (phase === 'keep') box.current?.focus();
+    };
+    window.addEventListener('amw:voice-draft', onDraft);
+    return () => window.removeEventListener('amw:voice-draft', onDraft);
+  }, [task.taskId]);
+  /** Typing into, or sending, a box that holds a spoken draft takes it over: it is not sent again. */
+  const takeVoice = () => {
+    if (voiceRef.current === null) return;
+    setVoice(null);
+    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task.taskId } }));
+  };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // While the agent works, Enter adds to what it is doing (read at its next step);
@@ -913,6 +950,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   const send = async (interrupt = false) => {
     const text = draft.trim();
     if (!text || sending) return;
+    takeVoice();
     if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
     setError('');
@@ -938,7 +976,10 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
   };
   return (
     <div className="composer">
-      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}`}>
+      <div className="composer-row">
+      {/* The voice bar's mic, on an agent's page: beside this box (VoiceDock renders into it). */}
+      <div id="composer-voice" className="composer-voice" />
+      <div className={`composer-box${shell ? ' shell-mode' : ''}${suggestion ? ' has-suggestion' : ''}${voice !== null ? ' voice-live' : ''}`} data-voice={voice !== null || undefined}>
         <textarea
           ref={box}
           className="composer-input"
@@ -947,7 +988,10 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
           autoFocus={!task.title.trim()}
           value={draft}
           placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            takeVoice();
+            setDraft(e.target.value);
+          }}
           data-testid="composer-input"
           data-suggestion={suggestion || undefined}
           onKeyDown={(e) => {
@@ -1014,6 +1058,7 @@ function Composer({ task, onBtw, btwCount = 0, inject }: { task: Task; onBtw?: (
             <Icon name="send" />
           </button>
         </div>
+      </div>
       </div>
       {error ? <div className="error-text">{error}</div> : null}
     </div>

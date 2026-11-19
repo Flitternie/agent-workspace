@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import type { AgentProvider, RouteDecision, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import { Markdown } from './Markdown';
 import { groupTranscript, mainActions } from './Content';
@@ -18,6 +19,8 @@ type Target = Parameters<typeof call<'route:dispatch'>>[1]['target'];
 interface Entry {
   id: number;
   source: 'voice' | 'typed';
+  /** Shown in the open agent's own box instead of a caption (said on its page, to it). */
+  inBox?: boolean;
   text: string;
   phase: EntryPhase;
   decision?: RouteDecision;
@@ -63,6 +66,7 @@ let nextId = 1;
 export function VoiceDock({
   snapshot,
   focusedTaskId,
+  composeTo,
   onDispatched,
   onView,
   mainTranscript,
@@ -70,6 +74,8 @@ export function VoiceDock({
 }: {
   snapshot: WorkspaceSnapshot;
   focusedTaskId: string | null;
+  /** The agent whose page is open: what is said goes into its own box, not a separate one. */
+  composeTo?: string | null;
   onDispatched: (taskId: string | undefined) => void;
   onView: (taskId: string) => void;
   /** The main agent's conversation, for the reply panel above the bar. */
@@ -91,6 +97,15 @@ export function VoiceDock({
   const queue = useRef<Promise<void>>(Promise.resolve());
   const focusRef = useRef(focusedTaskId);
   focusRef.current = focusedTaskId;
+  const composeRef = useRef(composeTo ?? null);
+  composeRef.current = composeTo ?? null;
+  /** Voice drafts already settled in the agent's box (kept there, sent, or taken over by the user). */
+  const kept = useRef(new Set<number>());
+  const [voiceSlot, setVoiceSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const el = composeTo ? document.getElementById('composer-voice') : null;
+    if (el !== voiceSlot) setVoiceSlot(el);
+  });
   const snapRef = useRef(snapshot);
   snapRef.current = snapshot;
   const tasks = snapshot.tasks;
@@ -110,6 +125,10 @@ export function VoiceDock({
   const [hint, setHint] = useState('');
 
   const patch = useCallback((id: number, p: Partial<Entry>) => setEntries((list) => list.map((e) => (e.id === id ? { ...e, ...p } : e))), []);
+
+  /** What is being said on an agent's page, shown in its own box (the Composer listens). */
+  const voiceToBox = (taskId: string, text: string, phase: 'listening' | 'keep' | 'drop') =>
+    window.dispatchEvent(new CustomEvent('amw:voice-draft', { detail: { taskId, text, phase } }));
 
   const dispatch = useCallback(
     async (entry: Pick<Entry, 'id' | 'text' | 'interrupt'> & { source?: Entry['source'] }, target: Target) => {
@@ -162,11 +181,42 @@ export function VoiceDock({
               return;
             }
           }
-          setShowMain(true);
+          // On the main agent's own page, what is said goes into its box like any agent's.
+          if (entry.inBox && composeRef.current === main.taskId) {
+            if (kept.current.has(entry.id)) return;
+            kept.current.add(entry.id);
+            if (snapRef.current.settings.alwaysConfirmVoice) {
+              voiceToBox(main.taskId, entry.text, 'keep');
+              setEntries((list) => list.filter((x) => x.id !== entry.id));
+              return;
+            }
+            voiceToBox(main.taskId, '', 'drop');
+          } else setShowMain(true);
           await dispatch(entry, { kind: 'existing', taskId: main.taskId });
           return;
         }
         const d = await call('route:decide', { utterance: entry.text, focusedTaskId: focusRef.current });
+        // Said on an agent's page, to it: into its box. Sent at once unless voice sends are
+        // confirmed or it is a sensitive command; then it waits in the box to be checked.
+        const box = composeRef.current;
+        if (kept.current.has(entry.id)) return;
+        if (entry.inBox && box && d.kind === 'existing' && d.taskId === box) {
+          kept.current.add(entry.id);
+          if (snapRef.current.settings.alwaysConfirmVoice || d.confidence !== 'high') {
+            voiceToBox(box, entry.text, 'keep');
+            setEntries((list) => list.filter((x) => x.id !== entry.id));
+            return;
+          }
+          voiceToBox(box, '', 'drop');
+          await dispatch(entry, { kind: 'existing', taskId: box });
+          return;
+        }
+        // For someone else (named, a new task, the coordinator): out of the box, into a caption.
+        if (entry.inBox) {
+          if (box) voiceToBox(box, '', 'drop');
+          entry.inBox = false;
+          patch(entry.id, { inBox: false });
+        }
         patch(entry.id, { decision: d, phase: 'review' });
         if (d.kind === 'create') {
           setNewProvider(d.provider ?? 'claude');
@@ -222,7 +272,7 @@ export function VoiceDock({
       return;
     }
     // "Stop, …" without a known agent yet: route the rest, and stop whoever gets it.
-    const entry: Entry = { id: d.id, source: 'voice', text: stop && rest ? rest : said, phase: 'routing', at: d.at, interrupt: stop || undefined };
+    const entry: Entry = { id: d.id, source: 'voice', text: stop && rest ? rest : said, phase: 'routing', at: d.at, interrupt: stop || undefined, inBox: !!composeRef.current };
     patch(d.id, { text: said, phase: 'routing', holdUntil: undefined });
     // Route in the order things were said.
     queue.current = queue.current.then(() => route(entry));
@@ -305,7 +355,7 @@ export function VoiceDock({
       if (!d) {
         d = { id: nextId++, at: new Date().toISOString(), parts: [] };
         draft.current = d;
-        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at });
+        addEntry({ id: d.id, source: 'voice', text: '', phase: 'listening', at: d.at, inBox: !!composeRef.current });
       }
       const current = d;
       const index = current.parts.push(null) - 1;
@@ -480,9 +530,43 @@ export function VoiceDock({
     setActiveId((a) => (a === id ? null : a));
   };
 
+  // On an agent's page, what is being said shows in its box as it is transcribed. Once the
+  // draft is decided ('keep' / 'drop' above) or gone (nothing heard, cancelled), the box lets go.
+  const boxLive = composeTo ? entries.find((e) => e.inBox && (e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing')) : undefined;
+  const boxShown = useRef<{ id: number; text: string } | null>(null);
+  useEffect(() => {
+    const was = boxShown.current;
+    if (boxLive && composeTo) {
+      if (was?.id !== boxLive.id || was.text !== boxLive.text) voiceToBox(composeTo, boxLive.text, 'listening');
+      boxShown.current = { id: boxLive.id, text: boxLive.text };
+    } else if (was) {
+      boxShown.current = null;
+      // Decided already (kept in the box, or sent): nothing to undo. Otherwise it went away: let go.
+      const e = entries.find((x) => x.id === was.id);
+      if (composeTo && (!e || e.phase === 'dismissed' || e.phase === 'error') && !kept.current.has(was.id)) voiceToBox(composeTo, '', 'drop');
+    }
+  });
+  // The user took it over in the box (typed into it, or sent it): this draft is not sent again.
+  useEffect(() => {
+    const taken = (ev: Event) => {
+      if ((ev as CustomEvent<{ taskId: string }>).detail.taskId !== composeRef.current) return;
+      const d = draft.current;
+      if (d) {
+        clearTimeout(d.timer);
+        draft.current = null;
+        kept.current.add(d.id);
+        setEntries((list) => list.filter((x) => x.id !== d.id));
+      }
+      // One already being routed is let go too.
+      setEntries((list) => list.filter((x) => !(x.inBox && x.phase === 'routing' && (kept.current.add(x.id), true))));
+    };
+    window.addEventListener('amw:voice-taken', taken);
+    return () => window.removeEventListener('amw:voice-taken', taken);
+  }, []);
   const active = entries.find((e) => e.id === activeId && (e.phase === 'review' || e.phase === 'sending'));
   // Captions fade out like subtitles; unresolved ones stay until handled.
   const recent = entries
+    .filter((e) => !(e.inBox && e.phase !== 'sent' && e.phase !== 'error'))
     .filter((e) => e.id !== active?.id && (e.phase === 'review' || e.phase === 'listening' || e.phase === 'transcribing' || e.phase === 'routing' || e.phase === 'sending' || now - Date.parse(e.at) < 12_000))
     .slice(-3);
   const busy = active?.phase === 'sending';
@@ -529,6 +613,158 @@ export function VoiceDock({
       ? `${live ? tr('Mute') : tr('Unmute')} (${keys})`
       : `${live ? tr('Send') : tr('Talk')} (${keys})`;
 
+  // The mic button: in the bar on the Overview; on an agent's page, beside its own box.
+  const micButton = (
+        <button
+          className={`mic mic-${mic}`}
+          disabled={!stt && !onSettings}
+          onClick={!stt ? onSettings : toggleMic}
+          aria-pressed={live}
+          aria-label={mode !== 'open' ? (live ? tr('Send') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
+          title={micTitle}
+          data-testid="mic-button"
+          style={{ ['--level' as string]: live ? level.toFixed(2) : '0' }}
+        >
+          <Icon name="mic" size={18} />
+          {!live ? <span className="mic-slash" aria-hidden /> : null}
+        </button>
+  );
+  // On an agent's page there is no bar: the mic and the notes (sent elsewhere, choose a target)
+  // move beside and above the agent's box (its slot, #composer-voice).
+  if (composeTo) {
+    return voiceSlot
+      ? createPortal(
+          <div className="voice-inline" data-testid="voice-dock">
+      {/* The reply panel is for when the main agent's own conversation is not on screen. */}
+      {snapshot.main && showMain && focusedTaskId !== snapshot.main.taskId ? (
+        <div className="popover main-reply" data-testid="main-reply">
+          <div className="popover-head">
+            <span>
+              <Icon name="spark" /> {tr('Main agent')}
+              <span className="muted small"> · {PROVIDER_LABEL[snapshot.main.provider]}</span>
+            </span>
+            <span className="row">
+              <button className="link small" onClick={() => onView(snapshot.main!.taskId)}>
+                {tr('Open conversation')}
+              </button>
+              <button className="icon-btn" aria-label={tr('Hide')} onClick={() => setShowMain(false)}>
+                <Icon name="x" />
+              </button>
+            </span>
+          </div>
+          {groupTranscript(
+            mainTranscript.filter((i) => i.role === 'user' || i.role === 'assistant' || (i.role === 'system' && /( is waiting on you |'s request is settled: )/.test(i.text)) || (i.role === 'tool' && i.tool?.name !== 'ToolSearch')),
+            true,
+          )
+            .slice(-6)
+            .map((i) =>
+              Array.isArray(i) ? (
+                <div key={i[0].id} className="main-step">
+                  <Icon name="tool" size={11} /> {mainActions(i)}
+                </div>
+              ) : (
+                <div key={i.id} className={`main-msg ${i.role}`}>
+                  {i.role === 'user' ? <span className="muted">{tr('You')}: </span> : null}
+                  {i.role === 'system' ? <Icon name="alert" size={11} /> : null}
+                  {i.role === 'assistant' ? <Markdown text={i.text} streaming={i.streaming} /> : i.role === 'system' ? systemText(i.text) : i.text}
+                </div>
+              ),
+            )}
+          {snapshot.main.status === 'running' || snapshot.main.status === 'starting' ? <div className="muted small">{tr('Working…')}</div> : null}
+          <WaitingOnYou snapshot={snapshot} now={now} onOpen={onView} compact limit={2} />
+        </div>
+      ) : null}
+      {!snapshot.main && showLog && snapshot.coordinator.length ? (
+        <div className="popover coord-log" data-testid="coordinator-log">
+          <div className="popover-head">
+            <span>
+              <Icon name="spark" /> {tr('Coordinator')}
+            </span>
+            <button className="icon-btn" aria-label={tr('Hide coordinator')} onClick={() => setShowLog(false)}>
+              <Icon name="x" />
+            </button>
+          </div>
+          {snapshot.coordinator.slice(-6).map((c) => (
+            <div key={c.id} className={`coord-entry ${c.role}`}>
+              {c.text}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {recent.length || active ? (
+        <div className="captions" aria-live="polite">
+          {recent.map((e) => (
+            <div key={e.id} className={`caption phase-${e.phase}`} data-testid="caption">
+              <span className="caption-src">{e.source === 'voice' ? <Icon name="mic" size={12} /> : '›'}</span>
+              <span className="caption-text">
+                {e.phase === 'transcribing' || (e.phase === 'listening' && !e.text) ? <span className="muted">{tr('Transcribing…')}</span> : e.text}
+              </span>
+              <span className="caption-out">
+                {e.phase === 'listening' ? (
+                  <>
+                    <span className="muted">{e.holdUntil ? tr('Keep talking, or press Enter to send now') : tr('Listening…')}</span>
+                    <button className="link" onClick={() => dismiss(e.id)}>
+                      {tr('Cancel')}
+                    </button>
+                  </>
+                ) : null}
+                {e.phase === 'routing' ? tr('Finding the agent…') : null}
+                {e.phase === 'sending' ? tr('Sending…') : null}
+                {e.phase === 'sent' ? (
+                  <>
+                    <Icon name="check" size={12} /> {e.outcome}
+                    {e.taskId && e.taskId !== focusedTaskId && focusedTaskId ? (
+                      <button className="link" onClick={() => onView(e.taskId!)}>
+                        {tr('View')}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+                {e.phase === 'dismissed' ? tr('Not sent') : null}
+                {e.phase === 'error' ? <span className="error-text">{e.error}</span> : null}
+                {e.phase === 'review' ? (
+                  <button className="link" onClick={() => setActiveId(e.id)}>
+                    {tr('Choose target')}
+                  </button>
+                ) : null}
+              </span>
+              <span className="caption-time">{timeAgo(e.at, now)}</span>
+              {e.phase === 'listening' && e.holdUntil ? (
+                // Restarts (key) each time the countdown restarts; empties as the send approaches.
+                <span key={e.holdUntil} className="hold-bar" data-testid="hold-bar" style={{ animationDuration: `${e.holdFor}ms` }} aria-hidden />
+              ) : null}
+            </div>
+          ))}
+
+          {active?.decision ? (
+            <RoutePreview
+              entry={active}
+              decision={active.decision}
+              busy={!!busy}
+              focusedTaskId={focusedTaskId}
+              taskById={taskById}
+              tasks={tasks}
+              chips={chips}
+              snapshot={snapshot}
+              newProvider={newProvider}
+              setNewProvider={setNewProvider}
+              newProject={newProject}
+              setNewProject={setNewProject}
+              onSend={(target) => void dispatch(active, target)}
+              onDismiss={() => dismiss(active.id)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+            {micButton}
+            {mic === 'denied' || hint ? <div className="voice-inline-note">{micLabel}</div> : null}
+          </div>,
+          voiceSlot,
+        )
+      : null;
+  }
   return (
     <div className="dock" data-testid="voice-dock">
       {/* The reply panel is for when the main agent's own conversation is not on screen. */}
@@ -655,19 +891,7 @@ export function VoiceDock({
       ) : null}
 
       <div className="dock-bar">
-        <button
-          className={`mic mic-${mic}`}
-          disabled={!stt && !onSettings}
-          onClick={!stt ? onSettings : toggleMic}
-          aria-pressed={live}
-          aria-label={mode !== 'open' ? (live ? tr('Send') : tr('Talk')) : live ? tr('Mute microphone') : tr('Unmute microphone')}
-          title={micTitle}
-          data-testid="mic-button"
-          style={{ ['--level' as string]: live ? level.toFixed(2) : '0' }}
-        >
-          <Icon name="mic" size={18} />
-          {!live ? <span className="mic-slash" aria-hidden /> : null}
-        </button>
+        {micButton}
         <div className="mic-state">
           {micLabel ? (
             <div className={`mic-label state-${mic}`} data-testid="mic-label">

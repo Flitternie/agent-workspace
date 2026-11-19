@@ -52,9 +52,8 @@ describe('agent header across widths', () => {
       // One row, or two (buttons under the name, starting where the name starts).
       expect(hh, where).toBeLessThanOrEqual(100);
       if (!sameRow) expect(Math.abs(g.actions[0] - g.ident[0]), where).toBeLessThanOrEqual(2);
-      // The voice bar: its status stays one short line, and the text box keeps a usable width.
-      expect((g as unknown as { micLabelH: number }).micLabelH, where).toBeLessThanOrEqual(22);
-      expect((g as unknown as { dockInput: number[] }).dockInput[2], where).toBeGreaterThanOrEqual(160);
+      // No voice bar on an agent's page: its box is the only one (the mic sits beside it).
+      expect((g as unknown as { dockInput: number[] | null }).dockInput, where).toBeNull();
       // The name shortens (ellipsis) instead of overflowing its column.
       expect(g.nameScroll, where).toBeLessThanOrEqual(g.ident[2] + 1);
     }    await page.setViewportSize({ width: 1100, height: 800 });
