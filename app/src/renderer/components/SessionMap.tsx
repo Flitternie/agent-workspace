@@ -191,8 +191,9 @@ function notTaken(d: MapDecision): string[] {
 }
 
 /**
- * The tree's outline with no words, for a conversation with no room beside it: a node per task in its
- * colour, its decisions as diamonds, its forks as twigs. A click opens the full map in the side column.
+ * The tree's outline with no words, for a conversation with no room beside it: the trunk only, a node per
+ * task in its colour and its decisions as diamonds (what branched off it, sub-agents, dropped attempts,
+ * forks, is for the full map). A click opens the full map in the side column.
  */
 export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; current: string | null; onOpen: () => void }) {
   const root = useRef<HTMLButtonElement>(null);
@@ -220,9 +221,6 @@ export function SessionMiniMap({ tasks, current, onOpen }: { tasks: MapTask[]; c
                 ))}
               </span>
             ) : null}
-            {task.subagents.length ? <span className="mini-fork sub" /> : null}
-            {task.attempts.length ? <span className="mini-fork dead" /> : null}
-            {task.branches.length ? <span className="mini-fork" /> : null}
           </span>
         );
       })}
@@ -246,3 +244,4 @@ function keepInView(el: HTMLElement | null, current: string | null, self = false
   if (n.top >= b.top + margin && n.top + Math.min(n.height, 80) <= b.bottom - margin) return;
   box.scrollTo({ top: box.scrollTop + (n.top - b.top) - box.clientHeight / 3, behavior: 'smooth' });
 }
+

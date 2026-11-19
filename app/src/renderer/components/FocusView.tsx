@@ -184,7 +184,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
    * (centred in what is left); else its outline at the edge, opening the full map in the side column.
    */
   const MAP_ROOM = 250;
-  const mapBeside = hasMap && threadW - MAP_ROOM - 32 >= 720;
+  // Opened in the side column by the user, it stays there (dragging the column narrower does not move it
+  // beside the conversation under the pointer); closed, it comes back beside when there is room.
+  const mapBeside = hasMap && !showMap && threadW - MAP_ROOM - 32 >= 720;
   // No room for it: its outline (no words) in a strip the column gives up on its right, unless even that
   // would leave too narrow a column; then nothing (nothing floats over the messages).
   const MINI_ROOM = 48;
@@ -249,7 +251,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Which panel the side column shows: one at a time, the preview first.
   const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
     ? 'preview'
-    : showMap && !mapBeside && hasMap
+    : showMap && hasMap
       ? 'map'
       : showBtw && btw.length
         ? 'btw'
@@ -616,6 +618,9 @@ function restored(taskId: string): ShownPreview | null {
 
 /** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
 function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
+  // A drag in progress ends with the bar too: if the panel goes while dragging, the pointer is not left as a resize cursor.
+  const stop = useRef<(() => void) | null>(null);
+  useEffect(() => () => stop.current?.(), []);
   return (
     <div
       className="panel-resizer"
@@ -626,24 +631,26 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
       data-testid="panel-resizer"
       onDoubleClick={() => onChange(PREVIEW_WIDTH)}
       onPointerDown={(e) => {
-        const bar = e.currentTarget;
+        e.preventDefault();
         const startX = e.clientX;
         const startW = width;
-        bar.setPointerCapture(e.pointerId);
         document.body.classList.add('resizing');
+        // On the window, so a fast drag that outruns the thin bar (or outlives it) still ends.
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
           onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
         };
         const up = () => {
-          bar.removeEventListener('pointermove', move);
-          bar.removeEventListener('pointerup', up);
-          bar.removeEventListener('pointercancel', up);
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', up);
           document.body.classList.remove('resizing');
+          stop.current = null;
         };
-        bar.addEventListener('pointermove', move);
-        bar.addEventListener('pointerup', up);
-        bar.addEventListener('pointercancel', up);
+        stop.current = up;
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
       }}
     />
   );

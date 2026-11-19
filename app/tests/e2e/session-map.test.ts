@@ -134,6 +134,9 @@ describe('session map', () => {
     await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(0);
     await expect.poll(() => page.getByTestId('mini-task').count()).toBe(1);
+    // The trunk only: each task's node and its decisions (what branched off, like the dropped attempt in
+    // this task, is for the full map).
+    expect(await page.locator('[data-testid="mini-task"] > *').evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute('class')))].sort())).toEqual(['mini-mark', 'mini-node']);
     expect(await page.getByTestId('session-minimap').innerText()).toBe('');
     // It sits in the margin, clear of the messages.
     const clear = await page.evaluate(() => {
@@ -182,6 +185,24 @@ describe('session map', () => {
     await expect.poll(panelW).toBeLessThan(before - 40);
     expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
+    // Opened there, it stays there: in a wider window, dragged as narrow as it goes (room enough now for the
+    // map beside the conversation), the side column keeps it, and the pointer is not left resizing.
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
+    const bar2 = (await page.getByTestId('panel-resizer').boundingBox())!;
+    await page.mouse.move(bar2.x + bar2.width / 2, bar2.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(bar2.x + 600, bar2.y + 200, { steps: 12 });
+    expect(await page.getByTestId('session-map-panel').count()).toBe(1);
+    expect(await page.getByTestId('session-map-beside').count()).toBe(0);
+    await page.mouse.up();
+    expect(await page.evaluate(() => document.body.classList.contains('resizing'))).toBe(false);
+    // Closed, it comes back beside the conversation where there is room.
+    await page.getByTestId('session-map-panel').getByTestId('side-close').click();
+    await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(1);
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.getByTestId('session-minimap').click();
+    await expect.poll(() => page.getByTestId('session-map-panel').count()).toBe(1);
 
     // Sub-agents sent off in a task: lanes of their own (another agent; structure groups it, no fitting answer).
     await page.setViewportSize({ width: 1720, height: 960 });
