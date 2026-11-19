@@ -6540,6 +6540,127 @@ button.subtask-row:hover {
   opacity: 0.85;
 }
 
+/* ------------------------------------------------------------------ the main agent's lanes */
+.main-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.lanes-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.lane-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.lane-chip:disabled {
+  cursor: default;
+}
+.lane-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lane);
+}
+.lane-project {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.lanes-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lanes-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+}
+.lanes-svg {
+  flex: none;
+  overflow: visible;
+}
+.lanes-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.lanes-hit {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.lanes-hit:hover .lanes-label {
+  background: var(--hover);
+}
+.lanes-hit:hover circle,
+.lanes-hit:hover rect {
+  stroke-width: 2.5;
+}
+.lanes-label.ask {
+  color: var(--text);
+}
+.lanes-verb {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.lanes-alias {
+  flex: none;
+  font-weight: 600;
+  color: var(--lane);
+}
+.lanes-name {
+  min-width: 0;
+  color: var(--text-3);
+}
+.kind-failed .lanes-alias {
+  text-decoration: line-through;
+}
+/* A task's node opens it, like its title. */
+.map-node {
+  cursor: pointer;
+}
+.lane-chip.more {
+  font-weight: 500;
+  color: var(--text-3);
+}
+.lanes-label.outcome .lanes-verb.status-failed {
+  color: var(--risk);
+}
+.lanes-label.outcome .lanes-verb.status-waiting_for_user {
+  color: var(--needs);
+}
+
 /* ------------------------------------------------------------------ voice on an agent's page */
 /* No voice bar here: the mic is the first button in the agent's box, the size of the side-question
    and send buttons on the right; what is said appears in the box; the rare note (sent to someone

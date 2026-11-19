@@ -70,7 +70,7 @@ export function SessionMap({
             data-testid="map-task"
             data-start={task.startItemId}
           >
-            <span className="map-node" aria-hidden>
+            <span className="map-node" onClick={() => onJump(task.startItemId)} title={task.title} aria-hidden data-testid="map-node">
               {task.status === 'done' ? <Icon name="check" size={8} /> : null}
             </span>
             <div className="map-head">

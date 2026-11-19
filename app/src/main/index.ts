@@ -251,6 +251,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:add': (i: { scope: 'global' | 'project' | 'task'; scopeId: string; body: string; title?: string; originTaskId?: string; approvedForReuse: boolean }) =>
     workspace.addMemory({ ...i, source: 'user' }),
   'memory:distill': (i: { taskId: string; itemId: string }) => workspace.distillMemory(i.taskId, i.itemId),
+  'label:short': (i: { text: string }) => workspace.shortLabel(i.text),
   'memory:update': (i: { id: string; body?: string; title?: string; approvedForReuse?: boolean }) => workspace.updateMemory(i.id, i),
   'memory:delete': (i: { id: string }) => workspace.deleteMemory(i.id),
   'memory:promote': (i: { id: string; scope: 'project' | 'global' }) => workspace.promoteMemory(i.id, i.scope),
