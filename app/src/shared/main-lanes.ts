@@ -1,11 +1,12 @@
 import type { Task, TranscriptItem } from './types';
 
-// The main agent's conversation as parallel lanes, git-graph style: time runs down; the main agent's
-// own lane is on the left (each of your messages to it is a point on it), and every agent it handed
-// work to has a lane of its own. A hand-off curves from the main lane to that agent's lane; later
-// hand-offs to the same agent land on the same lane, so work going on side by side reads as
-// parallel lines. An agent coming back (waiting on you, or done with a request) is a point on its
-// lane. Lanes of one project sit together.
+// The main agent's conversation as parallel lanes: time runs down, and every agent it handed work to
+// has a lane of its own (the main agent does no work itself, so it has none). A hand-off is a point
+// on that agent's lane, labelled with what you asked; later ones land on the same lane, so work going
+// on side by side reads as parallel lines, never crossing. A fork's lane sits right next to the one
+// it branched off. An agent coming back (waiting on you, or done with a request) is a point on its
+// lane. A message of yours that handed nothing off is a faint row on no lane. Lanes of one project
+// sit together.
 //
 // Who got what is read from the results the app's own workspace tools return ("Sent to Bob; …",
 // "Started Bob (claude) on shop: …", "Forked Ann as Bob …") and the app's own notices: fixed
@@ -29,12 +30,14 @@ export interface LaneRow {
   /** Your message to the main agent this happened under (where to jump). */
   turnId: string;
   kind: LaneEventKind;
-  /** 0 = the main agent's lane; otherwise 1 + the index in `lanes`. */
+  /** 1 + the index in `lanes`; 0 for a message of yours that handed nothing off. */
   lane: number;
   /** A fork: the lane it branched off. */
   from?: number;
   /** Your message (for an ask), or the agent's name. */
   label: string;
+  /** For a hand-off: what you asked that led to it. */
+  ask?: string;
   at: string;
 }
 
@@ -86,20 +89,35 @@ export function mainLanes(items: TranscriptItem[], tasks: LaneTask[], projects: 
   // Only agents the main agent handed work to get a lane (a notice alone does not make one).
   const handed = new Set(raw.filter((r) => r.kind !== 'waiting' && r.kind !== 'settled' && r.alias).map((r) => r.alias!));
   for (const r of raw) if (r.fromAlias) handed.add(r.fromAlias);
-  const rows = raw.filter((r) => r.kind === 'ask' || (r.alias && handed.has(r.alias)));
+  const askOf = new Map(raw.filter((r) => r.kind === 'ask').map((r) => [r.turnId, r.label]));
+  const handedTurns = new Set(raw.filter((r) => r.kind === 'send' || r.kind === 'create' || r.kind === 'fork' || r.kind === 'failed').map((r) => r.turnId));
+  const rows = raw
+    .filter((r) => (r.kind === 'ask' ? !handedTurns.has(r.turnId) : !!r.alias && handed.has(r.alias)))
+    .map((r) => (r.kind === 'send' || r.kind === 'create' || r.kind === 'fork' || r.kind === 'failed' ? { ...r, ask: askOf.get(r.turnId) } : r));
   // Lanes in order of first appearance, then gathered by project (keeping that order inside each).
   const order: string[] = [];
   for (const r of rows) for (const a of [r.fromAlias, r.alias]) if (a && !order.includes(a)) order.push(a);
-  const info = (alias: string) => {
+  const parentOf = new Map(rows.filter((r) => r.fromAlias && r.alias).map((r) => [r.alias!, r.fromAlias!]));
+  const info = (alias: string): Omit<Lane, 'first' | 'last'> => {
     const t = tasks.find((x) => x.alias === alias);
-    return { alias, taskId: t?.taskId, name: t?.name ?? alias, projectId: t?.projectId, projectName: projects.find((p) => p.projectId === t?.projectId)?.name };
+    const parent = parentOf.get(alias);
+    const projectId = t?.projectId ?? (parent ? tasks.find((x) => x.alias === parent)?.projectId : undefined);
+    return { alias, taskId: t?.taskId, name: t?.name ?? alias, projectId, projectName: projects.find((p) => p.projectId === projectId)?.name };
   };
   const projectsInOrder: Array<string | undefined> = [];
   for (const a of order) {
     const p = info(a).projectId;
     if (!projectsInOrder.includes(p)) projectsInOrder.push(p);
   }
-  const sorted = projectsInOrder.flatMap((p) => order.filter((a) => info(a).projectId === p));
+  const byProject = projectsInOrder.flatMap((p) => order.filter((a) => info(a).projectId === p && !parentOf.has(a)));
+  // Each fork right after the lane it came from (forks of forks after theirs).
+  const sorted: string[] = [];
+  const place = (a: string) => {
+    sorted.push(a);
+    for (const [child, parent] of parentOf) if (parent === a && !sorted.includes(child)) place(child);
+  };
+  for (const a of byProject) place(a);
+  for (const a of order) if (!sorted.includes(a)) place(a);
   const laneOf = (alias?: string) => (alias ? sorted.indexOf(alias) + 1 : 0);
   const out: LaneRow[] = rows.map(({ alias, fromAlias, ...r }) => ({ ...r, lane: laneOf(alias), ...(fromAlias ? { from: laneOf(fromAlias) } : {}) }));
   const lanes: Lane[] = sorted.map((alias, k) => {

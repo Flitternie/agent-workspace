@@ -6606,11 +6606,29 @@ button.subtask-row:hover {
   text-align: left;
   cursor: pointer;
 }
-.lanes-label:hover {
+.lanes-hit {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.lanes-hit:hover .lanes-label {
   background: var(--hover);
 }
+.lanes-hit:hover circle,
+.lanes-hit:hover rect {
+  stroke-width: 2.5;
+}
 .lanes-label.ask {
-  color: var(--text);
+  color: var(--text-3);
+  font-size: 11.5px;
 }
 .lanes-verb {
   flex: none;
@@ -6628,4 +6646,8 @@ button.subtask-row:hover {
 }
 .kind-failed .lanes-alias {
   text-decoration: line-through;
+}
+/* A task's node opens it, like its title. */
+.map-node {
+  cursor: pointer;
 }
