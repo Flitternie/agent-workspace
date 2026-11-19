@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Workspace</title>
+  <meta name="description" content="A desktop app for managing parallel agents, side by side. Works with Claude Code and Codex. Free and open source.">
+  <meta property="og:title" content="Agent Workspace">
+  <meta property="og:description" content="A desktop app for managing parallel agents, side by side. Works with Claude Code and Codex.">
+  <meta property="og:image" content="assets/en/overview.png">
+  <meta name="theme-color" content="#f6f7f9">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="style.css?v=64">
+</head>
+<body>
+  <canvas id="lanes" aria-hidden="true"></canvas>
+
+  <header class="nav">
+    <a class="brand" href="#top"><img src="assets/icon.png" alt="" width="28" height="28"><span>Agent Workspace</span></a>
+    <nav class="nav-links">
+      <a href="#overview" data-k="nav.overview">Overview</a>
+      <a href="#main-agent" data-k="nav.main">Main agent</a>
+      <a href="#work-map" data-k="nav.map">Work Map</a>
+      <a href="#memory" data-k="nav.mem">Memory</a>
+      <a href="#start" data-k="nav.start">Get started</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="lang" type="button" aria-label="Language"><span data-l="en">EN</span><span data-l="zh">中文</span></button>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/Flitternie/agent-workspace" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- Hero -->
+    <section class="hero">
+      <h1 class="reveal" data-k="hero.title">Are you <span class="grad">agentmaxxing?</span></h1>
+      <p class="prompt reveal" data-k="hero.prompt"><span class="typed">Stop juggling tabs and terminals.</span><span>Run a meeting with your agents.</span></p>
+      <p class="lede reveal" data-k="hero.lede">See what every agent is doing, and which one needs you first.</p>
+      <div class="cta reveal">
+        <a class="btn btn-primary" data-dl="mac" href="https://github.com/Flitternie/agent-workspace/releases/latest">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M16.37 12.6c-.03-2.6 2.12-3.84 2.22-3.9-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.89 2.65 3.24 2.6 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.38.81 1.4-.02 2.29-1.27 3.14-2.53.99-1.45 1.4-2.86 1.42-2.93-.03-.01-2.72-1.04-2.73-4.13ZM13.79 4.96c.72-.87 1.2-2.07 1.07-3.27-1.03.04-2.28.69-3.02 1.55-.66.77-1.24 2-1.09 3.18 1.15.09 2.32-.58 3.04-1.46Z"/></svg>
+          <span data-k="hero.download">Download for macOS</span>
+        </a>
+        <a class="btn btn-ghost" data-dl="win" href="https://github.com/Flitternie/agent-workspace/releases/latest">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 5.1 10.4 4v7.2H3V5.1Zm8.3-1.2L21 2.5v8.7h-9.7V3.9ZM3 12.8h7.4V20L3 18.9v-6.1Zm8.3 0H21v8.7l-9.7-1.4v-7.3Z"/></svg>
+          <span data-k="hero.downloadWin">Download for Windows</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Flitternie/agent-workspace" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+
+      <div class="stage reveal">
+        <div class="window">
+          
+          <div class="hero-app" data-s="0"><aside class="ha-side"><div class="ha-lights"><i></i><i></i><i></i></div><div class="aw-row act ov-row"><span class="aw-ico">▦</span><span data-k="nav.overview">Overview</span><b class="aw-badge ha-badge">1</b></div><div class="aw-row"><span class="aw-ico dark">✳</span><span data-k="ma.hub">Main agent</span></div>
+<div class="hs-proj" data-p="shop"><div class="aw-label">shop <em>3</em></div><div class="hs-row" data-id="a" data-st="w"><span class="aw-av" style="background:#fde2e2;color:#b42318">A</span><span data-k="n.a">Alice</span><i class="hs-dot"></i></div><div class="hs-row" data-id="b" data-st="w"><span class="aw-av" style="background:#fef3c7;color:#92400e">B</span><span data-k="n.b">Bob</span><i class="hs-dot"></i></div><div class="hs-row" data-id="d" data-st="w"><span class="aw-av" style="background:#fce7f3;color:#9d174d">D</span><span data-k="n.d">Diana</span><i class="hs-dot"></i></div></div><div class="hs-proj" data-p="blog"><div class="aw-label">blog <em>3</em></div><div class="hs-row" data-id="c" data-st="w"><span class="aw-av" style="background:#dbeafe;color:#1e40af">C</span><span data-k="n.c">Charlie</span><i class="hs-dot"></i></div><div class="hs-row" data-id="e" data-st="w"><span class="aw-av" style="background:#dcfce7;color:#166534">E</span><span data-k="n.e">Eve</span><i class="hs-dot"></i></div><div class="hs-row" data-id="f" data-st="i"><span class="aw-av" style="background:#e0e7ff;color:#3730a3">F</span><span data-k="n.f">Frank</span><i class="hs-dot"></i></div></div><div class="hs-proj" data-p="data"><div class="aw-label">data-pipeline <em>1</em></div><div class="hs-row" data-id="g" data-st="d"><span class="aw-av" style="background:#ffedd5;color:#9a3412">G</span><span data-k="n.g">Grace</span><i class="hs-dot"></i></div></div></aside><main class="ha-main"><div class="ha-head"><b data-k="nav.overview">Overview</b><span class="ha-sum" data-k="hero.sum">7 agents · 3 projects</span></div><div class="ha-grid"><div class="hc" data-id="a"><div class="hc-h"><span class="aw-av" style="background:#fde2e2;color:#b42318">A</span><b data-k="card.a">Orders API validation</b><span class="hc-tag">Claude Code</span><span class="hc-st"><i></i><em class="w" data-k="card.working">Working</em><em class="n" data-k="card.needs">Needs you</em><em class="d" data-k="card.done">Done</em></span></div><div class="hc-meta">shop · <span>amw/orders-validation</span></div><div class="hc-ask"><span class="hc-q" data-k="hero.q">Plain index or concurrent index?</span><span class="hc-opts"><b class="o1"><i></i><span data-k="hero.o1">Concurrent</span></b><b class="o2"><i></i><span data-k="hero.o2">Plain</span></b></span><span class="hc-other" data-k="hero.o3">Or type your own answer</span></div><div class="hc-now"><span class="hc-verb" data-k="hv.edit">Edit</span><code>src/api/orders.ts</code><b class="add">+12</b><b class="rm">−3</b></div><div class="hc-act" data-k="hd.a">Added quantity checks; writing tests.</div><div class="hc-plan"><span data-k="hv.plan">Plan</span><span class="hc-dots"><i class="ok"></i><i class="ok"></i><i class=""></i><i class=""></i></span><em>2/4</em></div><ul class="hc-log"><li><i>›_</i>cat src/api/orders.ts</li><li><i>›_</i>grep -n "createOrder" src</li><li><i>✎</i>src/api/orders.ts</li></ul><div class="hc-msg" data-k="hero.msg">New instruction from the main agent</div><span class="hc-bar"><i></i></span></div><div class="hc" data-id="b"><div class="hc-h"><span class="aw-av" style="background:#fef3c7;color:#92400e">B</span><b data-k="card.b">Revenue card</b><span class="hc-tag">Codex</span><span class="hc-st"><i></i><em class="w" data-k="card.working">Working</em><em class="n" data-k="card.needs">Needs you</em><em class="d" data-k="card.done">Done</em></span></div><div class="hc-meta">shop · <span>amw/revenue-card</span></div><div class="hc-ask"><span class="hc-q" data-k="hero.q">Plain index or concurrent index?</span><span class="hc-opts"><b class="o1"><i></i><span data-k="hero.o1">Concurrent</span></b><b class="o2"><i></i><span data-k="hero.o2">Plain</span></b></span><span class="hc-other" data-k="hero.o3">Or type your own answer</span></div><div class="hc-now"><span class="hc-verb" data-k="hv.run">Run</span><code>npm test</code></div><div class="hc-act"><span class="s-w" data-k="hd.bw">Adding the weekly change.</span><span class="s-d" data-k="hd.b">Weekly change added; tests pass.</span></div><div class="hc-plan"><span data-k="hv.plan">Plan</span><span class="hc-dots"><i class="ok"></i><i class="ok"></i><i class="ok-d"></i></span><em><span class="s-w">2/3</span><span class="s-d">3/3</span></em></div><ul class="hc-log"><li><i>✎</i>src/dashboard/RevenueCard.tsx</li><li><i>›_</i>npm test -- RevenueCard</li><li class="s-d"><i>✓</i>12 passed</li></ul><div class="hc-msg" data-k="hero.msg">New instruction from the main agent</div><span class="hc-bar"><i></i></span></div><div class="hc" data-id="c"><div class="hc-h"><span class="aw-av" style="background:#dbeafe;color:#1e40af">C</span><b data-k="card.c">Order history index</b><span class="hc-tag">Claude Code</span><span class="hc-st"><i></i><em class="w" data-k="card.working">Working</em><em class="n" data-k="card.needs">Needs you</em><em class="d" data-k="card.done">Done</em></span></div><div class="hc-meta">blog · <span>amw/order-history-idx</span></div><div class="hc-ask"><span class="hc-q" data-k="hero.q">Plain index or concurrent index?</span><span class="hc-opts"><b class="o1"><i></i><span data-k="hero.o1">Concurrent</span></b><b class="o2"><i></i><span data-k="hero.o2">Plain</span></b></span><span class="hc-other" data-k="hero.o3">Or type your own answer</span></div><div class="hc-now a-pre"><span class="hc-verb" data-k="hv.run">Run</span><code>ls db/migrations</code></div><div class="hc-now a-post"><span class="hc-verb" data-k="hv.write">Write</span><code>db/migrations/004_idx.sql</code><b class="add">+13</b></div><div class="hc-act"><span class="a-pre" data-k="hd.c">Schema read; checking the migrations.</span><span class="a-post" data-k="hd.c2">Writing the migration, concurrent index.</span></div><div class="hc-plan"><span data-k="hv.plan">Plan</span><span class="hc-dots"><i class="ok"></i><i class="ok-a"></i><i></i></span><em><span class="a-pre">1/3</span><span class="a-post">2/3</span></em></div><ul class="hc-log"><li><i>›_</i>cat db/schema.sql</li><li><i>›_</i>ls db/migrations</li><li class="a-post"><i>✎</i>db/migrations/004_idx.sql</li></ul><div class="hc-msg" data-k="hero.msg">New instruction from the main agent</div><span class="hc-bar"><i></i></span></div><div class="hc" data-id="d"><div class="hc-h"><span class="aw-av" style="background:#fce7f3;color:#9d174d">D</span><b data-k="card.d">Sparkline revenue</b><span class="hc-tag">Codex</span><span class="hc-st"><i></i><em class="w" data-k="card.working">Working</em><em class="n" data-k="card.needs">Needs you</em><em class="d" data-k="card.done">Done</em></span></div><div class="hc-meta">shop · <span>amw/sparkline</span></div><div class="hc-ask"><span class="hc-q" data-k="hero.q">Plain index or concurrent index?</span><span class="hc-opts"><b class="o1"><i></i><span data-k="hero.o1">Concurrent</span></b><b class="o2"><i></i><span data-k="hero.o2">Plain</span></b></span><span class="hc-other" data-k="hero.o3">Or type your own answer</span></div><div class="hc-now"><span class="hc-verb" data-k="hv.edit">Edit</span><code>src/dashboard/Sparkline.tsx</code><b class="add">+42</b><b class="rm">−5</b></div><div class="hc-act" data-k="hd.d">Chart kept under 40px tall.</div><div class="hc-plan"><span data-k="hv.plan">Plan</span><span class="hc-dots"><i class="ok"></i><i class="ok"></i><i class=""></i></span><em>2/3</em></div><ul class="hc-log"><li><i>✎</i>src/dashboard/Sparkline.tsx</li><li><i>›_</i>npm run lint</li><li><i>✎</i>src/dashboard/Sparkline.tsx</li></ul><div class="hc-msg" data-k="hero.msg">New instruction from the main agent</div><span class="hc-bar"><i></i></span></div></div><section class="ha-mainv"><div class="ha-ag-head"><span class="aw-ico dark">✳</span><b data-k="ma.hub">Main agent</b></div>
+<div class="ha-ag-body"><div class="ha-conv mv-conv"><div class="cv-scroll">
+<div class="cv-me" data-k="mv.m1">Add input checks to the orders API.</div><div class="cv-ai" data-k="mv.r1">Started Alice on it.</div>
+<div class="cv-me" data-k="mv.m2">How is everyone doing?</div><div class="cv-ai" data-k="mv.r2">Bob is done. Charlie was waiting on you for the index type; you picked concurrent, so it is writing the migration now.</div>
+<div class="mv-new"><div class="cv-me" data-k="hero.say">Tell everyone: run the tests before you commit.</div><div class="cv-ai" data-k="mv.r3">Passed on to Alice, Charlie and Diana. Bob is already done.</div></div>
+</div>
+<div class="cv-input"><span data-k="mv.ph">Message the main agent…</span><i>↑</i></div></div><aside class="mv-lanes"><div class="lanes-legend"></div><ol class="lanes-rows"></ol></aside></div></section><section class="ha-agent"><div class="ha-ag-head"><span class="aw-av" style="background:#dbeafe;color:#1e40af">C</span><b data-k="card.c">Order history index</b><span class="hc-tag">Claude Code</span><span class="ha-ag-st"><i></i><em class="n" data-k="card.needs">Needs you</em><em class="w" data-k="card.working">Working</em></span></div><div class="ha-ag-body"><div class="ha-conv"><div class="cv-scroll">
+<div class="cv-me" data-k="cv.me">Add an index for order history (by customer, newest first).</div>
+<div class="cv-tool"><i>›_</i> cat db/schema.sql</div><div class="cv-tool"><i>›_</i> ls db/migrations</div>
+<div class="cv-ai" data-k="cv.a1">orders has 2.1M rows and no index on customer_id.</div>
+<div class="cv-tool"><i>›_</i> grep -rn "FROM orders" src/history</div>
+<div class="cv-ai" data-k="cv.a2">The history page filters by customer and sorts by date. One index on (customer_id, created_at DESC) covers it.</div>
+<div class="cv-me sm" data-k="cv.m2">Good. Will it block checkout while it builds?</div>
+<div class="cv-ai" data-k="cv.ai">A plain index locks writes while it builds. A concurrent one doesn’t, but takes longer.</div>
+<div class="cv-ask"><span class="hc-q" data-k="hero.q">Plain index or concurrent index?</span><span class="hc-opts"><b class="o1"><i></i><span data-k="hero.o1">Concurrent</span></b><b class="o2"><i></i><span data-k="hero.o2">Plain</span></b></span></div>
+<div class="cv-after"><div class="cv-me sm" data-k="hero.o1">Concurrent</div><div class="cv-tool"><i>✎</i> db/migrations/004_idx.sql <b class="add">+13</b></div></div>
+</div><div class="cv-input"><span data-k="cv.ph">Message Charlie…</span><i>↑</i></div></div><aside class="ha-smap"><ol class="session-map"><li class="map-task" style="--hue:#6366f1" data-status="done"><span class="map-node"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="map-head"><button class="map-title" data-k="sm.t1">Read the schema and migrations</button></div><div class="map-meta"><span data-k="sm.m1">1 turn · 2 commands</span></div><div class="map-outcome" data-k="sm.o1">orders has 2.1M rows; no index on customer_id.</div></li><li class="map-task" style="--hue:#0ea5e9" data-status="done"><span class="map-node"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="map-head"><button class="map-title" data-k="sm.t3">See how history is queried</button></div><div class="map-meta"><span data-k="sm.m3">1 turn · 3 files</span></div><div class="map-outcome" data-k="sm.o3">Filters by customer, sorts by date.</div><button class="map-branch"><span class="map-lane"></span><span class="alias-xs e">E</span><span class="map-branch-name" data-k="n.e">Eve</span></button></li><li class="map-task current" style="--hue:#14b8a6" data-status="in_progress"><span class="map-node"></span><div class="map-head"><button class="map-title" data-k="sm.t2">Add the order history index</button></div><div class="map-meta"><span class="map-state going" data-k="sm.going">in progress</span><span data-k="sm.m2">2 turns · 1 file</span></div><button class="map-attempt"><span class="map-lane dead"></span><span class="map-cross"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12 M18 6L6 18"/></svg></span><span class="map-attempt-text"><span class="map-attempt-tried" data-k="sm.a1">Partial index on recent orders</span><span class="map-attempt-why" data-k="sm.w1">Old orders are looked up too</span></span></button><div class="map-decision kind-decided fresh"><span class="map-twig"></span><span class="map-diamond"></span><div class="map-decision-body"><button class="map-decision-label" data-k="sm.d1">Concurrent index</button><div class="map-not-taken"><span class="map-lane dead"></span><span class="map-end"></span><span class="truncate" data-k="sm.n1">Plain index (locks writes)</span></div></div></div></li><li class="map-task last todo" style="--hue:#f59e0b" data-status="unknown"><span class="map-node"></span><div class="map-head"><button class="map-title" data-k="sm.t4">Run the migration tests</button></div><div class="map-meta"><span data-k="sm.m4">up next</span></div></li></ol></aside></div></section><span class="ha-cursor" aria-hidden="true"></span><div class="ha-say"><span class="wave"><i></i><i></i><i></i><i></i><i></i></span><span class="ha-say-t"><b class="ha-say-who" data-k="ma.hub">Main agent</b><span data-k="hero.say">Tell everyone: run the tests before you commit.</span></span></div></main></div>
+        </div>
+
+      <div class="works reveal">
+        <div class="works-group"><span class="works-cap" data-k="works.agents">Agents</span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 10l3 2-3 2M12 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Claude Code</span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 10l3 2-3 2M12 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Codex</span></div>
+        <span class="works-div" aria-hidden="true"></span>
+        <div class="works-group"><span class="works-cap" data-k="works.runs">Desktop app</span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.37 12.6c-.03-2.6 2.12-3.84 2.22-3.9-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.89 2.65 3.24 2.6 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.38.81 1.4-.02 2.29-1.27 3.14-2.53.99-1.45 1.4-2.86 1.42-2.93-.03-.01-2.72-1.04-2.73-4.13ZM13.79 4.96c.72-.87 1.2-2.07 1.07-3.27-1.03.04-2.28.69-3.02 1.55-.66.77-1.24 2-1.09 3.18 1.15.09 2.32-.58 3.04-1.46Z"/></svg>macOS</span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.1 10.4 4v7.2H3V5.1Zm8.3-1.2L21 2.5v8.7h-9.7V3.9ZM3 12.8h7.4V20L3 18.9v-6.1Zm8.3 0H21v8.7l-9.7-1.4v-7.3Z"/></svg>Windows</span></div>
+        <span class="works-div" aria-hidden="true"></span>
+        <div class="works-group"><span class="works-cap" data-k="works.remote">Run on</span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2 19h20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-k="works.local">Your machine</span></span><span class="works-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="13" width="18" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 7.5h.01M7 16.5h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span data-k="works.ssh">SSH servers</span></span></div>
+      </div>
+    </section>
+
+    <!-- 01 Overview: one card, built up as you scroll, then the real Overview -->
+    <section class="story" id="overview" data-steps="5" style="--steps:5">
+      <div class="story-sticky">
+        <div class="story-copy">
+          <p class="kicker"><span>01</span><span data-k="ov.kicker">Overview</span></p>
+          <h2 data-k="ov.title">See every agent at once.</h2>
+          <ol class="caps">
+            <li data-at="0"><b data-k="ov.c0t">A card per agent</b><span data-k="ov.c0">Live, as it works.</span></li>
+            <li data-at="1"><b data-k="ov.c1t">It waits for you on the card</b><span data-k="ov.c1">With the change it wants to make.</span></li>
+            <li data-at="2"><b data-k="ov.c2t">Answer right there</b><span data-k="ov.c2">No need to open it.</span></li>
+            <li data-at="3"><b data-k="ov.c3t">Four agents, or ten</b><span data-k="ov.c3">Claude Code and Codex together.</span></li>
+            <li data-at="4"><b data-k="ov.c5t">Sorted for you</b><span data-k="ov.c5">What waits on you comes first, then the busiest.</span></li>
+          </ol>
+        </div>
+        <div class="story-stage">
+          <div class="iso iso-cards">
+            <article class="xcard main-card">
+              <header><span class="av">A</span><b data-k="card.a">Orders API validation</b><span class="tag">Claude Code</span>
+                <span class="st blue s-work" data-k="card.working">Working</span><span class="st amber s-needs" data-k="card.needs">Needs you</span><span class="st green s-done" data-k="card.done">Done</span></header>
+              <ul class="acts">
+                <li><i>›_</i> cat src/api/orders.ts</li>
+                <li><i>›_</i> grep -n "createOrder" src</li>
+                <li><i>✎</i> <span data-k="card.planning">Planning the validation</span></li>
+              </ul>
+              <div class="perm" data-at="1">
+                <p class="ask" data-k="card.aAsk">Claude Code asks permission · Edit src/api/orders.ts</p>
+                <pre><span class="add">+ if (!body.items.length) throw new Error("no items");</span>
+<span class="add">+ for (const it of body.items) assertPositive(it.quantity);</span></pre>
+                <div class="card-actions"><span class="b primary press" data-k="card.allow">Allow</span><span class="b" data-k="card.deny">Deny</span></div>
+              </div>
+              <p class="report" data-at="2" data-k="card.aDone">Validation added. Tests pass.</p>
+            <p class="mini-line team-only" data-k="card.aDone">Validation added. Tests pass.</p><div class="bar team-only"><i style="width:100%"></i></div></article>
+            <article class="xcard mini m1" data-at="3"><header><span class="av b">B</span><b data-k="card.b">Revenue card</b><span class="tag">Codex</span><span class="st green" data-k="card.done">Done</span></header><p class="mini-line" data-k="ov.mb">Weekly change added. Tests pass.</p><div class="bar"><i style="width:100%"></i></div></article>
+            <article class="xcard mini m2" data-at="3"><header><span class="av c">C</span><b data-k="card.c">Order history index</b><span class="tag">Claude Code</span><span class="st blue" data-k="card.working">Working</span></header><p class="mini-line" data-k="ov.mc">Writing the index migration.</p><div class="bar"><i class="run" style="width:60%"></i></div></article>
+            <article class="xcard mini m3" data-at="3"><header><span class="av d">D</span><b data-k="card.d">Sparkline revenue</b><span class="tag">Codex</span><span class="st amber" data-k="card.needs">Needs you</span></header><p class="mini-line" data-k="ov.md">Line chart or bars?</p><div class="bar"><i class="amberbar" style="width:45%"></i></div></article>
+          </div>
+          
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 Main agent -->
+    <section class="story" id="main-agent" data-steps="4" style="--steps:4">
+      <div class="story-sticky">
+        <div class="story-copy">
+          <p class="kicker"><span>02</span><span data-k="ma.kicker">Main agent</span></p>
+          <h2 data-k="ma.title">Tell one agent. It tells the rest.</h2>
+          <ol class="caps">
+            <li data-at="0"><b data-k="ma.c0t">Say it once</b><span data-k="ma.c0">Typed or spoken.</span></li>
+            <li data-at="1"><b data-k="ma.c1t">It splits the work</b><span data-k="ma.c1">Each agent gets its part.</span></li>
+            <li data-at="2"><b data-k="ma.c2t">Or name an agent</b><span data-k="ma.c2">Straight to them.</span></li>
+            <li data-at="3"><b data-k="ma.c3t">Ask how it’s going</b><span data-k="ma.c3">Answers from what they’re doing now.</span></li>
+          </ol>
+        </div>
+        <div class="story-stage">
+          <div class="iso iso-main">
+            <div class="say">
+              <span class="wave"><i></i><i></i><i></i><i></i><i></i></span>
+              <p data-k="ma.say">Pass these on: Bob, show last week’s change; Charlie, use a concurrent index; Diana, keep the chart under 40px.</p>
+            </div>
+            <div class="hub" data-at="1"><span class="hub-dot"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><b data-k="ma.hub">Main agent</b></div>
+            <ul class="routes">
+              <li data-at="1" style="--c:#6366f1"><span class="who" data-k="n.b">Bob</span><span data-k="ma.r1">Show the change from last week on the revenue card.</span></li>
+              <li data-at="1" style="--c:#0ea5e9"><span class="who" data-k="n.c">Charlie</span><span data-k="ma.r2">Use a concurrent index for the order history migration.</span></li>
+              <li data-at="1" style="--c:#14b8a6"><span class="who" data-k="n.d">Diana</span><span data-k="ma.r3">Keep the sparkline under 40px tall.</span></li>
+            </ul>
+            <div class="direct" data-at="2"><span class="wave"><i></i><i></i><i></i><i></i><i></i></span><span data-k="ma.direct">“Charlie, hold the migration.”</span><span class="arrow">→</span><span class="who" style="--c:#0ea5e9" data-k="n.c">Charlie</span></div>
+            <div class="summary" data-at="3">
+              <p class="q" data-k="ma.q">How is everyone doing?</p>
+              <ul>
+                <li><i style="background:#f59e0b"></i><b data-k="n.a">Alice</b> <span data-k="ma.s1">waiting for your approval to edit orders.ts</span></li>
+                <li><i style="background:#22c55e"></i><b data-k="n.b">Bob</b> <span data-k="ma.s2">done: the card shows the weekly change</span></li>
+                <li><i style="background:#2563eb"></i><b data-k="n.c">Charlie</b> <span data-k="ma.s3">writing the concurrent-index migration</span></li>
+              </ul>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 Work Map -->
+    <section class="story band-story" id="work-map" data-steps="5" style="--steps:5">
+      <div class="story-sticky">
+        <div class="story-copy">
+          <p class="kicker"><span>03</span><span data-k="wm.kicker">Work Map</span></p>
+          <h2 data-k="wm.title">Hours of agent work, on one map.</h2>
+          <ol class="caps">
+            <li data-at="0"><b data-k="wm.c0t">Tasks, not a wall of chat</b><span data-k="wm.c0">Grouped by what got done.</span></li>
+            <li data-at="1"><b data-k="wm.c1t">How each one ended</b><span data-k="wm.c1">Result, turns, files.</span></li>
+            <li data-at="2"><b data-k="wm.c2t">Why</b><span data-k="wm.c2">The decisions along the way.</span></li>
+            <li data-at="3"><b data-k="wm.c3t">What you tried</b><span data-k="wm.c3">Forks branch off.</span></li>
+            <li data-at="4"><b data-k="wm.c4t">The whole team</b><span data-k="wm.c4">One lane per agent.</span></li>
+          </ol>
+        </div>
+        <div class="story-stage">
+          <div class="iso iso-map">
+            <div class="smap ha-smap wm-smap"><ol class="session-map"><li class="map-task" style="--hue:#6366f1" data-status="done"><span class="map-node"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="map-head"><button class="map-title" data-k="wm.n1">Add RevenueCard to the dashboard</button></div><div class="map-meta" data-at="1"><span data-k="wm.n1m">2 turns · 2 files</span></div><div class="map-outcome" data-at="1" data-k="wm.o1">Shows total revenue; tests pass.</div></li><li class="map-task" style="--hue:#0ea5e9" data-status="done"><span class="map-node"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="map-head"><button class="map-title" data-k="wm.n2">Export orders as CSV</button></div><div class="map-meta" data-at="1"><span data-k="wm.n2m">1 turn · 1 file</span></div></li><li class="map-task" style="--hue:#14b8a6" data-status="done"><span class="map-node"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="map-head"><button class="map-title" data-k="wm.n3">Loading skeleton</button></div><div class="map-meta" data-at="1"><span data-k="wm.n3m">1 turn · 1 file</span></div><button class="map-branch" data-at="3"><span class="map-lane"></span><span class="alias-xs">D</span><span class="map-branch-name" data-k="n.d">Diana</span></button></li><li class="map-task current last" style="--hue:#f59e0b" data-status="in_progress"><span class="map-node"></span><div class="map-head"><button class="map-title" data-k="wm.n4">Show the week-over-week change</button></div><div class="map-meta" data-at="1"><span class="map-state going" data-k="sm.going">in progress</span><span data-k="wm.n4m">2 turns · 3 files</span></div><button class="map-attempt" data-at="3"><span class="map-lane dead"></span><span class="map-cross"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12 M18 6L6 18"/></svg></span><span class="map-attempt-text"><span class="map-attempt-tried" data-k="wm.at">Compare the last 7 days</span><span class="map-attempt-why" data-k="wm.aw">Would not match the weekly reports</span></span></button><div class="map-decision kind-decided" data-at="2"><span class="map-twig"></span><span class="map-diamond"></span><div class="map-decision-body"><button class="map-decision-label" data-k="wm.d1">Calendar weeks, Monday first</button><div class="map-not-taken"><span class="map-lane dead"></span><span class="map-end"></span><span class="truncate" data-k="wm.nt">Rolling 7 days</span></div></div></div></li></ol></div>
+            <div class="tmap mv-lanes wm-lanes" data-at="4"><div class="lanes-legend"></div><ol class="lanes-rows"></ol></div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 Memory -->
+    <section class="story" id="memory" data-steps="4" style="--steps:4">
+      <div class="story-sticky">
+        <div class="story-copy">
+          <p class="kicker"><span>04</span><span data-k="mm.kicker">Memory</span></p>
+          <h2 data-k="mm.title">Teach one agent. All of them know.</h2>
+          <ol class="caps">
+            <li data-at="0"><b data-k="mm.c0t">Say it once</b><span data-k="mm.c0">Click Remember on your message.</span></li>
+            <li data-at="1"><b data-k="mm.c1t">Turned into a note</b><span data-k="mm.c1">What it means for your work, not the raw words.</span></li>
+            <li data-at="2"><b data-k="mm.c2t">Every agent gets it</b><span data-k="mm.c2">Claude Code and Codex, on every machine.</span></li>
+            <li data-at="3"><b data-k="mm.c3t">Your files stay yours</b><span data-k="mm.c3">Backed up first. Your own text is never touched.</span></li>
+          </ol>
+        </div>
+        <div class="story-stage">
+          <div class="iso iso-mem">
+            <div class="mm-chat">
+              <div class="mm-bubble"><span class="mm-who" data-k="mm.you">You</span><p data-k="mm.msg">Don’t use default exports here, we always import by name.</p><span class="mm-rem" data-k="mm.rem">Remember</span></div>
+            </div>
+            <div class="mm-note" data-at="1">
+              <div class="mm-note-h"><span class="mm-spark">✦</span><b data-k="mm.nt">Prefer named exports</b><span class="mm-scope" data-k="mm.scope">Project · shop</span></div>
+              <p data-k="mm.nb">Use named exports in this codebase; import modules by name.</p>
+              <small data-k="mm.merge">Merged with an existing note on imports</small>
+            </div>
+            <div class="mm-targets" data-at="2">
+              <span><i class="ok">✓</i>Claude Code</span><span><i class="ok">✓</i>Codex</span><span><i class="ok">✓</i><b data-k="works.local">Your machine</b></span><span><i class="ok">✓</i>dev-server</span>
+            </div>
+            <div class="mm-file" data-at="3">
+              <div class="mm-file-h"><code>~/.claude/CLAUDE.md</code><span class="mm-bak" data-k="mm.bak">Backed up</span></div>
+              <pre><span class="own"># My notes
+- Run tests before committing
+- Use pnpm</span>
+<span class="ours">&lt;!-- agent-workspace --&gt;
+@~/.agent-workspace/memory/user.md</span></pre>
+              <small><span class="own-k" data-k="mm.ownk">Your text: untouched</span><span class="ours-k" data-k="mm.oursk">Our section: one marked line</span></small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Also built in -->
+    <section class="more" id="more">
+      <div class="section-head reveal">
+        <h2 data-k="more.title">Also built in</h2>
+        <p class="lede" data-k="more.lede"></p>
+      </div>
+      <div class="grid">
+        <div class="tile tile-side reveal">
+          <div class="sc-text"><h3 data-k="sc.t">Everything else, beside the conversation</h3><p data-k="sc.p">Open a file, check this turn’s changes, ask on the side or see what an agent remembers, without leaving the chat.</p>
+            <div class="sc-tabs"><span data-tab="0" data-k="sc.t0">Preview</span><span data-tab="1" data-k="sc.t1">Changes</span><span data-tab="2" data-k="sc.t2">Side question</span><span data-tab="3" data-k="sc.t3">Memory</span></div></div>
+          <div class="sc-win">
+            <div class="sc-chat"><span class="aw-l"></span><span class="aw-l s"></span><span class="sc-me"></span><span class="aw-l"></span><span class="aw-l xs"></span></div>
+            <div class="sc-panel">
+              <div class="sc-p" data-p="0"><div class="sc-ph"><code>README.md</code></div><b class="sc-h1">Shop</b><span class="aw-l"></span><span class="aw-l s"></span><span class="sc-img"></span><span class="aw-l xs"></span></div>
+              <div class="sc-p" data-p="1"><div class="sc-ph"><code>src/api/orders.ts</code><b class="add">+12</b><b class="rm">−3</b></div><pre><span class="rm">- export default createOrder</span>
+<span class="add">+ export function createOrder(body) {</span>
+<span class="add">+   assertItems(body.items)</span></pre><div class="sc-ph"><code>tests/orders.test.ts</code><b class="add">+24</b></div></div>
+              <div class="sc-p" data-p="2"><div class="sc-q" data-k="mu.btw">/btw why UTC here?</div><div class="sc-a" data-k="sc.a">So logs line up across servers. It stays in this side panel, not in the agent’s context.</div><div class="sc-run"><i></i><span data-k="sc.run">Agent still working</span></div></div>
+              <div class="sc-p" data-p="3"><div class="sc-mem"><span>✦</span><b data-k="mm.nt">Prefer named exports</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m2">Run tests before committing</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m3">Use pnpm, not npm</b></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="tile reveal"><div class="mini-ui mu-fork"><svg viewBox="0 0 160 56" aria-hidden="true"><path d="M8 28 H70 C 90 28, 92 10, 112 10 H150" stroke="#ec4899"/><path d="M8 28 H150" stroke="#6366f1"/><circle cx="8" cy="28" r="4" fill="#6366f1"/><circle cx="70" cy="28" r="4" fill="#6366f1"/><circle cx="150" cy="28" r="4" fill="#6366f1"/><circle cx="150" cy="10" r="4" fill="#ec4899"/></svg></div><h3 data-k="m2.t">Fork</h3><p data-k="m2.p">Try another approach from any message.</p></div>
+        <div class="tile reveal"><div class="mini-ui mu-host"><span class="mu-dot"></span><b>dev-server</b><span class="mu-tag">Claude Code</span><span class="mu-st" data-k="card.working">Working</span></div><h3 data-k="m3.t">Remote machines</h3><p data-k="m3.p">Agents on your servers, over SSH.</p></div>
+        <div class="tile reveal"><div class="mini-ui mu-files"><span class="mu-thumb"></span><span class="mu-chip">@src/api/orders.ts</span></div><h3 data-k="m4.t">Images and files</h3><p data-k="m4.p">Screenshots, @files, drag and drop.</p></div>
+        <div class="tile reveal"><div class="mini-ui mu-session"><span class="mu-ico">↻</span><span class="mu-title" data-k="mu.sess">Fix checkout redirect</span><small data-k="mu.sessMeta">yesterday · 32 turns</small></div><h3 data-k="m6.t">Pick up any session</h3><p data-k="m6.p">Continue any existing session.</p></div>
+        <div class="tile reveal"><div class="mini-ui mu-cmd"><code><b>!</b> npm test</code><span class="mu-ok">✓ 24 passed</span></div><h3 data-k="m7.t">! commands</h3><p data-k="m7.p">Run a command in the agent’s folder; it sees the output.</p></div>
+        <div class="tile reveal"><div class="mini-ui mu-model"><span class="mu-tag">Claude Code</span><span class="mu-pick">opus <i>▾</i></span><span class="mu-arrow">→</span><span class="mu-pick on">sonnet</span></div><h3 data-k="m8.t">Model per agent</h3><p data-k="m8.p">Switch an agent’s model from its next turn.</p></div>
+      </div>
+
+      <div class="compat reveal">
+        <h3 data-k="compat.title">Same features in Claude Code and Codex</h3>
+        <table>
+          <thead><tr><th></th><th>Claude Code</th><th>Codex</th></tr></thead>
+          <tbody>
+            <tr><td data-k="c1">Overview cards and permissions</td><td>●</td><td>●</td></tr>
+            <tr><td data-k="c2">Runs the main agent</td><td>●</td><td>●</td></tr>
+            <tr><td data-k="c3">Work Map</td><td>●</td><td>●</td></tr>
+            <tr><td data-k="c4">Fork</td><td>●</td><td>●</td></tr>
+            <tr><td data-k="c5">Side questions</td><td>●</td><td>●</td></tr>
+            <tr><td data-k="c6">Agents on SSH hosts</td><td>●</td><td>●</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Privacy -->
+    <section class="privacy">
+      <div class="section-head reveal">
+        <h2 data-k="pv.title">Local by default</h2>
+      </div>
+      <div class="pv-grid">
+        <div class="pv reveal"><span class="pv-n">01</span><h3 data-k="pv1.t">No server of ours</h3><p data-k="pv1.p">Agents run on your machine or server.</p></div>
+        <div class="pv reveal"><span class="pv-n">02</span><h3 data-k="pv2.t">Your permissions</h3><p data-k="pv2.p">The CLI’s own settings, never bypassed.</p></div>
+        <div class="pv reveal"><span class="pv-n">03</span><h3 data-k="pv3.t">On-device voice</h3><p data-k="pv3.p">Optional. Audio stays on your Mac.</p></div>
+      </div>
+    </section>
+
+    <!-- Get started -->
+    <section class="start" id="start">
+      <div class="start-card reveal">
+        <h2 data-k="st.title">Try it with the agents you already have.</h2>
+        <ol class="steps">
+          <li><span>1</span><div><b data-k="st1.t">Install Claude Code or Codex</b><p data-k="st1.p">Sign in with your plan.</p></div></li>
+          <li><span>2</span><div><b data-k="st2.t">Download Agent Workspace</b><p data-k="st2.p">macOS · Windows (beta)</p></div></li>
+          <li><span>3</span><div><b data-k="st3.t">Add a project</b><p data-k="st3.p">Start an agent, or ask the main agent.</p></div></li>
+        </ol>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/Flitternie/agent-workspace/releases/latest" data-k="st.download">Download the latest release</a>
+          <a class="btn btn-ghost" href="https://github.com/Flitternie/agent-workspace#readme" target="_blank" rel="noreferrer" data-k="st.readme">Read the README</a>
+        </div>
+        <p class="fineprint" data-k="st.fine">First launch on macOS: right-click the app › Open.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div><img src="assets/icon.png" alt="" width="20" height="20"> Agent Workspace</div>
+    <div class="foot-links">
+      <a href="https://github.com/Flitternie/agent-workspace" target="_blank" rel="noreferrer">GitHub</a>
+      <a href="https://github.com/Flitternie/agent-workspace/releases" target="_blank" rel="noreferrer" data-k="ft.releases">Releases</a>
+      <a href="https://github.com/Flitternie/agent-workspace/blob/main/LICENSE" target="_blank" rel="noreferrer">AGPL-3.0</a>
+    </div>
+  </footer>
+
+  <script src="main.js?v=64"></script>
+</body>
+</html>
