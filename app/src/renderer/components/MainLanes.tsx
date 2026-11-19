@@ -1,11 +1,10 @@
 import type { Lane, LaneRow } from '../../shared/main-lanes';
 import { t } from '../i18n';
 
-// The main agent's conversation as lanes: time runs down, one lane (one colour) per agent it handed
-// work to, and no lane of its own (it does no work itself), so lanes never cross. A hand-off is a
-// point on the agent's lane, labelled with what you asked; a fork branches off right beside its
-// origin; an agent coming back is a point on its lane. A message that handed nothing off is a faint
-// row. A row opens the agent (or, for your message, its place in the conversation).
+// The main agent's conversation, git-graph style: time runs down, its own lane on the left, one lane
+// (one colour) per agent it handed work to. A hand-off curves from the main lane into that agent's
+// lane; an agent coming back is a point on its lane. Rows are your messages (open them in the
+// conversation) and hand-offs (open the agent).
 
 const HUES = ['#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e', '#ef4444'];
 const STEP = 14; // between lanes
@@ -15,9 +14,10 @@ const ROW = 28;
 export const laneColor = (lane: number) => (lane === 0 ? 'var(--text-3)' : HUES[(lane - 1) % HUES.length]);
 
 export function MainLanes({ lanes, rows, onJump, onOpenAgent }: { lanes: Lane[]; rows: LaneRow[]; onJump: (itemId: string) => void; onOpenAgent: (taskId: string) => void }) {
-  const x = (lane: number) => PAD + (lane - 1) * STEP;
-  const width = Math.max(x(lanes.length) + PAD, 2 * PAD);
+  const x = (lane: number) => PAD + lane * STEP;
+  const width = x(lanes.length) + PAD;
   const mid = ROW / 2;
+  const lastAsk = rows.map((r) => r.kind).lastIndexOf('ask');
   return (
     <div className="main-lanes" data-testid="main-lanes">
       <div className="lanes-legend">
@@ -40,16 +40,27 @@ export function MainLanes({ lanes, rows, onJump, onOpenAgent }: { lanes: Lane[];
                 className="lanes-hit"
                 style={{ ['--lane' as string]: color }}
                 onClick={() => (r.kind === 'ask' ? onJump(r.itemId) : lane?.taskId ? onOpenAgent(lane.taskId) : onJump(r.turnId))}
-                title={r.kind === 'ask' ? r.label : [[lane?.alias, lane?.projectName].filter(Boolean).join(' · '), r.ask].filter(Boolean).join('\n')}
+                title={r.kind === 'ask' ? r.label : [lane?.alias, lane?.name, lane?.projectName].filter(Boolean).join(' · ')}
                 data-testid="lane-hit"
               >
               <svg width={width} height={ROW} aria-hidden className="lanes-svg">
+                {/* The main lane, from your first message to your last. */}
+                {n <= lastAsk ? <line x1={x(0)} y1={n === 0 ? mid : 0} x2={x(0)} y2={n === lastAsk ? mid : ROW} stroke={laneColor(0)} strokeWidth={1.5} /> : null}
                 {lanes.map((l, k) =>
                   n >= l.first && n <= l.last ? <line key={k} x1={x(k + 1)} y1={n === l.first ? mid : 0} x2={x(k + 1)} y2={n === l.last ? mid : ROW} stroke={laneColor(k + 1)} strokeWidth={2} /> : null,
                 )}
-                {/* A fork branches off its origin (the lane right beside it). */}
-                {r.from !== undefined ? <path d={`M ${x(r.from)} ${mid - 8} C ${x(r.from)} ${mid} ${x(r.lane)} ${mid - 8} ${x(r.lane)} ${mid}`} fill="none" stroke={color} strokeWidth={2} /> : null}
-                {r.kind === 'ask' ? null : r.kind === 'waiting' ? (
+                {handOff ? (
+                  <path
+                    d={`M ${x(r.from ?? 0)} ${r.from !== undefined ? mid : 0} C ${x(r.from ?? 0)} ${mid} ${x(r.lane)} ${r.from !== undefined ? mid : 0} ${x(r.lane)} ${mid}`}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={2}
+                    strokeDasharray={r.kind === 'failed' ? '3 3' : undefined}
+                  />
+                ) : null}
+                {r.kind === 'ask' ? (
+                  <circle cx={x(0)} cy={mid} r={4} fill="var(--panel)" stroke="var(--text-2)" strokeWidth={1.5} />
+                ) : r.kind === 'waiting' ? (
                   <rect x={x(r.lane) - 4} y={mid - 4} width={8} height={8} transform={`rotate(45 ${x(r.lane)} ${mid})`} fill="var(--panel)" stroke={color} strokeWidth={2} />
                 ) : r.kind === 'settled' ? (
                   <circle cx={x(r.lane)} cy={mid} r={3} fill="var(--panel)" stroke={color} strokeWidth={1.5} />
@@ -77,7 +88,7 @@ export function MainLanes({ lanes, rows, onJump, onOpenAgent }: { lanes: Lane[];
                               : t('done')}
                   </span>
                   <span className="lanes-alias">{lane?.alias ?? r.label}</span>
-                  {handOff && r.ask ? <span className="lanes-name truncate">{r.ask}</span> : null}
+                  {handOff && lane?.name && lane.name !== lane.alias ? <span className="lanes-name truncate">{lane.name}</span> : null}
                 </span>
               )}
               </button>
@@ -94,9 +105,10 @@ export function MainLanesMini({ lanes, rows, onOpen }: { lanes: Lane[]; rows: La
   const h = Math.max(1, rows.length);
   return (
     <button className="session-minimap lanes-mini" onClick={onOpen} title={t('Agents')} aria-label={t('Agents')} data-testid="lanes-mini">
-      <svg width={4 + lanes.length * 6} height={120} aria-hidden>
+      <svg width={8 + lanes.length * 6} height={120} aria-hidden>
+        <line x1={4} y1={0} x2={4} y2={120} stroke={laneColor(0)} strokeWidth={1.5} />
         {lanes.map((l, k) => (
-          <line key={l.alias} x1={4 + k * 6} y1={(l.first / h) * 120} x2={4 + k * 6} y2={Math.max((l.last / h) * 120, (l.first / h) * 120 + 4)} stroke={laneColor(k + 1)} strokeWidth={2} strokeLinecap="round" />
+          <line key={l.alias} x1={10 + k * 6} y1={(l.first / h) * 120} x2={10 + k * 6} y2={Math.max((l.last / h) * 120, (l.first / h) * 120 + 4)} stroke={laneColor(k + 1)} strokeWidth={2} strokeLinecap="round" />
         ))}
       </svg>
     </button>

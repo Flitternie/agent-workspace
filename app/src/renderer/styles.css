@@ -6627,8 +6627,7 @@ button.subtask-row:hover {
   stroke-width: 2.5;
 }
 .lanes-label.ask {
-  color: var(--text-3);
-  font-size: 11.5px;
+  color: var(--text);
 }
 .lanes-verb {
   flex: none;

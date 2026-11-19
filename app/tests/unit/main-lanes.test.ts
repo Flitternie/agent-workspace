@@ -34,23 +34,24 @@ describe('the main agent as lanes', () => {
       sys('Someone is waiting on you (question): "x"'), // never handed work: no lane
     ];
     const { lanes, rows } = mainLanes(items, tasks, projects);
-    // shop's agents together, the fork (Dan) right after Ann; then paper (Bob).
+    // shop's agents together (Ann, Cat, Dan), then paper (Bob).
+    // A fork's lane right after its origin: Dan (forked off Ann) before Cat.
     expect(lanes.map((l) => [l.alias, l.projectName])).toEqual([['Ann', 'shop'], ['Dan', 'shop'], ['Cat', 'shop'], ['Bob', 'paper']]);
-    // No lane for the main agent: your messages ride on the hand-offs they led to.
-    expect(rows.map((r) => [r.kind, r.lane, r.from, r.ask])).toEqual([
-      ['send', 1, undefined, 'Fix the orders page'],
-      ['create', 4, undefined, 'And draft the paper intro'],
-      ['send', 3, undefined, 'Also the orders API'],
-      ['waiting', 1, undefined, undefined],
-      ['fork', 2, 1, 'Try another way for the orders page'],
-      ['failed', 4, undefined, 'Try another way for the orders page'],
+    expect(rows.map((r) => [r.kind, r.lane, r.from])).toEqual([
+      ['ask', 0, undefined],
+      ['send', 1, undefined],
+      ['ask', 0, undefined],
+      ['create', 4, undefined],
+      ['ask', 0, undefined],
+      ['send', 3, undefined],
+      ['waiting', 1, undefined],
+      ['ask', 0, undefined],
+      ['fork', 2, 1],
+      ['failed', 4, undefined],
     ]);
-    expect(lanes.map((l) => [l.alias, l.first, l.last])).toEqual([['Ann', 0, 4], ['Dan', 4, 4], ['Cat', 2, 2], ['Bob', 1, 5]]);
+    // Each lane runs from its first to its last event (Ann's goes on to the fork off it).
+    expect(lanes.map((l) => [l.alias, l.first, l.last])).toEqual([['Ann', 1, 8], ['Dan', 8, 8], ['Cat', 5, 5], ['Bob', 3, 9]]);
+    expect(rows[1].turnId).toBe(rows[0].itemId);
     expect(lanes[0].taskId).toBe('t-ann');
-  });
-
-  it('keeps a message that handed nothing off as a row on no lane', () => {
-    const { rows } = mainLanes([user('How is everyone doing?'), user('Fix the orders page'), tool('send_to_agent', 'Sent to Ann; it is working on it.')], tasks, projects);
-    expect(rows.map((r) => [r.kind, r.lane, r.label])).toEqual([['ask', 0, 'How is everyone doing?'], ['send', 1, 'Ann']]);
   });
 });
