@@ -5,7 +5,7 @@
 //
 //   npm run build && node scripts/readme-shots.mjs [en|zh]     → ../docs/assets/<lang>/*.png
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -91,6 +91,26 @@ export function Card({ title, children }: { title: string; children: ReactNode }
 );
 `,
 };
+
+/** Rounds a screenshot's corners (transparent outside), drawn on a canvas in the app's own page. */
+async function roundCorners(page, file, radius = 44) {
+  const png = readFileSync(file).toString('base64');
+  const out = await page.evaluate(async ([png, radius]) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${png}`;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.roundRect(0, 0, img.width, img.height, radius);
+    ctx.clip();
+    ctx.drawImage(img, 0, 0);
+    return canvas.toDataURL('image/png').split(',')[1];
+  }, [png, radius]);
+  writeFileSync(file, Buffer.from(out, 'base64'));
+}
 
 async function shoot(lang) {
   const t = TEXT[lang];
@@ -183,6 +203,7 @@ async function shoot(lang) {
     await until(async () => (await page.getByTestId('map-task').count()) >= 2, 180_000).catch(() => console.log(`${lang}: the session map stayed one task`));
     await page.waitForTimeout(1500);
     await page.screenshot({ path: join(out, 'session-map.png') });
+    for (const f of ['overview.png', 'team-map.png', 'session-map.png']) await roundCorners(page, join(out, f));
     console.log(`${lang}: done → ${out}`);
   } finally {
     await app.close();
