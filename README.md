@@ -62,6 +62,7 @@ Long agent sessions are hard to read back. Work Map draws them.
 
 ## And also
 
+- **Side questions (/btw):** ask an agent about its work while it keeps going. The answer opens beside the conversation, never interrupts the agent and never becomes part of its context. Works with Claude Code and Codex.
 - **Fork** an agent from before any of your earlier messages, Claude Code or Codex, into its own worktree.
 - **Remote machines:** agents can run on your servers over SSH, with the CLIs and logins there.
 - **Images and files:** paste a screenshot, `@`-mention a file, or drop one in. The main agent passes them on.
