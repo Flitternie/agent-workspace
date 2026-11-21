@@ -123,6 +123,10 @@ export function App() {
   const [sideEl, setSideEl] = useState<HTMLDivElement | null>(null);
   const snapshot = useWorkspace();
   const { transcripts, load } = useTranscripts();
+  // Merging tasks in a session map is gone (it could not be undone): earlier merges stop applying.
+  useEffect(() => {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('amw.mapEdits.')) localStorage.removeItem(k);
+  }, []);
   // Every launch starts in Overview (spec 02).
   const [focusId, setFocusId] = useState<string | null>(null);
   // A task created from a dialog shows up with the next snapshot; focus it then.

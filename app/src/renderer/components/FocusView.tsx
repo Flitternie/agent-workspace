@@ -26,7 +26,7 @@ import { SessionMap, SessionMiniMap } from './SessionMap';
 import { MainLanes, MainLanesMini } from './MainLanes';
 import { mainLanes } from '../../shared/main-lanes';
 import { chapters } from '../../shared/chapters';
-import { sessionMap, type MapEdits, type MapGrouping } from '../../shared/session-map';
+import { sessionMap, type MapGrouping } from '../../shared/session-map';
 import { turnChanges } from '../turn-changes';
 import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
@@ -114,24 +114,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     };
   }, [task.taskId, turnCount, settled]);
   const forks = useMemo(() => snapshot.tasks.filter((x) => x.forkedFrom?.taskId === task.taskId), [snapshot.tasks, task.taskId]);
-  // The reader's corrections to the grouping, kept per agent on this machine.
-  const [mapEdits, setMapEdits] = useState<MapEdits>({});
-  useEffect(() => {
-    try {
-      setMapEdits(JSON.parse(localStorage.getItem(`amw.mapEdits.${task.taskId}`) ?? '{}') as MapEdits);
-    } catch {
-      setMapEdits({});
-    }
-  }, [task.taskId]);
-  const mergeTask = (startItemId: string) =>
-    setMapEdits((cur) => {
-      const next = { ...cur, merged: [...new Set([...(cur.merged ?? []), startItemId])] };
-      localStorage.setItem(`amw.mapEdits.${task.taskId}`, JSON.stringify(next));
-      return next;
-    });
-  const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
-  // The header's line: what the agent is on, the last task of its map (as drawn here, with the reader's
-  // corrections; else as cached for the sidebar). Never its latest message, and nothing until a map exists.
+  const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping) : []), [transcript, forks, grouping, turnCount]);
+  // The header's line: what the agent is on, the last task of its map (as drawn here, else as cached for
+  // the sidebar). Never its latest message, and nothing until a map exists.
   const workTitle = (grouping ? mapTasks.at(-1)?.title : undefined) ?? snapshot.workTitles?.[task.taskId];
   // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
   const main = isMainAgent(task);
@@ -356,7 +341,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         {lanes ? (
           <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanes.lanes} rows={lanes.rows} outcomes={outcomes} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} />
         ) : (
-          <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+          <SessionMap tasks={mapTasks} current={currentTask} onJump={(id) => thenConversation(() => jumpTo(id))} onOpenAgent={(id) => onOpen?.(id)} origin={mapOrigin} />
         )}
       </SidePanel>
     ) : sideKind === 'btw' ? (
@@ -567,7 +552,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 {lanes ? (
                   <MainLanes earlier={earlier} tasks={snapshot.tasks} projects={snapshot.projects} lanes={lanesBeside!.lanes} rows={lanesBeside!.rows} outcomes={outcomes} compact onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} />
                 ) : (
-                  <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} onMerge={mergeTask} origin={mapOrigin} />
+                  <SessionMap tasks={mapTasks} current={currentTask} onJump={jumpTo} onOpenAgent={(id) => onOpen?.(id)} origin={mapOrigin} />
                 )}
               </div>
             ) : mapRoom ? (

@@ -959,7 +959,6 @@ export const zh: Record<string, string> = {
   'Forked: {name}': '分叉：{name}',
   'Fold': '收起',
   'Unfold': '展开',
-  'Merge into the task above': '并入上一个任务',
   'in progress': '进行中',
   'dropped': '已放弃',
   '{n} decisions': '{n} 个决策',

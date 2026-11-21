@@ -1507,8 +1507,10 @@ body.resizing .sidebar-resizer {
   background: var(--text-3);
 }
 .msg.user {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  /* A faint tint of the accent: the user's own words read apart from the agent's neutral greys (table
+     headers, code blocks), in either theme. */
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
   border-radius: 10px;
   padding: 6px 12px 8px;
 }
@@ -6596,56 +6598,11 @@ button.subtask-row:hover {
   color: var(--hue) !important;
 }
 .map-caret,
-.map-merge {
-  flex: none;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--text-3);
-  cursor: pointer;
-}
 .map-caret:hover,
-.map-merge:hover {
-  background: var(--hover);
-  color: var(--text);
-}
 .map-caret.open .icon {
   transform: rotate(90deg);
 }
-.map-merge {
-  opacity: 0;
-}
-.map-task:hover .map-merge {
-  opacity: 1;
-}
-.map-merge[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 5;
-  padding: 3px 7px;
-  border-radius: 5px;
-  background: var(--ink);
-  color: #fff;
-  font-size: 11px;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-.map-merge[data-tip]:hover::after {
-  opacity: 1;
-  transition-delay: 0.25s;
-}
-.map-meta {
+.map-task:hover .map-meta {
   margin-top: 2px;
   font-size: 11px;
   color: var(--text-3);
