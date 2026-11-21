@@ -25,7 +25,7 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot, BtwEntry, ImageRef } from '../shared/types';
+  WorkspaceSnapshot, BtwEntry, ImageRef, AgentStatus } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -70,6 +70,14 @@ interface LiveSession {
   localId: string;
   session: ProviderSession;
   turnActive: boolean;
+  /**
+   * Connected in the background when the user opened the agent's page, and not used since. Its
+   * start-up is not activity: it must not move the agent in the sidebar, flag it or clear it.
+   * Holds the status it had, to go back to if the session ends unused.
+   */
+  warm?: { status: AgentStatus };
+  /** The "Resumed native session" note of a background connect, held back until the session is used. */
+  resumeNote?: string;
 }
 
 /** A `!command` the user typed is stopped after this long. */
@@ -120,6 +128,8 @@ export class Workspace {
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
+  /** Connects under way in the background (opening a page), whose failures stay quiet. */
+  private warming = new Set<string>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
   private changeListeners = new Set<() => void>();
@@ -1025,22 +1035,62 @@ export class Workspace {
     return this.store.data.sessions.find((s) => s.localId === task.sessionLocalId);
   }
 
-  /** Connects the task to its provider: resumes the recorded native session, or creates one. */
-  private connect(taskId: string): Promise<LiveSession> {
+  /**
+   * Connects the task to its provider: resumes the recorded native session, or creates one.
+   * Anything but a background connect is a use of the session: a warm one stops being quiet.
+   */
+  private connect(taskId: string, background = false): Promise<LiveSession> {
     const existing = this.live.get(taskId);
-    if (existing) return Promise.resolve(existing);
+    if (existing) return Promise.resolve(background ? existing : this.claim(taskId, existing));
     const pending = this.connecting.get(taskId);
-    if (pending) return pending;
-    const p = this.doConnect(taskId).finally(() => this.connecting.delete(taskId));
+    if (pending) {
+      if (background) return pending;
+      // A background connect that fails says nothing; asked for by the user, try again out loud.
+      const quiet = this.warming.has(taskId);
+      return pending.then(
+        (l) => this.claim(taskId, l),
+        (error) => (quiet ? this.connect(taskId) : Promise.reject(error)),
+      );
+    }
+    if (background) this.warming.add(taskId);
+    const p = this.doConnect(taskId, background).finally(() => {
+      this.connecting.delete(taskId);
+      this.warming.delete(taskId);
+    });
     this.connecting.set(taskId, p);
-    return p;
+    return background ? p : p.then((l) => this.claim(taskId, l));
   }
 
-  private async doConnect(taskId: string): Promise<LiveSession> {
+  /** A session connected in the background is being used: from now on it is like any other. */
+  private claim(taskId: string, live: LiveSession): LiveSession {
+    if (!live.warm) return live;
+    live.warm = undefined;
+    if (live.resumeNote) this.appendSystem(taskId, live.resumeNote);
+    live.resumeNote = undefined;
+    return live;
+  }
+
+  /**
+   * The user opened this agent's page: connect it now, in the background, so the first message
+   * does not wait for the session to start. Opening is not using: the agent keeps its place, its
+   * set-aside flag, unread mark, summary and status, and a failure stays quiet (sending surfaces it).
+   * Only sessions there is something to resume; not the main agent (its chapters start their own
+   * sessions) nor agents on other hosts (a remote process is not cheap to start on a whim).
+   */
+  warm(taskId: string): void {
+    const t = this.findTask(taskId);
+    if (!t || t === this.store.data.mainAgent || t.host || this.live.has(taskId) || this.connecting.has(taskId)) return;
+    if (!this.opts.adapters[t.provider] || !this.currentSession(t)?.nativeSessionId) return;
+    void this.connect(taskId, true).catch((error) => this.log('background connect failed', taskId, error));
+  }
+
+  private async doConnect(taskId: string, background = false): Promise<LiveSession> {
     const task = this.task(taskId);
     const adapter = this.opts.adapters[task.provider];
     if (!adapter) throw new Error(`Provider ${task.provider} is not available.`);
     const prev = this.currentSession(task);
+    // What a background connect leaves as it found it, whatever start-up does.
+    const before = background ? { status: task.status, summary: task.summary, lastError: task.lastError, updatedAt: task.updatedAt } : undefined;
     const resumeId = prev?.nativeSessionId || undefined;
     const record: SessionRecord = {
       localId: `s-${randomUUID().slice(0, 8)}`,
@@ -1053,8 +1103,10 @@ export class Workspace {
     };
     this.store.data.sessions.push(record);
     task.sessionLocalId = record.localId;
-    task.status = 'starting';
-    task.lastError = undefined;
+    if (!before) {
+      task.status = 'starting';
+      task.lastError = undefined;
+    }
     const injected = this.memoryGiven(task);
     task.injectedMemoryIds = injected.map((m) => m.id);
     task.memorySeen = seenOf(injected);
@@ -1090,12 +1142,20 @@ export class Workspace {
         this.handleEvent(taskId, record.localId, event);
       },
     );
-    const live: LiveSession = { localId: record.localId, session, turnActive: false };
+    const live: LiveSession = { localId: record.localId, session, turnActive: false, ...(before ? { warm: { status: before.status } } : {}) };
     this.live.set(taskId, live);
     try {
       await session.start();
     } catch (error) {
       this.live.delete(taskId);
+      if (before) {
+        // Nothing the user asked for failed: no error, no attention; the agent is as it was.
+        this.store.data.sessions = this.store.data.sessions.filter((s) => s !== record);
+        task.sessionLocalId = prev?.localId;
+        Object.assign(task, before);
+        this.changed();
+        throw error;
+      }
       const message = (error as Error).message;
       task.status = 'failed';
       task.lastError = message;
@@ -1106,15 +1166,21 @@ export class Workspace {
     } finally {
       replaying = false;
     }
+    const note = history.length ? `Resumed native ${task.provider} session ${record.nativeSessionId} (${history.length} items restored).` : resumeId ? `Resumed native ${task.provider} session ${resumeId}.` : undefined;
     // The native session is authoritative for history; replace the display cache with it.
     if (history.length) {
-      this.store.setTranscript(taskId, [
-        ...history,
-        { id: `sys-${randomUUID()}`, taskId, role: 'system', text: `Resumed native ${task.provider} session ${record.nativeSessionId} (${history.length} items restored).`, createdAt: now() },
-      ]);
+      this.store.setTranscript(taskId, [...history, ...(note && !before ? [{ id: `sys-${randomUUID()}`, taskId, role: 'system' as const, text: note, createdAt: now() }] : [])]);
       for (const cb of this.transcriptListeners) cb(taskId, null);
-    } else if (resumeId) {
-      this.appendSystem(taskId, `Resumed native ${task.provider} session ${resumeId}.`);
+    } else if (note && !before) {
+      this.appendSystem(taskId, note);
+    }
+    if (before) {
+      // Only "Not connected" is no longer true; a failure, a report or a question stays as it was.
+      live.resumeNote = note;
+      task.updatedAt = before.updatedAt;
+      if (task.status === 'disconnected') task.status = 'idle';
+      this.changed();
+      return live;
     }
     if (task.status === 'starting') task.status = 'idle';
     task.summary = resumeId ? 'Session resumed with its previous conversation.' : task.summary;
@@ -1909,7 +1975,21 @@ export class Workspace {
       this.log('dropped stale event', taskId, sessionLocalId, event.type);
       return;
     }
-    task.updatedAt = now();
+    let quiet = false;
+    if (live.warm) {
+      // A background connect ending before it was used: back to "Not connected", nothing to report.
+      if (event.type === 'sessionFailed' || event.type === 'sessionDisconnected') {
+        this.live.delete(taskId);
+        this.expireNative(taskId, sessionLocalId, 'Provider session ended.');
+        this.log('background session ended', taskId, event.type === 'sessionFailed' ? event.error : event.reason);
+        if (task.status === 'idle') task.status = live.warm.status;
+        return this.changed();
+      }
+      // Its start-up (the model, its id, history) is not activity; anything else (a turn of its own) is.
+      quiet = event.type === 'sessionStarted' || event.type === 'model' || (event.type === 'transcriptItem' && !!event.history);
+      if (!quiet) this.claim(taskId, live);
+    }
+    if (!quiet) task.updatedAt = now();
     // The provider's own retry is over once anything else happens.
     if (task.retry?.by === 'provider' && event.type !== 'retrying') task.retry = undefined;
     switch (event.type) {

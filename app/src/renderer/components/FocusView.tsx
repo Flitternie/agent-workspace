@@ -59,6 +59,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Main agent: the request the user unfolded in "waiting on you"; what they write is likely about it.
   const [aboutId, setAboutId] = useState<string | null>(null);
   useEffect(() => setAboutId(null), [task.taskId]);
+  // Opened: start its session in the background so the first message does not wait for it.
+  // The main process leaves the agent's place, status and flags as they were.
+  useEffect(() => {
+    void call('task:warm', { taskId: task.taskId }).catch(() => {});
+  }, [task.taskId]);
   const aboutItem = aboutId ? snapshot.attention.find((a) => a.id === aboutId && a.state === 'open') : undefined;
   const aboutTask = aboutItem ? snapshot.tasks.find((x) => x.taskId === aboutItem.taskId) : undefined;
   const about = aboutItem && aboutTask ? { id: aboutItem.id, alias: aboutTask.alias, headline: aboutItem.headline } : undefined;
