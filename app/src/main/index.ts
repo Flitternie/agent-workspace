@@ -13,6 +13,7 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
+import type { ResearchDoc } from '../shared/research';
 import { documentToHtml } from './documents';
 import { bundleIcon, installedApps, launch, launchCommand } from './open-in-app';
 import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
@@ -152,6 +153,9 @@ const handlers: { [C in IpcChannel]: Handler } = {
     return r.canceled ? null : (r.filePaths[0] ?? null);
   },
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
+  'research:get': (i: { projectId: string }) => workspace.researchGet(i.projectId),
+  'research:save': (i: { projectId: string; doc: ResearchDoc }) => workspace.researchSave(i.projectId, i.doc),
+  'research:create': (i: { projectId: string; title: string; goal: string; sample: boolean }) => workspace.researchCreate(i.projectId, i.title, i.goal, i.sample),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
   'ssh:check': (i: { host: string; quiet?: boolean }) => workspace.checkHost(i.host, { quiet: i.quiet }),

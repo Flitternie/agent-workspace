@@ -624,8 +624,8 @@ function restored(taskId: string): ShownPreview | null {
   return saved ? { ...saved, nonce: 1, again: false } : null;
 }
 
-/** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
-function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
+/** The bar between the conversation and the preview: drag to resize, double-click for the default width. Other pages' side columns use it too. */
+export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min = PREVIEW_MIN }: { width: number; room: number; onChange: (w: number) => void; reset?: number; min?: number }) {
   // A drag in progress ends with the bar too: if the panel goes while dragging, the pointer is not left as a resize cursor.
   const stop = useRef<(() => void) | null>(null);
   useEffect(() => () => stop.current?.(), []);
@@ -637,7 +637,7 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
       aria-label={t('Resize the side column')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="panel-resizer"
-      onDoubleClick={() => onChange(PREVIEW_WIDTH)}
+      onDoubleClick={() => onChange(reset)}
       onPointerDown={(e) => {
         e.preventDefault();
         const startX = e.clientX;
@@ -646,7 +646,7 @@ function PanelResizer({ width, room, onChange }: { width: number; room: number; 
         // On the window, so a fast drag that outruns the thin bar (or outlives it) still ends.
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
-          onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
+          onChange(Math.min(previewMaxWidth(room), Math.max(min, startW + (startX - ev.clientX))));
         };
         const up = () => {
           window.removeEventListener('pointermove', move);

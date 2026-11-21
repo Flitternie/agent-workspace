@@ -1,4 +1,5 @@
 import type { MapGrouping } from '../shared/session-map';
+import type { ResearchDoc } from '../shared/research';
 import type { FileMatch } from '../shared/file-match';
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type { FoundSkill, LibrarySkill } from '../shared/skills';
@@ -50,6 +51,9 @@ export interface Outputs {
   'ssh:terminal': void;
   'task:create': Task;
   'task:send': DispatchResult;
+  'research:get': ResearchDoc | null;
+  'research:save': ResearchDoc;
+  'research:create': ResearchDoc;
   'attachment:save': ImageRef;
   'task:interrupt': void;
   'task:models': ModelOption[];

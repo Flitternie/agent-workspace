@@ -218,6 +218,25 @@ describe('sub-agents', () => {
   });
 });
 
+describe('research', () => {
+  it('shows in the snapshot once created, follows the agents linked to it, and comes with the demo', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    expect(ws.snapshot().research).toEqual([]);
+    const doc = ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    expect(ws.snapshot().research).toEqual([{ projectId: p.projectId, title: 'Tuning', taskIds: [] }]);
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Data agent', isolate: false, mockScript: 'work', instruction: 'go' });
+    ws.researchSave(p.projectId, { ...doc, nodes: [{ id: 'a1', type: 'aspect', parent: null, title: 'Data', status: 'running', taskId: t.taskId, createdAt: '' }] });
+    expect(ws.snapshot().research[0].taskIds).toEqual([t.taskId]);
+    expect(ws.researchGet(p.projectId)!.nodes[0].title).toBe('Data');
+
+    const demo = open();
+    await demo.seedDemo(repo());
+    expect(demo.snapshot().research).toHaveLength(1);
+    expect(demo.researchGet(demo.snapshot().projects[0].projectId)!.nodes.length).toBeGreaterThan(20);
+  });
+});
+
 describe('voice dispatch', () => {
   it('off-focus dispatch reaches only the target; the focused task history is unchanged', async () => {
     const { ws, A, B } = await demo(open());

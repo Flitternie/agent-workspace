@@ -50,6 +50,8 @@ import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
+import { createResearch, readResearch, sampleResearch, writeResearch } from './research';
+import { taskIdsOf, type ResearchDoc, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -483,10 +485,48 @@ export class Workspace {
     for (const cb of this.changeListeners) cb();
   }
 
+  // ---------------------------------------------------------------- research (a project's tree, in its repo)
+
+  /** Which projects have a research and whose agents are in it, read once per project and kept current on save. */
+  private researchIndex = new Map<string, ResearchSummary | null>();
+
+  private researchSummaries(): ResearchSummary[] {
+    for (const p of this.store.data.projects)
+      if (!this.researchIndex.has(p.projectId)) {
+        const doc = readResearch(p);
+        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+      }
+    return this.store.data.projects.map((p) => this.researchIndex.get(p.projectId)).filter((x): x is ResearchSummary => !!x);
+  }
+
+  private indexResearch(projectId: string, doc: ResearchDoc | null): void {
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+    this.changed();
+  }
+
+  researchGet(projectId: string): ResearchDoc | null {
+    const doc = readResearch(this.project(projectId));
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+    return doc;
+  }
+
+  researchSave(projectId: string, doc: ResearchDoc): ResearchDoc {
+    writeResearch(this.project(projectId), doc);
+    this.indexResearch(projectId, doc);
+    return doc;
+  }
+
+  researchCreate(projectId: string, title: string, goal: string, sample: boolean): ResearchDoc {
+    const doc = createResearch(this.project(projectId), title, goal, sample, this.store.data.settings.language === 'zh' ? 'zh' : 'en');
+    this.indexResearch(projectId, doc);
+    return doc;
+  }
+
   snapshot(): WorkspaceSnapshot {
     this.stampStatus();
     const d = this.store.data;
     return {
+      research: this.researchSummaries(),
       projects: d.projects,
       tasks: d.tasks,
       sessions: d.sessions,
@@ -3048,6 +3088,11 @@ export class Workspace {
   /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
   async seedDemo(demoRepoPath: string): Promise<void> {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
+    // A filled-in research to look at (no agents behind it).
+    if (!readResearch(project)) {
+      writeResearch(project, sampleResearch(this.store.data.settings.language === 'zh' ? 'zh' : 'en'));
+      this.researchIndex.delete(project.projectId);
+    }
     // Labels come from the titles (the demo asks no model).
     const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
       this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });

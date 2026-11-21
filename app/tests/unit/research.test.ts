@@ -1,0 +1,141 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { createResearch, readResearch, sampleResearch, writeResearch } from '../../src/main/research';
+import {
+  addFinding,
+  addNode,
+  bestExperiment,
+  childrenOf,
+  contributions,
+  emptyResearch,
+  experimentStatus,
+  judge,
+  layoutGraph,
+  methodStatus,
+  normalizeResearch,
+  removeNode,
+  taskIdsOf,
+  updateNode,
+} from '../../src/shared/research';
+import type { Project } from '../../src/shared/types';
+
+const doc = sampleResearch('en');
+const byTitle = (t: string) => doc.nodes.find((n) => n.title === t)!;
+
+describe('research tree', () => {
+  it('rolls experiments up into their method, and picks the best on the aspect’s metric', () => {
+    // Lower is better for the architecture's proxy loss.
+    const attn = byTitle('Attention');
+    expect(bestExperiment(doc, attn)?.title).toBe('QK-norm');
+    expect(methodStatus(doc, attn)).toBe('running'); // GQA + QK-norm still runs
+    expect(methodStatus(doc, byTitle('Activation'))).toBe('pass');
+    expect(methodStatus(doc, byTitle('Back-translation'))).toBe('idea');
+    // Higher is better for data quality.
+    expect(bestExperiment(doc, byTitle('Deduplication'))?.title).toBe('threshold 0.85');
+  });
+
+  it('judges a result against the aspect’s start; an agent at work keeps an experiment running', () => {
+    const m = { name: 'loss', higherIsBetter: false, baseline: 3.4 };
+    expect(judge(m, 3.3)).toBe('pass');
+    expect(judge(m, 3.5)).toBe('fail');
+    expect(judge(undefined, 1)).toBe('pass');
+    const e = { ...byTitle('20%'), status: 'idea' as const };
+    expect(experimentStatus(e, 'running')).toBe('running');
+    expect(experimentStatus(e, 'idle')).toBe('idea');
+    // A recorded result stays, whatever the agent does next.
+    expect(experimentStatus({ ...e, status: 'pass' }, 'running')).toBe('pass');
+  });
+
+  it('says which aspects move the end result, from ablations, and how sure', () => {
+    const c = contributions(doc);
+    expect(c.map((x) => x.aspect.title)).toEqual(['Architecture', 'Data', 'Training']);
+    expect(c[0]).toMatchObject({ evidence: 1 });
+    expect(c[0].estimate).toBeCloseTo(0.016);
+    expect(c[1].evidence).toBe(2);
+    expect(c[1].estimate).toBeCloseTo(0.012);
+    expect(c[2]).toMatchObject({ estimate: null, evidence: 0 });
+    // The combinations row is not an aspect of its own here.
+    expect(c.some((x) => x.aspect.combos)).toBe(false);
+  });
+
+  it('lays out down to the chosen level; experiments fold into one item per method unless opened', () => {
+    const aspects = layoutGraph(doc, 'aspect');
+    expect(aspects.items.filter((i) => i.kind === 'aspect')).toHaveLength(4);
+    expect(aspects.items.some((i) => i.kind === 'method')).toBe(false);
+    const methods = layoutGraph(doc, 'method');
+    expect(methods.items.filter((i) => i.kind === 'experiment')).toHaveLength(0);
+    const dedupRuns = methods.items.find((i) => i.id === `runs:${byTitle('Deduplication').id}`)!;
+    expect(dedupRuns.runs).toHaveLength(3);
+    // A folded experiment is drawn at its method's runs item (cross links still find it).
+    expect(methods.at.get(byTitle('threshold 0.85').id)).toBe(dedupRuns);
+    const opened = layoutGraph(doc, 'method', new Set([byTitle('Deduplication').id]));
+    expect(opened.items.filter((i) => i.kind === 'experiment').map((i) => i.node!.title)).toEqual(['threshold 0.8', 'threshold 0.85', 'threshold 0.9']);
+    const all = layoutGraph(doc, 'experiment');
+    expect(all.items.filter((i) => i.kind === 'experiment')).toHaveLength(doc.nodes.filter((n) => n.type === 'experiment').length);
+    // No two items share a spot.
+    const spots = new Set(all.items.map((i) => `${i.x},${i.y}`));
+    expect(spots.size).toBe(all.items.length);
+  });
+
+  it('edits make a new doc; removing a method takes its experiments and the links to it', () => {
+    const pos = byTitle('Positional encoding');
+    const yarn = byTitle('Positional encoding · length extrapolation');
+    expect(yarn.links?.[0]).toMatchObject({ from: pos.id, kind: 'mutate' });
+    const next = removeNode(doc, pos.id);
+    expect(next.nodes.find((n) => n.id === pos.id)).toBeUndefined();
+    expect(next.nodes.some((n) => n.parent === pos.id)).toBe(false);
+    expect(next.nodes.find((n) => n.id === yarn.id)?.links).toEqual([]);
+    expect(doc.nodes.find((n) => n.id === pos.id)).toBeDefined(); // the old doc is untouched
+
+    const { doc: d2, node } = addNode(emptyResearch('t', 'g'), { type: 'aspect', parent: null, title: 'Data', status: 'running' });
+    const d3 = addFinding(updateNode(d2, node.id, { taskId: 't-1' }), node.id, 'learned', 'you');
+    expect(childrenOf(d3, null)[0]).toMatchObject({ taskId: 't-1', findings: [{ text: 'learned', by: 'you' }] });
+    expect(taskIdsOf(d3)).toEqual(['t-1']);
+  });
+
+  it('opens an older or hand-edited file: missing fields get defaults, broken nodes are dropped', () => {
+    const d = normalizeResearch({ title: 'x', nodes: [{ id: 'a', type: 'aspect', title: 'A', parent: null }, { id: 'bad' }, { id: 'm', type: 'nope', title: 'M' }] });
+    expect(d).toMatchObject({ version: 1, title: 'x', goal: '', evidence: [] });
+    expect(d!.nodes.map((n) => [n.id, n.status])).toEqual([['a', 'idea']]);
+    expect(normalizeResearch({ nodes: [] })).toBeNull();
+    expect(normalizeResearch('nope')).toBeNull();
+  });
+});
+
+describe('research in the repository', () => {
+  const project = (): Project => {
+    const dir = mkdtempSync(join(tmpdir(), 'amw-research-'));
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    return { projectId: 'p1', name: 'p', rootPath: dir, isGitRepo: true, createdAt: '' };
+  };
+
+  it('is written to .research/research.json (with a README) and read back', () => {
+    const p = project();
+    expect(readResearch(p)).toBeNull();
+    const created = createResearch(p, 'Tuning', 'Raise accuracy', false, 'en');
+    expect(created).toMatchObject({ title: 'Tuning', goal: 'Raise accuracy', nodes: [] });
+    expect(existsSync(join(p.rootPath, '.research', 'research.json'))).toBe(true);
+    expect(readFileSync(join(p.rootPath, '.research', 'README.md'), 'utf8')).toMatch(/research tree/);
+    const { doc: next } = addNode(created, { type: 'aspect', parent: null, title: 'Data', status: 'running' });
+    writeResearch(p, next);
+    expect(readResearch(p)!.nodes.map((n) => n.title)).toEqual(['Data']);
+    expect(() => createResearch(p, 'Again', '', false, 'en')).toThrow(/already has/);
+  });
+
+  it('can start from the example, in the UI language; a broken file reads as none; SSH projects say so', () => {
+    const p = project();
+    const zh = createResearch(p, '', '', true, 'zh');
+    expect(zh.title).toBe('nanochat 预训练调优');
+    expect(zh.nodes.some((n) => n.title === '跨方面组合' && n.combos)).toBe(true);
+    const q = project();
+    mkdirSync(join(q.rootPath, '.research'));
+    writeFileSync(join(q.rootPath, '.research', 'research.json'), '{ not json');
+    expect(readResearch(q)).toBeNull();
+    const remote = { ...project(), host: 'gpu-box' };
+    expect(readResearch(remote)).toBeNull();
+    expect(() => createResearch(remote, 'x', '', false, 'en')).toThrow(/SSH hosts/);
+  });
+});

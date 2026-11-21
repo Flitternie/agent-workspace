@@ -11,7 +11,41 @@ const text = z.string().max(100_000);
 /** A stored image (main/attachments.ts names them by their content). */
 const imageRef = z.object({ id: z.string().regex(/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/), mediaType: z.string().max(50), name: z.string().max(200).optional() });
 
+/** A research tree as the page saves it (shared/research.ts). */
+const short = z.string().max(2000);
+const researchMetric = z.object({ name: z.string().max(200), higherIsBetter: z.boolean(), baseline: z.number().optional(), digits: z.number().int().min(0).max(8).optional() });
+const researchNode = z.object({
+  id,
+  type: z.enum(['aspect', 'method', 'experiment']),
+  parent: id.nullable(),
+  title: z.string().min(1).max(300),
+  status: z.enum(['idea', 'running', 'pass', 'fail', 'error']),
+  taskId: id.optional(),
+  metric: researchMetric.optional(),
+  combos: z.boolean().optional(),
+  design: text.optional(),
+  source: short.optional(),
+  links: z.array(z.object({ from: id, kind: z.enum(['combine', 'mutate', 'borrow']), note: short.optional() })).max(20).optional(),
+  config: text.optional(),
+  value: z.number().optional(),
+  findings: z.array(z.object({ id, text: text, by: z.string().max(200).optional(), at: z.string().max(40) })).max(200).optional(),
+  createdAt: z.string().max(40),
+});
+const researchDoc = z.object({
+  version: z.literal(1),
+  title: z.string().min(1).max(300),
+  goal: text,
+  endMetric: researchMetric.optional(),
+  nodes: z.array(researchNode).max(5000),
+  evidence: z.array(z.object({ id, kind: z.enum(['e2e', 'ablation']), title: z.string().max(300), value: z.number(), delta: z.number(), aspect: id.optional(), at: z.string().max(40) })).max(1000),
+  createdAt: z.string().max(40),
+  updatedAt: z.string().max(40),
+});
+
 export const ipcSchemas = {
+  'research:get': z.object({ projectId: id }),
+  'research:save': z.object({ projectId: id, doc: researchDoc }),
+  'research:create': z.object({ projectId: id, title: z.string().min(1).max(300), goal: text, sample: z.boolean() }),
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),
   'project:pickDirectory': z.object({}),

@@ -33,6 +33,9 @@ export function Sidebar({
   expanded,
   toggle,
   onOpenSubtask,
+  researchOpen,
+  onOpenResearch,
+  onNewResearch,
 }: {
   snapshot: WorkspaceSnapshot;
   focusId: string | null;
@@ -48,6 +51,10 @@ export function Sidebar({
   teamList: Team[];
   expanded: (team: Team) => boolean;
   toggle: (team: Team) => void;
+  /** The project whose research page is open. */
+  researchOpen?: string | null;
+  onOpenResearch: (projectId: string) => void;
+  onNewResearch: (projectId: string) => void;
 }) {
   const micMode = snapshot.settings.micMode ?? 'open';
   const openAll = snapshot.attention.filter((a) => a.state === 'open');
@@ -74,6 +81,45 @@ export function Sidebar({
   // Projects where nothing is going on (every agent idle for days or set aside) fold into one
   // "Archived" row at the end, so the list does not grow with every project ever used. A project
   // comes back by itself as soon as one of its agents does something, or is opened or messaged.
+  // A research is one row in its project's team (its agents are on its page), above the members.
+  const researchOf = (projectId: string) => snapshot.research.find((r) => r.projectId === projectId);
+  const researchRow = (projectId: string) => {
+    const r = researchOf(projectId);
+    if (!r) return null;
+    const ids = new Set(r.taskIds);
+    const running = snapshot.tasks.filter((x) => ids.has(x.taskId) && (x.status === 'running' || x.status === 'starting')).length;
+    const waiting = new Set(snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && ids.has(a.taskId)).map((a) => a.taskId)).size;
+    const on = researchOpen === projectId;
+    return (
+      <div key={`research-${projectId}`} className={`agent-item${on ? ' active' : ''}`}>
+        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(projectId)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
+          <span className="alias alias-sm research-mark" aria-hidden>
+            <Icon name="branch" size={12} />
+          </span>
+          <span className="agent-row-text">
+            <span className="agent-row-name">
+              <span className="truncate">{r.title}</span>
+              {waiting ? <span className="team-count needs">⚑ {waiting}</span> : null}
+            </span>
+            <span className="agent-row-sub">
+              {tr('Research')}
+              {r.taskIds.length ? ` · ${tr('{n} agents', { n: r.taskIds.length })}` : ''}
+              {running ? ` · ${tr('{n} working', { n: running })}` : ''}
+            </span>
+          </span>
+        </button>
+      </div>
+    );
+  };
+  // Starting one: offered on a team without one, when the pointer is over it.
+  const newResearch = (projectId: string) =>
+    researchOf(projectId) || snapshot.projects.find((p) => p.projectId === projectId)?.host ? null : (
+      <button key={`new-research-${projectId}`} className="team-idle team-new-research" onClick={() => onNewResearch(projectId)} data-testid="new-research">
+        <Icon name="branch" size={11} /> {tr('New research')}
+      </button>
+    );
+  // A project whose agents are all in its research has no team of its own: its research still shows.
+  const teamless = snapshot.research.filter((r) => !teamList.some((team) => team.project.projectId === r.projectId) && snapshot.projects.some((p) => p.projectId === r.projectId));
   const live = teamList.filter((team) => team.active);
   const archived = teamList.filter((team) => !team.active);
   const [archiveOpen, setArchiveOpenState] = useState(() => localStorage.getItem('amw.archiveOpen') === '1');
@@ -104,6 +150,7 @@ export function Sidebar({
               </button>
               {open_ ? (
                 <>
+                  {researchRow(team.project.projectId)}
                   {team.members.map((t) => row(t))}
                   {team.idle.length ? (
                     <>
@@ -113,6 +160,7 @@ export function Sidebar({
                       {idleShown ? team.idle.map((t) => row(t)) : null}
                     </>
                   ) : null}
+                  {newResearch(team.project.projectId)}
                 </>
               ) : null}
             </div>
@@ -185,7 +233,7 @@ export function Sidebar({
         </span>
       </div>
 
-      <button className={`nav-item${focusId || settingsOpen ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
+      <button className={`nav-item${focusId || settingsOpen || researchOpen ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
         <Icon name="grid" />
         <span>{tr('Overview')}</span>
         {needYou ? <span className="count">{needYou}</span> : null}
@@ -233,6 +281,14 @@ export function Sidebar({
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
         {live.map(renderTeam)}
+        {teamless.map((r) => (
+          <div key={r.projectId} className="team open" data-testid="team" data-project={snapshot.projects.find((p) => p.projectId === r.projectId)?.name}>
+            <div className="team-head archived-head">
+              <span className="team-name truncate">{snapshot.projects.find((p) => p.projectId === r.projectId)?.name}</span>
+            </div>
+            {researchRow(r.projectId)}
+          </div>
+        ))}
         {archived.length ? (
           <div className="team-archive" data-testid="team-archive">
             <button className="team-head team-archive-head" onClick={() => setArchiveOpen(!archiveShown)} aria-expanded={archiveShown} data-testid="team-archive-head" title={tr('Nothing going on for 3 days; a project comes back when one of its agents is used.')}>
