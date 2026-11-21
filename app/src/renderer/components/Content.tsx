@@ -285,7 +285,8 @@ export function groupTranscript(items: TranscriptItem[], allTools = false): Arra
 }
 
 /** How many of the latest turns stay open; earlier ones fold to: your message, a summary, the reply. */
-export const OPEN_TURNS = 3;
+/** The latest turn stays open; earlier ones fold to a line. */
+export const OPEN_TURNS = 1;
 
 export interface Turn {
   /** The user's message that starts it (none for what came before the first one). */
@@ -298,11 +299,15 @@ export interface Turn {
   live: boolean;
 }
 
-/** The conversation as turns: each of the user's messages and what the agent did until the next one. */
+/**
+ * The conversation as turns: each of the user's messages and what the agent did until the next one. A
+ * message added while the agent was working (steering it, not stopping it) belongs to the turn it joined.
+ */
 export function splitTurns(items: TranscriptItem[]): Turn[] {
   const turns: Array<{ user?: TranscriptItem; rest: TranscriptItem[] }> = [];
   for (const it of items) {
-    if (it.role === 'user' || !turns.length) turns.push(it.role === 'user' ? { user: it, rest: [] } : { rest: [it] });
+    const starts = it.role === 'user' && !(it.delivery === 'steer' && turns.length);
+    if (starts || !turns.length) turns.push(it.role === 'user' ? { user: it, rest: [] } : { rest: [it] });
     else turns[turns.length - 1].rest.push(it);
   }
   return turns.map(({ user, rest }) => {
