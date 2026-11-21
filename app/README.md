@@ -47,7 +47,6 @@ Both also work from the repo root.
 | `npm run smoke:content [claude\|codex]` | Real CLIs edit a file and run a command; both adapters must emit the same diffs, terminal output and approval previews |
 | `npm run smoke:voice` | TTS fixtures → STT → router (rules + LLM) against the OpenAI API |
 | `npm run typecheck` | Strict TypeScript |
-| `npm run build && node scripts/readme-shots.mjs [en\|zh]` | The README screenshots (`docs/assets/<lang>/`): real Claude Code and Codex agents do small tasks in a scratch repository, off screen (a few minutes, a little usage) |
 
 ## Release
 
