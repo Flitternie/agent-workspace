@@ -7653,3 +7653,14 @@ button.subtask-row:hover {
   font-weight: 500;
   color: var(--text-2);
 }
+
+/* A card with one figure (the context used): as wide as that figure, not the tokens card's width. */
+.usage-pop.narrow {
+  width: auto;
+  min-width: 160px;
+  max-width: 220px;
+}
+/* A folded row's "details" and its file's Preview sit together at the row's end (not split apart). */
+.tool-more + .file-actions {
+  margin-left: 10px;
+}

@@ -115,6 +115,8 @@ describe('session usage in the agent header', () => {
     await page.getByTestId('usage-context').click();
     expect(await page.getByTestId('usage-context-pop').innerText()).toContain('~24.7K / 1M');
     const pop = (await page.getByTestId('usage-context-pop').boundingBox())!;
+    // As wide as its one figure, not the tokens card's width.
+    expect(pop.width).toBeLessThanOrEqual(220);
     expect(pop.y + pop.height).toBeLessThanOrEqual((await page.getByTestId('usage-context').boundingBox())!.y);
     await page.screenshot({ path: join(shots, 'usage-under-box.png') });
     await head('usage-context-pop.png');

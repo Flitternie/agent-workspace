@@ -40,7 +40,7 @@ function resetText(at: number, now: number): string {
 }
 
 /** A chip in the header's info row; a click opens a small card under it (out of the row, which clips). */
-function UsageChip({ testId, className, title, label, children }: { testId: string; className?: string; title: string; label: ReactNode; children: ReactNode }) {
+function UsageChip({ testId, className, popClass, title, label, children }: { testId: string; className?: string; popClass?: string; title: string; label: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -83,7 +83,7 @@ function UsageChip({ testId, className, title, label, children }: { testId: stri
       </button>
       {open
         ? createPortal(
-            <div ref={card} className="usage-pop" role="dialog" aria-label={title} data-testid={`${testId}-pop`} style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
+            <div ref={card} className={`usage-pop${popClass ? ` ${popClass}` : ''}`} role="dialog" aria-label={title} data-testid={`${testId}-pop`} style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
               {children}
             </div>,
             document.body,
@@ -151,6 +151,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
       {only.includes('context') && u?.context ? (
         <UsageChip
           testId="usage-context"
+          popClass="narrow"
           title={t('Context window used')}
           label={
             <>
