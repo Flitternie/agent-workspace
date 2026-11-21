@@ -514,6 +514,8 @@ export class Workspace {
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
       remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
+      // Read from the cached groupings only: nothing is asked of a model to fill it.
+      workTitles: Object.fromEntries(Object.entries(d.sessionMaps ?? {}).flatMap(([id, g]) => (g.version === GROUPING_VERSION && g.tasks.length ? [[id, g.tasks.at(-1)!.title]] : []))),
     };
   }
 
@@ -903,7 +905,8 @@ export class Workspace {
         } else grouping = parseGrouping(await ask(GROUPING_PROMPT, turnsDigest(items)), turns);
         if (grouping) {
           cache[taskId] = grouping;
-          this.store.save();
+          // Its last task's title is what the sidebar and header show for the agent: send a new snapshot.
+          this.changed();
         }
         return grouping ?? current ?? null;
       } catch (error) {

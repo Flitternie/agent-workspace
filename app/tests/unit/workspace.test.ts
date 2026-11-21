@@ -729,4 +729,21 @@ describe('user activity (orders the sidebar)', () => {
     await ws.respondAttention(ws.snapshot().attention.find((x) => x.kind === 'approval')!.id, 'deny');
     expect(Date.now() - Date.parse(at()!)).toBeLessThan(5_000);
   });
+
+  it('the snapshot names what each agent is on from its cached session map, and nothing before one exists', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const answer = JSON.stringify({ tasks: [{ start: 0, title: 'Clean the build', status: 'in_progress' }] });
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY) }, backgroundModel: async () => answer });
+    opened.push(ws);
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Build', mockScript: 'work', instruction: 'Clean the build output.', isolate: false });
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status !== 'running' && ws.transcript(a.taskId).length > 1);
+    expect(ws.snapshot().workTitles[a.taskId]).toBeUndefined();
+    let changes = 0;
+    ws.onChange(() => changes++);
+    await ws.sessionMapGrouping(a.taskId);
+    expect(ws.snapshot().workTitles[a.taskId]).toBe('Clean the build');
+    // A new snapshot goes out when the map is made, so the sidebar shows it without waiting for other news.
+    expect(changes).toBeGreaterThan(0);
+  });
 });

@@ -495,6 +495,11 @@ export interface WorkspaceSnapshot {
   connectedTaskIds: string[];
   /** Live Claude sessions with Remote Control on: taskId → the session's link (claude.ai/code, the Claude app). */
   remoteControl: Record<string, string>;
+  /**
+   * Per agent: the title of the last task on its session map (the model's grouping, as cached). What an
+   * agent is on, for the sidebar row and the agent's header; absent until a map has been made.
+   */
+  workTitles: Record<string, string>;
 }
 
 export interface DispatchResult {
