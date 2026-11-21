@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Stop juggling tabs and terminals. Run a meeting with your agents.</b><br>
-  A desktop app for managing parallel coding agents, side by side.
+  A desktop app for managing parallel agents, side by side.
 </p>
 
 <p align="center">

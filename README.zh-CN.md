@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>多开不乱，一眼看全。</b><br>
-  一个桌面应用，把并行的多个编程 Agent 放在一起管理。
+  一个桌面应用，把并行的多个 Agent 放在一起管理。
 </p>
 
 <p align="center">
