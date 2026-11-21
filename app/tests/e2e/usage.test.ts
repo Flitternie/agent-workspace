@@ -69,10 +69,17 @@ describe('session usage in the agent header', () => {
     await page.screenshot({ path: join(shots, 'usage-account-limits.png'), clip: { x: 0, y: 600, width: 260, height: 300 } });
     // Tokens in the header; the context under the reply box, on the right; its card opens upward there.
     expect(await page.locator('.focus-meta [data-testid="usage-tokens"]').count()).toBe(1);
-    expect(await page.locator('.composer-under [data-testid="usage-context"]').count()).toBe(1);
-    const under = (await page.locator('.composer-under').boundingBox())!;
+    // The context beside the reply box: outside it on the right, its bottom level with the box's.
+    const ctx = (await page.locator('.composer-side [data-testid="usage-context"]').boundingBox())!;
     const box = (await page.locator('.composer-box').boundingBox())!;
-    expect(under.y).toBeGreaterThanOrEqual(box.y + box.height);
+    expect(ctx.x).toBeGreaterThanOrEqual(box.x + box.width);
+    expect(Math.abs(ctx.y + ctx.height - (box.y + box.height))).toBeLessThanOrEqual(3);
+    // The header row's parts sit on one line: the tokens and the project folder share a centre.
+    const mid = async (sel: string) => {
+      const b = (await page.locator(sel).first().boundingBox())!;
+      return b.y + b.height / 2;
+    };
+    expect(Math.abs((await mid('.focus-meta [data-testid="usage-tokens"]')) - (await mid('.focus-meta > span:has(.icon)')))).toBeLessThanOrEqual(2);
 
     // Neither the first message nor "resumed · <id>"; the session id is on the provider's tag.
     const meta = await page.locator('.focus-meta').innerText();
@@ -154,6 +161,7 @@ describe('session usage in the agent header', () => {
     await expect.poll(async () => (await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 86% week 35%');
     expect(await page.getByTestId('account-limit').getAttribute('class')).toContain('hot');
     const limits = page.locator('.composer-under [data-testid="usage-limits"]');
+    expect(await page.locator('.composer-side [data-testid="usage-limits"]').count()).toBe(0);
     await expect.poll(() => limits.innerText()).toBe('Mock limits 5h 86% · week 35%');
     expect(await limits.getAttribute('class')).toContain('hot');
     await limits.click();

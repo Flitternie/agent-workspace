@@ -595,8 +595,10 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               inject={inject}
               about={about}
               onClearAbout={() => setAboutId(null)}
-              // The context is this agent's; its account's limits only when they are close (they are the account's, in the sidebar).
-              under={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['context', 'limits-if-hot']} />}
+              // The context is this agent's (beside the box); its account's limits only when they are close
+              // (they are the account's: in the sidebar).
+              side={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['context']} />}
+              under={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['limits-if-hot']} />}
             />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
@@ -1126,10 +1128,13 @@ function Composer({
   inject,
   about,
   onClearAbout,
+  side,
   under,
 }: {
   task: Task;
-  /** Shown under the box, on the right (how much room is left: context, account limits). */
+  /** Beside the box, outside it on the right, level with its bottom (the context used). */
+  side?: ReactNode;
+  /** Shown under the box, on the right (the account's limits, when close). */
   under?: ReactNode;
   onBtw?: (question: string) => void;
   btwCount?: number;
@@ -1356,6 +1361,7 @@ function Composer({
             <Icon name="send" />
           </button>
         </div>
+        {side ? <div className="composer-side">{side}</div> : null}
       </div>
       {under ? <div className="composer-under">{under}</div> : null}
       {error || attach.error ? <div className="error-text">{error || attach.error}</div> : null}

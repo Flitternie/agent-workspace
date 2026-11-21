@@ -1411,6 +1411,9 @@ body.resizing .sidebar-resizer {
 }
 .focus-meta {
   display: flex;
+  /* One line of mixed parts (chips, plain text, a mono path): centred on one line. */
+  align-items: center;
+  line-height: 16px;
   gap: 14px;
   font-size: 11px;
   color: var(--text-3);
@@ -5627,7 +5630,38 @@ button.subtask-row:hover {
 }
 
 /* The agent header's tokens, context and account limits: small chips; a click opens a card. */
-/* Under the reply box, on the right: how much room is left (context, account limits). */
+/* Beside the reply box: outside it on the right, its bottom level with the box's (the context used). */
+.composer-box {
+  position: relative;
+}
+.composer-side {
+  position: absolute;
+  left: calc(100% + 10px);
+  /* The text's line box sits a little above the box's edge otherwise. */
+  bottom: -2px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-side:empty {
+  display: none;
+}
+.composer-side .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.composer-side .usage-chip:hover,
+.composer-side .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.composer-side .usage-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Under the reply box, on the right: the account's limits when they are close. */
 .composer-under {
   display: flex;
   justify-content: flex-end;
@@ -5648,6 +5682,7 @@ button.subtask-row:hover {
   border: 0;
   background: none;
   padding: 0;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
