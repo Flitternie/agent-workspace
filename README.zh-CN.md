@@ -5,22 +5,25 @@
 <h1 align="center">Agent Workspace</h1>
 
 <p align="center">
+  <a href="README.md">English</a> · <b>简体中文</b>
+</p>
+
+<p align="center">
   <b>多开不乱，一眼看全。</b><br>
   一个桌面应用，把并行的多个 Agent 放在一起管理。
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
-  <img src="https://img.shields.io/badge/Claude%20Code-supported-d97757" alt="支持 Claude Code">
-  <img src="https://img.shields.io/badge/Codex-supported-10a37f" alt="支持 Codex">
-  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111?logo=apple" alt="macOS">
-  <img src="https://img.shields.io/badge/Windows-%E5%AE%9E%E9%AA%8C%E6%80%A7-555?logo=windows" alt="Windows（实验性）">
+  <img src="https://img.shields.io/badge/%E6%94%AF%E6%8C%81-Claude%20Code%20%C2%B7%20Codex-d97757" alt="支持 Claude Code 和 Codex">
+  <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Windows-111" alt="macOS 和 Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><b>下载</b></a> ·
-  <a href="README.md">English</a> ·
+  <a href="#开始使用">开始使用</a> ·
+  <a href="#常见问题">常见问题</a> ·
   <a href="app/README.md">开发文档</a>
 </p>
 
@@ -77,12 +80,13 @@
 
 ## 其他功能
 
-- **对话旁的侧栏：** 可以预览文件、查看这一轮的改动、查看这个 Agent 记住了什么，还可以用 `/btw` 问一个旁支问题：它不会打断 Agent，也不会进入 Agent 的上下文。
-- **Fork：** 从之前任意一条消息处分叉，在新的 worktree 里换个方案试。
-- **远端服务器：** Agent 可以通过 SSH 在你的服务器上运行，直接用服务器上装好的 CLI 和登录状态。
-- **图片和文件：** 可以粘贴截图、用 `@` 引用文件，或者把文件直接拖进来。
-- **`!` 命令和模型切换：** 可以在 Agent 的目录里直接运行命令，也可以给它换模型，从下一轮起生效。
-- **接上已有会话：** 之前的 Claude Code 或 Codex 会话，都可以接着继续。
+- **对话旁的侧栏：** 预览文件、看这一轮的改动、用 `/btw` 问旁支问题、查 Agent 记住了什么，都不用离开对话
+- **Fork：** 从之前任意一条消息处分叉，在新的 worktree 里换个方案试
+- **远端服务器：** 通过 SSH 让 Agent 在你的服务器上运行，直接用那里装好的 CLI 和登录状态
+- **图片和文件：** 粘贴截图、用 `@` 引用文件，或者直接拖进来
+- **`!` 命令：** 在 Agent 的目录里直接运行命令，它能看到输出
+- **单独选模型：** 给某个 Agent 换模型，从下一轮起生效
+- **接上已有会话：** 之前的 Claude Code 或 Codex 会话都可以接着用
 
 以上功能，Claude Code 和 Codex 都支持：
 
@@ -106,11 +110,51 @@
 > [!NOTE]
 > macOS 版还没有经过 Apple 公证。第一次打开时，请在「应用程序」里右键点击它，选择「打开」。在 Windows 上，如果 SmartScreen 弹出提示，请选择「更多信息 → 仍要运行」。
 
-## 隐私
+## 常见问题
 
-- **不经过我们的服务器。** Agent 通过你电脑或服务器上的 `claude` 和 `codex` CLI 运行，工作区数据都保存在你自己的硬盘上。
-- **权限由你决定。** 权限沿用各 CLI 自己的模式，可以给每个 Agent 单独设置，应用不会绕过。应用也不会修改你的 CLI 设置；共享记忆只写它自己加了标记的那一段，写之前会先备份。
-- **语音可以只在本机处理。** 语音识别可以用你自己的 OpenAI key，也可以用本机模型（SenseVoice、Whisper、Paraformer）。用本机模型时，音频不会离开你的电脑。
+<details>
+<summary><b>需要另外付费或者申请 API key 吗？</b></summary>
+
+不需要。Agent 用的就是你已经装好的 Claude Code 和 Codex，走你现有的订阅。只有语音识别选用 OpenAI 时，才需要一个 OpenAI key。
+</details>
+
+<details>
+<summary><b>和自己开几个终端有什么区别？</b></summary>
+
+所有 Agent 都在一屏上，哪个在等你就会自动排到最前面。要交代的事跟主 Agent 说一次就行，不用在每个终端里各说一遍。想知道某个 Agent 做过什么，看工作地图就够了，不用回头翻聊天记录。
+</details>
+
+<details>
+<summary><b>我的代码和对话会经过你们的服务器吗？</b></summary>
+
+不会，我们没有服务器。Agent 通过你电脑上的 `claude` 和 `codex` CLI 运行，也可以通过 SSH 在你自己的服务器上运行，工作区数据都存在你的硬盘上。
+</details>
+
+<details>
+<summary><b>它会替我批准权限请求吗？</b></summary>
+
+不会。每个 Agent 沿用 CLI 自己的权限模式，你可以单独设置，应用不会绕过。主 Agent 也不能替别的 Agent 批准请求。
+</details>
+
+<details>
+<summary><b>会改我的 CLAUDE.md 或 AGENTS.md 吗？</b></summary>
+
+只会改它自己加了标记的那一段，改之前会先备份，你自己写的内容不会动。不想用的话，可以在设置里关掉共享记忆。
+</details>
+
+<details>
+<summary><b>语音会上传吗？</b></summary>
+
+只有选用 OpenAI 做语音识别时才会。用本机模型（SenseVoice、Whisper、Paraformer）的话，音频不会离开你的电脑。语音功能可以不用。
+</details>
+
+<details>
+<summary><b>支持 Windows 和 Linux 吗？</b></summary>
+
+主要支持 Apple Silicon 的 macOS。Windows x64 有安装包，但还是实验性的。目前没有 Linux 版，不过 Agent 可以通过 SSH 在 Linux 服务器上运行。
+</details>
+
+## 本地开发
 
 <details>
 <summary><b>从源码运行</b></summary>

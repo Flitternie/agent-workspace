@@ -5,22 +5,25 @@
 <h1 align="center">Agent Workspace</h1>
 
 <p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <b>Stop juggling tabs and terminals. Run a meeting with your agents.</b><br>
   A desktop app for managing parallel agents, side by side.
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Claude%20Code-supported-d97757" alt="Claude Code supported">
-  <img src="https://img.shields.io/badge/Codex-supported-10a37f" alt="Codex supported">
-  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111?logo=apple" alt="macOS">
-  <img src="https://img.shields.io/badge/Windows-experimental-555?logo=windows" alt="Windows (experimental)">
+  <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-d97757" alt="Works with Claude Code and Codex">
+  <img src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Windows-111" alt="macOS and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><b>Download</b></a> ·
-  <a href="README.zh-CN.md">中文</a> ·
+  <a href="#get-started">Get started</a> ·
+  <a href="#faq">FAQ</a> ·
   <a href="app/README.md">Developer docs</a>
 </p>
 
@@ -77,12 +80,13 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 
 ## Also built in
 
-- **A side column** beside each conversation: preview a file, see what changed this turn, ask a side question (`/btw`, which never interrupts the agent or enters its context), or check what the agent remembers.
-- **Fork** from before any earlier message, into a new worktree.
-- **Remote machines.** Agents run on your servers over SSH, with the CLIs and logins there.
-- **Images and files.** Paste a screenshot, `@`-mention a file, or drop one in.
-- **`!` commands and models.** Run a command in an agent's folder, or switch its model from the next turn.
-- **Continue** any existing Claude Code or Codex session.
+- **Side column:** preview a file, see this turn's changes, ask a side question with `/btw`, or check what the agent remembers, all beside the conversation
+- **Fork:** branch an agent from before any earlier message, into a new worktree
+- **Remote machines:** run agents on your servers over SSH, with the CLIs and logins there
+- **Images and files:** paste a screenshot, `@`-mention a file, or drop one in
+- **`!` commands:** run a command in the agent's folder; it sees the output
+- **Model per agent:** switch an agent's model from its next turn
+- **Pick up a session:** continue any existing Claude Code or Codex session
 
 Every feature works the same with both CLIs:
 
@@ -106,11 +110,51 @@ Every feature works the same with both CLIs:
 > [!NOTE]
 > The macOS app is not notarized yet. The first time, right-click it in Applications and choose **Open**. On Windows, if SmartScreen warns, choose **More info → Run anyway**.
 
-## Privacy
+## FAQ
 
-- **No server in between.** Agents run through the `claude` and `codex` CLIs on your machine or your server, and your workspace stays on your disk.
-- **Permissions as you set them.** Permissions follow each CLI's own modes, per agent, and are never bypassed. Your CLI settings are left alone; shared memory writes only to its own marked section, after a backup.
-- **Voice can stay local.** Use OpenAI with your own key, or an on-device model (SenseVoice, Whisper, Paraformer) that sends no audio anywhere.
+<details>
+<summary><b>Do I need another subscription or an API key?</b></summary>
+
+No. Agents run through the Claude Code and Codex you already have, on your existing plan. An OpenAI key is only needed if you choose OpenAI for speech recognition.
+</details>
+
+<details>
+<summary><b>How is this different from opening several terminals?</b></summary>
+
+You see every agent on one screen, and whichever one is waiting on you moves to the top. You can give one instruction to the main agent instead of repeating it in each terminal, and the Work Map shows what each agent did without scrolling back through its conversation.
+</details>
+
+<details>
+<summary><b>Does my code or conversation go through your servers?</b></summary>
+
+No. There is no server of ours. Agents run through the `claude` and `codex` CLIs on your machine, or on your own server over SSH, and the workspace data stays on your disk.
+</details>
+
+<details>
+<summary><b>Can it approve things on my behalf?</b></summary>
+
+No. Each agent keeps its CLI's own permission mode, which you can set per agent, and nothing bypasses it. The main agent cannot approve another agent's request either.
+</details>
+
+<details>
+<summary><b>Will it change my CLAUDE.md or AGENTS.md?</b></summary>
+
+Only its own marked section, and only after a backup. What you wrote yourself is never changed. You can turn shared memory off in Settings.
+</details>
+
+<details>
+<summary><b>Does audio leave my computer?</b></summary>
+
+Only if you choose OpenAI for speech recognition. With an on-device model (SenseVoice, Whisper or Paraformer), audio stays on your machine. Voice is optional.
+</details>
+
+<details>
+<summary><b>Does it work on Windows and Linux?</b></summary>
+
+macOS on Apple Silicon is the main platform. There is a Windows x64 build, still experimental. There is no Linux build yet, though agents can run on Linux servers over SSH.
+</details>
+
+## Development
 
 <details>
 <summary><b>Build from source</b></summary>
