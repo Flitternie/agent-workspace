@@ -73,6 +73,7 @@ export interface Outputs {
   'task:fork': Task;
   'task:retry': void;
   'task:resume': void;
+  'task:warm': void;
   'task:stop': void;
   'task:rename': void;
   'task:viewed': void;

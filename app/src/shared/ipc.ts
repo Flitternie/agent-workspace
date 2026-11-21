@@ -62,6 +62,7 @@ export const ipcSchemas = {
   'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
   'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
+  'task:warm': z.object({ taskId: id }),
   'task:stop': z.object({ taskId: id }),
   'task:rename': z.object({ taskId: id, name: z.string().min(1).max(100) }),
   'task:viewed': z.object({ taskId: id }),
