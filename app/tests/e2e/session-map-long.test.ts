@@ -70,7 +70,8 @@ describe('session map, long session', () => {
     // It runs down to the reply box's bottom edge (the room right of the box is free).
     const ends = await page.evaluate(() => ({
       map: document.querySelector('[data-testid="session-map-beside"]')!.getBoundingClientRect().bottom,
-      box: document.querySelector('.composer-box')!.getBoundingClientRect().bottom,
+      // (The reply box, or the line under it with the context and limits when there is one.)
+      box: (document.querySelector('.composer-under') ?? document.querySelector('.composer-box'))!.getBoundingClientRect().bottom,
     }));
     expect(Math.abs(ends.map - ends.box)).toBeLessThan(20);
     /** Whether the task being read is within the map's box. */
