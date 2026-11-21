@@ -25,7 +25,7 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot, BtwEntry, ImageRef } from '../shared/types';
+  WorkspaceSnapshot, BtwEntry, ImageRef, TaskUsage, ProviderLimits, LimitWindow } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -515,6 +515,7 @@ export class Workspace {
       connectedTaskIds: [...this.live.keys()],
       remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
       // Read from the cached groupings only: nothing is asked of a model to fill it.
+      limits: d.limits ?? {},
       workTitles: Object.fromEntries(Object.entries(d.sessionMaps ?? {}).flatMap(([id, g]) => (g.version === GROUPING_VERSION && g.tasks.length ? [[id, g.tasks.at(-1)!.title]] : []))),
     };
   }
@@ -1954,6 +1955,14 @@ export class Workspace {
       case 'suggestion':
         task.suggestion = clip(event.text, 500);
         break;
+      case 'usage':
+        task.usage = addUsage(task.usage, event);
+        return this.changedThrottled();
+      case 'limits': {
+        const limits = (this.store.data.limits ??= {});
+        limits[task.provider] = mergeLimits(limits[task.provider], event.windows, event.plan);
+        return this.changedThrottled();
+      }
       case 'turnStarted':
         // Working again: back among the active.
         task.setAside = undefined;
@@ -3078,4 +3087,23 @@ function mergeItem(prev: TranscriptItem | undefined, item: TranscriptItem, tool?
     if (!next.toolLabel || tool?.title) next.toolLabel = mergedTool.title || next.toolLabel;
   }
   return next;
+}
+
+/** Adds a usage event to an agent's totals (kept across its sessions); context is replaced, not added. */
+export function addUsage(prev: TaskUsage | undefined, event: Extract<ProviderEvent, { type: 'usage' }>): TaskUsage {
+  const u: TaskUsage = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, reasoning: 0, ...prev, updatedAt: now() };
+  const a = event.add;
+  if (a) {
+    for (const k of ['input', 'cacheWrite', 'cacheRead', 'output', 'reasoning'] as const) u[k] += Math.max(0, a[k] ?? 0);
+    if (a.costUsd !== undefined) u.costUsd = (u.costUsd ?? 0) + Math.max(0, a.costUsd);
+  }
+  if (event.context !== undefined) u.context = event.context;
+  if (event.contextWindow !== undefined) u.contextWindow = event.contextWindow;
+  return u;
+}
+
+/** The latest limits replace the windows they name; windows not mentioned are kept. */
+export function mergeLimits(prev: ProviderLimits | undefined, windows: LimitWindow[], plan?: string): ProviderLimits {
+  const keep = (prev?.windows ?? []).filter((w) => !windows.some((n) => n.key === w.key));
+  return { windows: [...windows, ...keep].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity)), at: now(), ...((plan ?? prev?.plan) ? { plan: plan ?? prev?.plan } : {}) };
 }

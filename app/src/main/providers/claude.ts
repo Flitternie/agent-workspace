@@ -1,3 +1,4 @@
+import { claudeContext, claudeLimits, claudeResultUsage } from './usage';
 import { randomUUID } from 'node:crypto';
 import { open, readFile, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -712,6 +713,11 @@ class ClaudeSession implements ProviderSession {
       if (text && !history) this.emit({ type: 'suggestion', text });
       return;
     }
+    if (type === 'rate_limit_event') {
+      const windows = history ? undefined : claudeLimits(m);
+      if (windows) this.emit({ type: 'limits', windows });
+      return;
+    }
     // Output after a result means a queued message started a new turn.
     if ((type === 'stream_event' || type === 'assistant') && !history) this.beginTurn();
     if (type === 'assistant' && str(m.error) && !history) this.apiError = str(m.error);
@@ -727,6 +733,8 @@ class ClaudeSession implements ProviderSession {
       return;
     }
     if (type === 'assistant') {
+      const context = history ? undefined : claudeContext(m);
+      if (context) this.emit({ type: 'usage', context });
       const content = rec(m.message).content;
       const blocks = Array.isArray(content) ? content : [];
       blocks.forEach((b, i) => {
@@ -816,6 +824,8 @@ class ClaudeSession implements ProviderSession {
       const status = this.interruptRequested ? 'interrupted' : success ? 'completed' : 'failed';
       this.interruptRequested = false;
       // An API error ends as a 'success' result with is_error, its message in `result` ("API Error: 529 …").
+      const usage = claudeResultUsage(m);
+      if (usage) this.emit(usage);
       const error = success ? undefined : (Array.isArray(m.errors) ? m.errors.map(str).join('\n') : '') || (m.is_error === true ? str(m.result) : '') || str(m.subtype);
       this.emit({
         type: 'turnCompleted',

@@ -12,6 +12,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
 import { RetryNotice } from './Retry';
+import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
@@ -379,7 +380,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           )}
           <div className="focus-ident">
             <div className="focus-name">
-              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
+              <TaskName task={task} /> <SessionTag provider={task.provider} id={session?.nativeSessionId} mode={session?.integrationMode} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
               <MemoryChip
@@ -394,6 +395,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
+              <UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} />
               {workTitle ? (
                 <span className="truncate" title={workTitle} data-testid="focus-work">
                   {workTitle}
@@ -406,11 +408,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               {task.worktree ? (
                 <span title={task.worktree.path}>
                   <Icon name="branch" size={12} /> {task.worktree.branch}
-                </span>
-              ) : null}
-              {session?.nativeSessionId ? (
-                <span title={session.nativeSessionId}>
-                  {session.integrationMode} · {session.nativeSessionId.slice(0, 8)}
                 </span>
               ) : null}
               {task.forkedFrom ? (
@@ -1352,3 +1349,23 @@ function Composer({
   );
 }
 
+/** The provider's tag; it carries the native session id (in its tooltip; a click copies it). */
+function SessionTag({ provider, id, mode }: { provider: Task['provider']; id?: string; mode?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!id) return <ProviderTag provider={provider} />;
+  return (
+    <button
+      className="session-tag"
+      data-testid="session-tag"
+      title={`${copied ? t('Copied') : t('Session {id} · click to copy', { id })}${mode === 'resumed' ? ` · ${t('resumed')}` : ''}`}
+      onClick={() => {
+        void navigator.clipboard.writeText(id).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      <ProviderTag provider={provider} />
+    </button>
+  );
+}

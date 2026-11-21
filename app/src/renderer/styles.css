@@ -5626,6 +5626,96 @@ button.subtask-row:hover {
   }
 }
 
+/* The agent header's tokens, context and account limits: small chips; a click opens a card. */
+.usage-chip {
+  font-variant-numeric: tabular-nums;
+}
+.usage-chip.hot {
+  border-color: color-mix(in srgb, var(--needs) 55%, var(--border));
+  color: var(--needs);
+}
+.usage-ring-track {
+  stroke: var(--border);
+}
+.usage-ring-fill {
+  stroke: currentColor;
+}
+.usage-pop {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+.usage-pop-head {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.usage-row > span:first-child {
+  color: var(--text-2);
+}
+.usage-row.strong > span {
+  color: var(--text);
+  font-weight: 600;
+}
+.usage-big {
+  font-size: 15px;
+  font-weight: 600;
+}
+.usage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.usage-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-limit.hot .usage-bar > span {
+  background: var(--needs);
+}
+.usage-limit.hot .usage-row > span {
+  color: var(--needs);
+}
+.usage-cost {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.usage-note {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.session-tag {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: copy;
+}
+
 /* Project chooser (new agent): the chosen folder as a button; a searchable list under it. */
 .project-chooser {
   position: relative;

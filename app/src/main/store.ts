@@ -37,6 +37,8 @@ export interface WorkspaceData {
   btw?: Record<string, BtwEntry[]>;
   /** The session map's grouping of each agent's turns into tasks (by a model), with the turns it covers. */
   sessionMaps?: Record<string, import('../shared/session-map').MapGrouping>;
+  /** Each provider account's usage limits as last seen. */
+  limits?: Partial<Record<import('../shared/types').AgentProvider, import('../shared/types').ProviderLimits>>;
 }
 
 const empty = (): WorkspaceData => ({
