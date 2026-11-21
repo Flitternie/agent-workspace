@@ -5475,9 +5475,85 @@ button.subtask-row:hover {
   text-align: left;
   cursor: pointer;
 }
-.context-menu button:hover {
+.context-menu:focus {
+  outline: none;
+}
+/* The pointer and the arrow keys move the same highlight. */
+.context-menu button.active {
   background: var(--accent);
   color: #fff;
+}
+.context-menu button:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.context-menu-gap {
+  width: 13px;
+  flex: none;
+}
+.context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* A name renamed where it stands (agent rows, project heads, the agent's header, tiles). */
+.inline-edit {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 400;
+}
+.inline-edit .input.inline {
+  width: 100%;
+  min-width: 72px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: 6px;
+}
+.inline-edit.alias-edit .input.inline {
+  min-width: 64px;
+}
+.inline-edit .input.inline.invalid {
+  border-color: var(--risk);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--risk) 18%, transparent);
+}
+.inline-edit-problem {
+  position: fixed;
+  z-index: 110;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
+  color: var(--risk);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+}
+.agent-row.editing .agent-row-name {
+  justify-content: flex-start;
+}
+.agent-row.editing .agent-row-name .truncate {
+  flex: 0 1 auto;
+  max-width: 45%;
+}
+.team-head.editing {
+  cursor: default;
+}
+.task-name.editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 260px;
+}
+.task-name.editing .inline-edit .input.inline {
+  font-size: 15px;
 }
 .remember-dialog {
   display: flex;

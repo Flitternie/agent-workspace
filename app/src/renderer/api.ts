@@ -39,6 +39,7 @@ export interface Outputs {
   'transcript:get': TranscriptItem[];
   'project:pickDirectory': string | null;
   'project:add': Project;
+  'project:rename': Project;
   'ssh:hosts': Array<{ host: string; hostName?: string; user?: string }>;
   'ssh:setEnabled': void;
   'ssh:check': RemoteHostStatus;
@@ -76,6 +77,7 @@ export interface Outputs {
   'task:warm': void;
   'task:stop': void;
   'task:rename': void;
+  'task:renameAgent': void;
   'task:viewed': void;
   'task:setPermissionMode': void;
   'task:remove': string;

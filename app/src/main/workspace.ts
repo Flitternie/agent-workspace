@@ -40,6 +40,7 @@ import { AttachmentStore, MAX_IMAGES } from './attachments';
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
+import { ALIAS_PROBLEM_TEXT, aliasProblem, normalizeAlias } from '../shared/agent-name';
 import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
@@ -1014,6 +1015,38 @@ export class Workspace {
     t.labelStale = undefined;
     t.updatedAt = now();
     this.changed();
+  }
+
+  /**
+   * The agent's name (its alias, the handle the user says or types). One agent per name, case
+   * apart, and none of the router's words. What was already said under the old name stays as it was.
+   */
+  renameAgent(taskId: string, alias: string): void {
+    const t = this.task(taskId);
+    if (taskId.startsWith('t-main-')) throw new Error('The main agent keeps its name.');
+    const next = normalizeAlias(alias);
+    const problem = aliasProblem(next, this.store.data.tasks, taskId);
+    if (problem) throw new Error(ALIAS_PROBLEM_TEXT[problem]);
+    const before = t.alias;
+    if (next === before) return;
+    // No label of its own yet: its name was the label, and follows.
+    if (t.name === before) t.name = next;
+    t.alias = next;
+    // Forks name where they came from by the name it has now.
+    for (const o of this.store.data.tasks) if (o.forkedFrom?.taskId === taskId) o.forkedFrom = { ...o.forkedFrom, alias: next };
+    this.touched(t);
+    t.updatedAt = now();
+    this.changed();
+  }
+
+  renameProject(projectId: string, name: string): Project {
+    const p = this.project(projectId);
+    const next = name.replace(/\s+/g, ' ').trim();
+    if (!next) throw new Error('A project name cannot be empty.');
+    if (next === p.name) return p;
+    p.name = next.slice(0, 200);
+    this.changed();
+    return p;
   }
 
   async remove(taskId: string): Promise<string> {
