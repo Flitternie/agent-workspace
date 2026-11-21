@@ -115,7 +115,7 @@ function Ring({ share }: { share: number }) {
 }
 
 /** The agent's tokens so far (header), its context now and its provider account's limits (under the reply box). */
-export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'limits'] }: { task: Task; limits?: ProviderLimits; now: number; only?: Array<'tokens' | 'context' | 'limits'> }) {
+export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'limits'] }: { task: Task; limits?: ProviderLimits; now: number; only?: Array<'tokens' | 'context' | 'limits' | 'limits-if-hot'> }) {
   const u = task.usage;
   const { total, cacheHit } = u ? usageTotals(u) : { total: 0, cacheHit: undefined };
   const share = u?.context && u.contextWindow ? (u.context / u.contextWindow) * 100 : undefined;
@@ -172,14 +172,14 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
           <div className="usage-note">{t('As of the latest model request.')}</div>
         </UsageChip>
       ) : null}
-      {only.includes('limits') && limits?.windows.length ? (
+      {(only.includes('limits') || (only.includes('limits-if-hot') && hot)) && limits?.windows.length ? (
         <UsageChip
           testId="usage-limits"
           className={hot ? 'hot' : undefined}
           title={asOf ? `${t('{name} account limits', { name: PROVIDER_LABEL[task.provider] })} · ${asOf}` : t('{name} account limits', { name: PROVIDER_LABEL[task.provider] })}
           label={
             <>
-              <span className="chip-full">{t('Limits {list}', { list: limitsText })}</span>
+              <span className="chip-full">{only.includes('limits-if-hot') ? t('{name} limits {list}', { name: PROVIDER_LABEL[task.provider], list: limitsText }) : t('Limits {list}', { list: limitsText })}</span>
               <span className="chip-short">{`${Math.max(...limits.windows.map((w) => w.usedPercent))}%`}</span>
             </>
           }
@@ -207,5 +207,64 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
         </UsageChip>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Each provider account's limits (a provider on a machine: accounts differ between machines), one line
+ * each, for the sidebar's foot: they belong to the account, not to any one agent.
+ */
+export function AccountLimits({ limits, now }: { limits: Record<string, ProviderLimits>; now: number }) {
+  const rows = Object.entries(limits)
+    .filter(([, l]) => l.windows.length)
+    .map(([key, l]) => ({ key, l, provider: (l.provider ?? key.split('@')[0]) as Task['provider'], host: l.host ?? key.split('@')[1] }))
+    .sort((a, b) => Number(!!a.host) - Number(!!b.host) || (a.host ?? '').localeCompare(b.host ?? '') || a.provider.localeCompare(b.provider));
+  if (!rows.length) return null;
+  // The machine is named only when there is more than this Mac.
+  const machines = rows.some((r) => r.host);
+  return (
+    <div className="account-limits" data-testid="account-limits">
+      {rows.map(({ key, l, provider, host }) => {
+        const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
+        const hot = l.windows.some((w) => w.usedPercent >= HOT);
+        const age = now - Date.parse(l.at);
+        const asOf = age > 90_000 ? t('as of {time}', { time: timeAgo(l.at, now) }) : '';
+        return (
+          <UsageChip
+            key={key}
+            testId="account-limit"
+            className={`account-limit${hot ? ' hot' : ''}`}
+            title={asOf ? `${t('{name} account limits', { name })} · ${asOf}` : t('{name} account limits', { name })}
+            label={
+              <>
+                <span className="account-name truncate">{name}</span>
+                <span className="mono">{l.windows.map((w) => `${windowLabel(w)} ${w.usedPercent}%`).join(' · ')}</span>
+              </>
+            }
+          >
+            <div className="usage-pop-head">
+              {t('{name} account limits', { name })}
+              {l.plan ? <span className="muted"> · {l.plan}</span> : null}
+            </div>
+            {l.windows.map((w) => (
+              <div key={w.key} className={`usage-limit${w.usedPercent >= HOT ? ' hot' : ''}`} data-testid="usage-limit">
+                <div className="usage-row">
+                  <span>{windowLabel(w)}</span>
+                  <span className="mono">{t('{p}% used', { p: w.usedPercent })}</span>
+                </div>
+                <div className="usage-bar">
+                  <span style={{ width: `${Math.min(100, w.usedPercent)}%` }} />
+                </div>
+                {w.resetsAt ? <div className="usage-note">{resetText(w.resetsAt, now)}</div> : null}
+              </div>
+            ))}
+            <div className="usage-note">
+              {asOf || t('Updated {time}', { time: timeAgo(l.at, now) })}
+              {provider === 'claude' ? ` · ${t('Claude Code reports these with each turn.')}` : ''}
+            </div>
+          </UsageChip>
+        );
+      })}
+    </div>
   );
 }

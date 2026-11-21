@@ -117,3 +117,21 @@ describe('accumulating usage', () => {
     expect(windowLabel({ key: 'seven_day_opus', mins: 10080, usedPercent: 1 })).toBe('week Opus');
   });
 });
+
+describe('limits per account', () => {
+  it('keeps a provider on another machine apart from the same provider on this Mac', async () => {
+    const { withLimits } = await import('../../src/main/workspace');
+    const w = (usedPercent: number) => [{ key: 'five_hour', minutes: 300, usedPercent, resetsAt: 0 }] as never;
+    let all = withLimits({}, { provider: 'claude' }, w(34));
+    all = withLimits(all, { provider: 'claude', host: 'neptune' }, w(81));
+    all = withLimits(all, { provider: 'codex' }, w(12));
+    expect(Object.keys(all).sort()).toEqual(['claude', 'claude@neptune', 'codex']);
+    expect(all.claude.windows[0].usedPercent).toBe(34);
+    expect(all['claude@neptune'].windows[0].usedPercent).toBe(81);
+    expect(all['claude@neptune'].host).toBe('neptune');
+    // A newer reading for one account leaves the others alone.
+    all = withLimits(all, { provider: 'claude', host: 'neptune' }, w(90));
+    expect(all.claude.windows[0].usedPercent).toBe(34);
+    expect(all['claude@neptune'].windows[0].usedPercent).toBe(90);
+  });
+});

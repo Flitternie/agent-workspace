@@ -52,13 +52,17 @@ describe('session usage in the agent header', () => {
     const tokens = page.getByTestId('usage-tokens');
     await expect.poll(() => tokens.innerText()).toContain('35K tok · 88% cached');
     expect(await page.getByTestId('usage-context').innerText()).toBe('2%');
-    expect(await page.getByTestId('usage-limits').innerText()).toBe('Limits 5h 34% · week 35%');
-    expect(await page.getByTestId('usage-limits').getAttribute('class')).not.toContain('hot');
-    // Tokens in the header; what room is left (context, limits) under the reply box, on the right; and the
-    // context card opens upward there (no room below).
+    // The account's limits are the account's, not this agent's: in the sidebar's foot, one line per account
+    // (only this Mac here, so no machine named); under the reply box only when close to the limit.
+    const account = page.getByTestId('account-limit');
+    await expect.poll(() => account.count()).toBe(1);
+    expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 34% · week 35%');
+    expect(await account.getAttribute('class')).not.toContain('hot');
+    expect(await page.getByTestId('usage-limits').count()).toBe(0);
+    await page.screenshot({ path: join(shots, 'usage-account-limits.png'), clip: { x: 0, y: 600, width: 260, height: 300 } });
+    // Tokens in the header; the context under the reply box, on the right; its card opens upward there.
     expect(await page.locator('.focus-meta [data-testid="usage-tokens"]').count()).toBe(1);
     expect(await page.locator('.composer-under [data-testid="usage-context"]').count()).toBe(1);
-    expect(await page.locator('.composer-under [data-testid="usage-limits"]').count()).toBe(1);
     const under = (await page.locator('.composer-under').boundingBox())!;
     const box = (await page.locator('.composer-box').boundingBox())!;
     expect(under.y).toBeGreaterThanOrEqual(box.y + box.height);
@@ -103,8 +107,8 @@ describe('session usage in the agent header', () => {
     await page.mouse.click(700, 600);
     await expect.poll(() => page.getByTestId('usage-context-pop').count()).toBe(0);
 
-    await page.getByTestId('usage-limits').click();
-    const lp = page.getByTestId('usage-limits-pop');
+    await account.click();
+    const lp = page.getByTestId('account-limit-pop');
     expect(await lp.getByTestId('usage-limit').count()).toBe(2);
     const lt = await lp.innerText();
     expect(lt).toContain('34% used');
@@ -122,7 +126,7 @@ describe('session usage in the agent header', () => {
     // Chinese.
     await invoke(page, 'settings:update', { language: 'zh' });
     await expect.poll(() => tokens.innerText()).toContain('70K tok · 缓存命中 88%');
-    expect(await page.getByTestId('usage-limits').innerText()).toBe('额度 5h 34% · 周 35%');
+    expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 34% · 周 35%');
     await head('usage-header-zh.png');
     await invoke(page, 'settings:update', { language: 'en' });
     expect(errors).toEqual([]);
@@ -133,14 +137,17 @@ describe('session usage in the agent header', () => {
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`).click();
     await expect.poll(() => page.getByTestId('usage-tokens').innerText()).toContain('70K tok · 88% cached');
     expect(await page.getByTestId('usage-context').innerText()).toBe('3%');
-    expect(await page.getByTestId('usage-limits').innerText()).toBe('Limits 5h 34% · week 35%');
+    expect((await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 34% · week 35%');
 
     // Another agent of the same provider nearly used up the 5-hour window: highlighted here too.
     const b = await invoke<Task>(page, 'task:create', { projectId: p.projectId, provider: 'mock', title: 'Docs', name: 'Docs', mockScript: 'work limits-high', instruction: 'Write docs.', isolate: false });
     await expect.poll(async () => !['running', 'starting'].includes((await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === b.taskId)!.status), { timeout: 30_000 }).toBe(true);
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`).click();
-    const limits = page.getByTestId('usage-limits');
-    await expect.poll(() => limits.innerText()).toBe('Limits 5h 86% · week 35%');
+    // Close to the limit: the account line turns, and this agent's reply box says so too.
+    await expect.poll(async () => (await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 86% · week 35%');
+    expect(await page.getByTestId('account-limit').getAttribute('class')).toContain('hot');
+    const limits = page.locator('.composer-under [data-testid="usage-limits"]');
+    await expect.poll(() => limits.innerText()).toBe('Mock limits 5h 86% · week 35%');
     expect(await limits.getAttribute('class')).toContain('hot');
     await limits.click();
     expect(await page.locator('[data-testid="usage-limits-pop"] .usage-limit.hot').count()).toBe(1);

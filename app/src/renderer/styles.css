@@ -7440,3 +7440,37 @@ button.subtask-row:hover {
 .focus-meta .usage-chip:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* The sidebar's foot: each account's limits, a quiet line each. */
+.account-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.account-limits .usage-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.account-limits .usage-chip:hover,
+.account-limits .usage-chip[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.account-limits .usage-chip.hot {
+  color: var(--needs);
+}
+.account-limits .account-name {
+  min-width: 0;
+}

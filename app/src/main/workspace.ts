@@ -26,6 +26,7 @@ import type { ModelOption,
   TranscriptItem,
   TransientKind,
   WorkspaceSnapshot, BtwEntry, ImageRef, TaskUsage, ProviderLimits, LimitWindow } from '../shared/types';
+import { accountKey } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -1959,8 +1960,8 @@ export class Workspace {
         task.usage = addUsage(task.usage, event);
         return this.changedThrottled();
       case 'limits': {
-        const limits = (this.store.data.limits ??= {});
-        limits[task.provider] = mergeLimits(limits[task.provider], event.windows, event.plan);
+        // Per account: the same provider signed in on another machine has limits of its own.
+        this.store.data.limits = withLimits(this.store.data.limits ?? {}, task, event.windows, event.plan);
         return this.changedThrottled();
       }
       case 'turnStarted':
@@ -3100,6 +3101,12 @@ export function addUsage(prev: TaskUsage | undefined, event: Extract<ProviderEve
   if (event.context !== undefined) u.context = event.context;
   if (event.contextWindow !== undefined) u.contextWindow = event.contextWindow;
   return u;
+}
+
+/** An account's latest limits recorded (an account: the task's provider on its machine), the others kept. */
+export function withLimits(all: Record<string, ProviderLimits>, task: Pick<Task, 'provider' | 'host'>, windows: LimitWindow[], plan?: string): Record<string, ProviderLimits> {
+  const key = accountKey(task);
+  return { ...all, [key]: { ...mergeLimits(all[key], windows, plan), provider: task.provider, ...(task.host ? { host: task.host } : {}) } };
 }
 
 /** The latest limits replace the windows they name; windows not mentioned are kept. */

@@ -1,6 +1,7 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
+import { accountKey } from '../../shared/types';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -395,7 +396,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
-              <UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} only={['tokens']} />
+              <UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['tokens']} />
               {workTitle ? (
                 <span className="truncate" title={workTitle} data-testid="focus-work">
                   {workTitle}
@@ -594,7 +595,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               inject={inject}
               about={about}
               onClearAbout={() => setAboutId(null)}
-              under={<UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} only={['context', 'limits']} />}
+              // The context is this agent's; its account's limits only when they are close (they are the account's, in the sidebar).
+              under={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['context', 'limits-if-hot']} />}
             />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;

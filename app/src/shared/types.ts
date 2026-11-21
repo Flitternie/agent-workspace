@@ -137,6 +137,9 @@ export interface LimitWindow {
 
 /** A provider account's usage limits as last seen, and when. */
 export interface ProviderLimits {
+  /** Whose limits: the provider, and the machine its CLI runs on (unset: this Mac). One account each. */
+  provider?: AgentProvider;
+  host?: string;
   windows: LimitWindow[];
   /** When they were seen (ISO). */
   at: string;
@@ -546,7 +549,8 @@ export interface WorkspaceSnapshot {
    */
   workTitles: Record<string, string>;
   /** Per provider: its account's usage limits as last seen (Claude Code: after a turn; Codex: also at start). */
-  limits: Partial<Record<AgentProvider, ProviderLimits>>;
+  /** Usage limits per account, keyed by `accountKey` (a provider on a machine: accounts differ between machines). */
+  limits: Record<string, ProviderLimits>;
 }
 
 export interface DispatchResult {
@@ -581,3 +585,6 @@ export interface BtwEntry {
   askedAt: string;
   answeredAt?: string;
 }
+
+/** One provider account: a provider's CLI on one machine ("claude" on this Mac, "codex@neptune"). */
+export const accountKey = (t: { provider: AgentProvider; host?: string }) => (t.host ? `${t.provider}@${t.host}` : t.provider);
