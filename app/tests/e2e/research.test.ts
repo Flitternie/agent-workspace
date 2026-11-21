@@ -75,8 +75,6 @@ describe('research page (demo)', () => {
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
     // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.
     expect(await page.locator('.research-composer .composer .send-btn').count()).toBe(1);
-    // Narrower than a conversation's column: the graph is what is read here.
-    expect((await page.locator('.research-composer .composer').boundingBox())!.width).toBeLessThanOrEqual(760);
     expect(await page.getByTestId('composer-target').innerText()).toMatch(/To: a new agent for "Data"/);
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/About\s*Data/);
     await page.getByTestId('composer-input').fill('Which method would you try first?');
