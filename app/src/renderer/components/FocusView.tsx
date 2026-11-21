@@ -537,7 +537,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             message={
               task.worktree
                 ? t('Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.')
-                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
+                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session… (the history button next to + in the sidebar)', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
             }
             confirmLabel={t('Remove')}
             danger

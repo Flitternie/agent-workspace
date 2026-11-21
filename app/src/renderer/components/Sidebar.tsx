@@ -50,6 +50,7 @@ export function Sidebar({
   toggle: (team: Team) => void;
 }) {
   const micMode = snapshot.settings.micMode ?? 'open';
+  const signedOut = snapshot.capabilities.filter((c) => c.provider !== 'mock' && c.available && c.auth?.loggedIn === false);
   const openAll = snapshot.attention.filter((a) => a.state === 'open');
   const open = openAll.filter((a) => a.kind !== 'completion');
   // Agents set aside are not counted: whatever they were waiting on is hidden with them.
@@ -226,9 +227,14 @@ export function Sidebar({
 
       <div className="sidebar-section">
         <span>{tr('Agents')}</span>
-        <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask}>
-          <Icon name="plus" />
-        </button>
+        <span className="sidebar-section-actions">
+          <button className="icon-btn" aria-label={tr('Continue a session…')} title={tr('Continue a session…')} onClick={onResume} data-testid="resume-session">
+            <Icon name="history" />
+          </button>
+          <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask} data-testid="sidebar-new-task">
+            <Icon name="plus" />
+          </button>
+        </span>
       </div>
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
@@ -248,23 +254,15 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-foot">
-        <button className="btn btn-block" onClick={onResume} data-testid="resume-session">
-          <Icon name="history" /> {tr('Continue a session…')}
-        </button>
-        <button className={`conn-list${settingsOpen ? ' active' : ''}`} onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
-          {snapshot.capabilities
-            .filter((c) => c.provider !== 'mock')
-            .map((c) => (
-              <span key={c.provider} className={`conn${c.available && c.auth?.loggedIn !== false ? ' on' : ''}`}>
-                <span className="conn-dot" /> {PROVIDER_LABEL[c.provider]}
-              </span>
-            ))}
-          <span className={`conn${snapshot.voice.sttAvailable ? ' on' : ''}`}>
-            <span className="conn-dot" /> {tr('Voice')}
-          </span>
-          <span className="conn-settings">
-            <Icon name="gear" /> {tr('Settings')}
-          </span>
+        {signedOut.length ? (
+          // Only a CLI that is installed but signed out is flagged: its agents cannot run. A missing CLI
+          // is a choice (one provider is enough), and voice says so where it is used.
+          <button className="sidebar-warn" onClick={onSettings} data-testid="provider-warning">
+            <Icon name="alert" size={13} /> <span className="truncate">{tr('{names} signed out', { names: signedOut.map((c) => PROVIDER_LABEL[c.provider]).join(', ') })}</span>
+          </button>
+        ) : null}
+        <button className={`sidebar-settings${settingsOpen ? ' active' : ''}`} onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
+          <Icon name="gear" /> {tr('Settings')}
         </button>
         <div className="tips">
           <div>
