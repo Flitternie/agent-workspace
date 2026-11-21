@@ -7327,8 +7327,9 @@ button.subtask-row:hover {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  /* The column width of the box at the bottom (as on an agent's page). */
   container-type: inline-size;
+  /* The box at the bottom: narrower than a conversation's reading column (the graph is what is read here). */
+  --chat-w: min(760px, 100cqw);
 }
 .research-empty {
   margin: auto;
