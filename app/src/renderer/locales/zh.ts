@@ -694,6 +694,7 @@ export const zh: Record<string, string> = {
   'Imported with its full history. Send a message to continue.': '已带着完整历史接入，发消息即可继续。',
   'Not started yet.': '尚未开始。',
   'Continue a session…': '接入已有会话…',
+  'Continuing a conversation from Claude Code or Codex?': '想接着 Claude Code 或 Codex 里已有的对话？',
   '{names} signed out': '{names} 未登录',
 
   // Sidebar
@@ -986,7 +987,6 @@ export const zh: Record<string, string> = {
   '+{n} more on the left': '左侧还有 {n} 个',
   '{n} tiles ({grid})': '{n} 格（{grid}）',
   'Nothing going on for 3 days; a project comes back when one of its agents is used.': '3 天没有动静的项目；里面的 agent 一被使用，项目就会回到上面。',
-  'What should it do?': '要它做什么？',
   'Continues a Claude Code or Codex conversation here, with its history. Close it in the terminal first.': '在这里接着一段 Claude Code 或 Codex 的对话继续，保留完整历史。先在终端里关掉它。',
   'Started by an agent for itself: claude -p, codex exec, Codex sub-agents.': '由 agent 自己启动的：claude -p、codex exec、Codex 子 agent。',
   'A new agent continues from a copy; {name} stays as it is.': '新 agent 从一份副本接着做；{name} 保持不变。',

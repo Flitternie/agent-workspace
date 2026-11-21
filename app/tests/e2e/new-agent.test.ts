@@ -171,8 +171,12 @@ describe('new agent', () => {
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('local-lib');
     expect(await page.getByTestId('project-current').innerText()).toContain('This Mac');
 
-    // Nothing to name: no label or title fields; the instruction is optional.
+    // Nothing to name or write: no label, title or first-instruction box (the first message goes in the agent's reply box).
     expect(await dialog.locator('input.input').count()).toBe(0);
+    expect(await dialog.locator('textarea').count()).toBe(0);
+    expect(await page.getByTestId('new-instruction').count()).toBe(0);
+    // A quiet line for someone who meant to continue an existing conversation.
+    expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing a conversation from Claude Code or Codex?');
     await dialog.locator('label.radio').filter({ hasText: 'Mock' }).click();
     await page.screenshot({ path: join(shots, 'new-agent-01-dialog.png') });
     expect(await page.getByTestId('create-agent').isEnabled()).toBe(true);
@@ -199,5 +203,13 @@ describe('new agent', () => {
     await expect.poll(async () => (await task()).name).not.toBe((await task()).alias);
     await expect.poll(() => page.locator('.focus-meta').innerText()).toContain('Migrate the orders API to v2');
     await page.screenshot({ path: join(shots, 'new-agent-02-named.png') });
+
+    // The hint's link swaps the New agent dialog for Continue a session… (same as the sidebar's history button).
+    await page.getByTestId('sidebar-new-task').click();
+    await page.getByTestId('new-continue-session').click();
+    await expect.poll(() => page.getByTestId('session-search').count()).toBe(1);
+    expect(await page.getByTestId('create-agent').count()).toBe(0);
+    expect(await page.getByRole('dialog').count()).toBe(1);
+    await page.screenshot({ path: join(shots, 'new-agent-03-continue.png') });
   }, 120_000);
 });
