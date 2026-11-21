@@ -48,6 +48,10 @@ Both also work from the repo root.
 | `npm run smoke:voice` | TTS fixtures → STT → router (rules + LLM) against the OpenAI API |
 | `npm run typecheck` | Strict TypeScript |
 
+## Release
+
+Bump `version` in `app/package.json` on `main` (`cd app && npm version minor --no-git-tag-version`, commit, push). GitHub Actions tags the commit `v<version>`, runs the unit tests, builds the DMG and the Windows installer, and publishes the release with generated notes once both are attached. Pushes that keep the version release nothing. To build locally: `npm --prefix app run dist:mac` (output in `app/release/`; the .dmg file also gets the app icon in Finder).
+
 ## Layout
 
 ```
