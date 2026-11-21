@@ -318,7 +318,11 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         {/* What each provider account has left (per machine): the account's, not any one agent's. */}
-        <AccountLimits limits={snapshot.limits ?? {}} now={Date.now()} />
+        <AccountLimits
+          limits={snapshot.limits ?? {}}
+          now={Date.now()}
+          payAsYouGo={snapshot.capabilities.filter((c) => (c.provider === 'claude' || c.provider === 'codex') && c.auth?.loggedIn && /api key/i.test(c.auth.method ?? '')).map((c) => c.provider)}
+        />
         {signedOut.length ? (
           // Only a CLI that is installed but signed out is flagged: its agents cannot run. A missing CLI
           // is a choice (one provider is enough), and voice says so where it is used.

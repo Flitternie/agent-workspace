@@ -147,6 +147,11 @@ describe('session usage in the agent header', () => {
     await expect.poll(() => tokens.innerText()).toContain('70K tok · 缓存命中 88%');
     expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('Mock 5h 34% 周 35%');
     await head('usage-header-zh.png');
+    // Reset times in the app's language too.
+    await page.getByTestId('account-limit').click();
+    await expect.poll(() => page.getByTestId('account-limit-pop').innerText()).toMatch(/小时|周/);
+    expect(await page.getByTestId('account-limit-pop').innerText()).not.toMatch(/resets|\dh \d+m/);
+    await page.keyboard.press('Escape');
     await invoke(page, 'settings:update', { language: 'en' });
     expect(errors).toEqual([]);
 

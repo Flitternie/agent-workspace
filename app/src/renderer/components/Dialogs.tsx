@@ -134,6 +134,15 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
 
   return (
     <Modal title={t('New agent')} onClose={onClose}>
+      {/* For people who meant to pick up a conversation they already have: first, before choosing anything. */}
+      {onContinue ? (
+        <div className="hint new-continue" data-testid="new-continue-hint">
+          {t('Continuing a conversation from Claude Code or Codex?')}{' '}
+          <button className="link" onClick={onContinue} data-testid="new-continue-session">
+            {t('Continue a session…')}
+          </button>
+        </div>
+      ) : null}
       <ProjectChooser snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
         <label>{t('Agent')}</label>
@@ -179,14 +188,6 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
             : null}
       </label>
       {error ? <div className="error-text">{error}</div> : null}
-      {onContinue ? (
-        <div className="hint" data-testid="new-continue-hint">
-          {t('Continuing a conversation from Claude Code or Codex?')}{' '}
-          <button className="link" onClick={onContinue} data-testid="new-continue-session">
-            {t('Continue a session…')}
-          </button>
-        </div>
-      ) : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>
           {t('Cancel')}

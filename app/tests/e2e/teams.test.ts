@@ -71,10 +71,11 @@ describe('teams and overview layouts (mock agents)', () => {
     await expect.poll(() => page.getByRole('dialog').innerText()).toContain('Continue an existing session');
     await page.keyboard.press('Escape');
     await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
-    // The foot no longer lists providers and voice: just Settings (plus a warning only for a signed-out CLI).
+    // The foot no longer lists providers and voice as connection rows: just Settings (plus a warning only for
+    // a signed-out CLI, and the accounts' usage limits, which name their provider).
     const foot = page.locator('.sidebar-foot');
     expect(await foot.locator('.conn, .conn-dot').count()).toBe(0);
-    expect((await foot.locator(':scope > :not([data-testid="provider-warning"])').allInnerTexts()).join('\n')).not.toMatch(/Claude Code|Codex|Voice/);
+    expect((await foot.locator(':scope > :not([data-testid="provider-warning"]):not([data-testid="account-limits"])').allInnerTexts()).join('\n')).not.toMatch(/Claude Code|Codex|Voice/);
     expect(await foot.getByTestId('open-settings').innerText()).toBe('Settings');
 
     // Folding a team hides its members (and their ⌘ numbers); unfolding brings them back.

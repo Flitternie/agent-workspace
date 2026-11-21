@@ -177,6 +177,9 @@ describe('new agent', () => {
     expect(await page.getByTestId('new-instruction').count()).toBe(0);
     // A quiet line for someone who meant to continue an existing conversation.
     expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing a conversation from Claude Code or Codex?');
+    // At the top of the dialog, before the project and provider choices.
+    const hintTop = (await page.getByTestId('new-continue-hint').boundingBox())!.y;
+    expect(hintTop).toBeLessThan((await page.locator('.modal .field').first().boundingBox())!.y);
     await dialog.locator('label.radio').filter({ hasText: 'Mock' }).click();
     await page.screenshot({ path: join(shots, 'new-agent-01-dialog.png') });
     expect(await page.getByTestId('create-agent').isEnabled()).toBe(true);

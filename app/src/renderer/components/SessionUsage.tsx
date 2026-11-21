@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { LimitWindow, ProviderLimits, Task } from '../../shared/types';
-import { t } from '../i18n';
+import { language, t } from '../i18n';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL } from './bits';
 
@@ -33,10 +33,14 @@ export function windowLabel(w: LimitWindow): string {
 const HOT = 80;
 
 function resetText(at: number, now: number): string {
+  // In the app's language (not the system's): the duration and the weekday.
+  const zh = language() === 'zh';
   const mins = Math.max(0, Math.round((at - now) / 60_000));
-  if (mins < 60) return t('resets in {d}', { d: `${mins}m` });
-  if (mins < 24 * 60) return t('resets in {d}', { d: `${Math.floor(mins / 60)}h ${mins % 60}m` });
-  return t('resets {when}', { when: new Date(at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) });
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (mins < 60) return t('resets in {d}', { d: zh ? `${mins} 分钟` : `${mins}m` });
+  if (mins < 24 * 60) return t('resets in {d}', { d: zh ? `${h} 小时 ${m} 分钟` : `${h}h ${m}m` });
+  return t('resets {when}', { when: new Date(at).toLocaleString(zh ? 'zh-CN' : 'en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }) });
 }
 
 /** A chip in the header's info row; a click opens a small card under it (out of the row, which clips). */
@@ -218,7 +222,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
  * Each provider account's limits (a provider on a machine: accounts differ between machines), one line
  * each, for the sidebar's foot: they belong to the account, not to any one agent.
  */
-export function AccountLimits({ limits, now }: { limits: Record<string, ProviderLimits>; now: number }) {
+export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record<string, ProviderLimits>; now: number; payAsYouGo?: Task['provider'][] }) {
   const [open, setOpenState] = useState(() => localStorage.getItem('amw.limitsOpen') !== '0');
   const setOpen = (on: boolean) => {
     localStorage.setItem('amw.limitsOpen', on ? '1' : '0');
@@ -228,12 +232,14 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
     .filter(([, l]) => l.windows.length)
     .map(([key, l]) => ({ key, l, provider: (l.provider ?? key.split('@')[0]) as Task['provider'], host: l.host ?? key.split('@')[1] }))
     .sort((a, b) => Number(!!a.host) - Number(!!b.host) || (a.host ?? '').localeCompare(b.host ?? '') || a.provider.localeCompare(b.provider));
-  if (!rows.length) return null;
+  // Signed in with an API key (this Mac): billed by use, no plan limits to show; said so, not left blank.
+  const metered = payAsYouGo.filter((p) => !rows.some((r) => r.provider === p && !r.host));
+  if (!rows.length && !metered.length) return null;
   // The machine is named only when there is more than this Mac.
   const machines = rows.some((r) => r.host);
   // Folded to one line (the highest use across accounts), kept on this machine; a nearly used-up window
   // still shows on the folded line.
-  const top = Math.max(...rows.flatMap((r) => r.l.windows.map((w) => w.usedPercent)));
+  const top = rows.length ? Math.max(...rows.flatMap((r) => r.l.windows.map((w) => w.usedPercent))) : 0;
   const anyHot = top >= HOT;
   return (
     <div className={`account-limits${open ? ' open' : ''}`} data-testid="account-limits">
@@ -242,8 +248,16 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
           <Icon name="chevron" size={12} />
         </span>
         <span>{t('Limits')}</span>
-        {open ? null : <span className="mono">{top}%</span>}
+        {open || !rows.length ? null : <span className="mono">{top}%</span>}
       </button>
+      {open
+        ? metered.map((p) => (
+            <div key={`metered-${p}`} className="account-metered" data-testid="account-metered" title={t('Signed in with an API key: billed by use, with no plan limits.')}>
+              <span className="account-name truncate">{`${PROVIDER_LABEL[p]}${machines ? ` · ${t('this Mac')}` : ''}`}</span>
+              <span className="muted">{t('API key · billed by use')}</span>
+            </div>
+          ))
+        : null}
       {open ? rows.map(({ key, l, provider, host }) => {
         const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
         const hot = l.windows.some((w) => w.usedPercent >= HOT);
