@@ -52,7 +52,10 @@ function UsageChip({ testId, className, popClass, title, label, children }: { te
     const height = card.current?.offsetHeight ?? 160;
     // Below the chip, or above it when there is no room below (under the reply box).
     const top = b.bottom + 6 + height > window.innerHeight - 8 ? Math.max(8, b.top - 6 - height) : b.bottom + 6;
-    setPos({ left: Math.max(8, Math.min(b.left, window.innerWidth - width - 8)), top });
+    // Its edge on the chip's: the left edge for a chip on the left half of the window, the right edge for
+    // one on the right (the context beside the reply box), so the card hangs from the chip itself.
+    const left = b.left + b.width / 2 > window.innerWidth / 2 ? b.right - width : b.left;
+    setPos({ left: Math.max(8, Math.min(left, window.innerWidth - width - 8)), top });
   }, [open]);
   useEffect(() => {
     if (!open) return;

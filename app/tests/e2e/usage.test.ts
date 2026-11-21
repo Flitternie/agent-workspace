@@ -117,6 +117,9 @@ describe('session usage in the agent header', () => {
     const pop = (await page.getByTestId('usage-context-pop').boundingBox())!;
     // As wide as its one figure, not the tokens card's width.
     expect(pop.width).toBeLessThanOrEqual(220);
+    // Its right edge on the chip's (the context chip is on the right of the window).
+    const chip = (await page.getByTestId('usage-context').boundingBox())!;
+    expect(Math.abs(pop.x + pop.width - (chip.x + chip.width))).toBeLessThanOrEqual(1);
     expect(pop.y + pop.height).toBeLessThanOrEqual((await page.getByTestId('usage-context').boundingBox())!.y);
     await page.screenshot({ path: join(shots, 'usage-under-box.png') });
     await head('usage-context-pop.png');
