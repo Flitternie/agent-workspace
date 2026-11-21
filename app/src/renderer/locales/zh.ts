@@ -1025,6 +1025,8 @@ export const zh: Record<string, string> = {
   '1 ablation': '1 次消融',
   '1 method': '1 个方法',
   '1 experiment': '1 次实验',
+  'About these nodes in the research tree: {list}. ': '关于研究树里的这几个节点：{list}。',
+  'about {n} nodes': '关于 {n} 个节点',
   'This project has no research yet.': '这个项目还没有研究。',
   '{n} selected': '选中了 {n} 个',
   'Research details': '研究详情',

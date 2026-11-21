@@ -16,6 +16,7 @@ import {
   methodStatus,
   newId,
   removeNode,
+  routeFor,
   updateNode,
   type GraphDepth,
   type GraphItem,
@@ -1120,20 +1121,25 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
   const one = selected.length === 1 ? selected[0] : undefined;
-  const aspect = one ? aspectOf(doc, one) : undefined;
-  // Who gets it: an experiment's agent, else its aspect's; a method is its aspect agent's; the goal (or several) the main agent's.
+  // Who gets it: the agent of the nearest node over everything selected (shared/research routeFor).
+  const route = routeFor(doc, selected);
+  const aboutText = (nodes: ResearchNode[]) => (nodes.length === 1 ? t('About "{name}" in the research tree: ', { name: nodes[0].title }) : nodes.length ? t('About these nodes in the research tree: {list}. ', { list: nodes.map((n) => `"${n.title}"`).join(', ') }) : '');
   const target: { task?: Task; label: string; prefix: string; startAspect?: ResearchNode } = (() => {
-    if (one?.type === 'experiment' && ctx.taskOf(one.taskId)) return { task: ctx.taskOf(one.taskId), label: t('{agent} (experiment "{name}")', { agent: ctx.taskOf(one.taskId)!.alias, name: clip(one.title, 14) }), prefix: '' };
-    if (one && aspect && !aspect.combos) {
-      const at = ctx.taskOf(aspect.taskId);
-      const prefix = one.type === 'aspect' ? '' : t('About "{name}" in the research tree: ', { name: one.title });
-      if (at) return { task: at, label: t('{agent} ({aspect} aspect)', { agent: at.alias, aspect: aspect.title }), prefix };
-      return { label: t('a new agent for "{aspect}"', { aspect: aspect.title }), prefix, startAspect: aspect };
+    if (route.kind === 'experiment') {
+      const task = ctx.taskOf(route.node.taskId);
+      if (task) return { task, label: t('{agent} (experiment "{name}")', { agent: task.alias, name: clip(route.node.title, 14) }), prefix: '' };
     }
+    if (route.kind === 'aspect') {
+      const at = ctx.taskOf(route.aspect.taskId);
+      const prefix = aboutText(route.about);
+      if (at) return { task: at, label: t('{agent} ({aspect} aspect)', { agent: at.alias, aspect: route.aspect.title }), prefix };
+      return { label: t('a new agent for "{aspect}"', { aspect: route.aspect.title }), prefix, startAspect: route.aspect };
+    }
+    const about = route.kind === 'main' && route.about.length ? t('About {list} in the research "{title}": ', { list: route.about.map((n) => `"${n.title}"`).join(', '), title: doc.title }) : t('About the research "{title}" ({goal}): ', { title: doc.title, goal: doc.goal });
     const main = snapshot.main;
-    const about = selected.length ? t('About {list} in the research "{title}": ', { list: selected.map((n) => `"${n.title}"`).join(', '), title: doc.title }) : t('About the research "{title}" ({goal}): ', { title: doc.title, goal: doc.goal });
     return main ? { task: main, label: t('Main agent'), prefix: about } : { label: t('Main agent (off)'), prefix: about };
   })();
+  const aboutCount = route.kind === 'experiment' ? 0 : route.about.length;
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -1174,7 +1180,10 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
       ) : null}
       <div className="composer-about research-to" data-testid="research-to">
         <span className="composer-about-label">{t('To')}</span>
-        <span className="composer-about-text">{target.label}</span>
+        <span className="composer-about-text">
+          {target.label}
+          {aboutCount > 1 ? ` · ${t('about {n} nodes', { n: aboutCount })}` : ''}
+        </span>
         {selected.length ? (
           <button className="composer-about-clear" onClick={onClear} aria-label={t('Clear the selection')} title={t('Clear the selection')}>
             <Icon name="x" size={11} />

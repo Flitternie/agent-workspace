@@ -107,6 +107,11 @@ describe('research page (demo)', () => {
     await expect.poll(() => node('experiment', '0.87').count()).toBe(1);
     await page.screenshot({ path: join(shots, 'research-03-variants.png') });
 
+    // Several selected under one method: the message goes to the agent over them (the aspect's), not the main agent.
+    await node('experiment', '0.82').click();
+    await node('experiment', '0.87').click({ modifiers: ['Shift'] });
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\) · about 2 nodes/);
+
     // An experiment: record its result (judged against the aspect's start) and a finding.
     await node('experiment', '0.87').click();
     await page.getByTestId('research-result-input').fill('78.2');
@@ -120,6 +125,8 @@ describe('research page (demo)', () => {
     await node('method', 'Optimizer').click();
     await node('method', 'Activation').click({ modifiers: ['Shift'] });
     await expect.poll(() => panel.innerText()).toContain('From different aspects');
+    // Across aspects: only the main agent (here off) is over both.
+    expect(await page.getByTestId('research-to').innerText()).toMatch(/Main agent \(off\) · about 2 nodes/);
     await page.getByTestId('research-combine').click();
     await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Optimizer + Activation')?.links?.map((l) => l.kind)).toEqual(['combine', 'combine']);
     expect(await page.locator('.rg-link').count()).toBe(6);

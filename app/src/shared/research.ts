@@ -285,3 +285,44 @@ export function normalizeResearch(raw: unknown): ResearchDoc | null {
     updatedAt: r.updatedAt ?? now,
   };
 }
+
+// ------------------------------------------------------------------ who a message goes to
+
+/** The node and its ancestors, nearest first (aspects end the chain; their parent is the goal). */
+export function ancestry(doc: ResearchDoc, node: ResearchNode): ResearchNode[] {
+  const out: ResearchNode[] = [];
+  let n: ResearchNode | undefined = node;
+  while (n) {
+    out.push(n);
+    n = n.parent ? doc.nodes.find((x) => x.id === n!.parent) : undefined;
+  }
+  return out;
+}
+
+/** The nearest node every one of `nodes` is in or under; undefined: only the goal holds them all. */
+export function commonAncestor(doc: ResearchDoc, nodes: ResearchNode[]): ResearchNode | undefined {
+  if (!nodes.length) return undefined;
+  const chains = nodes.map((n) => ancestry(doc, n));
+  return chains[0].find((a) => chains.every((c) => c.some((x) => x.id === a.id)));
+}
+
+/**
+ * Who talks about the selection: the agent of the nearest node over all of it. One experiment with an
+ * agent: that agent. Anything within one aspect (an experiment without an agent, a method, several
+ * nodes under one method or one aspect): the aspect's agent. Across aspects, the cross-aspect row,
+ * or nothing selected: the main agent, about the whole research.
+ */
+export type ResearchRoute =
+  | { kind: 'experiment'; node: ResearchNode }
+  | { kind: 'aspect'; aspect: ResearchNode; about: ResearchNode[] }
+  | { kind: 'main'; about: ResearchNode[] };
+
+export function routeFor(doc: ResearchDoc, nodes: ResearchNode[]): ResearchRoute {
+  const top = commonAncestor(doc, nodes);
+  if (nodes.length === 1 && top?.type === 'experiment' && top.taskId) return { kind: 'experiment', node: top };
+  const aspect = top && aspectOf(doc, top);
+  // The aspect itself selected alone is spoken to directly, not "about" itself.
+  const about = nodes.length === 1 && nodes[0] === aspect ? [] : nodes;
+  if (aspect && !aspect.combos) return { kind: 'aspect', aspect, about };
+  return { kind: 'main', about: nodes };
+}

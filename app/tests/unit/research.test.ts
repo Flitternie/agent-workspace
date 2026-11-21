@@ -17,6 +17,8 @@ import {
   methodStatus,
   normalizeResearch,
   removeNode,
+  routeFor,
+  commonAncestor,
   taskIdsOf,
   updateNode,
 } from '../../src/shared/research';
@@ -94,6 +96,33 @@ describe('research tree', () => {
     const d3 = addFinding(updateNode(d2, node.id, { taskId: 't-1' }), node.id, 'learned', 'you');
     expect(childrenOf(d3, null)[0]).toMatchObject({ taskId: 't-1', findings: [{ text: 'learned', by: 'you' }] });
     expect(taskIdsOf(d3)).toEqual(['t-1']);
+  });
+
+  it('sends a message to the agent of the nearest node over everything selected', () => {
+    const route = (...titles: string[]) => routeFor(doc, titles.map(byTitle));
+    const aspectOf = (r: ReturnType<typeof routeFor>) => (r.kind === 'aspect' ? r.aspect.title : r.kind);
+    // Nothing selected, or across aspects: the main agent, about the whole research.
+    expect(routeFor(doc, [])).toEqual({ kind: 'main', about: [] });
+    expect(aspectOf(route('Deduplication', 'Activation'))).toBe('main');
+    expect(aspectOf(route('threshold 0.85', 'SwiGLU'))).toBe('main');
+    // Within one aspect: its agent, told which nodes it is about.
+    const twoRuns = route('threshold 0.8', 'threshold 0.85');
+    expect(aspectOf(twoRuns)).toBe('Data');
+    expect(twoRuns.kind === 'aspect' && twoRuns.about.map((n) => n.title)).toEqual(['threshold 0.8', 'threshold 0.85']);
+    expect(commonAncestor(doc, [byTitle('threshold 0.8'), byTitle('threshold 0.85')])?.title).toBe('Deduplication');
+    expect(aspectOf(route('Deduplication', 'Mix in code'))).toBe('Data');
+    // A method and one of its experiments: the method is the common node.
+    expect(commonAncestor(doc, [byTitle('Attention'), byTitle('QK-norm')])?.title).toBe('Attention');
+    expect(aspectOf(route('Attention', 'QK-norm'))).toBe('Architecture');
+    // The aspect alone: spoken to directly; a method alone: its aspect's agent, about the method.
+    expect(route('Data')).toMatchObject({ kind: 'aspect', about: [] });
+    expect(route('Deduplication')).toMatchObject({ kind: 'aspect', about: [{ title: 'Deduplication' }] });
+    // One experiment with an agent of its own: that agent; without one: its aspect's.
+    const withAgent = { ...doc, nodes: doc.nodes.map((n) => (n.title === 'SwiGLU' ? { ...n, taskId: 't-9' } : n)) };
+    expect(routeFor(withAgent, [withAgent.nodes.find((n) => n.title === 'SwiGLU')!])).toMatchObject({ kind: 'experiment', node: { taskId: 't-9' } });
+    expect(aspectOf(route('SwiGLU'))).toBe('Architecture');
+    // The cross-aspect row is validated end to end: the main agent's.
+    expect(aspectOf(route('Code mix + QK-norm'))).toBe('main');
   });
 
   it('opens an older or hand-edited file: missing fields get defaults, broken nodes are dropped', () => {
