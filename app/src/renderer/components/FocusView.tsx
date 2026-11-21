@@ -1,7 +1,7 @@
-import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
-import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
+import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry, ImageRef } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
@@ -1107,15 +1107,32 @@ function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
   );
 }
 
-function Composer({
+/**
+ * Where a box sends when it is not an agent's own (the research page): who it goes to, what to show,
+ * and how to send. The box is the same; what only fits one agent's conversation (commands, side
+ * questions, suggestions, stop and send) is left out.
+ */
+export interface ComposerTarget {
+  label: ReactNode;
+  placeholder: string;
+  send: (text: string, images: ImageRef[]) => Promise<{ ok: boolean; error?: string }>;
+  disabled?: boolean;
+  /** A chip above the box: what the message is about, with a way to take it back. */
+  about?: { label: string; text: string; clearLabel: string; onClear: () => void };
+}
+
+export function Composer({
   task,
+  target,
   onBtw,
   btwCount = 0,
   inject,
   about,
   onClearAbout,
 }: {
-  task: Task;
+  /** The agent the box is for (on the research page: the one a message would reach, if it exists yet). */
+  task?: Task;
+  target?: ComposerTarget;
   onBtw?: (question: string) => void;
   btwCount?: number;
   inject?: { text: string; n: number };
@@ -1146,7 +1163,7 @@ function Composer({
     const join = (a: string, b: string) => (a.trim() && b ? `${a.trimEnd()} ${b}` : a || b);
     const onDraft = (ev: Event) => {
       const { taskId, text, phase } = (ev as CustomEvent<{ taskId: string; text: string; phase: 'listening' | 'keep' | 'drop' }>).detail;
-      if (taskId !== task.taskId) return;
+      if (!task || taskId !== task.taskId) return;
       // A new spoken draft starts after whatever is in the box now.
       if (voiceRef.current === null) base.current = draftRef.current;
       if (phase === 'listening') {
@@ -1161,30 +1178,30 @@ function Composer({
     };
     window.addEventListener('amw:voice-draft', onDraft);
     return () => window.removeEventListener('amw:voice-draft', onDraft);
-  }, [task.taskId]);
+  }, [task?.taskId]);
   /** Typing into, or sending, a box that holds a spoken draft takes it over: it is not sent again. */
   const takeVoice = () => {
     if (voiceRef.current === null) return;
     setVoice(null);
-    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task.taskId } }));
+    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task?.taskId } }));
   };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
   // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
-  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task) });
+  const mention = useMentions(task?.taskId, box, draft, setDraft, { browseOnly: !task || isMainAgent(task) });
   // Other files dropped here are mentioned with @, as if picked from the list.
   const attach = useAttachments(async (files) => {
-    const text = await dropMentions(task.taskId, files);
+    const text = task ? await dropMentions(task.taskId, files) : '';
     if (text) mention.insert(text);
     box.current?.focus();
   });
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
-  const working = task.status === 'running' || task.status === 'starting';
+  const working = !target && !!task && (task.status === 'running' || task.status === 'starting');
   // `!command` runs a command in the agent's folder, as in the CLIs.
-  const shell = draft.trimStart().startsWith('!') && !isMainAgent(task);
-  const suggestion = !draft && task.suggestion ? task.suggestion : '';
+  const shell = !target && !!task && draft.trimStart().startsWith('!') && !isMainAgent(task);
+  const suggestion = !target && !draft && task?.suggestion ? task.suggestion : '';
   /**
    * A side question ("btw"): the same box, another way to send (⌥↵, the bubble button, or a message
    * starting /btw). It goes to the side column, never into the conversation, and interrupts nothing.
@@ -1206,7 +1223,7 @@ function Composer({
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = shell ? [] : attach.refs;
-    if ((!text && !images.length) || sending || attach.busy) return;
+    if ((!text && !images.length) || sending || attach.busy || target?.disabled) return;
     takeVoice();
     if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
@@ -1217,9 +1234,13 @@ function Composer({
       // A command can run for a while (its row shows it running): the box is free at once, and
       // gets the command back if it could not run.
       if (shell) setDraft('');
-      const r = shell
-        ? await call('task:shell', { taskId: task.taskId, command })
-        : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt, ...(images.length ? { images } : {}), ...(about ? { about: about.id } : {}) });
+      const r = target
+        ? await target.send(text, images)
+        : !task
+          ? { ok: false, error: t('Not delivered') }
+          : shell
+            ? await call('task:shell', { taskId: task.taskId, command })
+            : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt, ...(images.length ? { images } : {}), ...(about ? { about: about.id } : {}) });
       if (r.ok) {
         if (!shell) {
           setDraft('');
@@ -1238,6 +1259,15 @@ function Composer({
   };
   return (
     <div className="composer">
+      {target?.about ? (
+        <div className="composer-about" data-testid="composer-about">
+          <span className="composer-about-label">{target.about.label}</span>
+          <span className="composer-about-text">{target.about.text}</span>
+          <button className="composer-about-clear" onClick={target.about.onClear} aria-label={target.about.clearLabel} title={target.about.clearLabel} data-testid="composer-about-clear">
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+      ) : null}
       {about ? (
         <div className="composer-about" data-testid="composer-about">
           <span className="composer-about-label">{t('About {name}’s request', { name: about.alias })}</span>
@@ -1261,9 +1291,10 @@ function Composer({
           className="composer-input"
           rows={3}
           // A new agent with nothing asked yet: ready for its first message.
-          autoFocus={!task.title.trim()}
+          autoFocus={!!task && !target && !task.title.trim()}
           value={draft}
-          placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
+          disabled={target?.disabled}
+          placeholder={target ? target.placeholder : btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: task && isMainAgent(task) ? t('Main agent') : (task?.alias ?? '') })}
           onChange={(e) => {
             takeVoice();
             setDraft(e.target.value);
@@ -1307,7 +1338,7 @@ function Composer({
               </>
             ) : (
               <>
-                {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
+                {target ? target.label : task ? `${t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · ${PROVIDER_LABEL[task.provider]}` : null}
               </>
             )}
           </span>
@@ -1337,7 +1368,7 @@ function Composer({
               <Icon name="btw" />
             </button>
           ) : null}
-          <button className="send-btn" aria-label={t('Send')} disabled={(!draft.trim() && !(attach.items.length && !shell)) || sending || attach.busy} onClick={() => void send()}>
+          <button className="send-btn" aria-label={t('Send')} disabled={(!draft.trim() && !(attach.items.length && !shell)) || sending || attach.busy || !!target?.disabled} onClick={() => void send()} data-testid="composer-send">
             <Icon name="send" />
           </button>
         </div>

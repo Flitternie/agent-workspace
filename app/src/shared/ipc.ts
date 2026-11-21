@@ -45,7 +45,9 @@ const researchDoc = z.object({
 export const ipcSchemas = {
   'research:get': z.object({ projectId: id }),
   'research:save': z.object({ projectId: id, doc: researchDoc }),
-  'research:message': z.object({ projectId: id, nodeIds: z.array(id).max(200), text: text.min(1) }),
+  'research:message': z
+    .object({ projectId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
+    .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
   'research:create': z.object({ projectId: id, title: z.string().min(1).max(300), goal: text, sample: z.boolean() }),
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),

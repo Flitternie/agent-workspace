@@ -23,9 +23,9 @@ import {
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { SideSlot } from '../side-slot';
-import { Alias, Icon, STATUS_LABEL as AGENT_STATUS } from './bits';
+import { Alias, Icon, PROVIDER_LABEL, STATUS_LABEL as AGENT_STATUS } from './bits';
 import { Modal } from './Dialogs';
-import { PanelResizer } from './FocusView';
+import { Composer, PanelResizer, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
 
 const STATUS_LABEL: Record<ResearchStatus, string> = { idea: 'Not tried', running: 'Running', pass: 'Works', fail: 'Does not work', error: 'No result' };
@@ -77,6 +77,12 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const select = (id: string, add: boolean) => setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
 
   const ctx: Ctx = { snapshot, project: project.projectId, doc, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
+  /** A double-click opens the node's agent (a method's is its aspect's); with none yet, it just selects the node. */
+  const openNode = (n: ResearchNode) => {
+    const id = n.type === 'method' ? aspectOf(doc, n)?.taskId : n.taskId;
+    if (id && taskOf(id)) onOpenAgent(id);
+    else setSel([n.id]);
+  };
   const sidePanel = panel ? (
     <SidePanel
       title={selected.length > 1 ? t('{n} selected', { n: selected.length }) : selected[0] ? selected[0].title : doc.title}
@@ -117,7 +123,7 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
         </div>
       </header>
       {error ? <div className="error-text pad">{error}</div> : null}
-      <Graph doc={doc} depth={depth} setDepth={setDepth} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
+      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       {sidePanel
         ? side
@@ -158,6 +164,7 @@ function Graph({
   doc,
   depth,
   setDepth,
+  openNode,
   opened,
   toggleOpen,
   sel,
@@ -169,6 +176,7 @@ function Graph({
   doc: ResearchDoc;
   depth: GraphDepth;
   setDepth: (d: GraphDepth) => void;
+  openNode: (n: ResearchNode) => void;
   opened: Set<string>;
   toggleOpen: (id: string) => void;
   sel: string[];
@@ -300,7 +308,7 @@ function Graph({
           {/* Under the nodes, so they never cover a title or a number; a selected method's own links come forward. */}
           <g className={`rg-links${sel.length ? ' has-sel' : ''}`}>{cross}</g>
           {L.items.map((it) => (
-            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
+            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} openNode={openNode} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
           ))}
         </g>
       </svg>
@@ -314,6 +322,7 @@ function Graph({
         <span className="lk mutate">┅ {t('Mutated')}</span>
         <span className="lk borrow">┈ {t('Borrows')}</span>
         <span className="lk finding">◆ {t('Finding')}</span>
+        <span className="lk-how">{t('Click: talk to its agent · ⇧-click: several · double-click: open its conversation')}</span>
       </div>
       {!childrenOf(doc, null).length ? <div className="research-hint">{t('Add the aspects that may move the result from the side column: data, model, training…')}</div> : null}
     </div>
@@ -322,7 +331,7 @@ function Graph({
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-function GraphNode({ it, doc, sel, select, toggleOpen, statusOf, taskOf, snapshot }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot }) {
+function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot }) {
   const { nodeW: W, nodeH: H } = GRAPH;
   const at = `translate(${it.x},${it.y})`;
   const waiting = (taskId?: string) => (taskId ? snapshot.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.kind !== 'completion').length : 0);
@@ -377,11 +386,12 @@ function GraphNode({ it, doc, sel, select, toggleOpen, statusOf, taskOf, snapsho
   const st = statusOf(n);
   const isSel = sel.includes(n.id);
   const click = (e: ReactMouseEvent) => select(n.id, e.shiftKey || e.metaKey);
+  const dbl = () => openNode(n);
   if (n.type === 'aspect') {
     const methods = childrenOf(doc, n.id);
     const agent = taskOf(n.taskId);
     return (
-      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}`} transform={at} onClick={click} data-testid="research-node" data-kind="aspect" data-title={n.title}>
+      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="aspect" data-title={n.title}>
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 strong">
           {clip(n.title, 15)}
@@ -402,7 +412,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, statusOf, taskOf, snapsho
     const link = n.links?.[0];
     const found = childrenOf(doc, n.id).reduce((s, e) => s + (e.findings?.length ?? 0), 0);
     return (
-      <g className={`rg-node method st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} data-testid="research-node" data-kind="method" data-title={n.title}>
+      <g className={`rg-node method st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="method" data-title={n.title}>
         <rect className="box" width={W} height={H} rx={10} />
         <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
         <text x={25} y={21} className="t1">
@@ -424,7 +434,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, statusOf, taskOf, snapsho
   }
   const agent = taskOf(n.taskId);
   return (
-    <g className={`rg-node experiment st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+    <g className={`rg-node experiment st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
       <rect className="box" width={W} height={H} rx={10} />
       <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
       <text x={25} y={21} className="t1">
@@ -745,38 +755,62 @@ function MultiPanel({ ctx, nodes }: { ctx: Ctx; nodes: ResearchNode[] }) {
 
 function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: ResearchNode[]; onClear: () => void }) {
   const { doc, snapshot } = ctx;
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
   const one = selected.length === 1 ? selected[0] : undefined;
   // Who gets it (decided again in the main process when sent): the agent of the nearest node over the selection.
   const route = routeFor(doc, selected);
-  const label = (() => {
-    if (route.kind === 'experiment') return t('{agent} (experiment "{name}")', { agent: ctx.taskOf(route.node.taskId)?.alias ?? '', name: clip(route.node.title, 14) });
-    if (route.kind === 'aspect') {
-      const at = ctx.taskOf(route.aspect.taskId);
-      return at ? t('{agent} ({aspect} aspect)', { agent: at.alias, aspect: route.aspect.title }) : t('a new agent for "{aspect}"', { aspect: route.aspect.title });
-    }
-    return snapshot.main ? t('Main agent') : t('Main agent (off)');
-  })();
-  const aboutCount = route.kind === 'experiment' ? 0 : route.about.length;
+  const routed: Task | undefined = route.kind === 'experiment' ? ctx.taskOf(route.node.taskId) : route.kind === 'aspect' ? ctx.taskOf(route.aspect.taskId) : snapshot.main;
+  const to =
+    route.kind === 'experiment'
+      ? t('{agent} (experiment "{name}")', { agent: routed?.alias ?? '', name: clip(route.node.title, 14) })
+      : route.kind === 'aspect'
+        ? routed
+          ? t('{agent} ({aspect} aspect)', { agent: routed.alias, aspect: route.aspect.title })
+          : t('a new agent for "{aspect}"', { aspect: route.aspect.title })
+        : snapshot.main
+          ? t('Main agent')
+          : t('Main agent (off)');
   const disabled = route.kind === 'main' && !snapshot.main;
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || sending || disabled) return;
-    setSending(true);
-    try {
-      const r = await call('research:message', { projectId: ctx.project, nodeIds: selected.map((n) => n.id), text });
-      setSent({ to: r.alias, taskId: r.taskId });
-      setDraft('');
-    } catch (e) {
-      ctx.setError(errorText(e));
-    } finally {
-      setSending(false);
-    }
+  const target: ComposerTarget = {
+    label: (
+      <span data-testid="research-to">
+        {t('To: {alias}', { alias: to })}
+        {routed && route.kind !== 'main' ? ` · ${PROVIDER_LABEL[routed.provider]}` : ''}
+      </span>
+    ),
+    placeholder: disabled
+      ? t('Turn the main agent on in Settings to talk about the whole research.')
+      : selected.length > 1
+        ? t('e.g. Combine these into one method')
+        : one?.type === 'aspect'
+          ? t('e.g. Which methods would you try first?')
+          : one?.type === 'method'
+            ? t('e.g. Try thresholds 0.82 and 0.87 in parallel')
+            : one?.type === 'experiment'
+              ? t('e.g. Rerun with half the learning rate')
+              : t('e.g. Add an aspect for inference speed · Turn Alice’s and Bob’s conversations into this tree'),
+    disabled,
+    // The selection is what the message is about: shown above the box, as on an agent's page.
+    about: selected.length
+      ? {
+          label: t('About'),
+          text: selected.length === 1 ? selected[0].title : t('{first} and {n} more', { first: selected[0].title, n: selected.length - 1 }),
+          clearLabel: t('Clear the selection'),
+          onClear,
+        }
+      : undefined,
+    send: async (text, images) => {
+      try {
+        const r = await call('research:message', { projectId: ctx.project, nodeIds: selected.map((n) => n.id), text, ...(images.length ? { images } : {}) });
+        setSent({ to: r.alias, taskId: r.taskId });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: errorText(e) };
+      }
+    },
   };
   return (
-    <div className="composer research-composer">
+    <div className="research-composer">
       {sent ? (
         <div className="research-sent" data-testid="research-sent">
           {t('Sent to {agent}.', { agent: sent.to })}{' '}
@@ -788,53 +822,8 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
           </button>
         </div>
       ) : null}
-      <div className="composer-about research-to" data-testid="research-to">
-        <span className="composer-about-label">{t('To')}</span>
-        <span className="composer-about-text">
-          {label}
-          {aboutCount > 1 ? ` · ${t('about {n} nodes', { n: aboutCount })}` : ''}
-        </span>
-        {selected.length ? (
-          <button className="composer-about-clear" onClick={onClear} aria-label={t('Clear the selection')} title={t('Clear the selection')}>
-            <Icon name="x" size={11} />
-          </button>
-        ) : null}
-      </div>
-      <div className="composer-box">
-        <textarea
-          className="composer-input"
-          rows={2}
-          value={draft}
-          disabled={disabled}
-          placeholder={
-            disabled
-              ? t('Turn the main agent on in Settings to talk about the whole research.')
-              : selected.length > 1
-                ? t('e.g. Combine these into one method')
-                : one?.type === 'aspect'
-                  ? t('e.g. Which methods would you try first?')
-                  : one?.type === 'method'
-                    ? t('e.g. Try thresholds 0.82 and 0.87 in parallel')
-                    : one?.type === 'experiment'
-                      ? t('e.g. Rerun with half the learning rate')
-                      : t('e.g. Add an aspect for inference speed · Turn Alice’s and Bob’s conversations into this tree')
-          }
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          data-testid="research-input"
-        />
-        <div className="composer-foot">
-          <span className="hint">{t('Select a node to talk to its agent; ⇧-click to select several.')}</span>
-          <button className="btn btn-primary btn-sm" onClick={() => void send()} disabled={disabled || sending || !draft.trim()} data-testid="research-send">
-            {t('Send')}
-          </button>
-        </div>
-      </div>
+      {/* The same box as on an agent's page (attachments, @ files of the agent it reaches), sending through the research. */}
+      <Composer task={routed} target={target} />
     </div>
   );
 }

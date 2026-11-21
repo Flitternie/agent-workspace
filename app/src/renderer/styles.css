@@ -7654,15 +7654,18 @@ button.subtask-row:hover {
 }
 /* The box at the bottom: who it goes to above it, as on an agent's page. */
 .research-composer {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  flex: none;
+  padding-top: 6px;
   background: var(--panel);
 }
+/* Above the box, in its column (the box itself is the agent page's own). */
 .research-sent {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
+  max-width: var(--chat-w);
+  margin: 0 auto;
+  padding: 0 24px 2px;
   font-size: 12px;
   color: var(--text-2);
 }
@@ -7918,4 +7921,8 @@ button.subtask-row:hover {
   background: var(--panel-2);
   color: var(--text-2);
   font-size: 12px;
+}
+.research-legend .lk-how {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
 }

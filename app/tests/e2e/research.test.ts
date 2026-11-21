@@ -73,8 +73,12 @@ describe('research page (demo)', () => {
     expect(await panel.innerText()).toMatch(/the first thing you say to it below starts one/);
     expect(await panel.locator('input, textarea, select, .btn').count()).toBe(0);
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
-    await page.getByTestId('research-input').fill('Which method would you try first?');
-    await page.getByTestId('research-send').click();
+    // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.
+    expect(await page.locator('.research-composer .composer .send-btn').count()).toBe(1);
+    expect(await page.getByTestId('composer-target').innerText()).toMatch(/To: a new agent for "Data"/);
+    expect(await page.getByTestId('composer-about').innerText()).toMatch(/About\s*Data/);
+    await page.getByTestId('composer-input').fill('Which method would you try first?');
+    await page.getByTestId('composer-send').click();
     await expect.poll(() => page.getByTestId('research-sent').innerText(), { timeout: 20_000 }).toMatch(/Sent to/);
     await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Data')?.taskId ?? '').not.toBe('');
     const dataAgent = (await doc()).nodes.find((n) => n.title === 'Data')!.taskId!;
@@ -85,6 +89,21 @@ describe('research page (demo)', () => {
     const alias = (await snap()).tasks.find((x) => x.taskId === dataAgent)!.alias;
     expect(await page.locator(`[data-testid="rail-item"][data-alias="${alias}"]`).count()).toBe(0);
     await expect.poll(() => row.innerText()).toMatch(/1 agent\b/);
+    // A double-click opens a node's agent (a method's: its aspect's); Esc comes back.
+    await node('aspect', 'Data').dblclick();
+    await expect.poll(() => page.getByTestId('research').count()).toBe(0);
+    expect(await page.getByTestId('composer-target').innerText()).toMatch(new RegExp(`To: ${alias}`));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByTestId('research').isVisible()).toBe(true);
+    await node('method', 'Deduplication').dblclick();
+    await expect.poll(() => page.getByTestId('research').count()).toBe(0);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByTestId('research').isVisible()).toBe(true);
+    // No agent behind it: a double-click just selects it.
+    await node('aspect', 'Training').dblclick();
+    await expect.poll(() => panel.innerText()).toContain('Which methods are there for "Training"?');
+    expect(await page.getByTestId('research').isVisible()).toBe(true);
+    await node('aspect', 'Data').click();
     // Its context when wanted: open its conversation; Esc comes back to the research.
     await page.getByTestId('research-open-agent').click();
     await expect.poll(() => page.getByTestId('research').count()).toBe(0);
@@ -103,12 +122,14 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-depth-experiment').click();
     await node('experiment', 'threshold 0.8').click();
     await node('experiment', 'threshold 0.87').click({ modifiers: ['Shift'] });
-    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\) · about 2 nodes/);
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\)/);
+    expect(await page.getByTestId('composer-about').innerText()).toMatch(/threshold 0\.8 and 1 more/);
     await page.getByTestId('research-depth-method').click();
     await node('method', 'Optimizer').click();
     await node('method', 'Activation').click({ modifiers: ['Shift'] });
-    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/Main agent \(off\) · about 2 nodes/);
-    expect(await page.getByTestId('research-input').isDisabled()).toBe(true);
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/To: Main agent \(off\)/);
+    expect(await page.getByTestId('composer-about').innerText()).toMatch(/Optimizer and 1 more/);
+    expect(await page.getByTestId('composer-input').isDisabled()).toBe(true);
     await page.screenshot({ path: join(shots, 'research-03-multi.png') });
 
     // Starting one in another project: offered on its team.

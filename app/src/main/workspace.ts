@@ -570,14 +570,14 @@ export class Workspace {
    * The box on the research page: to the agent of the nearest node over what is selected (an aspect
    * with no agent yet: this message starts it), or to the main agent about the whole research.
    */
-  async researchMessage(projectId: string, nodeIds: string[], text: string): Promise<{ taskId: string; alias: string }> {
+  async researchMessage(projectId: string, nodeIds: string[], text: string, images?: ImageRef[]): Promise<{ taskId: string; alias: string }> {
     const doc = this.researchGet(projectId);
     if (!doc) throw new Error('This project has no research.');
     const nodes = nodeIds.map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n);
     const route = routeFor(doc, nodes);
     const lang = this.language();
     if (route.kind === 'experiment') {
-      const r = await this.send(route.node.taskId!, text, 'text');
+      const r = await this.send(route.node.taskId!, text, 'text', { images });
       if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
       return { taskId: route.node.taskId!, alias: this.findTask(route.node.taskId!)?.alias ?? '' };
     }
@@ -586,15 +586,17 @@ export class Workspace {
       const agent = route.aspect.taskId ? this.findTask(route.aspect.taskId) : undefined;
       if (!agent) {
         const t = await this.researchStartAgent(projectId, route.aspect.id, { isolate: false, message: `${prefix}${text}` });
+        // Images come with a first message only through send: right after it starts.
+        if (images?.length) await this.send(t.taskId, '', 'text', { images });
         return { taskId: t.taskId, alias: t.alias };
       }
-      const r = await this.send(agent.taskId, `${prefix}${text}`, 'text');
+      const r = await this.send(agent.taskId, `${prefix}${text}`, 'text', { images });
       if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
       return { taskId: agent.taskId, alias: agent.alias };
     }
     const main = this.store.data.mainAgent;
     if (!main) throw new Error('Turn the main agent on in Settings to talk about the whole research.');
-    const r = await this.send(main.taskId, `${aboutPrefix(route.about, doc, lang, true)}${text}`, 'text');
+    const r = await this.send(main.taskId, `${aboutPrefix(route.about, doc, lang, true)}${text}`, 'text', { images });
     if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
     return { taskId: main.taskId, alias: main.alias };
   }

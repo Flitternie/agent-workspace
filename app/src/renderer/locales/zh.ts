@@ -1022,6 +1022,9 @@ export const zh: Record<string, string> = {
   'Files in this agent’s folder': '这个 agent 目录里的文件',
   'In {dir}': '{dir} 里',
   // Research page
+  About: '关于',
+  '{first} and {n} more': '「{first}」等 {n} 个',
+  'Click: talk to its agent · ⇧-click: several · double-click: open its conversation': '单击：和它的 agent 对话 · ⇧ 单击：多选 · 双击：打开它的对话',
   'Manage it by talking: ask below to add an aspect, record an ablation, or turn earlier conversations into this tree.': '用对话来管理：在下方说要加一个方面、记录一次消融，或者把之前的对话整理进这棵树。',
   'The main agent looks after combinations across aspects.': '跨方面的组合由主 agent 负责。',
   'No agent yet: the first thing you say to it below starts one.': '还没有 agent：在下方对它说第一句话，就会开一个。',
