@@ -694,6 +694,8 @@ export const zh: Record<string, string> = {
   'Imported with its full history. Send a message to continue.': '已带着完整历史接入，发消息即可继续。',
   'Not started yet.': '尚未开始。',
   'Continue a session…': '接入已有会话…',
+  'Continuing a conversation from Claude Code or Codex?': '想接着 Claude Code 或 Codex 里已有的对话？',
+  '{names} signed out': '{names} 未登录',
 
   // Sidebar
   'Overview (⌘0 / Esc)': '总览（⌘0 / Esc）',
@@ -963,7 +965,7 @@ export const zh: Record<string, string> = {
   '{n} dropped': '{n} 个放弃的尝试',
   'Tried: {x}': '试过：{x}',
   'Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.': '停止这个 agent 并把它从工作区移除。如果它的独立工作副本里没有未提交的改动，副本会被删除，之后这段对话就无法继续；有未提交的改动则保留在磁盘上。',
-  'Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里，随时可以用「接入已有会话…」找回来。',
+  'Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session… (the history button next to + in the sidebar)': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里，随时可以用「接入已有会话…」（左侧栏 + 号旁的历史按钮）找回来。',
   'Archived': '已归档',
   'Projects where nothing is going on: no agent working or waiting, none used for 3 days. One comes back by itself when an agent in it does something or you message it.': '没有动静的项目：没有 agent 在工作或等你，且都 3 天没用过。项目里的 agent 一有动静，或者你给它发消息，项目就会自动回到上面。',
   'to': '交给',
@@ -985,7 +987,6 @@ export const zh: Record<string, string> = {
   '+{n} more on the left': '左侧还有 {n} 个',
   '{n} tiles ({grid})': '{n} 格（{grid}）',
   'Nothing going on for 3 days; a project comes back when one of its agents is used.': '3 天没有动静的项目；里面的 agent 一被使用，项目就会回到上面。',
-  'What should it do?': '要它做什么？',
   'Continues a Claude Code or Codex conversation here, with its history. Close it in the terminal first.': '在这里接着一段 Claude Code 或 Codex 的对话继续，保留完整历史。先在终端里关掉它。',
   'Started by an agent for itself: claude -p, codex exec, Codex sub-agents.': '由 agent 自己启动的：claude -p、codex exec、Codex 子 agent。',
   'A new agent continues from a copy; {name} stays as it is.': '新 agent 从一份副本接着做；{name} 保持不变。',
