@@ -1507,10 +1507,10 @@ body.resizing .sidebar-resizer {
   background: var(--text-3);
 }
 .msg.user {
-  /* A faint tint of the accent: the user's own words read apart from the agent's neutral greys (table
-     headers, code blocks), in either theme. */
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
-  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  /* A shade darker than the agent's light greys (table headers, code blocks), so the user's own words
+     read apart from them; mixed from the text colour, so it holds in either theme. */
+  background: color-mix(in srgb, var(--text) 5%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--text) 9%, var(--border));
   border-radius: 10px;
   padding: 6px 12px 8px;
 }
