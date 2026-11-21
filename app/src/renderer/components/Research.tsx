@@ -1,9 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { AgentProvider, Task, WorkspaceSnapshot } from '../../shared/types';
+import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import {
-  addFinding,
-  addNode,
   aspectOf,
   bestExperiment,
   childrenOf,
@@ -11,13 +9,9 @@ import {
   experimentStatus,
   formatValue,
   GRAPH,
-  judge,
   layoutGraph,
   methodStatus,
-  newId,
-  removeNode,
   routeFor,
-  updateNode,
   type GraphDepth,
   type GraphItem,
   type ResearchDoc,
@@ -38,13 +32,6 @@ const STATUS_LABEL: Record<ResearchStatus, string> = { idea: 'Not tried', runnin
 const LINK_LABEL: Record<ResearchLinkKind, string> = { combine: 'Combined', mutate: 'Mutated', borrow: 'Borrows' };
 const PANEL_W = 380;
 
-/** A provider that can start an agent now (as the new-task dialog picks its default). */
-function providerFor(snapshot: WorkspaceSnapshot): AgentProvider | null {
-  // The demo shows the page with mock agents (no model calls); otherwise Claude Code, then Codex.
-  const list: AgentProvider[] = snapshot.demo ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
-  return list.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? null;
-}
-
 /**
  * A project's research as a graph: the goal, its aspects, their methods and experiments, with
  * combinations, mutations and borrowed ideas drawn across. What is selected decides both the side
@@ -61,23 +48,21 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const [panelW, setPanelW] = useState(PANEL_W);
   const side = useContext(SideSlot);
 
+  // Read again whenever the tree changes (an agent's tool call writes it; the summary's stamp moves).
+  const stamp = snapshot.research.find((r) => r.projectId === projectId)?.updatedAt;
+  useEffect(() => {
+    setSel([]);
+    setDoc(undefined);
+  }, [projectId]);
   useEffect(() => {
     let live = true;
-    setDoc(undefined);
-    setSel([]);
     call('research:get', { projectId })
       .then((d) => live && setDoc(d))
       .catch((e) => live && (setError(errorText(e)), setDoc(null)));
     return () => {
       live = false;
     };
-  }, [projectId]);
-
-  /** Every edit: shown at once, then written to the repository. */
-  const commit = (next: ResearchDoc) => {
-    setDoc(next);
-    call('research:save', { projectId, doc: next }).catch((e) => setError(errorText(e)));
-  };
+  }, [projectId, stamp]);
 
   const taskOf = (id?: string) => (id ? snapshot.tasks.find((x) => x.taskId === id) : undefined);
   const statusOf = (n: ResearchNode): ResearchStatus => (n.type === 'experiment' ? experimentStatus(n, taskOf(n.taskId)?.status) : n.type === 'method' && doc ? methodStatus(doc, n, statusOf) : n.status);
@@ -91,7 +76,7 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const count = (s: ResearchStatus) => exps.filter((e) => statusOf(e) === s).length;
   const select = (id: string, add: boolean) => setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
 
-  const ctx: Ctx = { snapshot, project: project.projectId, doc, commit, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError, open: (id) => setOpened((o) => new Set(o).add(id)) };
+  const ctx: Ctx = { snapshot, project: project.projectId, doc, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
   const sidePanel = panel ? (
     <SidePanel
       title={selected.length > 1 ? t('{n} selected', { n: selected.length }) : selected[0] ? selected[0].title : doc.title}
@@ -153,13 +138,11 @@ interface Ctx {
   snapshot: WorkspaceSnapshot;
   project: string;
   doc: ResearchDoc;
-  commit: (d: ResearchDoc) => void;
   statusOf: (n: ResearchNode) => ResearchStatus;
   taskOf: (id?: string) => Task | undefined;
   select: (id: string | null) => void;
   onOpenAgent: (taskId: string) => void;
   setError: (e: string) => void;
-  open: (methodId: string) => void;
 }
 
 function levelName(sel: ResearchNode[]): string {
@@ -463,24 +446,16 @@ function GraphNode({ it, doc, sel, select, toggleOpen, statusOf, taskOf, snapsho
   );
 }
 
-// ------------------------------------------------------------------ side column: each level its own question
+// ------------------------------------------------------------------ side column: each level its question, to read
+// Changes are made by talking (the box below, to the right agent, which has the research tools);
+// the column shows where things stand and opens an agent's conversation when its context is wanted.
 
 function Question({ children }: { children: ReactNode }) {
   return <div className="rs-question">{children}</div>;
 }
 
-function AgentLine({ ctx, task, role, onStart }: { ctx: Ctx; task?: Task; role: string; onStart?: () => void }) {
-  if (!task)
-    return (
-      <div className="rs-agent none">
-        <span className="muted">{t('No agent on this yet.')}</span>
-        {onStart ? (
-          <button className="btn btn-primary btn-sm" onClick={onStart} data-testid="research-start-agent">
-            {t('Start an agent for it')}
-          </button>
-        ) : null}
-      </div>
-    );
+function AgentLine({ ctx, task, role, none }: { ctx: Ctx; task?: Task; role: string; none: string }) {
+  if (!task) return <div className="rs-agent none muted">{none}</div>;
   return (
     <div className="rs-agent">
       <Alias alias={task.alias} size="sm" />
@@ -497,12 +472,34 @@ function AgentLine({ ctx, task, role, onStart }: { ctx: Ctx; task?: Task; role: 
   );
 }
 
+function Findings({ ctx, items }: { ctx: Ctx; items: Array<{ text: string; by?: string; id: string; on?: ResearchNode }> }) {
+  if (!items.length) return null;
+  return (
+    <>
+      <div className="rs-sec">{t('Findings')}</div>
+      {items.map((f) => (
+        <div key={f.id} className="rs-finding">
+          {f.text}
+          {f.on ? (
+            <button className="link small" onClick={() => ctx.select(f.on!.id)}>
+              {' '}
+              — {f.by ? `${f.by}, ` : ''}
+              {f.on.title}
+            </button>
+          ) : f.by ? (
+            <span className="muted"> — {f.by}</span>
+          ) : null}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function GoalPanel({ ctx }: { ctx: Ctx }) {
   const { doc } = ctx;
   const rows = contributions(doc);
   const max = Math.max(0.0001, ...rows.map((r) => Math.abs(r.estimate ?? 0)));
   const m = doc.endMetric;
-  const [adding, setAdding] = useState<'aspect' | 'evidence' | null>(null);
   return (
     <>
       <Question>{t('Which aspects move the end result?')}</Question>
@@ -523,132 +520,31 @@ function GoalPanel({ ctx }: { ctx: Ctx }) {
               </span>
             </div>
           ))}
-          <div className="muted small">{t('Estimated from ablations: what taking an aspect’s changes out costs end to end. Hatched: one ablation only.')}</div>
         </div>
       ) : null}
-      <div className="rs-sec">{t('Evidence: end-to-end runs and ablations')}</div>
       {doc.evidence.length ? (
-        <table className="rs-table">
-          <thead>
-            <tr>
-              <th>{t('Run')}</th>
-              <th>{m?.name ?? t('Result')}</th>
-              <th>{t('Change')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {doc.evidence.map((e) => (
-              <tr key={e.id}>
-                <td>
-                  <span className={`pill${e.kind === 'ablation' ? '' : ' pill-e2e'}`}>{e.kind === 'ablation' ? t('Ablation') : t('End to end')}</span> {e.title}
-                </td>
-                <td>{formatValue(m, e.value)}</td>
-                <td className={e.delta >= 0 ? 'up' : 'down'}>
-                  {e.delta >= 0 ? '+' : ''}
-                  {formatValue(m, e.delta)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className="muted small">{t('None yet. Record an end-to-end run, or an ablation (an aspect’s changes taken out), to see which aspects matter.')}</div>
-      )}
-      <div className="rs-actions">
-        <button className="btn btn-sm" onClick={() => setAdding(adding === 'aspect' ? null : 'aspect')} data-testid="research-add-aspect">
-          {t('Add an aspect')}
-        </button>
-        <button className="btn btn-sm" onClick={() => setAdding(adding === 'evidence' ? null : 'evidence')}>
-          {t('Record a run')}
-        </button>
-      </div>
-      {adding === 'aspect' ? <AddAspect ctx={ctx} onDone={() => setAdding(null)} /> : null}
-      {adding === 'evidence' ? <AddEvidence ctx={ctx} onDone={() => setAdding(null)} /> : null}
+        <>
+          <div className="rs-sec">{t('Evidence: end-to-end runs and ablations')}</div>
+          <table className="rs-table">
+            <tbody>
+              {doc.evidence.map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <span className={`pill${e.kind === 'ablation' ? '' : ' pill-e2e'}`}>{e.kind === 'ablation' ? t('Ablation') : t('End to end')}</span> {e.title}
+                  </td>
+                  <td>{formatValue(m, e.value)}</td>
+                  <td className={e.delta >= 0 ? 'up' : 'down'}>
+                    {e.delta >= 0 ? '+' : ''}
+                    {formatValue(m, e.delta)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+      <div className="rs-tip">{t('Manage it by talking: ask below to add an aspect, record an ablation, or turn earlier conversations into this tree.')}</div>
     </>
-  );
-}
-
-function AddAspect({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
-  const [title, setTitle] = useState('');
-  const [metric, setMetric] = useState('');
-  const [higher, setHigher] = useState(true);
-  const [baseline, setBaseline] = useState('');
-  const save = () => {
-    if (!title.trim()) return;
-    const m: ResearchMetric | undefined = metric.trim() ? { name: metric.trim(), higherIsBetter: higher, ...(baseline.trim() && !isNaN(+baseline) ? { baseline: +baseline } : {}) } : undefined;
-    const r = addNode(ctx.doc, { type: 'aspect', parent: null, title: title.trim(), status: 'running', metric: m });
-    ctx.commit(r.doc);
-    ctx.select(r.node.id);
-    onDone();
-  };
-  return (
-    <div className="rs-form" data-testid="research-aspect-form">
-      <input className="input" autoFocus placeholder={t('Aspect, e.g. Data')} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="rs-form-row">
-        <input className="input" placeholder={t('How it is validated: a metric (optional)')} value={metric} onChange={(e) => setMetric(e.target.value)} />
-        <select className="input" value={higher ? 'up' : 'down'} onChange={(e) => setHigher(e.target.value === 'up')} disabled={!metric.trim()}>
-          <option value="up">{t('higher is better')}</option>
-          <option value="down">{t('lower is better')}</option>
-        </select>
-        <input className="input rs-num" placeholder={t('start')} value={baseline} onChange={(e) => setBaseline(e.target.value)} disabled={!metric.trim()} />
-      </div>
-      <div className="muted small">{t('Without a metric, its results are judged by hand: works / does not work.')}</div>
-      <div className="rs-actions">
-        <button className="btn btn-primary btn-sm" onClick={save} disabled={!title.trim()}>
-          {t('Add')}
-        </button>
-        <button className="btn btn-sm" onClick={onDone}>
-          {t('Cancel')}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AddEvidence({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
-  const aspects = childrenOf(ctx.doc, null).filter((a) => !a.combos);
-  const [kind, setKind] = useState<'e2e' | 'ablation'>('e2e');
-  const [title, setTitle] = useState('');
-  const [value, setValue] = useState('');
-  const [delta, setDelta] = useState('');
-  const [aspect, setAspect] = useState(aspects[0]?.id ?? '');
-  const ok = title.trim() && value.trim() && !isNaN(+value) && delta.trim() && !isNaN(+delta) && (kind === 'e2e' || aspect);
-  const save = () => {
-    if (!ok) return;
-    ctx.commit({ ...ctx.doc, evidence: [...ctx.doc.evidence, { id: newId('ev'), kind, title: title.trim(), value: +value, delta: +delta, ...(kind === 'ablation' ? { aspect } : {}), at: new Date().toISOString() }], updatedAt: new Date().toISOString() });
-    onDone();
-  };
-  return (
-    <div className="rs-form">
-      <div className="rs-form-row">
-        <select className="input" value={kind} onChange={(e) => setKind(e.target.value as 'e2e' | 'ablation')}>
-          <option value="e2e">{t('End-to-end run')}</option>
-          <option value="ablation">{t('Ablation: an aspect taken out')}</option>
-        </select>
-        {kind === 'ablation' ? (
-          <select className="input" value={aspect} onChange={(e) => setAspect(e.target.value)}>
-            {aspects.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.title}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-      <input className="input" placeholder={t('What was run')} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="rs-form-row">
-        <input className="input" placeholder={ctx.doc.endMetric?.name ?? t('Result')} value={value} onChange={(e) => setValue(e.target.value)} />
-        <input className="input" placeholder={t('Change against the run compared with')} value={delta} onChange={(e) => setDelta(e.target.value)} />
-      </div>
-      <div className="rs-actions">
-        <button className="btn btn-primary btn-sm" onClick={save} disabled={!ok}>
-          {t('Record')}
-        </button>
-        <button className="btn btn-sm" onClick={onDone}>
-          {t('Cancel')}
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -658,77 +554,14 @@ function NodePanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   return <ExperimentPanel ctx={ctx} node={node} />;
 }
 
-/** The instruction an agent starts with: its place in the research, what to do, and how it is validated. */
-function roleBrief(doc: ResearchDoc, node: ResearchNode, extra = ''): string {
-  const aspect = aspectOf(doc, node);
-  const m = aspect?.metric;
-  const how = m ? t('Validation: {metric} ({dir}){base}.', { metric: m.name, dir: m.higherIsBetter ? t('higher is better') : t('lower is better'), base: m.baseline != null ? t(', starting at {v}', { v: formatValue(m, m.baseline) }) : '' }) : t('Validation: judged by the user (works / does not work).');
-  if (node.type === 'aspect')
-    return [
-      t('You own the "{aspect}" aspect of the research "{title}" ({goal}).', { aspect: node.title, title: doc.title, goal: doc.goal }),
-      how,
-      t('First list methods worth trying here, each in a line or two, and which could run in parallel. Do not change code yet; wait for the user to pick.'),
-      extra,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  const method = node.type === 'experiment' ? doc.nodes.find((n) => n.id === node.parent) : node;
-  return [
-    t('Research "{title}" · aspect "{aspect}" · method "{method}".', { title: doc.title, aspect: aspect?.title ?? '', method: method?.title ?? '' }),
-    method?.design ? t('Design: {design}', { design: method.design }) : '',
-    t('Try this variant: {config}', { config: node.config ?? node.title }),
-    how,
-    t('When done, report the result in one line ({metric}: value) and anything learned.', { metric: m?.name ?? t('works / does not work') }),
-    extra,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-async function startAgent(ctx: Ctx, node: ResearchNode, opts: { isolate: boolean; message?: string }): Promise<string | undefined> {
-  const provider = providerFor(ctx.snapshot);
-  if (!provider) {
-    ctx.setError(t('No signed-in Claude Code or Codex to start an agent. Open Settings to sign in.'));
-    return undefined;
-  }
-  try {
-    const task = await call('task:create', {
-      projectId: ctx.project,
-      provider,
-      title: node.type === 'aspect' ? t('{title} (research)', { title: node.title }) : `${aspectOf(ctx.doc, node)?.title ?? ''} · ${node.title}`,
-      instruction: roleBrief(ctx.doc, node, opts.message),
-      isolate: opts.isolate,
-      ...(provider === 'mock' ? { mockScript: 'work' } : {}),
-    });
-    return task.taskId;
-  } catch (e) {
-    ctx.setError(errorText(e));
-    return undefined;
-  }
-}
-
 function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   const { doc } = ctx;
   const methods = childrenOf(doc, node.id);
-  const task = ctx.taskOf(node.taskId);
-  const [adding, setAdding] = useState(false);
   const m = node.metric;
   return (
     <>
       <Question>{node.combos ? t('How do methods from different aspects work together?') : t('Which methods are there for "{aspect}"?', { aspect: node.title })}</Question>
-      <AgentLine
-        ctx={ctx}
-        task={task}
-        role={t('owns this aspect')}
-        onStart={
-          node.combos
-            ? undefined
-            : async () => {
-                const id = await startAgent(ctx, node, { isolate: false });
-                if (id) ctx.commit(updateNode(ctx.doc, node.id, { taskId: id }));
-              }
-        }
-      />
+      <AgentLine ctx={ctx} task={ctx.taskOf(node.taskId)} role={t('owns this aspect')} none={node.combos ? t('The main agent looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
       <div className="rs-kv">
         <span>{t('Validated by')}</span>
         <span>{m ? `${m.name} · ${m.higherIsBetter ? t('higher is better') : t('lower is better')}${m.baseline != null ? ` · ${t('starts at {v}', { v: formatValue(m, m.baseline) })}` : ''}` : t('judged by hand')}</span>
@@ -738,7 +571,6 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           <thead>
             <tr>
               <th>{t('Method')}</th>
-              <th>{t('Status')}</th>
               <th>{m?.name ?? t('Result')}</th>
               <th>{t('Runs')}</th>
             </tr>
@@ -750,10 +582,9 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
               return (
                 <tr key={x.id} className="clickable" onClick={() => ctx.select(x.id)}>
                   <td>
-                    <i className={`rg-dot st-${st}`} /> {x.title}
+                    <i className={`rg-dot st-${st}`} title={t(STATUS_LABEL[st])} /> {x.title}
                     {x.links?.[0] ? <span className={`pill link-${x.links[0].kind}`}>{t(LINK_LABEL[x.links[0].kind])}</span> : null}
                   </td>
-                  <td>{t(STATUS_LABEL[st])}</td>
                   <td>{best ? formatValue(m, best.value) : '—'}</td>
                   <td>{childrenOf(doc, x.id).length}</td>
                 </tr>
@@ -762,42 +593,9 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           </tbody>
         </table>
       ) : (
-        <div className="muted small">{t('No methods yet. Add the ones you know, or ask the aspect’s agent for ideas in the box below.')}</div>
+        <div className="muted small">{t('No methods yet.')}</div>
       )}
-      <div className="rs-actions">
-        <button className="btn btn-sm" onClick={() => setAdding(!adding)} data-testid="research-add-method">
-          {t('Add a method')}
-        </button>
-      </div>
-      {adding ? <AddMethod ctx={ctx} aspect={node} onDone={() => setAdding(false)} /> : null}
-      {!node.combos ? <div className="muted small">{t('Dashed: not tried yet. Select a method to try variants of it in parallel, one agent each.')}</div> : <div className="muted small">{t('⇧-click methods from different aspects on the graph to combine them here.')}</div>}
     </>
-  );
-}
-
-function AddMethod({ ctx, aspect, onDone, link }: { ctx: Ctx; aspect: ResearchNode; onDone: () => void; link?: { from: string; kind: ResearchLinkKind } }) {
-  const [title, setTitle] = useState('');
-  const [design, setDesign] = useState('');
-  const save = () => {
-    if (!title.trim()) return;
-    const r = addNode(ctx.doc, { type: 'method', parent: aspect.id, title: title.trim(), status: 'idea', design: design.trim() || undefined, ...(link ? { links: [link] } : {}) });
-    ctx.commit(r.doc);
-    ctx.select(r.node.id);
-    onDone();
-  };
-  return (
-    <div className="rs-form" data-testid="research-method-form">
-      <input className="input" autoFocus placeholder={link ? t('What changes in the new version') : t('Method, e.g. Deduplication')} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <textarea className="input" rows={3} placeholder={t('Design: how it works, its key parameters (optional)')} value={design} onChange={(e) => setDesign(e.target.value)} />
-      <div className="rs-actions">
-        <button className="btn btn-primary btn-sm" onClick={save} disabled={!title.trim()}>
-          {t('Add')}
-        </button>
-        <button className="btn btn-sm" onClick={onDone}>
-          {t('Cancel')}
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -807,37 +605,10 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   const m = aspect.metric;
   const exps = childrenOf(doc, node.id);
   const best = bestExperiment(doc, node);
-  const [mode, setMode] = useState<'variants' | 'mutate' | 'design' | null>(null);
-  const [variants, setVariants] = useState('');
-  const [design, setDesign] = useState(node.design ?? '');
-  const [busy, setBusy] = useState(false);
-  const aspectAgent = ctx.taskOf(aspect.taskId);
-  const findings = exps.flatMap((e) => (e.findings ?? []).map((f) => ({ f, e })));
-  const tryVariants = async () => {
-    const list = variants.split(/\s*[/、,，\n]\s*/).map((s) => s.trim()).filter(Boolean).slice(0, 8);
-    if (!list.length) return;
-    setBusy(true);
-    let next = ctx.doc;
-    for (const v of list) {
-      const r = addNode(next, { type: 'experiment', parent: node.id, title: v, config: v, status: 'running' });
-      next = r.doc;
-      const id = await startAgent(ctx, { ...r.node }, { isolate: true });
-      next = id ? updateNode(next, r.node.id, { taskId: id }) : updateNode(next, r.node.id, { status: 'idea' });
-    }
-    if (node.status === 'idea') next = updateNode(next, node.id, { status: 'running' });
-    ctx.commit(next);
-    ctx.open(node.id);
-    setVariants('');
-    setMode(null);
-    setBusy(false);
-  };
   return (
     <>
       <Question>{t('How is "{method}" designed, and how well does it work?', { method: node.title })}</Question>
-      <div className="muted small">
-        {t('In "{aspect}", owned by its agent', { aspect: aspect.title })}
-        {aspectAgent ? ` ${aspectAgent.alias}` : ''}
-      </div>
+      <AgentLine ctx={ctx} task={ctx.taskOf(aspect.taskId)} role={t('owns "{aspect}"', { aspect: aspect.title })} none={aspect.combos ? t('The main agent looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
       {node.links?.length ? (
         <div className="rs-links">
           {node.links.map((l) => (
@@ -851,24 +622,7 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           ))}
         </div>
       ) : null}
-      <div className="rs-sec">
-        {t('Design')}
-        <button className="link small" onClick={() => setMode(mode === 'design' ? null : 'design')}>
-          {mode === 'design' ? t('Cancel') : t('Edit')}
-        </button>
-      </div>
-      {mode === 'design' ? (
-        <div className="rs-form">
-          <textarea className="input" rows={4} value={design} onChange={(e) => setDesign(e.target.value)} />
-          <div className="rs-actions">
-            <button className="btn btn-primary btn-sm" onClick={() => (ctx.commit(updateNode(doc, node.id, { design: design.trim() || undefined })), setMode(null))}>
-              {t('Save')}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="rs-design">{node.design || <span className="muted">{t('Not written yet.')}</span>}</div>
-      )}
+      {node.design ? <div className="rs-design">{node.design}</div> : null}
       {node.source && ctx.statusOf(node) === 'idea' ? <div className="muted small">{t('Idea from: {source}', { source: node.source })}</div> : null}
       {exps.length ? (
         <>
@@ -878,13 +632,6 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           {best ? <div className="muted small">{t('best {v} ({name})', { v: formatValue(m, best.value), name: best.title })}</div> : null}
           {m ? <ResultBars metric={m} exps={exps} statusOf={ctx.statusOf} select={ctx.select} /> : null}
           <table className="rs-table">
-            <thead>
-              <tr>
-                <th>{t('Variant')}</th>
-                <th>{t('Result')}</th>
-                <th>{t('Agent')}</th>
-              </tr>
-            </thead>
             <tbody>
               {exps.map((e) => {
                 const st = ctx.statusOf(e);
@@ -895,51 +642,17 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
                       {e.findings?.length ? <span className="rs-find-count">◆ {e.findings.length}</span> : null}
                     </td>
                     <td>{e.value != null ? formatValue(m, e.value) : t(STATUS_LABEL[st])}</td>
-                    <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? '—'}</td>
+                    <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? ''}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </>
-      ) : null}
-      {findings.length ? (
-        <>
-          <div className="rs-sec">{t('Findings (on its experiments)')}</div>
-          {findings.map(({ f, e }) => (
-            <div key={f.id} className="rs-finding">
-              {f.text}{' '}
-              <button className="link small" onClick={() => ctx.select(e.id)}>
-                — {f.by ? `${f.by}, ` : ''}
-                {e.title}
-              </button>
-            </div>
-          ))}
-        </>
-      ) : null}
-      <div className="rs-actions">
-        <button className="btn btn-primary btn-sm" onClick={() => setMode(mode === 'variants' ? null : 'variants')} data-testid="research-try-variants">
-          {t('Try variants in parallel')}
-        </button>
-        <button className="btn btn-sm" onClick={() => setMode(mode === 'mutate' ? null : 'mutate')} data-testid="research-mutate">
-          {t('Mutate into a new method')}
-        </button>
-        <button className="btn btn-sm btn-ghost" onClick={() => (ctx.commit(removeNode(doc, node.id)), ctx.select(null))}>
-          {t('Remove')}
-        </button>
-      </div>
-      {mode === 'variants' ? (
-        <div className="rs-form" data-testid="research-variants-form">
-          <input className="input" autoFocus placeholder={t('Variants, separated by / — e.g. 0.82 / 0.87 / 0.9')} value={variants} onChange={(e) => setVariants(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && void tryVariants()} />
-          <div className="muted small">{t('One agent per variant, each in its own worktree, told the design and how this aspect is validated.')}</div>
-          <div className="rs-actions">
-            <button className="btn btn-primary btn-sm" onClick={() => void tryVariants()} disabled={busy || !variants.trim()} data-testid="research-start-variants">
-              {busy ? t('Starting…') : t('Start the agents')}
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {mode === 'mutate' ? <AddMethod ctx={ctx} aspect={aspect} link={{ from: node.id, kind: 'mutate' }} onDone={() => setMode(null)} /> : null}
+      ) : (
+        <div className="muted small">{t('Not tried yet.')}</div>
+      )}
+      <Findings ctx={ctx} items={exps.flatMap((e) => (e.findings ?? []).map((f) => ({ ...f, on: e })))} />
     </>
   );
 }
@@ -985,13 +698,6 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   const m = aspect?.metric;
   const st = ctx.statusOf(node);
   const task = ctx.taskOf(node.taskId);
-  const [value, setValue] = useState(node.value != null ? String(node.value) : '');
-  const [finding, setFinding] = useState('');
-  useEffect(() => setValue(node.value != null ? String(node.value) : ''), [node.id, node.value]);
-  const record = () => {
-    if (!value.trim() || isNaN(+value)) return;
-    ctx.commit(updateNode(doc, node.id, { value: +value, status: judge(m, +value) }));
-  };
   return (
     <>
       <Question>{node.title}</Question>
@@ -1002,15 +708,7 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
         </button>{' '}
         · {aspect?.title}
       </div>
-      <AgentLine
-        ctx={ctx}
-        task={task}
-        role={task?.worktree ? t('one variant, own worktree') : t('one variant')}
-        onStart={async () => {
-          const id = await startAgent(ctx, node, { isolate: true });
-          if (id) ctx.commit(updateNode(ctx.doc, node.id, { taskId: id, status: node.status === 'idea' ? 'running' : node.status }));
-        }}
-      />
+      <AgentLine ctx={ctx} task={task} role={task?.worktree ? t('one variant, own worktree') : t('one variant')} none={t('No agent on this one.')} />
       <div className="rs-kv">
         <span>{t('Status')}</span>
         <span>
@@ -1022,73 +720,14 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           {m?.baseline != null ? <span className="muted"> · {t('start {v}', { v: formatValue(m, m.baseline) })}</span> : null}
         </span>
       </div>
-      <div className="rs-sec">{t('Record the result')}</div>
-      {m ? (
-        <div className="rs-form-row">
-          <input className="input rs-num" placeholder={m.name} value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && record()} data-testid="research-result-input" />
-          <button className="btn btn-sm btn-primary" onClick={record} disabled={!value.trim() || isNaN(+value)} data-testid="research-result-save">
-            {t('Record')}
-          </button>
-          <button className="btn btn-sm" onClick={() => ctx.commit(updateNode(doc, node.id, { status: 'error', value: undefined }))}>
-            {t('No result')}
-          </button>
-        </div>
-      ) : (
-        <div className="rs-actions">
-          <button className="btn btn-sm btn-primary" onClick={() => ctx.commit(updateNode(doc, node.id, { status: 'pass' }))}>
-            {t('Works')}
-          </button>
-          <button className="btn btn-sm" onClick={() => ctx.commit(updateNode(doc, node.id, { status: 'fail' }))}>
-            {t('Does not work')}
-          </button>
-        </div>
-      )}
-      <div className="muted small">{m ? t('Compared with the aspect’s start: better passes, otherwise it does not.') : t('This aspect is judged by hand.')}</div>
-      {node.config && node.config !== node.title ? (
-        <>
-          <div className="rs-sec">{t('What it changes')}</div>
-          <div className="rs-design">{node.config}</div>
-        </>
-      ) : null}
-      <div className="rs-sec">{t('Findings')}</div>
-      {(node.findings ?? []).map((f) => (
-        <div key={f.id} className="rs-finding">
-          {f.text}
-          {f.by ? <span className="muted"> — {f.by}</span> : null}
-        </div>
-      ))}
-      <div className="rs-form-row">
-        <input className="input" placeholder={t('What was learned (it stays with this experiment)')} value={finding} onChange={(e) => setFinding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && finding.trim() && (ctx.commit(addFinding(doc, node.id, finding.trim(), t('you'))), setFinding(''))} data-testid="research-finding-input" />
-        <button className="btn btn-sm" disabled={!finding.trim()} onClick={() => (ctx.commit(addFinding(doc, node.id, finding.trim(), t('you'))), setFinding(''))}>
-          {t('Add')}
-        </button>
-      </div>
-      <div className="rs-actions">
-        <button className="btn btn-sm btn-ghost" onClick={() => (ctx.commit(removeNode(doc, node.id)), ctx.select(method?.id ?? null))}>
-          {t('Remove')}
-        </button>
-      </div>
+      {node.config && node.config !== node.title ? <div className="rs-design">{node.config}</div> : null}
+      <Findings ctx={ctx} items={node.findings ?? []} />
     </>
   );
 }
 
 function MultiPanel({ ctx, nodes }: { ctx: Ctx; nodes: ResearchNode[] }) {
   const { doc } = ctx;
-  const methods = nodes.filter((n) => n.type === 'method');
-  const aspects = [...new Set(methods.map((m) => aspectOf(doc, m)?.id))];
-  const cross = aspects.length > 1;
-  const combine = () => {
-    let next = doc;
-    let where = cross ? childrenOf(next, null).find((a) => a.combos) : aspectOf(doc, methods[0]);
-    if (!where) {
-      const r = addNode(next, { type: 'aspect', parent: null, title: t('Across aspects'), status: 'running', combos: true, metric: doc.endMetric });
-      next = r.doc;
-      where = r.node;
-    }
-    const r = addNode(next, { type: 'method', parent: where.id, title: methods.map((m) => m.title).join(' + '), status: 'idea', design: methods.map((m) => t('From "{m}": its best variant', { m: m.title })).join('\n'), links: methods.map((m) => ({ from: m.id, kind: 'combine' as const })) });
-    ctx.commit(r.doc);
-    ctx.select(r.node.id);
-  };
   return (
     <>
       <Question>{t('{n} selected', { n: nodes.length })}</Question>
@@ -1097,18 +736,7 @@ function MultiPanel({ ctx, nodes }: { ctx: Ctx; nodes: ResearchNode[] }) {
           {n.title} <span className="muted">· {aspectOf(doc, n)?.title ?? ''}</span>
         </div>
       ))}
-      {methods.length >= 2 ? (
-        <>
-          <div className="muted small">{cross ? t('From different aspects: the combination goes under "Across aspects", validated end to end.') : t('From the same aspect: the combination stays in it, validated by its metric.')}</div>
-          <div className="rs-actions">
-            <button className="btn btn-primary btn-sm" onClick={combine} data-testid="research-combine">
-              {t('Combine into a new method')}
-            </button>
-          </div>
-        </>
-      ) : (
-        <div className="muted small">{t('Select two or more methods to combine them.')}</div>
-      )}
+      <div className="rs-tip">{t('Ask below about them together, e.g. to combine them into a new method.')}</div>
     </>
   );
 }
@@ -1121,50 +749,32 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
   const one = selected.length === 1 ? selected[0] : undefined;
-  // Who gets it: the agent of the nearest node over everything selected (shared/research routeFor).
+  // Who gets it (decided again in the main process when sent): the agent of the nearest node over the selection.
   const route = routeFor(doc, selected);
-  const aboutText = (nodes: ResearchNode[]) => (nodes.length === 1 ? t('About "{name}" in the research tree: ', { name: nodes[0].title }) : nodes.length ? t('About these nodes in the research tree: {list}. ', { list: nodes.map((n) => `"${n.title}"`).join(', ') }) : '');
-  const target: { task?: Task; label: string; prefix: string; startAspect?: ResearchNode } = (() => {
-    if (route.kind === 'experiment') {
-      const task = ctx.taskOf(route.node.taskId);
-      if (task) return { task, label: t('{agent} (experiment "{name}")', { agent: task.alias, name: clip(route.node.title, 14) }), prefix: '' };
-    }
+  const label = (() => {
+    if (route.kind === 'experiment') return t('{agent} (experiment "{name}")', { agent: ctx.taskOf(route.node.taskId)?.alias ?? '', name: clip(route.node.title, 14) });
     if (route.kind === 'aspect') {
       const at = ctx.taskOf(route.aspect.taskId);
-      const prefix = aboutText(route.about);
-      if (at) return { task: at, label: t('{agent} ({aspect} aspect)', { agent: at.alias, aspect: route.aspect.title }), prefix };
-      return { label: t('a new agent for "{aspect}"', { aspect: route.aspect.title }), prefix, startAspect: route.aspect };
+      return at ? t('{agent} ({aspect} aspect)', { agent: at.alias, aspect: route.aspect.title }) : t('a new agent for "{aspect}"', { aspect: route.aspect.title });
     }
-    const about = route.kind === 'main' && route.about.length ? t('About {list} in the research "{title}": ', { list: route.about.map((n) => `"${n.title}"`).join(', '), title: doc.title }) : t('About the research "{title}" ({goal}): ', { title: doc.title, goal: doc.goal });
-    const main = snapshot.main;
-    return main ? { task: main, label: t('Main agent'), prefix: about } : { label: t('Main agent (off)'), prefix: about };
+    return snapshot.main ? t('Main agent') : t('Main agent (off)');
   })();
   const aboutCount = route.kind === 'experiment' ? 0 : route.about.length;
+  const disabled = route.kind === 'main' && !snapshot.main;
   const send = async () => {
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sending || disabled) return;
     setSending(true);
     try {
-      let taskId = target.task?.taskId;
-      if (!taskId && target.startAspect) {
-        // An aspect with no agent: this message is the first thing its new agent hears.
-        taskId = await startAgent(ctx, target.startAspect, { isolate: false, message: `${target.prefix}${text}` });
-        if (taskId) ctx.commit(updateNode(ctx.doc, target.startAspect.id, { taskId }));
-      } else if (taskId) {
-        const r = await call('task:send', { taskId, text: `${target.prefix}${text}`, via: 'text' });
-        if (!r.ok) throw new Error(r.error ?? t('Not delivered'));
-      }
-      if (taskId) {
-        setSent({ to: target.task?.alias ?? ctx.snapshot.tasks.find((x) => x.taskId === taskId)?.alias ?? '', taskId });
-        setDraft('');
-      }
+      const r = await call('research:message', { projectId: ctx.project, nodeIds: selected.map((n) => n.id), text });
+      setSent({ to: r.alias, taskId: r.taskId });
+      setDraft('');
     } catch (e) {
       ctx.setError(errorText(e));
     } finally {
       setSending(false);
     }
   };
-  const disabled = !target.task && !target.startAspect;
   return (
     <div className="composer research-composer">
       {sent ? (
@@ -1181,7 +791,7 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
       <div className="composer-about research-to" data-testid="research-to">
         <span className="composer-about-label">{t('To')}</span>
         <span className="composer-about-text">
-          {target.label}
+          {label}
           {aboutCount > 1 ? ` · ${t('about {n} nodes', { n: aboutCount })}` : ''}
         </span>
         {selected.length ? (
@@ -1196,7 +806,19 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
           rows={2}
           value={draft}
           disabled={disabled}
-          placeholder={disabled ? t('Turn the main agent on in Settings to talk about the whole research.') : one?.type === 'aspect' ? t('e.g. Which methods would you try first?') : one?.type === 'method' ? t('e.g. What would you change in this design?') : one?.type === 'experiment' ? t('e.g. Rerun with half the learning rate') : t('e.g. Which aspect deserves the next experiments?')}
+          placeholder={
+            disabled
+              ? t('Turn the main agent on in Settings to talk about the whole research.')
+              : selected.length > 1
+                ? t('e.g. Combine these into one method')
+                : one?.type === 'aspect'
+                  ? t('e.g. Which methods would you try first?')
+                  : one?.type === 'method'
+                    ? t('e.g. Try thresholds 0.82 and 0.87 in parallel')
+                    : one?.type === 'experiment'
+                      ? t('e.g. Rerun with half the learning rate')
+                      : t('e.g. Add an aspect for inference speed · Turn Alice’s and Bob’s conversations into this tree')
+          }
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

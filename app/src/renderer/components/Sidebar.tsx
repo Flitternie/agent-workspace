@@ -103,7 +103,7 @@ export function Sidebar({
             </span>
             <span className="agent-row-sub">
               {tr('Research')}
-              {r.taskIds.length ? ` · ${tr('{n} agents', { n: r.taskIds.length })}` : ''}
+              {r.taskIds.length ? ` · ${r.taskIds.length === 1 ? tr('1 agent') : tr('{n} agents', { n: r.taskIds.length })}` : ''}
               {running ? ` · ${tr('{n} working', { n: running })}` : ''}
             </span>
           </span>

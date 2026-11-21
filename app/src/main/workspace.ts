@@ -51,7 +51,8 @@ import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { createResearch, readResearch, sampleResearch, writeResearch } from './research';
-import { taskIdsOf, type ResearchDoc, type ResearchSummary } from '../shared/research';
+import { aboutPrefix, researchBrief, researchTools, type ResearchHost } from './research-tools';
+import { routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -494,19 +495,19 @@ export class Workspace {
     for (const p of this.store.data.projects)
       if (!this.researchIndex.has(p.projectId)) {
         const doc = readResearch(p);
-        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
       }
     return this.store.data.projects.map((p) => this.researchIndex.get(p.projectId)).filter((x): x is ResearchSummary => !!x);
   }
 
   private indexResearch(projectId: string, doc: ResearchDoc | null): void {
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
     this.changed();
   }
 
   researchGet(projectId: string): ResearchDoc | null {
     const doc = readResearch(this.project(projectId));
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc) } : null);
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
     return doc;
   }
 
@@ -514,6 +515,88 @@ export class Workspace {
     writeResearch(this.project(projectId), doc);
     this.indexResearch(projectId, doc);
     return doc;
+  }
+
+  // ResearchHost: what the research tools need.
+  researchProjects(): Array<{ projectId: string; name: string }> {
+    const has = new Set(this.researchSummaries().map((r) => r.projectId));
+    return this.store.data.projects.filter((p) => has.has(p.projectId)).map((p) => ({ projectId: p.projectId, name: p.name }));
+  }
+
+  allProjects(): Array<{ projectId: string; name: string }> {
+    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name }));
+  }
+
+  findTaskById(taskId: string): Task | undefined {
+    return this.findTask(taskId);
+  }
+
+  language(): 'en' | 'zh' {
+    return this.store.data.settings.language === 'zh' ? 'zh' : 'en';
+  }
+
+  /** The provider a research starts agents with: in the demo its mock agents; else the first signed-in CLI. */
+  private researchProvider(): AgentProvider {
+    // Mock agents only where they are the point: the demo, or a workspace that has nothing else (tests).
+    const onlyMock = Object.keys(this.opts.adapters).every((k) => k === 'mock');
+    const order: AgentProvider[] = this.opts.demo || onlyMock ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
+    const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
+    if (!p) throw new Error('No signed-in Claude Code or Codex to start an agent.');
+    return p;
+  }
+
+  async researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task> {
+    const doc = this.researchGet(projectId);
+    const node = doc?.nodes.find((n) => n.id === nodeId);
+    if (!doc || !node) throw new Error('That node is not in the research.');
+    const provider = this.researchProvider();
+    const aspect = node.type === 'aspect' ? node : doc.nodes.find((n) => n.id === doc.nodes.find((m) => m.id === node.parent)?.parent);
+    const zh = this.language() === 'zh';
+    const task = await this.createTask({
+      projectId,
+      provider,
+      title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
+      instruction: researchBrief(doc, node, this.language(), opts.message),
+      isolate: opts.isolate,
+      ...(provider === 'mock' ? { mockScript: 'work' } : {}),
+    });
+    // Linked on the freshest copy: the tree may have changed while the agent started.
+    const fresh = this.researchGet(projectId)!;
+    this.researchSave(projectId, updateNode(fresh, nodeId, { taskId: task.taskId, ...(node.status === 'idea' ? { status: 'running' as const } : {}) }));
+    return task;
+  }
+
+  /**
+   * The box on the research page: to the agent of the nearest node over what is selected (an aspect
+   * with no agent yet: this message starts it), or to the main agent about the whole research.
+   */
+  async researchMessage(projectId: string, nodeIds: string[], text: string): Promise<{ taskId: string; alias: string }> {
+    const doc = this.researchGet(projectId);
+    if (!doc) throw new Error('This project has no research.');
+    const nodes = nodeIds.map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n);
+    const route = routeFor(doc, nodes);
+    const lang = this.language();
+    if (route.kind === 'experiment') {
+      const r = await this.send(route.node.taskId!, text, 'text');
+      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+      return { taskId: route.node.taskId!, alias: this.findTask(route.node.taskId!)?.alias ?? '' };
+    }
+    if (route.kind === 'aspect') {
+      const prefix = aboutPrefix(route.about, doc, lang, false);
+      const agent = route.aspect.taskId ? this.findTask(route.aspect.taskId) : undefined;
+      if (!agent) {
+        const t = await this.researchStartAgent(projectId, route.aspect.id, { isolate: false, message: `${prefix}${text}` });
+        return { taskId: t.taskId, alias: t.alias };
+      }
+      const r = await this.send(agent.taskId, `${prefix}${text}`, 'text');
+      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+      return { taskId: agent.taskId, alias: agent.alias };
+    }
+    const main = this.store.data.mainAgent;
+    if (!main) throw new Error('Turn the main agent on in Settings to talk about the whole research.');
+    const r = await this.send(main.taskId, `${aboutPrefix(route.about, doc, lang, true)}${text}`, 'text');
+    if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+    return { taskId: main.taskId, alias: main.alias };
   }
 
   researchCreate(projectId: string, title: string, goal: string, sample: boolean): ResearchDoc {
@@ -1115,7 +1198,9 @@ export class Workspace {
         mockScript: task.mockScript,
         model: task.model,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
-        tools: isMain ? workspaceTools(this) : undefined,
+        tools: isMain ? [...workspaceTools(this), ...researchTools(this, { kind: 'main' })] : undefined,
+        // In a project with a research, any agent may read the tree; what it may change is decided per call (its place in it).
+        extraTools: !isMain && this.researchSummaries().some((r) => r.projectId === task.projectId) ? researchTools(this, { kind: 'agent', taskId: task.taskId }) : undefined,
         skills,
       },
       (event) => {

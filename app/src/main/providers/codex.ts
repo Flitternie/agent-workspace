@@ -523,7 +523,12 @@ class CodexSession implements ProviderSession {
     // (Its built-in sub-agents cannot be turned off; the instructions forbid them.)
     const policy = tools.length
       ? { approvalPolicy: 'never', sandbox: 'read-only', config: MAIN_AGENT_CONFIG, dynamicTools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) }
-      : { ...codexPolicy(this.args.permissionMode ?? 'auto'), ...workspaceSandbox(this.args.cwd, this.args.host) };
+      : {
+          ...codexPolicy(this.args.permissionMode ?? 'auto'),
+          ...workspaceSandbox(this.args.cwd, this.args.host),
+          // A worker in a project with a research: those tools too (answered via item/tool/call).
+          ...(this.args.extraTools?.length ? { dynamicTools: this.args.extraTools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) } : {}),
+        };
     const instructions = this.args.developerInstructions
       ? { developerInstructions: this.args.developerInstructions }
       : {};
@@ -661,7 +666,7 @@ class CodexSession implements ProviderSession {
     const requestId = `codex-${String(rpcId)}-${str(p.itemId) || Date.now()}`;
     if (method === 'item/tool/call') {
       // A workspace tool call from the main agent: run it here and answer.
-      const tool = this.args.tools?.find((t) => t.name === str(p.tool));
+      const tool = [...(this.args.tools ?? []), ...(this.args.extraTools ?? [])].find((t) => t.name === str(p.tool));
       const reply = (text: string, success: boolean) => this.server?.reply(rpcId, { contentItems: [{ type: 'inputText', text }], success });
       if (!tool) return reply(`Unknown tool ${str(p.tool)}`, false);
       void tool

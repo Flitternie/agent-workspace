@@ -112,6 +112,8 @@ export interface StartArgs {
   permissionMode?: PermissionMode;
   /** Main agent only: workspace tools it may call; the session is limited to these plus read-only tools. */
   tools?: WorkspaceTool[];
+  /** Any agent: tools added to its own (the research tools of its project), pre-approved; nothing else changes. */
+  extraTools?: WorkspaceTool[];
   title: string;
 }
 

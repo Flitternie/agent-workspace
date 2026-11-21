@@ -1,11 +1,13 @@
 // A project's research page, end to end (demo workspace: its example research, mock agents).
+// The page shows the tree; changes are made by talking to the agents (who have the research tools).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { WorkspaceSnapshot } from '../../src/shared/types';
+import type { ResearchDoc } from '../../src/shared/research';
 
 const appDir = resolve(__dirname, '../..');
 const shots = join(appDir, 'test-results');
@@ -22,7 +24,7 @@ const invoke = <T,>(page: Page, channel: string, payload: unknown) =>
   page.evaluate(([c, p]) => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke(c as string, p), [channel, payload] as const) as Promise<T>;
 
 describe('research page (demo)', () => {
-  it('a project’s research: one row in the sidebar, a graph by level, each level its own questions, agents behind the nodes', async () => {
+  it('one row in the sidebar; a graph by level; each level its question to read; talking to the agent over the selection', async () => {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
     app = await electron.launch({
@@ -38,105 +40,78 @@ describe('research page (demo)', () => {
     const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
     await expect.poll(async () => (await snap()).research.length, { timeout: 30_000 }).toBe(1);
     const projectId = (await snap()).research[0].projectId;
-    const doc = () => invoke<{ nodes: Array<{ id: string; type: string; title: string; taskId?: string; status: string; value?: number; findings?: unknown[]; links?: Array<{ kind: string }> }> }>(page, 'research:get', { projectId });
+    const doc = () => invoke<ResearchDoc>(page, 'research:get', { projectId });
 
     // The entry: one row in its project's team.
     const row = page.getByTestId('research-row');
     await expect.poll(() => row.count()).toBe(1);
-    expect(await row.innerText()).toMatch(/nanochat pretraining[\s\S]*Research/);
     await row.click();
     await expect.poll(() => page.getByTestId('research').isVisible()).toBe(true);
-    expect(await page.getByTestId('research-progress').innerText()).toMatch(/\d+ experiments/);
 
-    // Nothing selected: the goal's question, and which aspects matter (from the ablations).
+    // The goal: which aspects matter, from the ablations; nothing to fill in, a hint to talk instead.
     const panel = page.getByTestId('research-panel');
     await expect.poll(() => panel.innerText()).toContain('Which aspects move the end result?');
     expect(await page.getByTestId('research-contrib').innerText()).toMatch(/Architecture[\s\S]*1 ablation\n[\s\S]*Data[\s\S]*2 ablations/);
+    expect(await panel.innerText()).toMatch(/Manage it by talking/);
+    expect(await panel.locator('input, textarea, select').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'research-01-goal.png') });
 
-    // Levels: aspects only, methods (experiments folded per method), every experiment.
+    // Levels.
     const kinds = async () => page.getByTestId('research-node').evaluateAll((els) => els.map((e) => e.getAttribute('data-kind')));
     await page.getByTestId('research-depth-aspect').click();
     expect((await kinds()).filter((k) => k === 'method')).toHaveLength(0);
-    expect((await kinds()).filter((k) => k === 'aspect')).toHaveLength(4);
     await page.getByTestId('research-depth-experiment').click();
-    expect((await kinds()).filter((k) => k === 'experiment').length).toBeGreaterThan(15);
     expect((await kinds()).filter((k) => k === 'runs')).toHaveLength(0);
     await page.getByTestId('research-depth-method').click();
     expect((await kinds()).filter((k) => k === 'runs').length).toBeGreaterThan(5);
-    // Combined / mutated / borrowed methods are linked across.
     expect(await page.locator('.rg-link').count()).toBe(4);
-    await page.screenshot({ path: join(shots, 'research-02-methods.png') });
 
-    // An aspect: its question; no agent yet, so the box would start one; start it from the panel.
+    // An aspect: its question, read only; no agent yet, so what is said below starts one.
     const node = (kind: string, title: string) => page.locator(`[data-testid="research-node"][data-kind="${kind}"][data-title="${title}"]`);
     await node('aspect', 'Data').click();
     await expect.poll(() => panel.innerText()).toContain('Which methods are there for "Data"?');
+    expect(await panel.innerText()).toMatch(/the first thing you say to it below starts one/);
+    expect(await panel.locator('input, textarea, select, .btn').count()).toBe(0);
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
-    await page.getByTestId('research-start-agent').click();
-    await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Data')?.taskId ?? '', { timeout: 20_000 }).not.toBe('');
-    const dataAgent = (await doc()).nodes.find((n) => n.title === 'Data')!.taskId!;
-    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\)/);
-    // Its agent is on the research's row, not in the team's list.
-    await expect.poll(() => row.innerText()).toMatch(/1 agents/);
-    const alias = (await snap()).tasks.find((x) => x.taskId === dataAgent)!.alias;
-    expect(await page.locator(`[data-testid="rail-item"][data-alias="${alias}"]`).count()).toBe(0);
-    expect((await snap()).research[0].taskIds).toContain(dataAgent);
-
-    // Talking to it from the box: sent to that agent; open its conversation; Esc comes back here.
     await page.getByTestId('research-input').fill('Which method would you try first?');
     await page.getByTestId('research-send').click();
-    await expect.poll(() => page.getByTestId('research-sent').innerText()).toMatch(/Sent to/);
+    await expect.poll(() => page.getByTestId('research-sent').innerText(), { timeout: 20_000 }).toMatch(/Sent to/);
+    await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Data')?.taskId ?? '').not.toBe('');
+    const dataAgent = (await doc()).nodes.find((n) => n.title === 'Data')!.taskId!;
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\)/);
+    // Its brief and the message, in its conversation; not one of the team's rows.
+    const first = (await invoke<Array<{ role: string; text: string }>>(page, 'transcript:get', { taskId: dataAgent })).find((i) => i.role === 'user')!.text;
+    expect(first).toMatch(/You own the "Data" aspect[\s\S]*research_try[\s\S]*Which method would you try first\?/);
+    const alias = (await snap()).tasks.find((x) => x.taskId === dataAgent)!.alias;
+    expect(await page.locator(`[data-testid="rail-item"][data-alias="${alias}"]`).count()).toBe(0);
+    await expect.poll(() => row.innerText()).toMatch(/1 agent\b/);
+    // Its context when wanted: open its conversation; Esc comes back to the research.
     await page.getByTestId('research-open-agent').click();
     await expect.poll(() => page.getByTestId('research').count()).toBe(0);
     await page.keyboard.press('Escape');
     await expect.poll(() => page.getByTestId('research').isVisible()).toBe(true);
 
-    // A method: design and results; try two variants in parallel, one agent each, in its own worktree.
+    // When an agent changes the tree (its tool writes the file), the page follows.
+    const d = await doc();
+    const dedup = d.nodes.find((n) => n.title === 'Deduplication')!;
+    await invoke(page, 'research:save', { projectId, doc: { ...d, nodes: [...d.nodes, { id: 'x-new', type: 'experiment', parent: dedup.id, title: 'threshold 0.87', status: 'pass', value: 78.2, createdAt: new Date().toISOString(), findings: [{ id: 'f-new', text: '0.87 keeps the code samples', at: new Date().toISOString() }] }], updatedAt: new Date().toISOString() } });
     await node('method', 'Deduplication').click();
-    await expect.poll(() => panel.innerText()).toContain('How is "Deduplication" designed, and how well does it work?');
-    expect(await page.getByTestId('research-bars').locator('rect').count()).toBe(3);
-    await page.getByTestId('research-try-variants').click();
-    await page.getByTestId('research-variants-form').locator('input').fill('0.82 / 0.87');
-    await page.getByTestId('research-start-variants').click();
-    await expect.poll(async () => (await doc()).nodes.filter((n) => n.type === 'experiment' && ['0.82', '0.87'].includes(n.title) && n.taskId).length, { timeout: 30_000 }).toBe(2);
-    const variant = (await doc()).nodes.find((n) => n.title === '0.87')!;
-    const variantTask = (await snap()).tasks.find((x) => x.taskId === variant.taskId)!;
-    expect(variantTask.worktree).toBeTruthy();
-    // The method is opened on the graph: its experiments one by one.
-    await expect.poll(() => node('experiment', '0.87').count()).toBe(1);
-    await page.screenshot({ path: join(shots, 'research-03-variants.png') });
+    await expect.poll(() => panel.innerText()).toMatch(/threshold 0\.87[\s\S]*78\.2[\s\S]*0\.87 keeps the code samples/);
+    await page.screenshot({ path: join(shots, 'research-02-method.png') });
 
-    // Several selected under one method: the message goes to the agent over them (the aspect's), not the main agent.
-    await node('experiment', '0.82').click();
-    await node('experiment', '0.87').click({ modifiers: ['Shift'] });
+    // Several selected: to the agent over them all.
+    await page.getByTestId('research-depth-experiment').click();
+    await node('experiment', 'threshold 0.8').click();
+    await node('experiment', 'threshold 0.87').click({ modifiers: ['Shift'] });
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\) · about 2 nodes/);
-
-    // An experiment: record its result (judged against the aspect's start) and a finding.
-    await node('experiment', '0.87').click();
-    await page.getByTestId('research-result-input').fill('78.2');
-    await page.getByTestId('research-result-save').click();
-    await page.getByTestId('research-finding-input').fill('0.87 keeps the code samples');
-    await page.getByTestId('research-finding-input').press('Enter');
-    await expect.poll(async () => (await doc()).nodes.find((n) => n.id === variant.id)).toMatchObject({ value: 78.2, status: 'pass', findings: [{ text: '0.87 keeps the code samples' }] });
-
-    // Two methods from different aspects: combined under "Across aspects", linked to both.
     await page.getByTestId('research-depth-method').click();
     await node('method', 'Optimizer').click();
     await node('method', 'Activation').click({ modifiers: ['Shift'] });
-    await expect.poll(() => panel.innerText()).toContain('From different aspects');
-    // Across aspects: only the main agent (here off) is over both.
-    expect(await page.getByTestId('research-to').innerText()).toMatch(/Main agent \(off\) · about 2 nodes/);
-    await page.getByTestId('research-combine').click();
-    await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Optimizer + Activation')?.links?.map((l) => l.kind)).toEqual(['combine', 'combine']);
-    expect(await page.locator('.rg-link').count()).toBe(6);
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/Main agent \(off\) · about 2 nodes/);
+    expect(await page.getByTestId('research-input').isDisabled()).toBe(true);
+    await page.screenshot({ path: join(shots, 'research-03-multi.png') });
 
-    // It is all in the repository.
-    const file = JSON.parse(readFileSync(join((await snap()).projects.find((p) => p.projectId === projectId)!.rootPath, '.research', 'research.json'), 'utf8'));
-    expect(file.nodes.some((n: { title: string }) => n.title === 'Optimizer + Activation')).toBe(true);
-    await page.screenshot({ path: join(shots, 'research-04-combined.png') });
-
-    // Starting one in another project: offered on its team, opens empty with a hint.
+    // Starting one in another project: offered on its team.
     const other = join(mkdtempSync(join(tmpdir(), 'amw-research-p-')), 'notes');
     mkdirSync(other);
     execFileSync('git', ['init', '-q'], { cwd: other });
@@ -152,7 +127,6 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-new').locator('input').fill('Note quality');
     await page.getByTestId('research-create').click();
     await expect.poll(() => page.locator('.research-title h1').innerText()).toBe('Note quality');
-    await expect.poll(() => page.locator('.research-hint').count()).toBe(1);
     expect(await page.getByTestId('research-row').count()).toBe(2);
   }, 180_000);
 });

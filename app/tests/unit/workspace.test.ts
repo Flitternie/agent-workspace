@@ -224,7 +224,8 @@ describe('research', () => {
     const p = await ws.addProject(repo(), 'shop');
     expect(ws.snapshot().research).toEqual([]);
     const doc = ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
-    expect(ws.snapshot().research).toEqual([{ projectId: p.projectId, title: 'Tuning', taskIds: [] }]);
+    expect(ws.snapshot().research).toMatchObject([{ projectId: p.projectId, title: 'Tuning', taskIds: [] }]);
+    expect(ws.snapshot().research[0].updatedAt).toBe(doc.updatedAt);
     const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Data agent', isolate: false, mockScript: 'work', instruction: 'go' });
     ws.researchSave(p.projectId, { ...doc, nodes: [{ id: 'a1', type: 'aspect', parent: null, title: 'Data', status: 'running', taskId: t.taskId, createdAt: '' }] });
     expect(ws.snapshot().research[0].taskIds).toEqual([t.taskId]);
@@ -234,6 +235,80 @@ describe('research', () => {
     await demo.seedDemo(repo());
     expect(demo.snapshot().research).toHaveLength(1);
     expect(demo.researchGet(demo.snapshot().projects[0].projectId)!.nodes.length).toBeGreaterThan(20);
+  });
+});
+
+describe('research managed by talking', () => {
+  async function setup() {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const as = (caller: { kind: 'main' } | { kind: 'agent'; taskId: string }) => Object.fromEntries(researchTools(ws, caller).map((t) => [t.name, t]));
+    const main = as({ kind: 'main' });
+    await main.research_add.run({ type: 'aspect', title: 'Data', metric: 'quality', higher_is_better: true, baseline: 70 });
+    await main.research_add.run({ type: 'aspect', title: 'Model', metric: 'loss', higher_is_better: false, baseline: 3.4 });
+    const doc = () => ws.researchGet(p.projectId)!;
+    const node = (title: string) => doc().nodes.find((n) => n.title === title)!;
+    return { ws, p, as, main, doc, node };
+  }
+
+  it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects needs the main agent', async () => {
+    const { ws, p, doc, node } = await setup();
+    const first = await ws.researchMessage(p.projectId, [node('Data').id], 'Which methods would you try?');
+    expect(node('Data').taskId).toBe(first.taskId);
+    const brief = ws.transcript(first.taskId).find((i) => i.role === 'user')!.text;
+    expect(brief).toMatch(/You own the "Data" aspect of the research "Tuning"[\s\S]*research_try[\s\S]*Which methods would you try\?/);
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === first.taskId)!.status !== 'running');
+    const { doc: withMethod } = await import('../../src/shared/research').then((r) => r.addNode(doc(), { type: 'method', parent: node('Data').id, title: 'Dedup', status: 'idea' }));
+    ws.researchSave(p.projectId, withMethod);
+    const again = await ws.researchMessage(p.projectId, [node('Dedup').id], 'Try 0.8 and 0.9');
+    expect(again.taskId).toBe(first.taskId);
+    expect(ws.transcript(first.taskId).filter((i) => i.role === 'user').at(-1)!.text).toBe(`About "Dedup" [${node('Dedup').id}] in the research "Tuning": Try 0.8 and 0.9`);
+    // Its agent lives on the research page.
+    expect(ws.snapshot().research[0].taskIds).toEqual([first.taskId]);
+    await expect(ws.researchMessage(p.projectId, [node('Data').id, node('Model').id], 'Compare')).rejects.toThrow(/main agent/);
+  });
+
+  it('each agent changes only its part: an aspect’s agent its aspect, an experiment’s agent its own result; the main agent anything', async () => {
+    const { ws, p, as, main, doc, node } = await setup();
+    const dataAgent = await ws.researchStartAgent(p.projectId, node('Data').id, { isolate: false });
+    const data = as({ kind: 'agent', taskId: dataAgent.taskId });
+    expect(await data.research_add.run({ type: 'method', title: 'Dedup', design: 'MinHash' })).toMatch(/Added method/);
+    await expect(data.research_add.run({ type: 'method', parent_id: node('Model').id, title: 'GQA' })).rejects.toThrow(/Only this aspect’s agent/);
+    await expect(data.research_add.run({ type: 'aspect', title: 'Training' })).rejects.toThrow(/Only the main agent/);
+    // Variants in parallel: one agent each, in its own worktree, linked to its experiment.
+    const tried = await data.research_try.run({ method_id: node('Dedup').id, variants: [{ title: '0.8' }, { title: '0.9', config: 'threshold 0.9' }] });
+    expect(tried).toMatch(/Started 2 variants/);
+    const exps = doc().nodes.filter((n) => n.type === 'experiment');
+    expect(exps.map((e) => [e.title, !!e.taskId])).toEqual([['0.8', true], ['0.9', true]]);
+    for (const e of exps) expect(ws.snapshot().tasks.find((t) => t.taskId === e.taskId)!.worktree).toBeTruthy();
+    expect(ws.transcript(exps[1].taskId!).find((i) => i.role === 'user')!.text).toMatch(/Try this variant: threshold 0\.9[\s\S]*research_record/);
+    // An experiment's agent records its own result, judged against the aspect's start; not another's.
+    const e08 = as({ kind: 'agent', taskId: exps[0].taskId! });
+    expect(await e08.research_record.run({ value: 74.2, finding: 'keeps code samples' })).toMatch(/pass \(74\.2\)/);
+    await expect(e08.research_record.run({ experiment_id: exps[1].id, value: 60 })).rejects.toThrow(/its aspect’s agent/);
+    expect(doc().nodes.find((n) => n.id === exps[0].id)).toMatchObject({ status: 'pass', value: 74.2, findings: [{ text: 'keeps code samples' }] });
+    // Across aspects: the main agent's, under the cross-aspect row.
+    await main.research_add.run({ type: 'method', parent_id: node('Model').id, title: 'GQA' });
+    await expect(data.research_derive.run({ kind: 'combine', from_ids: [node('Dedup').id, node('GQA').id], title: 'Dedup + GQA' })).rejects.toThrow(/main agent/);
+    expect(await main.research_derive.run({ kind: 'combine', from_ids: [node('Dedup').id, node('GQA').id], title: 'Dedup + GQA' })).toMatch(/Across aspects/);
+    expect(node('Dedup + GQA').links!.map((l) => l.kind)).toEqual(['combine', 'combine']);
+    expect(await main.research_overview.run({})).toMatch(new RegExp(`\\[${node('Dedup').id}\\] method "Dedup"[\\s\\S]*finding: keeps code samples`));
+  });
+
+  it('turns existing conversations into the tree: attached as they are, with what they found; not twice, not from another project', async () => {
+    const { ws, p, main, doc, node } = await setup();
+    const earlier = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Dedup at 0.85', isolate: false, mockScript: 'work', instruction: 'try it' });
+    await main.research_add.run({ type: 'method', parent_id: node('Data').id, title: 'Dedup' });
+    const r = await main.research_attach.run({ agent: earlier.alias, as: 'experiment', node_id: node('Dedup').id, outcome: 'works', value: 76.4, finding: '0.85 is the turning point' });
+    expect(r).toMatch(/Attached Alice as experiment/);
+    expect(doc().nodes.find((n) => n.taskId === earlier.taskId)).toMatchObject({ type: 'experiment', title: 'Dedup at 0.85', status: 'pass', value: 76.4, findings: [{ text: '0.85 is the turning point', by: 'Alice' }] });
+    expect(ws.snapshot().research[0].taskIds).toContain(earlier.taskId);
+    await expect(main.research_attach.run({ agent: earlier.alias, as: 'aspect_agent', node_id: node('Model').id })).rejects.toThrow(/already in the research/);
+    const elsewhere = await ws.addProject(repo(), 'other');
+    const stranger = await ws.createTask({ projectId: elsewhere.projectId, provider: 'mock', title: 'x', isolate: false, mockScript: 'work', instruction: 'go' });
+    await expect(main.research_attach.run({ agent: stranger.alias, as: 'aspect_agent', node_id: node('Model').id })).rejects.toThrow(/another project/);
   });
 });
 

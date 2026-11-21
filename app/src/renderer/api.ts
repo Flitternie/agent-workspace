@@ -54,6 +54,7 @@ export interface Outputs {
   'research:get': ResearchDoc | null;
   'research:save': ResearchDoc;
   'research:create': ResearchDoc;
+  'research:message': { taskId: string; alias: string };
   'attachment:save': ImageRef;
   'task:interrupt': void;
   'task:models': ModelOption[];

@@ -155,6 +155,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
   'research:get': (i: { projectId: string }) => workspace.researchGet(i.projectId),
   'research:save': (i: { projectId: string; doc: ResearchDoc }) => workspace.researchSave(i.projectId, i.doc),
+  'research:message': (i: { projectId: string; nodeIds: string[]; text: string }) => workspace.researchMessage(i.projectId, i.nodeIds, i.text),
   'research:create': (i: { projectId: string; title: string; goal: string; sample: boolean }) => workspace.researchCreate(i.projectId, i.title, i.goal, i.sample),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),

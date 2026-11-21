@@ -7911,3 +7911,11 @@ button.subtask-row:hover {
   align-items: center;
   gap: 5px;
 }
+.rs-tip {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+}

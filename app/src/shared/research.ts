@@ -92,6 +92,8 @@ export interface ResearchSummary {
   projectId: string;
   title: string;
   taskIds: string[];
+  /** Changes when the tree does (an agent's tool call, an edit): the page reads it again. */
+  updatedAt?: string;
 }
 
 export const childrenOf = (doc: ResearchDoc, id: string | null): ResearchNode[] => doc.nodes.filter((n) => n.parent === id);
