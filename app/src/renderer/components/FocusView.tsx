@@ -677,6 +677,7 @@ export function WaitingOnYou({
   limit,
   bar,
   onPick,
+  only,
 }: {
   snapshot: WorkspaceSnapshot;
   now: number;
@@ -686,12 +687,14 @@ export function WaitingOnYou({
   bar?: boolean;
   /** The row the user unfolded themselves (not one opened by itself), or null. */
   onPick?: (attentionId: string | null) => void;
+  /** Only these agents' requests (the research page: its agents). */
+  only?: (taskId: string) => boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [unfolded, setUnfolded] = useState(false);
   // The bar's open row: undefined = automatic (the only one, when there is one), null = none.
   const [picked, setPicked] = useState<string | null | undefined>(undefined);
-  const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId));
+  const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId) && (!only || only(a.taskId)));
   // Folds again once everything is answered, so the next request arrives as one line.
   useEffect(() => {
     if (!open.length) setUnfolded(false);
@@ -1119,6 +1122,8 @@ export interface ComposerTarget {
   disabled?: boolean;
   /** A chip above the box: what the message is about, with a way to take it back. */
   about?: { label: string; text: string; clearLabel: string; onClear: () => void };
+  /** Questions that fit here, offered while the box is empty: a click puts one in the box (to edit or send). */
+  chips?: string[];
 }
 
 export function Composer({
@@ -1275,6 +1280,22 @@ export function Composer({
           <button className="composer-about-clear" onClick={onClearAbout} aria-label={t('Not about this request')} title={t('Not about this request')} data-testid="composer-about-clear">
             <Icon name="x" size={11} />
           </button>
+        </div>
+      ) : null}
+      {target?.chips?.length && !draft.trim() && !target.disabled ? (
+        <div className="composer-chips" data-testid="composer-chips">
+          {target.chips.map((c) => (
+            <button
+              key={c}
+              className="composer-chip"
+              onClick={() => {
+                setDraft(c);
+                box.current?.focus();
+              }}
+            >
+              {c}
+            </button>
+          ))}
         </div>
       ) : null}
       <MentionMenu m={mention} />

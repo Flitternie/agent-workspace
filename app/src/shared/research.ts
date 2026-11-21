@@ -8,8 +8,12 @@
 // Pure data and functions, shared by the main process (files) and the renderer (the page).
 
 export type ResearchNodeType = 'aspect' | 'method' | 'experiment';
-/** idea: not tried yet · running · pass/fail: by the aspect's own validation · error: no result. */
-export type ResearchStatus = 'idea' | 'running' | 'pass' | 'fail' | 'error';
+/**
+ * idea: not tried yet · running · pass/fail: by the aspect's own validation · unclear: the difference
+ * is within the noise (only known when there are repeated runs, or the user said how noisy the metric is)
+ * · error: no result.
+ */
+export type ResearchStatus = 'idea' | 'running' | 'pass' | 'fail' | 'unclear' | 'error';
 export type ResearchLinkKind = 'combine' | 'mutate' | 'borrow';
 
 export interface ResearchMetric {
@@ -18,6 +22,8 @@ export interface ResearchMetric {
   /** Where the aspect starts (what an experiment is compared with). */
   baseline?: number;
   digits?: number;
+  /** How noisy one run is (a typical standard deviation), when the user says so: a single result closer than this to the start is unclear. */
+  noise?: number;
 }
 
 export interface ResearchFinding {
@@ -46,6 +52,8 @@ export interface ResearchNode {
   taskId?: string;
   /** Aspect: how it is validated (none: by judgement, pass / fail). */
   metric?: ResearchMetric;
+  /** Aspect: more metrics watched besides the main one (shown, not used to judge). */
+  metrics?: ResearchMetric[];
   /** Aspect: the row of cross-aspect combinations (validated end to end). */
   combos?: boolean;
   /** Method: its design, a few lines. */
@@ -56,8 +64,12 @@ export interface ResearchNode {
   links?: ResearchLink[];
   /** Experiment: what this variant changes. */
   config?: string;
-  /** Experiment: its result on the aspect's metric. */
+  /** Experiment: its result on the aspect's metric (the mean, when it was run several times). */
   value?: number;
+  /** Experiment: each run's result, when the user asked for repeats. */
+  runs?: number[];
+  /** Experiment: results on the aspect's other metrics, by name. */
+  values?: Record<string, number>;
   /** Experiment: when its result was recorded. */
   resultAt?: string;
   findings?: ResearchFinding[];
@@ -77,10 +89,31 @@ export interface ResearchEvidence {
   at: string;
 }
 
+/**
+ * How this research is run: the user's call, changed by telling its lead. The tools and the page are
+ * the same whatever is chosen; these only tell the agents how much to ask, and what to keep up to date.
+ *   auto: agents go ahead on their own (within the budget) and say what they started
+ *   direction: they ask the user before exploring a new direction
+ *   review: they propose experiments and start them when the user agrees
+ *   collaborative: both
+ */
+export type ResearchMode = 'auto' | 'direction' | 'review' | 'collaborative';
+export interface ResearchPolicy {
+  mode?: ResearchMode;
+  /** Ask an aspect's agent for its notes when a batch of experiments has its results (default on). */
+  autoNotes?: boolean;
+  /** Ask the lead to fold the aspects' notes into the summary at most this often, in minutes (0: never; default 30). */
+  summaryEvery?: number;
+}
+export const DEFAULT_MODE: ResearchMode = 'review';
+
 export interface ResearchDoc {
   version: 1;
   title: string;
   goal: string;
+  /** The research's own lead: the agent the user talks to about the whole of it (lays out the tree, keeps the summary). */
+  leadTaskId?: string;
+  policy?: ResearchPolicy;
   /** The end-to-end metric, when there is one. */
   endMetric?: ResearchMetric;
   nodes: ResearchNode[];
@@ -103,7 +136,7 @@ export interface ResearchNotes {
 /** Results recorded since a note was last written: how far behind it is. */
 export function resultsSince(doc: ResearchDoc, since: string | undefined, aspectId?: string): number {
   const t = since ? Date.parse(since) : 0;
-  return doc.nodes.filter((n) => n.type === 'experiment' && (n.status === 'pass' || n.status === 'fail' || n.status === 'error') && Date.parse(n.resultAt ?? n.createdAt) > t && (!aspectId || aspectOf(doc, n)?.id === aspectId)).length;
+  return doc.nodes.filter((n) => n.type === 'experiment' && (n.status === 'pass' || n.status === 'fail' || n.status === 'unclear' || n.status === 'error') && Date.parse(n.resultAt ?? n.createdAt) > t && (!aspectId || aspectOf(doc, n)?.id === aspectId)).length;
 }
 
 /** What the sidebar needs without reading the file: that there is one, and whose agents are in it. */
@@ -123,7 +156,7 @@ export const aspectOf = (doc: ResearchDoc, node: ResearchNode): ResearchNode | u
   while (n && n.type !== 'aspect') n = doc.nodes.find((x) => x.id === n!.parent);
   return n;
 };
-export const taskIdsOf = (doc: ResearchDoc): string[] => [...new Set(doc.nodes.map((n) => n.taskId).filter((x): x is string => !!x))];
+export const taskIdsOf = (doc: ResearchDoc): string[] => [...new Set([doc.leadTaskId, ...doc.nodes.map((n) => n.taskId)].filter((x): x is string => !!x))];
 
 export function formatValue(metric: ResearchMetric | undefined, v: number | undefined): string {
   if (v == null) return '—';
@@ -132,9 +165,23 @@ export function formatValue(metric: ResearchMetric | undefined, v: number | unde
 
 const better = (m: ResearchMetric, a: number, b: number) => (m.higherIsBetter ? a > b : a < b);
 
-/** Whether a result passes its aspect's validation: better than the baseline (with a metric), else judged. */
-export function judge(metric: ResearchMetric | undefined, value: number): ResearchStatus {
+/** Mean, standard deviation and count of repeated runs. */
+export function runStats(runs: number[]): { mean: number; sd: number; n: number } {
+  const n = runs.length;
+  const mean = runs.reduce((a, b) => a + b, 0) / (n || 1);
+  const sd = n > 1 ? Math.sqrt(runs.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+  return { mean, sd, n };
+}
+
+/**
+ * Whether a result passes its aspect's validation: better than the start (with a metric), else judged.
+ * Within the noise it is unclear; the noise is the runs' own spread when there are several, or what the
+ * user said the metric's noise is. One run with no declared noise is simply better or not.
+ */
+export function judge(metric: ResearchMetric | undefined, value: number, runs?: number[]): ResearchStatus {
   if (!metric || metric.baseline == null) return 'pass';
+  const noise = runs && runs.length > 1 ? runStats(runs).sd : metric.noise;
+  if (noise && Math.abs(value - metric.baseline) < noise) return 'unclear';
   return better(metric, value, metric.baseline) ? 'pass' : 'fail';
 }
 
@@ -143,7 +190,7 @@ export function judge(metric: ResearchMetric | undefined, value: number): Resear
  * node (pass / fail / error) is what it found; an agent that stopped without one leaves it as it was.
  */
 export function experimentStatus(node: ResearchNode, agentStatus?: string): ResearchStatus {
-  if (node.status === 'pass' || node.status === 'fail' || node.status === 'error') return node.status;
+  if (node.status === 'pass' || node.status === 'fail' || node.status === 'unclear' || node.status === 'error') return node.status;
   if (agentStatus === 'running' || agentStatus === 'starting' || agentStatus === 'waiting_for_user') return 'running';
   return node.status;
 }
@@ -164,6 +211,7 @@ export function methodStatus(doc: ResearchDoc, method: ResearchNode, statusOf: (
   const s = exps.map(statusOf);
   if (s.includes('running')) return 'running';
   if (s.includes('pass')) return 'pass';
+  if (s.includes('unclear')) return 'unclear';
   if (s.every((x) => x === 'idea')) return 'idea';
   return 'fail';
 }
@@ -301,6 +349,8 @@ export function normalizeResearch(raw: unknown): ResearchDoc | null {
     version: 1,
     title: r.title,
     goal: typeof r.goal === 'string' ? r.goal : '',
+    ...(typeof r.leadTaskId === 'string' ? { leadTaskId: r.leadTaskId } : {}),
+    ...(r.policy && typeof r.policy === 'object' ? { policy: r.policy } : {}),
     endMetric: r.endMetric,
     nodes: Array.isArray(r.nodes) ? r.nodes.filter((n): n is ResearchNode => !!n && typeof n.id === 'string' && typeof n.title === 'string' && ['aspect', 'method', 'experiment'].includes(n.type)).map((n) => ({ ...n, status: n.status ?? 'idea', createdAt: n.createdAt ?? now })) : [],
     evidence: Array.isArray(r.evidence) ? r.evidence.filter((e) => !!e && typeof e.value === 'number') : [],
@@ -333,12 +383,12 @@ export function commonAncestor(doc: ResearchDoc, nodes: ResearchNode[]): Researc
  * Who talks about the selection: the agent of the nearest node over all of it. One experiment with an
  * agent: that agent. Anything within one aspect (an experiment without an agent, a method, several
  * nodes under one method or one aspect): the aspect's agent. Across aspects, the cross-aspect row,
- * or nothing selected: the main agent, about the whole research.
+ * or nothing selected: the research's lead.
  */
 export type ResearchRoute =
   | { kind: 'experiment'; node: ResearchNode }
   | { kind: 'aspect'; aspect: ResearchNode; about: ResearchNode[] }
-  | { kind: 'main'; about: ResearchNode[] };
+  | { kind: 'lead'; about: ResearchNode[] };
 
 export function routeFor(doc: ResearchDoc, nodes: ResearchNode[]): ResearchRoute {
   const top = commonAncestor(doc, nodes);
@@ -347,5 +397,43 @@ export function routeFor(doc: ResearchDoc, nodes: ResearchNode[]): ResearchRoute
   // The aspect itself selected alone is spoken to directly, not "about" itself.
   const about = nodes.length === 1 && nodes[0] === aspect ? [] : nodes;
   if (aspect && !aspect.combos) return { kind: 'aspect', aspect, about };
-  return { kind: 'main', about: nodes };
+  return { kind: 'lead', about: nodes };
+}
+
+// ------------------------------------------------------------------ how a result reads against the start
+
+/** Change from the aspect's start, as a fraction, positive when better (null without a start). */
+export function gain(metric: ResearchMetric | undefined, value: number | undefined): number | null {
+  if (!metric || metric.baseline == null || value == null || metric.baseline === 0) return null;
+  const d = (value - metric.baseline) / Math.abs(metric.baseline);
+  return metric.higherIsBetter ? d : -d;
+}
+
+/**
+ * How far the best working result stands out from the spread of all results (as pi-autoresearch does):
+ * |best − start| / median absolute deviation. Advisory only: ≥2 likely real, 1–2 marginal, <1 within
+ * the noise. Null with fewer than three results, no start, nothing working, or no spread.
+ */
+export function confidence(metric: ResearchMetric | undefined, exps: ResearchNode[]): number | null {
+  if (!metric || metric.baseline == null) return null;
+  const vals = exps.filter((e) => e.value != null && e.status !== 'error').map((e) => e.value!);
+  if (vals.length < 3) return null;
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  const m = median(vals);
+  const mad = median(vals.map((v) => Math.abs(v - m)));
+  const kept = exps.filter((e) => e.status === 'pass' && e.value != null).map((e) => e.value!);
+  if (!mad || !kept.length) return null;
+  const best = metric.higherIsBetter ? Math.max(...kept) : Math.min(...kept);
+  if (best === metric.baseline) return null;
+  return Math.abs(best - metric.baseline) / mad;
+}
+
+/** Experiments under a node (a method's, an aspect's), in the order they were started. */
+export function experimentsUnder(doc: ResearchDoc, node: ResearchNode): ResearchNode[] {
+  if (node.type === 'experiment') return [node];
+  const ids = new Set(node.type === 'aspect' ? childrenOf(doc, node.id).map((m) => m.id) : [node.id]);
+  return doc.nodes.filter((n) => n.type === 'experiment' && n.parent && ids.has(n.parent)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }

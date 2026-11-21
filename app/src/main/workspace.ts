@@ -50,8 +50,9 @@ import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
-import { createResearch, readNotes, readResearch, sampleResearch, writeNote, writeResearch, writeSampleNotes } from './research';
-import { aboutPrefix, researchBrief, researchTools, type ResearchHost } from './research-tools';
+import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
+import { ResearchFiles } from './research-files';
+import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
 import { childrenOf, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -488,73 +489,96 @@ export class Workspace {
 
   // ---------------------------------------------------------------- research (a project's tree, in its repo)
 
+  /** The research files of each project: .research/ on this Mac, or fetched from and written to its SSH host. */
+  private researchFiles = new ResearchFiles(
+    (projectId) => this.project(projectId),
+    () => {
+      this.researchIndex.clear();
+      this.changed();
+    },
+    (...args) => this.log(...args),
+  );
   /** Which projects have a research and whose agents are in it, read once per project and kept current on save. */
   private researchIndex = new Map<string, ResearchSummary | null>();
 
+  private summarize(projectId: string, doc: ResearchDoc | null): ResearchSummary | null {
+    if (!doc) return null;
+    const n = this.researchFiles.notes(projectId);
+    const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
+    return { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
+  }
+
   private researchSummaries(): ResearchSummary[] {
-    for (const p of this.store.data.projects)
-      if (!this.researchIndex.has(p.projectId)) {
-        const doc = readResearch(p);
-        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(p.projectId) } : null);
-      }
+    for (const p of this.store.data.projects) if (!this.researchIndex.has(p.projectId)) this.researchIndex.set(p.projectId, this.summarize(p.projectId, this.researchFiles.doc(p.projectId)));
     return this.store.data.projects.map((p) => this.researchIndex.get(p.projectId)).filter((x): x is ResearchSummary => !!x);
   }
 
   private indexResearch(projectId: string, doc: ResearchDoc | null): void {
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(projectId) } : null);
+    this.researchIndex.set(projectId, this.summarize(projectId, doc));
     this.changed();
   }
 
+  /** Resolves when the research can be read as it is (pending writes done; an SSH host's fetched). */
+  researchReady(projectId: string): Promise<void> {
+    return this.researchFiles.ready(projectId);
+  }
+
   researchGet(projectId: string): ResearchDoc | null {
-    const doc = readResearch(this.project(projectId));
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(projectId) } : null);
+    return this.researchFiles.doc(projectId);
+  }
+
+  /** For the page: once ready (an SSH host's research is fetched first). */
+  async researchLoad(projectId: string): Promise<ResearchDoc | null> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    this.researchIndex.set(projectId, this.summarize(projectId, doc));
     return doc;
   }
 
   researchSave(projectId: string, doc: ResearchDoc): ResearchDoc {
-    const before = readResearch(this.project(projectId));
-    writeResearch(this.project(projectId), doc);
+    const before = this.researchFiles.doc(projectId);
+    this.researchFiles.saveDoc(projectId, doc);
     this.indexResearch(projectId, doc);
     if (before) this.nudgeNotes(projectId, before, doc);
     return doc;
   }
 
-  // Notes: .research/summary.md and notes/<aspect>.md, kept by the agents (research_notes).
-  private notesStamp(projectId: string): string | undefined {
-    const n = readNotes(this.project(projectId));
-    const all = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x);
-    return all.sort().at(-1);
-  }
-
+  // Notes: .research/summary.md (the lead's) and notes/<aspect>.md (each aspect's agent's).
   researchNotes(projectId: string): ResearchNotes {
-    return readNotes(this.project(projectId));
+    return this.researchFiles.notes(projectId);
   }
 
-  /** When the summary was last asked for, per research: at most every SUMMARY_EVERY. */
+  async researchLoadNotes(projectId: string): Promise<ResearchNotes> {
+    await this.researchReady(projectId);
+    return this.researchNotes(projectId);
+  }
+
+  /** When the summary was last asked for, per research (the research's policy says how often at most). */
   private summaryAsked = new Map<string, number>();
-  static SUMMARY_EVERY = 30 * 60_000;
 
   researchWriteNote(projectId: string, scope: string, text: string): void {
-    writeNote(this.project(projectId), scope, text);
-    const doc = readResearch(this.project(projectId));
+    this.researchFiles.saveNote(projectId, scope, text);
+    const doc = this.researchFiles.doc(projectId);
     this.indexResearch(projectId, doc);
-    // An aspect's notes moved: the main agent folds them into the summary (not more often than every half hour).
-    const main = this.store.data.mainAgent;
+    if (scope === 'summary' || !doc) return;
+    // An aspect's notes moved: the lead folds them into the summary, as often as the policy allows.
+    const every = (doc.policy?.summaryEvery ?? 30) * 60_000;
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
     const last = this.summaryAsked.get(projectId) ?? 0;
-    if (scope !== 'summary' && doc && main && Date.now() - last > Workspace.SUMMARY_EVERY) {
-      this.summaryAsked.set(projectId, Date.now());
-      const zh = this.language() === 'zh';
-      const aspect = doc.nodes.find((n) => n.id === scope)?.title ?? scope;
-      void this.send(main.taskId, zh ? `[研究「${doc.title}」] 「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况：结论、哪些方面重要、方面之间互相的启发、下一步。` : `[Research "${doc.title}"] The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary"): where things stand, which aspects matter, what one taught another, next steps.`, 'text').catch(() => {});
-    }
+    if (!every || !lead || Date.now() - last < every) return;
+    this.summaryAsked.set(projectId, Date.now());
+    const zh = this.language() === 'zh';
+    const aspect = doc.nodes.find((n) => n.id === scope)?.title ?? scope;
+    void this.send(lead.taskId, zh ? `「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况。` : `The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary").`, 'text').catch(() => {});
   }
 
   /**
    * A method whose experiments all have their results now (some were still running before): its
-   * aspect's agent is asked to bring the aspect's notes up to date.
+   * aspect's agent is asked to bring the aspect's notes up to date, unless the research's policy says not to.
    */
   private nudgeNotes(projectId: string, before: ResearchDoc, after: ResearchDoc): void {
-    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'error';
+    if (after.policy?.autoNotes === false) return;
+    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'unclear' || s === 'error';
     const zh = this.language() === 'zh';
     for (const m of after.nodes.filter((n) => n.type === 'method')) {
       const now = childrenOf(after, m.id);
@@ -564,7 +588,7 @@ export class Workspace {
       const aspect = after.nodes.find((n) => n.id === m.parent);
       const agent = aspect?.taskId ? this.findTask(aspect.taskId) : undefined;
       if (!aspect || !agent) continue;
-      void this.send(agent.taskId, zh ? `「${m.title}」这一批 ${now.length} 个实验都有结果了。请用 research_notes 更新「${aspect.title}」的笔记：试过什么、什么有效、发现了什么、下一步试什么。` : `All ${now.length} experiments of "${m.title}" have their results. Bring the notes for "${aspect.title}" up to date with research_notes: what was tried, what works, what was found, what to try next.`, 'text').catch(() => {});
+      void this.send(agent.taskId, zh ? `「${m.title}」这一批 ${now.length} 个实验都有结果了。可以用 research_notes 更新「${aspect.title}」的笔记。` : `All ${now.length} experiments of "${m.title}" have their results. You may want to update the notes for "${aspect.title}" (research_notes).`, 'text').catch(() => {});
     }
   }
 
@@ -586,9 +610,8 @@ export class Workspace {
     return this.store.data.settings.language === 'zh' ? 'zh' : 'en';
   }
 
-  /** The provider a research starts agents with: in the demo its mock agents; else the first signed-in CLI. */
+  /** The provider a research starts agents with: mock agents in the demo or a workspace with nothing else; else the first signed-in CLI. */
   private researchProvider(): AgentProvider {
-    // Mock agents only where they are the point: the demo, or a workspace that has nothing else (tests).
     const onlyMock = Object.keys(this.opts.adapters).every((k) => k === 'mock');
     const order: AgentProvider[] = this.opts.demo || onlyMock ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
     const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
@@ -596,7 +619,9 @@ export class Workspace {
     return p;
   }
 
+  /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   async researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task> {
+    await this.researchReady(projectId);
     const doc = this.researchGet(projectId);
     const node = doc?.nodes.find((n) => n.id === nodeId);
     if (!doc || !node) throw new Error('That node is not in the research.');
@@ -617,43 +642,60 @@ export class Workspace {
     return task;
   }
 
+  /** The research's lead: the agent the user lays the tree out with and talks to about all of it. Started by the first message to it. */
+  async researchStartLead(projectId: string, message: string): Promise<Task> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    if (!doc) throw new Error('This project has no research.');
+    const zh = this.language() === 'zh';
+    const task = await this.createTask({
+      projectId,
+      provider: this.researchProvider(),
+      title: zh ? `${doc.title}（研究负责人）` : `${doc.title} (research lead)`,
+      instruction: leadBrief(doc, this.language(), message, this.researchNotes(projectId)),
+      isolate: false,
+      ...(this.researchProvider() === 'mock' ? { mockScript: 'work' } : {}),
+    });
+    this.researchSave(projectId, { ...this.researchGet(projectId)!, leadTaskId: task.taskId, updatedAt: new Date().toISOString() });
+    return task;
+  }
+
   /**
    * The box on the research page: to the agent of the nearest node over what is selected (an aspect
-   * with no agent yet: this message starts it), or to the main agent about the whole research.
+   * with no agent yet: this message starts it), or to the research's lead (started by its first message).
    */
   async researchMessage(projectId: string, nodeIds: string[], text: string, images?: ImageRef[]): Promise<{ taskId: string; alias: string }> {
+    await this.researchReady(projectId);
     const doc = this.researchGet(projectId);
     if (!doc) throw new Error('This project has no research.');
     const nodes = nodeIds.map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n);
     const route = routeFor(doc, nodes);
     const lang = this.language();
-    if (route.kind === 'experiment') {
-      const r = await this.send(route.node.taskId!, text, 'text', { images });
+    const deliver = async (taskId: string, body: string) => {
+      const r = await this.send(taskId, body, 'text', { images });
       if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
-      return { taskId: route.node.taskId!, alias: this.findTask(route.node.taskId!)?.alias ?? '' };
-    }
+      return { taskId, alias: this.findTask(taskId)?.alias ?? '' };
+    };
+    if (route.kind === 'experiment') return deliver(route.node.taskId!, text);
+    const start = async (t: Task) => {
+      // Images come with a first message only through send: right after it starts.
+      if (images?.length) await this.send(t.taskId, '', 'text', { images });
+      return { taskId: t.taskId, alias: t.alias };
+    };
     if (route.kind === 'aspect') {
       const prefix = aboutPrefix(route.about, doc, lang, false);
       const agent = route.aspect.taskId ? this.findTask(route.aspect.taskId) : undefined;
-      if (!agent) {
-        const t = await this.researchStartAgent(projectId, route.aspect.id, { isolate: false, message: `${prefix}${text}` });
-        // Images come with a first message only through send: right after it starts.
-        if (images?.length) await this.send(t.taskId, '', 'text', { images });
-        return { taskId: t.taskId, alias: t.alias };
-      }
-      const r = await this.send(agent.taskId, `${prefix}${text}`, 'text', { images });
-      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
-      return { taskId: agent.taskId, alias: agent.alias };
+      if (!agent) return start(await this.researchStartAgent(projectId, route.aspect.id, { isolate: false, message: `${prefix}${text}` }));
+      return deliver(agent.taskId, `${prefix}${text}`);
     }
-    const main = this.store.data.mainAgent;
-    if (!main) throw new Error('Turn the main agent on in Settings to talk about the whole research.');
-    const r = await this.send(main.taskId, `${aboutPrefix(route.about, doc, lang, true)}${text}`, 'text', { images });
-    if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
-    return { taskId: main.taskId, alias: main.alias };
+    const prefix = aboutPrefix(route.about, doc, lang, false);
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    if (!lead) return start(await this.researchStartLead(projectId, `${prefix}${text}`));
+    return deliver(lead.taskId, `${prefix}${text}`);
   }
 
-  researchCreate(projectId: string, title: string, goal: string, sample: boolean): ResearchDoc {
-    const doc = createResearch(this.project(projectId), title, goal, sample, this.store.data.settings.language === 'zh' ? 'zh' : 'en');
+  async researchCreate(projectId: string, title: string, goal: string, sample: boolean): Promise<ResearchDoc> {
+    const doc = await this.researchFiles.create(projectId, title, goal, sample, this.language());
     this.indexResearch(projectId, doc);
     return doc;
   }

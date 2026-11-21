@@ -223,7 +223,7 @@ describe('research', () => {
     const ws = open();
     const p = await ws.addProject(repo(), 'shop');
     expect(ws.snapshot().research).toEqual([]);
-    const doc = ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    const doc = await ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
     expect(ws.snapshot().research).toMatchObject([{ projectId: p.projectId, title: 'Tuning', taskIds: [] }]);
     expect(ws.snapshot().research[0].updatedAt).toBe(doc.updatedAt);
     const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Data agent', isolate: false, mockScript: 'work', instruction: 'go' });
@@ -242,7 +242,7 @@ describe('research managed by talking', () => {
   async function setup() {
     const ws = open();
     const p = await ws.addProject(repo(), 'shop');
-    ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    await ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
     const { researchTools } = await import('../../src/main/research-tools');
     const as = (caller: { kind: 'main' } | { kind: 'agent'; taskId: string }) => Object.fromEntries(researchTools(ws, caller).map((t) => [t.name, t]));
     const main = as({ kind: 'main' });
@@ -253,7 +253,7 @@ describe('research managed by talking', () => {
     return { ws, p, as, main, doc, node };
   }
 
-  it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects needs the main agent', async () => {
+  it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects, the research lead (started by its first message)', async () => {
     const { ws, p, doc, node } = await setup();
     const first = await ws.researchMessage(p.projectId, [node('Data').id], 'Which methods would you try?');
     expect(node('Data').taskId).toBe(first.taskId);
@@ -267,7 +267,13 @@ describe('research managed by talking', () => {
     expect(ws.transcript(first.taskId).filter((i) => i.role === 'user').at(-1)!.text).toBe(`About "Dedup" [${node('Dedup').id}] in the research "Tuning": Try 0.8 and 0.9`);
     // Its agent lives on the research page.
     expect(ws.snapshot().research[0].taskIds).toEqual([first.taskId]);
-    await expect(ws.researchMessage(p.projectId, [node('Data').id, node('Model').id], 'Compare')).rejects.toThrow(/main agent/);
+    const lead = await ws.researchMessage(p.projectId, [node('Data').id, node('Model').id], 'Compare');
+    expect(doc().leadTaskId).toBe(lead.taskId);
+    expect(ws.transcript(lead.taskId).find((i) => i.role === 'user')!.text).toMatch(/You lead the research "Tuning"[\s\S]*research_settings[\s\S]*review first[\s\S]*About "Data" \[[^\]]+\], "Model" \[[^\]]+\] in the research "Tuning": Compare/);
+    // Its agents are on the research page (the lead too), not in the team.
+    expect(ws.snapshot().research[0].taskIds).toEqual(expect.arrayContaining([first.taskId, lead.taskId]));
+    // Then the same lead, about the whole research.
+    expect((await ws.researchMessage(p.projectId, [], 'Where do things stand?')).taskId).toBe(lead.taskId);
   });
 
   it('each agent changes only its part: an aspect’s agent its aspect, an experiment’s agent its own result; the main agent anything', async () => {
@@ -276,7 +282,7 @@ describe('research managed by talking', () => {
     const data = as({ kind: 'agent', taskId: dataAgent.taskId });
     expect(await data.research_add.run({ type: 'method', title: 'Dedup', design: 'MinHash' })).toMatch(/Added method/);
     await expect(data.research_add.run({ type: 'method', parent_id: node('Model').id, title: 'GQA' })).rejects.toThrow(/Only this aspect’s agent/);
-    await expect(data.research_add.run({ type: 'aspect', title: 'Training' })).rejects.toThrow(/Only the main agent/);
+    await expect(data.research_add.run({ type: 'aspect', title: 'Training' })).rejects.toThrow(/research’s lead/);
     // Variants in parallel: one agent each, in its own worktree, linked to its experiment.
     const tried = await data.research_try.run({ method_id: node('Dedup').id, variants: [{ title: '0.8' }, { title: '0.9', config: 'threshold 0.9' }] });
     expect(tried).toMatch(/Started 2 variants/);
@@ -291,7 +297,7 @@ describe('research managed by talking', () => {
     expect(doc().nodes.find((n) => n.id === exps[0].id)).toMatchObject({ status: 'pass', value: 74.2, findings: [{ text: 'keeps code samples' }] });
     // Across aspects: the main agent's, under the cross-aspect row.
     await main.research_add.run({ type: 'method', parent_id: node('Model').id, title: 'GQA' });
-    await expect(data.research_derive.run({ kind: 'combine', from_ids: [node('Dedup').id, node('GQA').id], title: 'Dedup + GQA' })).rejects.toThrow(/main agent/);
+    await expect(data.research_derive.run({ kind: 'combine', from_ids: [node('Dedup').id, node('GQA').id], title: 'Dedup + GQA' })).rejects.toThrow(/research lead’s/);
     expect(await main.research_derive.run({ kind: 'combine', from_ids: [node('Dedup').id, node('GQA').id], title: 'Dedup + GQA' })).toMatch(/Across aspects/);
     expect(node('Dedup + GQA').links!.map((l) => l.kind)).toEqual(['combine', 'combine']);
     expect(await main.research_overview.run({})).toMatch(new RegExp(`\\[${node('Dedup').id}\\] method "Dedup"[\\s\\S]*finding: keeps code samples`));
@@ -304,7 +310,7 @@ describe('research managed by talking', () => {
     expect(await data.research_notes.run({ markdown: '## Tried\n- dedup 0.85 works' })).toMatch(/Notes for "Data" updated/);
     expect(readFileSync(join(p.rootPath, '.research', 'notes', `${node('Data').id}.md`), 'utf8')).toBe('## Tried\n- dedup 0.85 works\n');
     await expect(data.research_notes.run({ scope: node('Model').id, markdown: 'x' })).rejects.toThrow(/its own aspect/);
-    await expect(data.research_notes.run({ scope: 'summary', markdown: 'x' })).rejects.toThrow(/main agent/);
+    await expect(data.research_notes.run({ scope: 'summary', markdown: 'x' })).rejects.toThrow(/lead’s/);
     expect(await main.research_notes.run({ scope: 'summary', markdown: '# Where things stand\nData helps.' })).toBe('Summary updated.');
     expect(ws.researchNotes(p.projectId).summary!.text).toMatch(/Data helps/);
     expect(ws.snapshot().research[0].notesAt).toBeTruthy();
@@ -318,24 +324,37 @@ describe('research managed by talking', () => {
 
     // Its result closes the batch: the aspect's agent is asked to update its notes.
     await until(() => ws.snapshot().tasks.find((t) => t.taskId === dataAgent.taskId)!.status !== 'running');
-    const asked = () => ws.transcript(dataAgent.taskId).filter((i) => i.role === 'user' && /Bring the notes for "Data" up to date/.test(i.text)).length;
+    const asked = () => ws.transcript(dataAgent.taskId).filter((i) => i.role === 'user' && /You may want to update the notes for "Data"/.test(i.text)).length;
     expect(asked()).toBe(0);
     await as({ kind: 'agent', taskId: e.taskId! }).research_record.run({ value: 75 });
     expect(asked()).toBe(1);
     expect(doc().nodes.find((n) => n.id === e.id)!.resultAt).toBeTruthy();
 
-    // With a main agent: an aspect's new notes ask it for the summary, at most every half hour.
-    const internal = ws as unknown as { store: { data: { mainAgent?: unknown } }; connect(id: string): Promise<unknown> };
-    internal.store.data.mainAgent = { taskId: 't-main-n', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: '/tmp', createdAt: '', updatedAt: '' };
-    const sent: string[] = [];
-    const connect = internal.connect.bind(ws);
-    internal.connect = async (id: string) => (id === 't-main-n' ? { turnActive: false, session: { send: async (t: string) => (sent.push(t), 'turn') } } : connect(id));
+    // With a research lead: an aspect's new notes ask it for the summary, as often as the research's settings allow.
+    const lead = await ws.researchStartLead(p.projectId, 'Hello');
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === lead.taskId)!.status !== 'running');
+    const askedSummary = () => ws.transcript(lead.taskId).filter((i) => i.role === 'user' && /The notes for "Data" changed[\s\S]*scope "summary"/.test(i.text)).length;
     await data.research_notes.run({ markdown: '## Tried\n- dedup 0.86: 75' });
     await data.research_notes.run({ markdown: '## Tried\n- dedup 0.86: 75 (again)' });
-    await until(() => sent.length >= 1);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatch(/\[Research "Tuning"\] The notes for "Data" changed[\s\S]*research_notes \(scope "summary"\)/);
+    expect(askedSummary()).toBe(1);
+
+    // How the research runs is the user's, set with its lead: an aspect's agent cannot; the lead can.
+    const asLead = as({ kind: 'agent', taskId: lead.taskId });
+    await expect(data.research_settings.run({ mode: 'auto' })).rejects.toThrow(/with its lead/);
+    expect(await asLead.research_settings.run({ mode: 'auto', auto_notes: false, summary_every_minutes: 0 })).toMatch(/mode auto, notes reminders off, summary every 0 min \(never\)/);
+    expect(doc().policy).toEqual({ mode: 'auto', autoNotes: false, summaryEvery: 0 });
+    // A new aspect agent is told the mode (an experiment's agent runs one variant; the mode is not its concern).
+    const modelAgent = await ws.researchStartAgent(p.projectId, node('Model').id, { isolate: false });
+    expect(ws.transcript(modelAgent.taskId).find((i) => i.role === 'user')!.text).toMatch(/on its own/);
+    await data.research_try.run({ method_id: node('Dedup').id, variants: [{ title: '0.87' }] });
+    const e87 = doc().nodes.find((n) => n.title === '0.87')!;
+    // Reminders off: no summary request, no notes request when this batch has its results.
+    (ws as unknown as { summaryAsked: Map<string, number> }).summaryAsked.clear();
+    await data.research_notes.run({ markdown: 'x' });
+    expect(askedSummary()).toBe(1);
+    const before = asked();
+    await as({ kind: 'agent', taskId: e87.taskId! }).research_record.run({ value: 76 });
+    expect(asked()).toBe(before);
   });
 
   it('turns existing conversations into the tree: attached as they are, with what they found; not twice, not from another project', async () => {

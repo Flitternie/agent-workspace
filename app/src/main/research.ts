@@ -82,32 +82,32 @@ export function createResearch(project: Project, title: string, goal: string, sa
 }
 
 /** The example's notes: a summary, and the notes of its first two aspects. */
-export function writeSampleNotes(project: Project, doc: ResearchDoc, lang: 'en' | 'zh'): void {
+export function sampleNotes(doc: ResearchDoc, lang: 'en' | 'zh'): Record<string, string> {
+  const out: Record<string, string> = {};
   const zh = lang === 'zh';
   const aspects = doc.nodes.filter((n) => n.type === 'aspect' && !n.combos);
-  writeNote(
-    project,
-    'summary',
+  out.summary = (
     zh
       ? `# 现在的情况\n\n端到端 val acc 从 0.842 提升到 **0.871**（数据 + 结构的最优组合）。\n\n## 哪些方面重要\n- **模型结构**：去掉后掉 1.6 pt（1 次消融，还要再确认）\n- **数据处理**：去掉后掉 1.2 pt（2 次消融，比较可信）\n- **训练策略**：还没有消融，不知道\n\n## 方面之间的启发\n- 数据里 10% 代码语料让推理类样本变好 → 结构那边的 QK-norm 在含代码数据上收益更大\n- SwiGLU 需要更长 warmup → 训练策略的学习率调度借用了这条\n\n## 下一步\n1. 对训练策略做一次消融\n2. 「代码语料 + QK-norm」再换一个种子确认\n`
-      : `# Where things stand\n\nEnd-to-end val acc went from 0.842 to **0.871** (the best of data + architecture).\n\n## Which aspects matter\n- **Architecture**: −1.6 pt without it (one ablation, to confirm)\n- **Data**: −1.2 pt without it (two ablations, fairly sure)\n- **Training**: no ablation yet\n\n## What one aspect taught another\n- 10% code in the data helps reasoning samples → QK-norm gains more on data with code\n- SwiGLU needs a longer warmup → the training schedule borrows it\n\n## Next\n1. Ablate training\n2. Confirm "code mix + QK-norm" on a new seed\n`,
+      : `# Where things stand\n\nEnd-to-end val acc went from 0.842 to **0.871** (the best of data + architecture).\n\n## Which aspects matter\n- **Architecture**: −1.6 pt without it (one ablation, to confirm)\n- **Data**: −1.2 pt without it (two ablations, fairly sure)\n- **Training**: no ablation yet\n\n## What one aspect taught another\n- 10% code in the data helps reasoning samples → QK-norm gains more on data with code\n- SwiGLU needs a longer warmup → the training schedule borrows it\n\n## Next\n1. Ablate training\n2. Confirm "code mix + QK-norm" on a new seed\n`
   );
   if (aspects[0])
-    writeNote(
-      project,
-      aspects[0].id,
+    out[aspects[0].id] = (
       zh
         ? `## 试过的\n- 去重：阈值 0.8 / 0.85 / 0.9 → **0.85 最好（76.4）**\n- 代码语料：5% / 10%（20% 在跑）→ **10% 最好（77.9）**\n\n## 发现\n- 去重太狠会把代码样本一起删掉，0.85 是拐点\n\n## 下一步\n- 回译增强（还没试）\n- 去重阈值在 0.85 附近再细扫\n`
-        : `## Tried\n- Deduplication: 0.8 / 0.85 / 0.9 → **0.85 best (76.4)**\n- Code mix: 5% / 10% (20% running) → **10% best (77.9)**\n\n## Findings\n- Deduplicating harder removes code samples; 0.85 is the turning point\n\n## Next\n- Back-translation (not tried)\n- A finer sweep around 0.85\n`,
+        : `## Tried\n- Deduplication: 0.8 / 0.85 / 0.9 → **0.85 best (76.4)**\n- Code mix: 5% / 10% (20% running) → **10% best (77.9)**\n\n## Findings\n- Deduplicating harder removes code samples; 0.85 is the turning point\n\n## Next\n- Back-translation (not tried)\n- A finer sweep around 0.85\n`
     );
   if (aspects[1])
-    writeNote(
-      project,
-      aspects[1].id,
+    out[aspects[1].id] = (
       zh
         ? `## 试过的\n- 激活：SwiGLU 最好（3.371）\n- 位置编码：RoPE θ=500k 最好；ALiBi 在短序列上不行\n- 注意力：QK-norm 最好（3.362），GQA + QK-norm 在跑\n\n## 下一步\n- 位置编码的长度外推版（YaRN）还在跑\n`
-        : `## Tried\n- Activation: SwiGLU best (3.371)\n- Positional encoding: RoPE θ=500k best; ALiBi loses on short sequences\n- Attention: QK-norm best (3.362), GQA + QK-norm running\n\n## Next\n- The length-extrapolation version (YaRN) is still running\n`,
+        : `## Tried\n- Activation: SwiGLU best (3.371)\n- Positional encoding: RoPE θ=500k best; ALiBi loses on short sequences\n- Attention: QK-norm best (3.362), GQA + QK-norm running\n\n## Next\n- The length-extrapolation version (YaRN) is still running\n`
     );
+  return out;
+}
+
+export function writeSampleNotes(project: Project, doc: ResearchDoc, lang: 'en' | 'zh'): void {
+  for (const [scope, text] of Object.entries(sampleNotes(doc, lang))) writeNote(project, scope, text);
 }
 
 /**

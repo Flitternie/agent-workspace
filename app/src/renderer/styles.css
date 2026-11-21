@@ -8007,3 +8007,126 @@ button.subtask-row:hover {
 .rs-note-body h3 {
   font-size: 12.5px;
 }
+/* Questions offered above an empty box (the research page's): one click fills the box. */
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.composer-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+}
+.composer-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+/* Node encoding (after Arbor): change from the start, the tally under a node, the best of a method. */
+.rg-node .t2.gain {
+  fill: var(--ok);
+  font-weight: 600;
+}
+.rg-node .t2.loss {
+  fill: var(--text-3);
+}
+.rg-node .t2.tally {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.rg-node.best .box {
+  stroke: #d4a72c;
+  stroke-width: 1.8;
+}
+.research .st-unclear,
+.research-side .st-unclear {
+  fill: #d4a72c;
+  background: #d4a72c;
+}
+/* Side column: numbers, the progress chart, the advisory confidence, tinted changes. */
+.rs-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rs-kpis > div {
+  flex: 1 1 70px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.rs-kpis small {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.rs-kpis b {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.research-side .gain {
+  color: var(--ok);
+}
+.research-side .loss {
+  color: var(--risk);
+}
+.rs-progress .base {
+  stroke: var(--text-3);
+  stroke-dasharray: 3 3;
+}
+.rs-progress .base-label {
+  font-size: 10px;
+  fill: var(--text-3);
+}
+.rs-progress .best-line {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 1.8;
+}
+.rs-progress circle,
+.rs-progress rect {
+  cursor: pointer;
+}
+.rs-progress circle.faint {
+  opacity: 0.5;
+}
+.rs-progress circle.record {
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.rs-conf {
+  align-self: flex-start;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.rs-conf.good {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--ok);
+}
+.rs-conf.marginal {
+  background: rgba(212, 167, 44, 0.16);
+  color: #9a7412;
+}
+.rs-conf.noise {
+  background: var(--risk-bg);
+  color: var(--risk);
+}
+.rs-heat {
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+}
+.rs-runs {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}

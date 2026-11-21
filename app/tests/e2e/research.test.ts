@@ -74,6 +74,13 @@ describe('research page (demo)', () => {
     await expect.poll(() => panel.innerText()).toContain('Which methods are there for "Data"?');
     expect(await panel.innerText()).toMatch(/the first thing you say to it below starts one/);
     expect(await page.getByTestId('research-notes').innerText()).toMatch(/Notes[\s\S]*Tried[\s\S]*0\.85 best/);
+    // The aspect at a glance: start → best, how many ran and work, the search as a step line through the best.
+    expect(await page.getByTestId('research-kpis').innerText()).toMatch(/start → best[\s\S]*71\.0 → 77\.9[\s\S]*experiments[\s\S]*work/);
+    expect(await page.getByTestId('research-progress-chart').locator('circle').count()).toBeGreaterThan(3);
+    // Questions that fit, offered while the box is empty: a click fills it.
+    await page.getByTestId('composer-chips').getByText('What has worked so far?').click();
+    expect(await page.getByTestId('composer-input').inputValue()).toBe('What has worked so far?');
+    await page.getByTestId('composer-input').fill('');
     expect(await panel.locator('input, textarea, select, .btn').count()).toBe(0);
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
     // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.
@@ -131,6 +138,8 @@ describe('research page (demo)', () => {
     await invoke(page, 'research:save', { projectId, doc: { ...d, nodes: [...d.nodes, { id: 'x-new', type: 'experiment', parent: dedup.id, title: 'threshold 0.87', status: 'pass', value: 78.2, createdAt: new Date().toISOString(), findings: [{ id: 'f-new', text: '0.87 keeps the code samples', at: new Date().toISOString() }] }], updatedAt: new Date().toISOString() } });
     await node('method', 'Deduplication').click();
     await expect.poll(() => panel.innerText()).toMatch(/threshold 0\.87[\s\S]*78\.2[\s\S]*0\.87 keeps the code samples/);
+    // Changes from the start, tinted by size; the best variant starred.
+    expect(await page.getByTestId('research-results').innerText()).toMatch(/★ threshold 0\.87[\s\S]*\+10%/);
     await page.screenshot({ path: join(shots, 'research-02-method.png') });
 
     // Several selected: to the agent over them all.
@@ -142,10 +151,26 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-depth-method').click();
     await node('method', 'Optimizer').click();
     await node('method', 'Activation').click({ modifiers: ['Shift'] });
-    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/To: Main agent \(off\)/);
+    // Across aspects: the research's own lead (none yet: the first message starts it).
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/To: a new research lead/);
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/Optimizer and 1 more/);
-    expect(await page.getByTestId('composer-input').isDisabled()).toBe(true);
+    expect(await page.getByTestId('composer-input').isDisabled()).toBe(false);
     await page.screenshot({ path: join(shots, 'research-03-multi.png') });
+
+    // The goal's agent is the research's lead: the first message starts it; a double-click on the goal opens it.
+    await page.getByTestId('research-panel').locator('.side-head').click();
+    await page.locator('[data-testid="research-node"][data-kind="goal"]').click();
+    await expect.poll(() => panel.innerText()).toMatch(/No research lead yet/);
+    await page.getByTestId('composer-input').fill('Help me lay out the next aspect.');
+    await page.getByTestId('composer-send').click();
+    await expect.poll(async () => (await doc()).leadTaskId ?? '', { timeout: 20_000 }).not.toBe('');
+    const leadId = (await doc()).leadTaskId!;
+    expect((await invoke<Array<{ role: string; text: string }>>(page, 'transcript:get', { taskId: leadId })).find((i) => i.role === 'user')!.text).toMatch(/You lead the research[\s\S]*Help me lay out the next aspect\./);
+    await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/research lead/);
+    await page.locator('[data-testid="research-node"][data-kind="goal"]').dblclick();
+    await expect.poll(() => page.getByTestId('research').count()).toBe(0);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByTestId('research').isVisible()).toBe(true);
 
     // Starting one in another project: offered on its team.
     const other = join(mkdtempSync(join(tmpdir(), 'amw-research-p-')), 'notes');

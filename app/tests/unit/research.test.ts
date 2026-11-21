@@ -102,9 +102,9 @@ describe('research tree', () => {
     const route = (...titles: string[]) => routeFor(doc, titles.map(byTitle));
     const aspectOf = (r: ReturnType<typeof routeFor>) => (r.kind === 'aspect' ? r.aspect.title : r.kind);
     // Nothing selected, or across aspects: the main agent, about the whole research.
-    expect(routeFor(doc, [])).toEqual({ kind: 'main', about: [] });
-    expect(aspectOf(route('Deduplication', 'Activation'))).toBe('main');
-    expect(aspectOf(route('threshold 0.85', 'SwiGLU'))).toBe('main');
+    expect(routeFor(doc, [])).toEqual({ kind: 'lead', about: [] });
+    expect(aspectOf(route('Deduplication', 'Activation'))).toBe('lead');
+    expect(aspectOf(route('threshold 0.85', 'SwiGLU'))).toBe('lead');
     // Within one aspect: its agent, told which nodes it is about.
     const twoRuns = route('threshold 0.8', 'threshold 0.85');
     expect(aspectOf(twoRuns)).toBe('Data');
@@ -122,13 +122,15 @@ describe('research tree', () => {
     expect(routeFor(withAgent, [withAgent.nodes.find((n) => n.title === 'SwiGLU')!])).toMatchObject({ kind: 'experiment', node: { taskId: 't-9' } });
     expect(aspectOf(route('SwiGLU'))).toBe('Architecture');
     // The cross-aspect row is validated end to end: the main agent's.
-    expect(aspectOf(route('Code mix + QK-norm'))).toBe('main');
+    expect(aspectOf(route('Code mix + QK-norm'))).toBe('lead');
   });
 
   it('opens an older or hand-edited file: missing fields get defaults, broken nodes are dropped', () => {
     const d = normalizeResearch({ title: 'x', nodes: [{ id: 'a', type: 'aspect', title: 'A', parent: null }, { id: 'bad' }, { id: 'm', type: 'nope', title: 'M' }] });
     expect(d).toMatchObject({ version: 1, title: 'x', goal: '', evidence: [] });
     expect(d!.nodes.map((n) => [n.id, n.status])).toEqual([['a', 'idea']]);
+    // Who leads it and how it is run survive a read.
+    expect(normalizeResearch({ title: 'x', leadTaskId: 't-1', policy: { mode: 'auto', summaryEvery: 0 } })).toMatchObject({ leadTaskId: 't-1', policy: { mode: 'auto', summaryEvery: 0 } });
     expect(normalizeResearch({ nodes: [] })).toBeNull();
     expect(normalizeResearch('nope')).toBeNull();
   });
@@ -166,5 +168,83 @@ describe('research in the repository', () => {
     const remote = { ...project(), host: 'gpu-box' };
     expect(readResearch(remote)).toBeNull();
     expect(() => createResearch(remote, 'x', '', false, 'en')).toThrow(/SSH hosts/);
+  });
+});
+
+describe('repeats and noise, only when asked for', () => {
+  const metric = { name: 'acc', higherIsBetter: true, baseline: 0.6, digits: 3 };
+  it('one run is better or not; with repeats or a declared noise, a difference within it is unclear', async () => {
+    const { judge, runStats } = await import('../../src/shared/research');
+    expect(judge(metric, 0.61)).toBe('pass');
+    expect(judge(metric, 0.59)).toBe('fail');
+    // Repeats: the mean decides, the spread says whether it stands out.
+    expect(runStats([0.6, 0.62, 0.64])).toMatchObject({ mean: 0.62, n: 3 });
+    expect(judge(metric, 0.62, [0.58, 0.62, 0.66])).toBe('unclear'); // sd 0.04, only 0.02 above the start
+    expect(judge(metric, 0.7, [0.69, 0.7, 0.71])).toBe('pass');
+    // A noise the user declared works for single runs too.
+    expect(judge({ ...metric, noise: 0.05 }, 0.63)).toBe('unclear');
+    expect(judge({ ...metric, noise: 0.05 }, 0.7)).toBe('pass');
+  });
+
+  it('reads results against the start: change as a fraction, confidence as a hint', async () => {
+    const { gain, confidence } = await import('../../src/shared/research');
+    expect(gain(metric, 0.66)).toBeCloseTo(0.1);
+    expect(gain({ ...metric, higherIsBetter: false }, 0.66)).toBeCloseTo(-0.1);
+    expect(gain({ name: 'x', higherIsBetter: true }, 1)).toBeNull();
+    const e = (value: number, status: 'pass' | 'fail' = 'pass') => ({ id: String(value), type: 'experiment' as const, parent: 'm', title: '', status, value, createdAt: '' });
+    // Fewer than three results: no confidence.
+    expect(confidence(metric, [e(0.7), e(0.61)])).toBeNull();
+    // Best 0.7 vs start 0.6, spread (median deviation) 0.01: 10×.
+    expect(confidence(metric, [e(0.7), e(0.61), e(0.62), e(0.6, 'fail')])).toBeCloseTo(10);
+  });
+});
+
+describe('research on an SSH host', () => {
+  it('is fetched in one round trip, written in order, and read only once writes are done', async () => {
+    const { vi } = await import('vitest');
+    const files = new Map<string, string>([['/srv/p/.research/research.json', JSON.stringify(sampleResearch('en'))], ['/srv/p/.research/summary.md', '# Where things stand\n']]);
+    const calls: string[] = [];
+    vi.resetModules();
+    vi.doMock('../../src/main/util/ssh', async (orig) => ({
+      ...(await orig<typeof import('../../src/main/util/ssh')>()),
+      sshRun: async (_host: string, cmd: string) => {
+        calls.push('fetch');
+        // What the fetch script prints: a marker line per file, then its base64.
+        expect(cmd).toMatch(/research\.json summary\.md notes/);
+        let out = '';
+        for (const [f, text] of files) out += `\n@@AMW-RESEARCH ${f.replace('/srv/p/.research/', '')} 1700000000\n${Buffer.from(text).toString('base64')}\n`;
+        return { code: 0, stdout: out, stderr: '' };
+      },
+      sshRunInput: async (_host: string, cmd: string, input: Buffer) => {
+        const file = /mv '[^']+' '([^']+)'$/.exec(cmd)![1];
+        await new Promise((r) => setTimeout(r, 5));
+        calls.push(`write ${file.replace('/srv/p/', '')}`);
+        files.set(file, input.toString());
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    }));
+    const { ResearchFiles } = await import('../../src/main/research-files');
+    const project = { projectId: 'p', name: 'p', rootPath: '/srv/p', host: 'gpu-box', isGitRepo: true, createdAt: '' };
+    let changed = 0;
+    const rf = new ResearchFiles(() => project, () => changed++);
+    // Nothing until fetched; then the tree and the summary, once.
+    expect(rf.doc('p')).toBeNull();
+    await rf.ready('p');
+    expect(rf.doc('p')!.title).toBe('nanochat pretraining');
+    expect(rf.notes('p').summary!.text).toBe('# Where things stand\n');
+    expect(rf.notes('p').summary!.updatedAt).toBe(new Date(1700000000 * 1000).toISOString());
+    expect(calls.filter((c) => c === 'fetch')).toHaveLength(1);
+    // Writes: shown at once, sent in order, awaited by the next reader.
+    const doc = rf.doc('p')!;
+    rf.saveDoc('p', { ...doc, title: 'Renamed' });
+    rf.saveNote('p', 'summary', '# New');
+    expect(rf.doc('p')!.title).toBe('Renamed');
+    expect(rf.notes('p').summary!.text).toBe('# New\n');
+    await rf.ready('p');
+    expect(calls.slice(1)).toEqual(['write .research/research.json', 'write .research/summary.md']);
+    expect(JSON.parse(files.get('/srv/p/.research/research.json')!).title).toBe('Renamed');
+    expect(changed).toBeGreaterThan(0);
+    await expect(rf.create('p', 'Again', '', false, 'en')).rejects.toThrow(/already has/);
+    vi.doUnmock('../../src/main/util/ssh');
   });
 });

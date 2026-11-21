@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import {
@@ -13,6 +13,11 @@ import {
   methodStatus,
   resultsSince,
   routeFor,
+  runStats,
+  taskIdsOf,
+  gain,
+  confidence,
+  experimentsUnder,
   type GraphDepth,
   type GraphItem,
   type ResearchDoc,
@@ -30,10 +35,10 @@ import { Alias, Icon, PROVIDER_LABEL, STATUS_LABEL as AGENT_STATUS } from './bit
 import { Markdown } from './Markdown';
 import { timeAgo } from '../state';
 import { Modal } from './Dialogs';
-import { Composer, PanelResizer, type ComposerTarget } from './FocusView';
+import { Composer, PanelResizer, WaitingOnYou, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
 
-const STATUS_LABEL: Record<ResearchStatus, string> = { idea: 'Not tried', running: 'Running', pass: 'Works', fail: 'Does not work', error: 'No result' };
+const STATUS_LABEL: Record<ResearchStatus, string> = { idea: 'Not tried', running: 'Running', pass: 'Works', fail: 'Does not work', unclear: 'Unclear', error: 'No result' };
 const LINK_LABEL: Record<ResearchLinkKind, string> = { combine: 'Combined', mutate: 'Mutated', borrow: 'Borrows' };
 const PANEL_W = 380;
 
@@ -94,10 +99,11 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
 
   const ctx: Ctx = { snapshot, project: project.projectId, doc, notes, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
   /** A double-click opens the node's agent (a method's is its aspect's); with none yet, it just selects the node. */
-  const openNode = (n: ResearchNode) => {
-    const id = n.type === 'method' ? aspectOf(doc, n)?.taskId : n.taskId;
+  const openNode = (n?: ResearchNode) => {
+    // The goal (no node) is the lead's.
+    const id = !n ? doc.leadTaskId : n.type === 'method' ? aspectOf(doc, n)?.taskId : n.taskId;
     if (id && taskOf(id)) onOpenAgent(id);
-    else setSel([n.id]);
+    else setSel(n ? [n.id] : []);
   };
   const sidePanel = panel ? (
     <SidePanel
@@ -196,7 +202,7 @@ function Graph({
   doc: ResearchDoc;
   depth: GraphDepth;
   setDepth: (d: GraphDepth) => void;
-  openNode: (n: ResearchNode) => void;
+  openNode: (n?: ResearchNode) => void;
   opened: Set<string>;
   toggleOpen: (id: string) => void;
   sel: string[];
@@ -340,7 +346,7 @@ function Graph({
       </svg>
       {legend ? (
       <div className="research-legend" data-testid="research-legend">
-        {(['running', 'pass', 'fail', 'idea'] as const).map((s) => (
+        {(['running', 'pass', 'fail', 'unclear', 'idea'] as const).map((s) => (
           <span key={s}>
             <i className={`rg-dot st-${s}`} /> {t(STATUS_LABEL[s])}
           </span>
@@ -359,7 +365,7 @@ function Graph({
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot }) {
+function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n?: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot }) {
   const { nodeW: W, nodeH: H } = GRAPH;
   const at = `translate(${it.x},${it.y})`;
   const waiting = (taskId?: string) => (taskId ? snapshot.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.kind !== 'completion').length : 0);
@@ -372,13 +378,13 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     ) : null;
   if (it.kind === 'goal')
     return (
-      <g className={`rg-node goal${sel.length ? '' : ' sel'}`} transform={at} onClick={() => select('', false)} data-testid="research-node" data-kind="goal">
+      <g className={`rg-node goal${sel.length ? '' : ' sel'}`} transform={at} onClick={() => select('', false)} onDoubleClick={() => openNode()} data-testid="research-node" data-kind="goal">
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 inv">
           {clip(doc.title, 16)}
         </text>
         <text x={12} y={41} className="t2 inv">
-          {t('Which aspects move the result?')}
+          {taskOf(doc.leadTaskId) ? `◇ ${taskOf(doc.leadTaskId)!.alias} · ${t('research lead')}` : t('Which aspects move the result?')}
         </text>
       </g>
     );
@@ -415,20 +421,33 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
   const isSel = sel.includes(n.id);
   const click = (e: ReactMouseEvent) => select(n.id, e.shiftKey || e.metaKey);
   const dbl = () => openNode(n);
+  // Counts of what is under a node (as Arbor's tree shows them): ✓ works · ✗ does not · ≈ unclear · ▸ running.
+  const tally = (exps: ResearchNode[]) => {
+    const c = (x: ResearchStatus) => exps.filter((e) => statusOf(e) === x).length;
+    return [c('pass') ? `✓${c('pass')}` : '', c('fail') + c('error') ? `✗${c('fail') + c('error')}` : '', c('unclear') ? `≈${c('unclear')}` : '', c('running') ? `▸${c('running')}` : ''].filter(Boolean).join(' ');
+  };
+  const pct = (g: number | null) => (g == null ? '' : `${g >= 0 ? '+' : ''}${(g * 100).toFixed(Math.abs(g) < 0.1 ? 1 : 0)}%`);
+  const tip = (lines: Array<string | false | undefined | null>) => <title>{lines.filter(Boolean).join('\n')}</title>;
   if (n.type === 'aspect') {
     const methods = childrenOf(doc, n.id);
     const agent = taskOf(n.taskId);
+    const exps = experimentsUnder(doc, n);
+    const bestG = Math.max(-Infinity, ...exps.filter((e) => statusOf(e) === 'pass').map((e) => gain(n.metric, e.value) ?? -Infinity));
     return (
       <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="aspect" data-title={n.title}>
+        {tip([n.title, n.metric ? `${n.metric.name} (${n.metric.higherIsBetter ? '↑' : '↓'})` : t('judged by hand'), agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : t('no agent yet'), tally(exps)])}
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 strong">
-          {clip(n.title, 15)}
+          {clip(n.title, 13)}
         </text>
-        <text x={W - 10} y={22} className="t2" textAnchor="end">
-          {methods.length === 1 ? t('1 method') : t('{n} methods', { n: methods.length })}
+        <text x={W - 10} y={22} className={`t2${bestG > -Infinity ? ' gain' : ''}`} textAnchor="end">
+          {bestG > -Infinity ? pct(bestG) : methods.length === 1 ? t('1 method') : t('{n} methods', { n: methods.length })}
         </text>
         <text x={12} y={41} className="t2">
-          {clip(`${agent ? agent.alias : t('no agent yet')} · ${n.metric ? n.metric.name : t('judged by hand')}`, 30)}
+          {clip(`${agent ? agent.alias : t('no agent yet')} · ${n.metric ? n.metric.name : t('judged by hand')}`, 22)}
+        </text>
+        <text x={W - 10} y={41} className="t2 tally" textAnchor="end">
+          {tally(exps)}
         </text>
         {badge(waiting(n.taskId))}
       </g>
@@ -438,9 +457,13 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
   if (n.type === 'method') {
     const best = bestExperiment(doc, n);
     const link = n.links?.[0];
-    const found = childrenOf(doc, n.id).reduce((s, e) => s + (e.findings?.length ?? 0), 0);
+    const exps = childrenOf(doc, n.id);
+    const found = exps.reduce((s, e) => s + (e.findings?.length ?? 0), 0);
+    const g = best && statusOf(best) !== 'fail' ? gain(metric, best.value) : null;
+    const lastFinding = exps.flatMap((e) => e.findings ?? []).at(-1);
     return (
       <g className={`rg-node method st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="method" data-title={n.title}>
+        {tip([n.title, t(STATUS_LABEL[st]), best ? `${t('best {v} ({name})', { v: formatValue(metric, best.value), name: best.title })}${g != null ? ` · ${pct(g)}` : ''}` : '', link ? `${t(LINK_LABEL[link.kind])}: ${doc.nodes.find((x) => x.id === link.from)?.title ?? ''}` : '', lastFinding ? `◆ ${lastFinding.text}` : '', n.design])}
         <rect className="box" width={W} height={H} rx={10} />
         <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
         <text x={25} y={21} className="t1">
@@ -450,35 +473,39 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
           {best ? formatValue(metric, best.value) : st === 'running' ? '…' : ''}
         </text>
         <text x={12} y={41} className="t2">
-          {clip(st === 'idea' ? (n.source ?? t('Not tried')) : `${link ? t(LINK_LABEL[link.kind]) + ' · ' : ''}${childrenOf(doc, n.id).length === 1 ? t('1 experiment') : t('{n} experiments', { n: childrenOf(doc, n.id).length })}`, 24)}
+          {clip(st === 'idea' ? (n.source ?? t('Not tried')) : [link ? t(LINK_LABEL[link.kind]) : '', tally(exps), found ? `◆${found}` : ''].filter(Boolean).join(' · '), 26)}
         </text>
-        {found ? (
-          <text x={W - 10} y={41} className="t-find" textAnchor="end">
-            ◆ {found}
+        {g != null ? (
+          <text x={W - 10} y={41} className={`t2 ${g >= 0 ? 'gain' : 'loss'}`} textAnchor="end">
+            {pct(g)}
           </text>
         ) : null}
       </g>
     );
   }
   const agent = taskOf(n.taskId);
+  const method = doc.nodes.find((x) => x.id === n.parent);
+  const isBest = !!method && bestExperiment(doc, method)?.id === n.id && st === 'pass';
+  const g = gain(metric, n.value);
+  const spread = n.runs && n.runs.length > 1 ? runStats(n.runs) : undefined;
   return (
-    <g className={`rg-node experiment st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+    <g className={`rg-node experiment st-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+      {tip([`${isBest ? '★ ' : ''}${n.title}`, t(STATUS_LABEL[st]), n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ± ${formatValue(metric, spread.sd)} (${spread.n})` : ''}${g != null ? ` · ${pct(g)}` : ''}` : '', agent ? `${agent.alias} · ${agent.summary || t(AGENT_STATUS[agent.status])}` : '', n.findings?.at(-1) ? `◆ ${n.findings.at(-1)!.text}` : ''])}
       <rect className="box" width={W} height={H} rx={10} />
       <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
       <text x={25} y={21} className="t1">
-        {clip(n.title, 14)}
+        {isBest ? '★ ' : ''}
+        {clip(n.title, isBest ? 12 : 14)}
       </text>
       <text x={W - 10} y={21} className={`t-val ${st}`} textAnchor="end">
-        {n.value != null ? formatValue(metric, n.value) : st === 'running' ? '…' : ''}
+        {n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ±${formatValue(metric, spread.sd)}` : ''}` : st === 'running' ? '…' : ''}
       </text>
       <text x={12} y={41} className="t2">
-        {agent ? `${agent.alias} · ${agent.worktree ? t('own worktree') : t('shared folder')}` : t('no agent')}
+        {clip(agent ? `${agent.alias} · ${st === 'running' && agent.summary ? agent.summary : agent.worktree ? t('own worktree') : t('shared folder')}` : t('no agent'), 24)}
       </text>
-      {n.findings?.length ? (
-        <text x={W - 10} y={41} className="t-find" textAnchor="end">
-          ◆ {n.findings.length}
-        </text>
-      ) : null}
+      <text x={W - 10} y={41} className={n.findings?.length ? 't-find' : `t2 ${g != null && g >= 0 ? 'gain' : 'loss'}`} textAnchor="end">
+        {n.findings?.length ? `◆ ${n.findings.length}` : pct(g)}
+      </text>
       {badge(waiting(n.taskId))}
     </g>
   );
@@ -566,6 +593,7 @@ function GoalPanel({ ctx }: { ctx: Ctx }) {
     <>
       <Question>{t('Which aspects move the end result?')}</Question>
       <div className="rs-text">{doc.goal}</div>
+      <AgentLine ctx={ctx} task={ctx.taskOf(doc.leadTaskId)} role={t('research lead')} none={t('No research lead yet: what you say below starts one; lay the research out with it step by step.')} />
       <NoteCard
         title={t('Summary')}
         note={ctx.notes.summary}
@@ -623,6 +651,112 @@ function NodePanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   return <ExperimentPanel ctx={ctx} node={node} />;
 }
 
+/** Change from the start as a percentage, positive when better. */
+const pctOf = (g: number | null) => (g == null ? '' : `${g >= 0 ? '+' : ''}${(g * 100).toFixed(Math.abs(g) < 0.1 ? 1 : 0)}%`);
+
+/**
+ * Advisory, as pi-autoresearch shows it: how far the best working result stands out from the spread
+ * (≥2 likely real, 1–2 marginal, <1 within the noise). It never decides anything.
+ */
+function Confidence({ metric, exps }: { metric?: ResearchMetric; exps: ResearchNode[] }) {
+  const c = confidence(metric, exps);
+  if (c == null) return null;
+  const level = c >= 2 ? 'good' : c >= 1 ? 'marginal' : 'noise';
+  const say = { good: t('likely real'), marginal: t('above the noise, marginal'), noise: t('within the noise: a rerun would tell') }[level];
+  return (
+    <span className={`rs-conf ${level}`} title={t('Best working result against the spread of all results (|best − start| / median deviation). A hint, not a verdict.')} data-testid="research-confidence">
+      {t('confidence {x}×', { x: c.toFixed(1) })} · {say}
+    </span>
+  );
+}
+
+/** Start → best, the change, how many ran, how many work: one row of numbers (as autoresearch dashboards lead with). */
+function Kpis({ metric, exps, statusOf }: { metric?: ResearchMetric; exps: ResearchNode[]; statusOf: (n: ResearchNode) => ResearchStatus }) {
+  const done = exps.filter((e) => e.value != null && statusOf(e) !== 'error');
+  const passed = exps.filter((e) => statusOf(e) === 'pass');
+  const best = metric && passed.length ? passed.reduce((b, e) => ((metric.higherIsBetter ? e.value! > b.value! : e.value! < b.value!) ? e : b)) : undefined;
+  return (
+    <div className="rs-kpis" data-testid="research-kpis">
+      {metric ? (
+        <div>
+          <small>{t('start → best')}</small>
+          <b>
+            {formatValue(metric, metric.baseline)} → {best ? formatValue(metric, best.value) : '—'}
+          </b>
+        </div>
+      ) : null}
+      {metric && best ? (
+        <div>
+          <small>{t('change')}</small>
+          <b className="gain">{pctOf(gain(metric, best.value))}</b>
+        </div>
+      ) : null}
+      <div>
+        <small>{t('experiments')}</small>
+        <b>{exps.length}</b>
+      </div>
+      <div>
+        <small>{t('work')}</small>
+        <b>
+          {passed.length}/{done.length || exps.length}
+        </b>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The search at a glance (after autoresearcherUI's hero chart): each experiment by when it started, the
+ * dashed start, a step line through the running best; failures and running ones in a lane at the top.
+ * A click selects the experiment.
+ */
+function ProgressChart({ metric, exps, statusOf, select }: { metric: ResearchMetric; exps: ResearchNode[]; statusOf: (n: ResearchNode) => ResearchStatus; select: (id: string) => void }) {
+  const Ww = 330, Hh = 118, lane = 14, pad = 8;
+  const vals = exps.filter((e) => e.value != null && statusOf(e) !== 'error').map((e) => e.value!);
+  if (!exps.length) return null;
+  const base = metric.baseline ?? vals[0] ?? 0;
+  const lo = Math.min(base, ...vals), hi = Math.max(base, ...vals);
+  const x = (i: number) => pad + (exps.length === 1 ? (Ww - 2 * pad) / 2 : (i / (exps.length - 1)) * (Ww - 2 * pad));
+  const y = (v: number) => Hh - pad - ((v - lo) / (hi - lo || 1)) * (Hh - 2 * pad - lane - 6);
+  const better = (a: number, b: number) => (metric.higherIsBetter ? a > b : a < b);
+  let best = base;
+  let path = `M${x(0)},${y(base)}`;
+  exps.forEach((e, i) => {
+    if (statusOf(e) === 'pass' && e.value != null && better(e.value, best)) {
+      path += ` H${x(i)} V${y(e.value)}`;
+      best = e.value;
+    }
+  });
+  path += ` H${x(exps.length - 1)}`;
+  let record = base;
+  return (
+    <svg className="rs-progress" width={Ww} height={Hh} data-testid="research-progress-chart">
+      <line x1={0} x2={Ww} y1={y(base)} y2={y(base)} className="base" />
+      <text x={Ww - 2} y={y(base) - 3} textAnchor="end" className="base-label">
+        {t('start {v}', { v: formatValue(metric, base) })}
+      </text>
+      <path d={path} className="best-line" />
+      {exps.map((e, i) => {
+        const st = statusOf(e);
+        const label = `${e.title}: ${e.value != null ? formatValue(metric, e.value) : t(STATUS_LABEL[st])}`;
+        if (st === 'running' || st === 'error' || e.value == null)
+          return (
+            <rect key={e.id} x={x(i) - 1.5} y={3} width={3} height={lane - 4} rx={1.5} className={`st-${st} lane`} onClick={() => select(e.id)}>
+              <title>{label}</title>
+            </rect>
+          );
+        const isRecord = st === 'pass' && better(e.value, record);
+        if (isRecord) record = e.value;
+        return (
+          <circle key={e.id} cx={x(i)} cy={y(e.value)} r={isRecord ? 4.2 : 3} className={`st-${st}${isRecord ? ' record' : ' faint'}`} onClick={() => select(e.id)}>
+            <title>{label}</title>
+          </circle>
+        );
+      })}
+    </svg>
+  );
+}
+
 function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   const { doc } = ctx;
   const methods = childrenOf(doc, node.id);
@@ -630,11 +764,21 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   return (
     <>
       <Question>{node.combos ? t('How do methods from different aspects work together?') : t('Which methods are there for "{aspect}"?', { aspect: node.title })}</Question>
-      <AgentLine ctx={ctx} task={ctx.taskOf(node.taskId)} role={t('owns this aspect')} none={node.combos ? t('The main agent looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
+      <AgentLine ctx={ctx} task={ctx.taskOf(node.taskId)} role={t('owns this aspect')} none={node.combos ? t('The research lead looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
       <div className="rs-kv">
         <span>{t('Validated by')}</span>
-        <span>{m ? `${m.name} · ${m.higherIsBetter ? t('higher is better') : t('lower is better')}${m.baseline != null ? ` · ${t('starts at {v}', { v: formatValue(m, m.baseline) })}` : ''}` : t('judged by hand')}</span>
+        <span>
+          {m ? `${m.name} · ${m.higherIsBetter ? t('higher is better') : t('lower is better')}${m.baseline != null ? ` · ${t('starts at {v}', { v: formatValue(m, m.baseline) })}` : ''}${m.noise ? ` · ${t('noise ±{v}', { v: formatValue(m, m.noise) })}` : ''}` : t('judged by hand')}
+          {node.metrics?.length ? <span className="muted"> · {t('also watched: {list}', { list: node.metrics.map((x) => x.name).join(', ') })}</span> : null}
+        </span>
       </div>
+      {experimentsUnder(doc, node).length ? (
+        <>
+          <Kpis metric={m} exps={experimentsUnder(doc, node)} statusOf={ctx.statusOf} />
+          {m ? <ProgressChart metric={m} exps={experimentsUnder(doc, node)} statusOf={ctx.statusOf} select={ctx.select} /> : null}
+          <Confidence metric={m} exps={experimentsUnder(doc, node)} />
+        </>
+      ) : null}
       {node.combos ? null : (
         <NoteCard
           title={t('Notes')}
@@ -686,7 +830,7 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   return (
     <>
       <Question>{t('How is "{method}" designed, and how well does it work?', { method: node.title })}</Question>
-      <AgentLine ctx={ctx} task={ctx.taskOf(aspect.taskId)} role={t('owns "{aspect}"', { aspect: aspect.title })} none={aspect.combos ? t('The main agent looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
+      <AgentLine ctx={ctx} task={ctx.taskOf(aspect.taskId)} role={t('owns "{aspect}"', { aspect: aspect.title })} none={aspect.combos ? t('The research lead looks after combinations across aspects.') : t('No agent yet: the first thing you say to it below starts one.')} />
       {node.links?.length ? (
         <div className="rs-links">
           {node.links.map((l) => (
@@ -707,31 +851,71 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           <div className="rs-sec">
             {t('Results')} · {m?.name ?? t('judged by hand')}
           </div>
-          {best ? <div className="muted small">{t('best {v} ({name})', { v: formatValue(m, best.value), name: best.title })}</div> : null}
+          <Kpis metric={m} exps={exps} statusOf={ctx.statusOf} />
           {m ? <ResultBars metric={m} exps={exps} statusOf={ctx.statusOf} select={ctx.select} /> : null}
-          <table className="rs-table">
-            <tbody>
-              {exps.map((e) => {
-                const st = ctx.statusOf(e);
-                return (
-                  <tr key={e.id} className="clickable" onClick={() => ctx.select(e.id)}>
-                    <td>
-                      <i className={`rg-dot st-${st}`} /> {e.title}
-                      {e.findings?.length ? <span className="rs-find-count">◆ {e.findings.length}</span> : null}
-                    </td>
-                    <td>{e.value != null ? formatValue(m, e.value) : t(STATUS_LABEL[st])}</td>
-                    <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? ''}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <Confidence metric={m} exps={exps} />
+          <ResultTable ctx={ctx} aspect={aspect} exps={exps} best={best} />
         </>
       ) : (
         <div className="muted small">{t('Not tried yet.')}</div>
       )}
       <Findings ctx={ctx} items={exps.flatMap((e) => (e.findings ?? []).map((f) => ({ ...f, on: e })))} />
     </>
+  );
+}
+
+/**
+ * Variants with their results: the change from the start in a cell tinted by its size (green better,
+ * red worse, as autoresearcherUI's table does), repeated runs as mean ± spread, other metrics as columns.
+ */
+function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNode; exps: ResearchNode[]; best?: ResearchNode }) {
+  const m = aspect.metric;
+  const others = aspect.metrics ?? [];
+  const gains = exps.map((e) => gain(m, e.value)).filter((g): g is number => g != null);
+  const top = Math.max(0.0001, ...gains.map(Math.abs));
+  return (
+    <table className="rs-table" data-testid="research-results">
+      <thead>
+        <tr>
+          <th>{t('Variant')}</th>
+          <th>{m?.name ?? t('Result')}</th>
+          {m?.baseline != null ? <th>{t('vs start')}</th> : null}
+          {others.map((o) => (
+            <th key={o.name}>{o.name}</th>
+          ))}
+          <th>{t('Agent')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {exps.map((e) => {
+          const st = ctx.statusOf(e);
+          const g = gain(m, e.value);
+          const spread = e.runs && e.runs.length > 1 ? runStats(e.runs) : undefined;
+          return (
+            <tr key={e.id} className="clickable" onClick={() => ctx.select(e.id)}>
+              <td>
+                <i className={`rg-dot st-${st}`} title={t(STATUS_LABEL[st])} /> {best?.id === e.id && st === 'pass' ? '★ ' : ''}
+                {e.title}
+                {e.findings?.length ? <span className="rs-find-count">◆ {e.findings.length}</span> : null}
+              </td>
+              <td>
+                {e.value != null ? formatValue(m, e.value) : t(STATUS_LABEL[st])}
+                {spread ? <span className="muted"> ±{formatValue(m, spread.sd)} ({spread.n})</span> : null}
+              </td>
+              {m?.baseline != null ? (
+                <td className="rs-heat" style={g != null ? { background: `${g >= 0 ? 'rgba(22,163,74,' : 'rgba(192,38,45,'}${0.08 + 0.3 * (Math.abs(g) / top)})` } : undefined}>
+                  {pctOf(g)}
+                </td>
+              ) : null}
+              {others.map((o) => (
+                <td key={o.name}>{e.values?.[o.name] != null ? formatValue(o, e.values[o.name]) : '—'}</td>
+              ))}
+              <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? ''}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
@@ -795,8 +979,22 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
         <span>{m?.name ?? t('Result')}</span>
         <span>
           {node.value != null ? <b>{formatValue(m, node.value)}</b> : '—'}
+          {node.runs && node.runs.length > 1 ? <span className="muted"> ± {formatValue(m, runStats(node.runs).sd)}</span> : null}
+          {gain(m, node.value) != null ? <span className={gain(m, node.value)! >= 0 ? 'gain' : 'loss'}> {pctOf(gain(m, node.value))}</span> : null}
           {m?.baseline != null ? <span className="muted"> · {t('start {v}', { v: formatValue(m, m.baseline) })}</span> : null}
         </span>
+        {node.runs && node.runs.length > 1 ? (
+          <>
+            <span>{t('Runs')}</span>
+            <span className="rs-runs">{node.runs.map((v) => formatValue(m, v)).join(' · ')}</span>
+          </>
+        ) : null}
+        {Object.entries(node.values ?? {}).map(([k, v]) => (
+          <Fragment key={k}>
+            <span>{k}</span>
+            <span>{formatValue(aspect?.metrics?.find((x) => x.name === k), v)}</span>
+          </Fragment>
+        ))}
       </div>
       {node.config && node.config !== node.title ? <div className="rs-design">{node.config}</div> : null}
       <Findings ctx={ctx} items={node.findings ?? []} />
@@ -825,9 +1023,10 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
   const { doc, snapshot } = ctx;
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
   const one = selected.length === 1 ? selected[0] : undefined;
+  const ids = new Set(taskIdsOf(doc));
   // Who gets it (decided again in the main process when sent): the agent of the nearest node over the selection.
   const route = routeFor(doc, selected);
-  const routed: Task | undefined = route.kind === 'experiment' ? ctx.taskOf(route.node.taskId) : route.kind === 'aspect' ? ctx.taskOf(route.aspect.taskId) : snapshot.main;
+  const routed: Task | undefined = route.kind === 'experiment' ? ctx.taskOf(route.node.taskId) : route.kind === 'aspect' ? ctx.taskOf(route.aspect.taskId) : ctx.taskOf(doc.leadTaskId);
   const to =
     route.kind === 'experiment'
       ? t('{agent} (experiment "{name}")', { agent: routed?.alias ?? '', name: clip(route.node.title, 14) })
@@ -835,20 +1034,30 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
         ? routed
           ? t('{agent} ({aspect} aspect)', { agent: routed.alias, aspect: route.aspect.title })
           : t('a new agent for "{aspect}"', { aspect: route.aspect.title })
-        : snapshot.main
-          ? t('Main agent')
-          : t('Main agent (off)');
-  const disabled = route.kind === 'main' && !snapshot.main;
+        : routed
+          ? t('{agent} (research lead)', { agent: routed.alias })
+          : t('a new research lead');
   const target: ComposerTarget = {
     label: (
       <span data-testid="research-to">
         {t('To: {alias}', { alias: to })}
-        {routed && route.kind !== 'main' ? ` · ${PROVIDER_LABEL[routed.provider]}` : ''}
+        {routed ? ` · ${PROVIDER_LABEL[routed.provider]}` : ''}
       </span>
     ),
-    placeholder: disabled
-      ? t('Turn the main agent on in Settings to talk about the whole research.')
-      : selected.length > 1
+    // A few questions that fit where one is (as Arbor's and autoresearcherUI's boxes offer): a click puts one in the box.
+    chips:
+      route.kind === 'experiment' || one?.type === 'experiment'
+        ? [t('What did it find?'), t('Rerun it to confirm')]
+        : one?.type === 'method'
+          ? [t('How is this method doing?'), t('Which variants next?')]
+          : one?.type === 'aspect'
+            ? [t('Which methods would you try first?'), t('What has worked so far?')]
+            : selected.length > 1
+              ? [t('Compare these'), t('Combine these into one method')]
+              : doc.nodes.length
+                ? [t('Where do things stand?'), t('Which aspect deserves the next experiments?')]
+                : [t('Help me lay out this research'), t('Turn earlier conversations into this tree')],
+    placeholder: selected.length > 1
         ? t('e.g. Combine these into one method')
         : one?.type === 'aspect'
           ? t('e.g. Which methods would you try first?')
@@ -856,8 +1065,9 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
             ? t('e.g. Try thresholds 0.82 and 0.87 in parallel')
             : one?.type === 'experiment'
               ? t('e.g. Rerun with half the learning rate')
-              : t('e.g. Add an aspect for inference speed · Turn Alice’s and Bob’s conversations into this tree'),
-    disabled,
+              : doc.nodes.length
+                ? t('e.g. Add an aspect for inference speed')
+                : t('Tell the lead what the research is about; lay out its aspects together'),
     // The selection is what the message is about: shown above the box, as on an agent's page.
     about: selected.length
       ? {
@@ -890,6 +1100,8 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
           </button>
         </div>
       ) : null}
+      {/* What the research's agents wait on, answerable here: the agent page's own bar, for this research's agents. */}
+      <WaitingOnYou snapshot={snapshot} now={Date.now()} onOpen={ctx.onOpenAgent} bar only={(id) => ids.has(id)} />
       {/* The same box as on an agent's page (attachments, @ files of the agent it reaches), sending through the research. */}
       <Composer task={routed} target={target} />
     </div>
