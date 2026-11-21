@@ -142,12 +142,6 @@ export function UsageChips({ task, limits, now }: { task: Task; limits?: Provide
           <Row label={t('Cache read')} value={u.cacheRead.toLocaleString()} />
           <Row label={t('Output')} value={u.output.toLocaleString()} />
           {task.provider === 'codex' || u.reasoning ? <Row label={t('of which reasoning')} value={u.reasoning.toLocaleString()} /> : null}
-          {u.costUsd ? (
-            <div className="usage-cost" data-testid="usage-cost">
-              <div>{t('≈ ${n} at API prices', { n: u.costUsd < 10 ? u.costUsd.toFixed(2) : u.costUsd.toFixed(0) })}</div>
-              <div className="usage-note">{t('On a subscription this is a reference, not a charge.')}</div>
-            </div>
-          ) : null}
           <div className="usage-note">{t('Summed over all of this agent’s sessions.')}</div>
         </UsageChip>
       ) : null}

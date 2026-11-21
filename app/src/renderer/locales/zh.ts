@@ -1037,8 +1037,6 @@ export const zh: Record<string, string> = {
   'Cache read': '缓存读取',
   Output: '输出',
   'of which reasoning': '其中推理',
-  '≈ ${n} at API prices': '按 API 价格约 ${n}',
-  'On a subscription this is a reference, not a charge.': '用订阅时仅作参考，不会实际扣费。',
   'Summed over all of this agent’s sessions.': '这个 Agent 所有会话的累计。',
   'Context window used': '已用上下文',
   'As of the latest model request.': '截至最近一次模型请求。',

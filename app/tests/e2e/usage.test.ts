@@ -77,7 +77,9 @@ describe('session usage in the agent header', () => {
     const tokensPop = page.getByTestId('usage-tokens-pop');
     await expect.poll(() => tokensPop.isVisible()).toBe(true);
     const tp = await tokensPop.innerText();
-    for (const s of ['Total', '35,000', 'Cache hit', '88%', 'Uncached input', '1,200', 'Cache write', '3,000', 'Cache read', '30,000', 'Output', '800', '≈ $0.12 at API prices', 'not a charge']) expect(tp).toContain(s);
+    for (const s of ['Total', '35,000', 'Cache hit', '88%', 'Uncached input', '1,200', 'Cache write', '3,000', 'Cache read', '30,000', 'Output', '800']) expect(tp).toContain(s);
+    // No cost figure (the CLI's estimate is not dependable enough to show).
+    expect(tp).not.toContain('$');
     await head('usage-tokens-pop.png');
     await page.keyboard.press('Escape');
     await expect.poll(() => tokensPop.count()).toBe(0);

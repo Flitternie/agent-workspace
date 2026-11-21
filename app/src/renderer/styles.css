@@ -5627,11 +5627,20 @@ button.subtask-row:hover {
 }
 
 /* The agent header's tokens, context and account limits: small chips; a click opens a card. */
-.usage-chip {
+/* Plain text in the row (only the memory chip keeps a box); a click opens its card. */
+.focus-meta .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
-.usage-chip.hot {
-  border-color: color-mix(in srgb, var(--needs) 55%, var(--border));
+.focus-meta .usage-chip:hover,
+.focus-meta .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.focus-meta .usage-chip.hot {
   color: var(--needs);
 }
 .usage-ring-track {
@@ -5697,11 +5706,6 @@ button.subtask-row:hover {
 }
 .usage-limit.hot .usage-row > span {
   color: var(--needs);
-}
-.usage-cost {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
 }
 .usage-note {
   font-size: 11px;
@@ -7412,4 +7416,7 @@ button.subtask-row:hover {
   background: var(--accent-soft);
   border-radius: 4px;
   box-shadow: 0 0 0 1.5px var(--accent-soft);
+}
+.focus-meta .usage-chip:focus:not(:focus-visible) {
+  outline: none;
 }
