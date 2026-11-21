@@ -549,6 +549,7 @@ export const zh: Record<string, string> = {
   'Mark read': '标为已读',
   'No report yet.': '暂无进展。',
   Activity: '最近操作',
+  Limits: '额度',
   '{name} limits {list}': '{name} 额度 {list}',
   'Memory sent with this message: {n}': '随这条消息同步了 {n} 条记忆',
   'No longer applies': '不再适用',

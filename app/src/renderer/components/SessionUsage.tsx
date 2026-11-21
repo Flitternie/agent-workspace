@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { LimitWindow, ProviderLimits, Task } from '../../shared/types';
 import { t } from '../i18n';
 import { timeAgo } from '../state';
-import { PROVIDER_LABEL } from './bits';
+import { Icon, PROVIDER_LABEL } from './bits';
 
 /** 950 · 2.3K · 24.7K · 115K · 1.2M · 1M */
 export function formatTokens(n: number): string {
@@ -215,6 +215,11 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
  * each, for the sidebar's foot: they belong to the account, not to any one agent.
  */
 export function AccountLimits({ limits, now }: { limits: Record<string, ProviderLimits>; now: number }) {
+  const [open, setOpenState] = useState(() => localStorage.getItem('amw.limitsOpen') !== '0');
+  const setOpen = (on: boolean) => {
+    localStorage.setItem('amw.limitsOpen', on ? '1' : '0');
+    setOpenState(on);
+  };
   const rows = Object.entries(limits)
     .filter(([, l]) => l.windows.length)
     .map(([key, l]) => ({ key, l, provider: (l.provider ?? key.split('@')[0]) as Task['provider'], host: l.host ?? key.split('@')[1] }))
@@ -222,9 +227,20 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
   if (!rows.length) return null;
   // The machine is named only when there is more than this Mac.
   const machines = rows.some((r) => r.host);
+  // Folded to one line (the highest use across accounts), kept on this machine; a nearly used-up window
+  // still shows on the folded line.
+  const top = Math.max(...rows.flatMap((r) => r.l.windows.map((w) => w.usedPercent)));
+  const anyHot = top >= HOT;
   return (
-    <div className="account-limits" data-testid="account-limits">
-      {rows.map(({ key, l, provider, host }) => {
+    <div className={`account-limits${open ? ' open' : ''}`} data-testid="account-limits">
+      <button className={`account-limits-head${anyHot ? ' hot' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open} data-testid="account-limits-head">
+        <span className="team-chevron" aria-hidden>
+          <Icon name="chevron" size={12} />
+        </span>
+        <span>{t('Limits')}</span>
+        {open ? null : <span className="mono">{top}%</span>}
+      </button>
+      {open ? rows.map(({ key, l, provider, host }) => {
         const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
         const hot = l.windows.some((w) => w.usedPercent >= HOT);
         const age = now - Date.parse(l.at);
@@ -238,7 +254,17 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
             label={
               <>
                 <span className="account-name truncate">{name}</span>
-                <span className="mono">{l.windows.map((w) => `${windowLabel(w)} ${w.usedPercent}%`).join(' · ')}</span>
+                <span className="account-windows">
+                  {l.windows.map((w) => (
+                    <span key={w.key} className={`lim${w.usedPercent >= HOT ? ' hot' : ''}`}>
+                      <span className="lim-k">{windowLabel(w)}</span>
+                      <span className="lim-bar" aria-hidden>
+                        <i style={{ width: `${Math.min(100, w.usedPercent)}%` }} />
+                      </span>
+                      <span className="lim-v mono">{w.usedPercent}%</span>
+                    </span>
+                  ))}
+                </span>
               </>
             }
           >
@@ -264,7 +290,7 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
             </div>
           </UsageChip>
         );
-      })}
+      }) : null}
     </div>
   );
 }

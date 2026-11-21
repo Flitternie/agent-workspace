@@ -7474,3 +7474,81 @@ button.subtask-row:hover {
 .account-limits .account-name {
   min-width: 0;
 }
+
+.account-limits-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  /* Like the sidebar's section labels (AGENTS). */
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.account-limits-head:hover {
+  background: var(--hover);
+}
+.account-limits-head .mono {
+  margin-left: auto;
+  font-weight: 400;
+}
+.account-limits.open .account-limits-head .team-chevron {
+  transform: rotate(90deg);
+}
+.account-limits-head.hot {
+  color: var(--needs);
+}
+
+/* An account's windows: a short bar each, its share used beside it. */
+.account-windows {
+  display: inline-flex;
+  gap: 10px;
+  flex: none;
+}
+.lim {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lim-k {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.lim-bar {
+  position: relative;
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-3) 22%, transparent);
+  overflow: hidden;
+}
+.lim-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-2) 70%, transparent);
+}
+.lim-v {
+  min-width: 26px;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.lim.hot .lim-bar i {
+  background: var(--needs);
+}
+.lim.hot .lim-v {
+  color: var(--needs);
+  font-weight: 600;
+}
+.account-limits .account-name {
+  font-weight: 500;
+  color: var(--text-2);
+}
