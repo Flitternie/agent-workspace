@@ -6,11 +6,13 @@
 
 <p align="center">
   <b>Stop juggling tabs and terminals. Run a meeting with your agents.</b><br>
-  A desktop app for running Claude Code and Codex side by side: every agent on its own card, a main agent to pass things on, and a map of how the work went.
+  A desktop app for managing parallel coding agents, side by side.
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-supported-d97757" alt="Claude Code supported">
+  <img src="https://img.shields.io/badge/Codex-supported-10a37f" alt="Codex supported">
   <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/Windows-experimental-555?logo=windows" alt="Windows (experimental)">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>

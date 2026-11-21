@@ -6,11 +6,13 @@
 
 <p align="center">
   <b>多开不乱，一眼看全。</b><br>
-  Claude Code 和 Codex 开得再多，谁在干活、谁在等你、每一步怎么走的，都在一个窗口里。
+  一个桌面应用，把并行的多个编程 Agent 放在一起管理。
 </p>
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-supported-d97757" alt="支持 Claude Code">
+  <img src="https://img.shields.io/badge/Codex-supported-10a37f" alt="支持 Codex">
   <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/Windows-%E5%AE%9E%E9%AA%8C%E6%80%A7-555?logo=windows" alt="Windows（实验性）">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>
