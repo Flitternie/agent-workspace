@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/en/overview.png" alt="The Overview: four agents at work, one asking for permission">
+  <img src="docs/assets/en/demo.webp" alt="A run through the app: agents at work, one asks a question and moves to the top, you answer it on its page beside its Session Map, then the main agent passes an instruction to everyone" width="900">
 </p>
 
 If you run several Claude Code or Codex sessions at once, you know how it goes: a dozen terminals, an agent that has been waiting on you for twenty minutes, and no easy way to see what each one already tried. Agent Workspace puts them all in one window.
@@ -35,6 +35,11 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 - Each agent is a card: what it did, what it is doing, what it needs from you.
 - Questions and permission requests stay on the card, with the proposed change, until you answer.
 - Reply, approve or redirect from the card. Each agent works in its own git worktree.
+- Cards and the sidebar sort themselves: whatever waits on you comes first, then what is working, then what is done.
+
+<p align="center">
+  <img src="docs/assets/en/overview.png" alt="The Overview in the app: four agents, one asking for permission">
+</p>
 
 ## Main agent
 
@@ -60,13 +65,21 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 - **Session Map:** an agent's conversation as a tree of tasks, with outcomes, the decisions along the way and the forks that tried something else. Click a task to jump there.
 - **Team Map:** one lane per agent beside the main agent: what went to whom, and where each stands. Long conversations turn into chapters, and the map follows.
 
+## Memory
+
+**Teach one agent. All of them know.**
+
+- Click **Remember** on something you said. It is turned into a note about how you want things done, not a copy of your words, for this project or for everything.
+- The note reaches every agent: Claude Code and Codex, on this machine and on your servers. Running agents get it with their next message.
+- Your own memory files stay yours. The app writes only its own marked section, after a backup.
+
 ## Also built in
 
-- **Side questions (`/btw`).** Ask an agent about its work without stopping it or adding to its context.
+- **A side column** beside each conversation: preview a file, see what changed this turn, ask a side question (`/btw`, which never interrupts the agent or enters its context), or check what the agent remembers.
 - **Fork** from before any earlier message, into a new worktree.
 - **Remote machines.** Agents run on your servers over SSH, with the CLIs and logins there.
 - **Images and files.** Paste a screenshot, `@`-mention a file, or drop one in.
-- **Shared memory** across Claude Code, Codex and your machines, without overwriting your own files.
+- **`!` commands and models.** Run a command in an agent's folder, or switch its model from the next turn.
 - **Continue** any existing Claude Code or Codex session.
 
 Every feature works the same with both CLIs:
