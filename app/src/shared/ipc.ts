@@ -28,6 +28,7 @@ const researchNode = z.object({
   links: z.array(z.object({ from: id, kind: z.enum(['combine', 'mutate', 'borrow']), note: short.optional() })).max(20).optional(),
   config: text.optional(),
   value: z.number().optional(),
+  resultAt: z.string().max(40).optional(),
   findings: z.array(z.object({ id, text: text, by: z.string().max(200).optional(), at: z.string().max(40) })).max(200).optional(),
   createdAt: z.string().max(40),
 });
@@ -45,6 +46,7 @@ const researchDoc = z.object({
 export const ipcSchemas = {
   'research:get': z.object({ projectId: id }),
   'research:save': z.object({ projectId: id, doc: researchDoc }),
+  'research:notes': z.object({ projectId: id }),
   'research:message': z
     .object({ projectId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),

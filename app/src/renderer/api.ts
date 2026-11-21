@@ -1,5 +1,5 @@
 import type { MapGrouping } from '../shared/session-map';
-import type { ResearchDoc } from '../shared/research';
+import type { ResearchDoc, ResearchNotes } from '../shared/research';
 import type { FileMatch } from '../shared/file-match';
 import type { IpcChannel, IpcInput } from '../shared/ipc';
 import type { FoundSkill, LibrarySkill } from '../shared/skills';
@@ -55,6 +55,7 @@ export interface Outputs {
   'research:save': ResearchDoc;
   'research:create': ResearchDoc;
   'research:message': { taskId: string; alias: string };
+  'research:notes': ResearchNotes;
   'attachment:save': ImageRef;
   'task:interrupt': void;
   'task:models': ModelOption[];

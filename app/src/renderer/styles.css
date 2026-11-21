@@ -7953,3 +7953,57 @@ button.subtask-row:hover {
 .research-zoom .btn.on {
   background: var(--hover);
 }
+/* The agents' markdown notes: the research summary, an aspect's notes. */
+.rs-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+.rs-note-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.rs-note-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+}
+.rs-note-age {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.rs-note-age.behind {
+  color: var(--needs);
+}
+.rs-note-body {
+  padding: 4px 12px 8px;
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12.5px;
+}
+.rs-note > .muted {
+  padding: 8px 12px;
+}
+/* Headings in a note stay smaller than the column's question. */
+.rs-note-body h1,
+.rs-note-body h2,
+.rs-note-body h3 {
+  margin: 10px 0 4px;
+  line-height: 1.3;
+}
+.rs-note-body h1 {
+  font-size: 13.5px;
+}
+.rs-note-body h2 {
+  font-size: 13px;
+}
+.rs-note-body h3 {
+  font-size: 12.5px;
+}

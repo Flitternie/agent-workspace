@@ -58,6 +58,8 @@ export interface ResearchNode {
   config?: string;
   /** Experiment: its result on the aspect's metric. */
   value?: number;
+  /** Experiment: when its result was recorded. */
+  resultAt?: string;
   findings?: ResearchFinding[];
   createdAt: string;
 }
@@ -87,6 +89,23 @@ export interface ResearchDoc {
   updatedAt: string;
 }
 
+/** The markdown kept beside the tree: the research's summary and each aspect's notes. */
+export interface ResearchNote {
+  text: string;
+  updatedAt: string;
+}
+export interface ResearchNotes {
+  summary?: ResearchNote;
+  /** By aspect id. */
+  aspects: Record<string, ResearchNote>;
+}
+
+/** Results recorded since a note was last written: how far behind it is. */
+export function resultsSince(doc: ResearchDoc, since: string | undefined, aspectId?: string): number {
+  const t = since ? Date.parse(since) : 0;
+  return doc.nodes.filter((n) => n.type === 'experiment' && (n.status === 'pass' || n.status === 'fail' || n.status === 'error') && Date.parse(n.resultAt ?? n.createdAt) > t && (!aspectId || aspectOf(doc, n)?.id === aspectId)).length;
+}
+
 /** What the sidebar needs without reading the file: that there is one, and whose agents are in it. */
 export interface ResearchSummary {
   projectId: string;
@@ -94,6 +113,8 @@ export interface ResearchSummary {
   taskIds: string[];
   /** Changes when the tree does (an agent's tool call, an edit): the page reads it again. */
   updatedAt?: string;
+  /** Changes when a note does. */
+  notesAt?: string;
 }
 
 export const childrenOf = (doc: ResearchDoc, id: string | null): ResearchNode[] => doc.nodes.filter((n) => n.parent === id);

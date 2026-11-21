@@ -11,6 +11,7 @@ import {
   GRAPH,
   layoutGraph,
   methodStatus,
+  resultsSince,
   routeFor,
   type GraphDepth,
   type GraphItem,
@@ -18,12 +19,16 @@ import {
   type ResearchLinkKind,
   type ResearchMetric,
   type ResearchNode,
+  type ResearchNote,
+  type ResearchNotes,
   type ResearchStatus,
 } from '../../shared/research';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { SideSlot } from '../side-slot';
 import { Alias, Icon, PROVIDER_LABEL, STATUS_LABEL as AGENT_STATUS } from './bits';
+import { Markdown } from './Markdown';
+import { timeAgo } from '../state';
 import { Modal } from './Dialogs';
 import { Composer, PanelResizer, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
@@ -50,6 +55,17 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
 
   // Read again whenever the tree changes (an agent's tool call writes it; the summary's stamp moves).
   const stamp = snapshot.research.find((r) => r.projectId === projectId)?.updatedAt;
+  const notesStamp = snapshot.research.find((r) => r.projectId === projectId)?.notesAt;
+  const [notes, setNotes] = useState<ResearchNotes>({ aspects: {} });
+  useEffect(() => {
+    let live = true;
+    call('research:notes', { projectId })
+      .then((n) => live && setNotes(n))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [projectId, notesStamp]);
   useEffect(() => {
     setSel([]);
     setDoc(undefined);
@@ -76,7 +92,7 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const count = (s: ResearchStatus) => exps.filter((e) => statusOf(e) === s).length;
   const select = (id: string, add: boolean) => setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
 
-  const ctx: Ctx = { snapshot, project: project.projectId, doc, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
+  const ctx: Ctx = { snapshot, project: project.projectId, doc, notes, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
   /** A double-click opens the node's agent (a method's is its aspect's); with none yet, it just selects the node. */
   const openNode = (n: ResearchNode) => {
     const id = n.type === 'method' ? aspectOf(doc, n)?.taskId : n.taskId;
@@ -147,6 +163,7 @@ interface Ctx {
   snapshot: WorkspaceSnapshot;
   project: string;
   doc: ResearchDoc;
+  notes: ResearchNotes;
   statusOf: (n: ResearchNode) => ResearchStatus;
   taskOf: (id?: string) => Task | undefined;
   select: (id: string | null) => void;
@@ -516,6 +533,30 @@ function Findings({ ctx, items }: { ctx: Ctx; items: Array<{ text: string; by?: 
   );
 }
 
+/** A markdown note kept by the agents, with how fresh it is against the results recorded since. */
+function NoteCard({ title, note, behind, empty, testId }: { title: string; note?: ResearchNote; behind: number; empty: string; testId: string }) {
+  return (
+    <div className="rs-note" data-testid={testId}>
+      <div className="rs-note-head">
+        <span className="rs-note-title">{title}</span>
+        {note ? (
+          <span className={`rs-note-age${behind ? ' behind' : ''}`}>
+            {t('updated {ago}', { ago: timeAgo(note.updatedAt) })}
+            {behind ? ` · ${behind === 1 ? t('1 new result since') : t('{n} new results since', { n: behind })}` : ''}
+          </span>
+        ) : null}
+      </div>
+      {note ? (
+        <div className="rs-note-body">
+          <Markdown text={note.text} />
+        </div>
+      ) : (
+        <div className="muted small">{empty}</div>
+      )}
+    </div>
+  );
+}
+
 function GoalPanel({ ctx }: { ctx: Ctx }) {
   const { doc } = ctx;
   const rows = contributions(doc);
@@ -525,6 +566,13 @@ function GoalPanel({ ctx }: { ctx: Ctx }) {
     <>
       <Question>{t('Which aspects move the end result?')}</Question>
       <div className="rs-text">{doc.goal}</div>
+      <NoteCard
+        title={t('Summary')}
+        note={ctx.notes.summary}
+        behind={resultsSince(doc, ctx.notes.summary?.updatedAt)}
+        empty={t('No summary yet. The main agent writes it from the aspects’ notes as results come in; you can also ask it below.')}
+        testId="research-summary"
+      />
       {rows.length ? (
         <div className="rs-contrib" data-testid="research-contrib">
           {rows.map((r) => (
@@ -587,6 +635,15 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
         <span>{t('Validated by')}</span>
         <span>{m ? `${m.name} · ${m.higherIsBetter ? t('higher is better') : t('lower is better')}${m.baseline != null ? ` · ${t('starts at {v}', { v: formatValue(m, m.baseline) })}` : ''}` : t('judged by hand')}</span>
       </div>
+      {node.combos ? null : (
+        <NoteCard
+          title={t('Notes')}
+          note={ctx.notes.aspects[node.id]}
+          behind={resultsSince(doc, ctx.notes.aspects[node.id]?.updatedAt, node.id)}
+          empty={t('No notes yet. Its agent writes them when a batch of experiments has its results.')}
+          testId="research-notes"
+        />
+      )}
       {methods.length ? (
         <table className="rs-table">
           <thead>

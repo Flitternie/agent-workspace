@@ -15,10 +15,12 @@ import {
   judge,
   methodStatus,
   removeNode,
+  resultsSince,
   routeFor,
   updateNode,
   type ResearchDoc,
   type ResearchNode,
+  type ResearchNotes,
 } from '../shared/research';
 import type { WorkspaceTool } from './main-agent';
 
@@ -32,6 +34,8 @@ export interface ResearchHost {
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
   findTaskById(taskId: string): Task | undefined;
+  researchNotes(projectId: string): ResearchNotes;
+  researchWriteNote(projectId: string, scope: string, text: string): void;
   /** An agent by its name or role (as the main agent's tools find them). */
   findAgent(name: string): Task | undefined;
   language(): 'en' | 'zh';
@@ -41,7 +45,10 @@ export type ResearchCaller = { kind: 'main' } | { kind: 'agent'; taskId: string 
 
 // ------------------------------------------------------------------ briefs (what a new agent is told)
 
-export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' | 'zh', message?: string): string {
+/** A note shortened for a brief: the start, where the current state is written. */
+const excerpt = (text: string | undefined, n = 1800) => (text ? (text.length > n ? `${text.slice(0, n)}\n…` : text).trim() : '');
+
+export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' | 'zh', message?: string, notes?: ResearchNotes): string {
   const zh = lang === 'zh';
   const L = (en: string, cn: string) => (zh ? cn : en);
   const aspect = aspectOf(doc, node);
@@ -58,12 +65,19 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
             'Manage it with the research tools: research_overview shows the tree; research_add lists a method (as an idea, with its design); research_try starts variants of a method in parallel, one agent each in its own worktree; research_derive combines or mutates methods; research_record records a result. Propose first and start experiments when the user agrees. Keep your replies short: the tree on the research page shows the details.',
             '用研究工具来管理：research_overview 查看研究树；research_add 加一个方法（先作为想法，附上设计）；research_try 对一个方法并行开几个变体，每个变体一个 agent、各自独立 worktree；research_derive 组合或变异方法；research_record 记录结果。先提建议，用户同意后再开实验。回复保持简短，细节都在研究页面的树上。',
           ),
+          L(
+            'You keep this aspect’s notes (markdown, in the repository) with research_notes: what was tried, what works and what does not, the findings that matter, and what to try next. Update them whenever a batch of experiments has its results; new agents in this aspect start from them.',
+            '这个方面的笔记由你维护（markdown，存在仓库里），用 research_notes 更新：试过什么、什么有效什么无效、重要的发现、下一步试什么。每批实验出结果后都要更新；这个方面新开的 agent 会从这份笔记开始。',
+          ),
+          notes?.aspects[node.id] ? L(`Your notes so far:\n${excerpt(notes.aspects[node.id].text)}`, `目前的笔记：\n${excerpt(notes.aspects[node.id].text)}`) : '',
         ]
       : [
           L(`Research "${doc.title}" · aspect "${aspect?.title ?? ''}" · method "${doc.nodes.find((n) => n.id === node.parent)?.title ?? ''}".`, `研究「${doc.title}」· 方面「${aspect?.title ?? ''}」· 方法「${doc.nodes.find((n) => n.id === node.parent)?.title ?? ''}」。`),
           doc.nodes.find((n) => n.id === node.parent)?.design ? L(`Design: ${doc.nodes.find((n) => n.id === node.parent)!.design}`, `设计：${doc.nodes.find((n) => n.id === node.parent)!.design}`) : '',
           L(`Try this variant: ${node.config ?? node.title}`, `尝试这个变体：${node.config ?? node.title}`),
           how,
+          aspect && notes?.aspects[aspect.id] ? L(`What is known in this aspect so far (its notes):\n${excerpt(notes.aspects[aspect.id].text)}`, `这个方面目前已知的情况（它的笔记）：\n${excerpt(notes.aspects[aspect.id].text)}`) : '',
+          notes?.summary ? L(`The research so far (its summary):\n${excerpt(notes.summary.text, 1200)}`, `整项研究目前的情况（总结）：\n${excerpt(notes.summary.text, 1200)}`) : '',
           L(
             `When done, call research_record with the result${m ? ` (${m.name})` : ' (works or not)'} and one finding worth keeping. Then reply in a line or two.`,
             `完成后调用 research_record 记录结果${m ? `（${m.name}）` : '（有效或无效）'}和一条值得留下的发现，然后用一两句话回复。`,
@@ -155,7 +169,17 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       name: 'research_overview',
       description: 'The research tree: its goal, which aspects matter (from ablations), every aspect with its validation and agent, its methods (status, best result, design, what they come from) and their experiments with results and findings. Node ids are in [brackets].',
       schema: z.object({ ...projectArg }),
-      run: async (a) => treeText(load(a.project).doc, name),
+      run: async (a) => {
+        const { projectId, doc } = load(a.project);
+        const notes = host.researchNotes(projectId);
+        const parts = [treeText(doc, name)];
+        if (notes.summary) parts.push(`--- summary.md (${resultsSince(doc, notes.summary.updatedAt)} results since it was written)\n${excerpt(notes.summary.text, 4000)}`);
+        for (const a2 of childrenOf(doc, null)) {
+          const n = notes.aspects[a2.id];
+          if (n) parts.push(`--- notes for "${a2.title}" [${a2.id}] (${resultsSince(doc, n.updatedAt, a2.id)} results since)\n${excerpt(n.text, 3000)}`);
+        }
+        return parts.join('\n\n');
+      },
     },
     {
       name: 'research_add',
@@ -240,9 +264,10 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         if (!isMain && mine?.id !== e.id) mayChange(doc, e);
         const metric = aspectOf(doc, e)?.metric;
         let next = doc;
-        if (a.no_result) next = updateNode(next, e.id, { status: 'error', value: undefined });
-        else if (typeof a.value === 'number') next = updateNode(next, e.id, { value: a.value, status: judge(metric, a.value) });
-        else if (typeof a.works === 'boolean') next = updateNode(next, e.id, { status: a.works ? 'pass' : 'fail' });
+        const at = new Date().toISOString();
+        if (a.no_result) next = updateNode(next, e.id, { status: 'error', value: undefined, resultAt: at });
+        else if (typeof a.value === 'number') next = updateNode(next, e.id, { value: a.value, status: judge(metric, a.value), resultAt: at });
+        else if (typeof a.works === 'boolean') next = updateNode(next, e.id, { status: a.works ? 'pass' : 'fail', resultAt: at });
         if (a.finding) next = addFinding(next, e.id, String(a.finding), name(caller.kind === 'agent' ? caller.taskId : undefined) ?? (isMain ? 'main agent' : undefined));
         if (next === doc) throw new Error('Nothing to record: give value, works, no_result or finding.');
         host.researchSave(projectId, next);
@@ -277,6 +302,25 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         const r = addNode(next, { type: 'method', parent: where.id, title: String(a.title), status: 'idea', ...(a.design ? { design: String(a.design) } : {}), links: from.map((m) => ({ from: m.id, kind: a.kind as 'combine' | 'mutate' })) });
         host.researchSave(projectId, r.doc);
         return `Made method [${r.node.id}] "${r.node.title}" in "${where.title}" (${a.kind} of ${from.map((m) => `"${m.title}"`).join(', ')}).`;
+      },
+    },
+    {
+      name: 'research_notes',
+      description: 'Writes a note, in markdown, kept in the repository next to the tree: an aspect’s notes (what was tried, what works and what does not, findings that matter, what to try next) or, for the main agent, the research summary (where things stand, which aspects matter, what one aspect taught another, next steps). The whole note: it replaces the last version (git keeps them). New agents start from these notes.',
+      schema: z.object({ ...projectArg, scope: z.string().optional().describe('"summary", or an aspect id (an aspect’s agent: its own, the default).'), markdown: z.string().min(1).max(40_000) }),
+      run: async (a) => {
+        const { projectId, doc } = load(a.project);
+        const mine = me(doc);
+        const scope = String(a.scope ?? (mine?.type === 'aspect' ? mine.id : ''));
+        if (!scope) throw new Error('Give scope: "summary" or an aspect id.');
+        if (scope === 'summary') {
+          if (!isMain) throw new Error('The research summary is the main agent’s; write your aspect’s notes.');
+        } else {
+          const aspect = nodeIn(doc, scope, 'aspect');
+          if (!isMain && mine?.id !== aspect.id) throw new Error('An agent writes its own aspect’s notes.');
+        }
+        host.researchWriteNote(projectId, scope, String(a.markdown));
+        return scope === 'summary' ? 'Summary updated.' : `Notes for "${doc.nodes.find((n) => n.id === scope)!.title}" updated.`;
       },
     },
     {
@@ -349,7 +393,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!a.outcome) throw new Error('Say its outcome: works, does_not_work, no_result or in_progress.');
           const metric = aspectOf(doc, method)?.metric;
           const status = a.outcome === 'in_progress' ? 'running' : a.outcome === 'no_result' ? 'error' : typeof a.value === 'number' && metric?.baseline != null ? judge(metric, a.value) : a.outcome === 'works' ? 'pass' : 'fail';
-          let r = addNode(doc, { type: 'experiment', parent: method.id, title: String(a.title || agent.title || agent.name), status, taskId: agent.taskId, ...(typeof a.value === 'number' ? { value: a.value } : {}) });
+          const r = addNode(doc, { type: 'experiment', parent: method.id, title: String(a.title || agent.title || agent.name), status, taskId: agent.taskId, ...(typeof a.value === 'number' ? { value: a.value } : {}), ...(status !== 'running' ? { resultAt: new Date().toISOString() } : {}) });
           let next = r.doc;
           if (a.finding) next = addFinding(next, r.node.id, String(a.finding), agent.alias);
           if (method.status === 'idea') next = updateNode(next, method.id, { status: 'running' });

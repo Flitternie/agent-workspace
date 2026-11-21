@@ -50,9 +50,9 @@ import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
-import { createResearch, readResearch, sampleResearch, writeResearch } from './research';
+import { createResearch, readNotes, readResearch, sampleResearch, writeNote, writeResearch, writeSampleNotes } from './research';
 import { aboutPrefix, researchBrief, researchTools, type ResearchHost } from './research-tools';
-import { routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchSummary } from '../shared/research';
+import { childrenOf, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -495,26 +495,77 @@ export class Workspace {
     for (const p of this.store.data.projects)
       if (!this.researchIndex.has(p.projectId)) {
         const doc = readResearch(p);
-        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
+        this.researchIndex.set(p.projectId, doc ? { projectId: p.projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(p.projectId) } : null);
       }
     return this.store.data.projects.map((p) => this.researchIndex.get(p.projectId)).filter((x): x is ResearchSummary => !!x);
   }
 
   private indexResearch(projectId: string, doc: ResearchDoc | null): void {
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(projectId) } : null);
     this.changed();
   }
 
   researchGet(projectId: string): ResearchDoc | null {
     const doc = readResearch(this.project(projectId));
-    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt } : null);
+    this.researchIndex.set(projectId, doc ? { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt: this.notesStamp(projectId) } : null);
     return doc;
   }
 
   researchSave(projectId: string, doc: ResearchDoc): ResearchDoc {
+    const before = readResearch(this.project(projectId));
     writeResearch(this.project(projectId), doc);
     this.indexResearch(projectId, doc);
+    if (before) this.nudgeNotes(projectId, before, doc);
     return doc;
+  }
+
+  // Notes: .research/summary.md and notes/<aspect>.md, kept by the agents (research_notes).
+  private notesStamp(projectId: string): string | undefined {
+    const n = readNotes(this.project(projectId));
+    const all = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x);
+    return all.sort().at(-1);
+  }
+
+  researchNotes(projectId: string): ResearchNotes {
+    return readNotes(this.project(projectId));
+  }
+
+  /** When the summary was last asked for, per research: at most every SUMMARY_EVERY. */
+  private summaryAsked = new Map<string, number>();
+  static SUMMARY_EVERY = 30 * 60_000;
+
+  researchWriteNote(projectId: string, scope: string, text: string): void {
+    writeNote(this.project(projectId), scope, text);
+    const doc = readResearch(this.project(projectId));
+    this.indexResearch(projectId, doc);
+    // An aspect's notes moved: the main agent folds them into the summary (not more often than every half hour).
+    const main = this.store.data.mainAgent;
+    const last = this.summaryAsked.get(projectId) ?? 0;
+    if (scope !== 'summary' && doc && main && Date.now() - last > Workspace.SUMMARY_EVERY) {
+      this.summaryAsked.set(projectId, Date.now());
+      const zh = this.language() === 'zh';
+      const aspect = doc.nodes.find((n) => n.id === scope)?.title ?? scope;
+      void this.send(main.taskId, zh ? `[研究「${doc.title}」] 「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况：结论、哪些方面重要、方面之间互相的启发、下一步。` : `[Research "${doc.title}"] The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary"): where things stand, which aspects matter, what one taught another, next steps.`, 'text').catch(() => {});
+    }
+  }
+
+  /**
+   * A method whose experiments all have their results now (some were still running before): its
+   * aspect's agent is asked to bring the aspect's notes up to date.
+   */
+  private nudgeNotes(projectId: string, before: ResearchDoc, after: ResearchDoc): void {
+    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'error';
+    const zh = this.language() === 'zh';
+    for (const m of after.nodes.filter((n) => n.type === 'method')) {
+      const now = childrenOf(after, m.id);
+      const was = childrenOf(before, m.id);
+      if (!now.length || !now.every((e) => done(e.status))) continue;
+      if (!was.some((e) => e.status === 'running')) continue;
+      const aspect = after.nodes.find((n) => n.id === m.parent);
+      const agent = aspect?.taskId ? this.findTask(aspect.taskId) : undefined;
+      if (!aspect || !agent) continue;
+      void this.send(agent.taskId, zh ? `「${m.title}」这一批 ${now.length} 个实验都有结果了。请用 research_notes 更新「${aspect.title}」的笔记：试过什么、什么有效、发现了什么、下一步试什么。` : `All ${now.length} experiments of "${m.title}" have their results. Bring the notes for "${aspect.title}" up to date with research_notes: what was tried, what works, what was found, what to try next.`, 'text').catch(() => {});
+    }
   }
 
   // ResearchHost: what the research tools need.
@@ -556,7 +607,7 @@ export class Workspace {
       projectId,
       provider,
       title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
-      instruction: researchBrief(doc, node, this.language(), opts.message),
+      instruction: researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId)),
       isolate: opts.isolate,
       ...(provider === 'mock' ? { mockScript: 'work' } : {}),
     });
@@ -3177,7 +3228,9 @@ export class Workspace {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
     // A filled-in research to look at (no agents behind it).
     if (!readResearch(project)) {
-      writeResearch(project, sampleResearch(this.store.data.settings.language === 'zh' ? 'zh' : 'en'));
+      const sample = sampleResearch(this.language());
+      writeResearch(project, sample);
+      writeSampleNotes(project, sample, this.language());
       this.researchIndex.delete(project.projectId);
     }
     // Labels come from the titles (the demo asks no model).

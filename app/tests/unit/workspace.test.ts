@@ -297,6 +297,47 @@ describe('research managed by talking', () => {
     expect(await main.research_overview.run({})).toMatch(new RegExp(`\\[${node('Dedup').id}\\] method "Dedup"[\\s\\S]*finding: keeps code samples`));
   });
 
+  it('keeps markdown notes: each aspect’s by its agent, the summary by the main agent; new agents start from them; finished batches ask for them', async () => {
+    const { ws, p, as, main, doc, node } = await setup();
+    const dataAgent = await ws.researchStartAgent(p.projectId, node('Data').id, { isolate: false });
+    const data = as({ kind: 'agent', taskId: dataAgent.taskId });
+    expect(await data.research_notes.run({ markdown: '## Tried\n- dedup 0.85 works' })).toMatch(/Notes for "Data" updated/);
+    expect(readFileSync(join(p.rootPath, '.research', 'notes', `${node('Data').id}.md`), 'utf8')).toBe('## Tried\n- dedup 0.85 works\n');
+    await expect(data.research_notes.run({ scope: node('Model').id, markdown: 'x' })).rejects.toThrow(/its own aspect/);
+    await expect(data.research_notes.run({ scope: 'summary', markdown: 'x' })).rejects.toThrow(/main agent/);
+    expect(await main.research_notes.run({ scope: 'summary', markdown: '# Where things stand\nData helps.' })).toBe('Summary updated.');
+    expect(ws.researchNotes(p.projectId).summary!.text).toMatch(/Data helps/);
+    expect(ws.snapshot().research[0].notesAt).toBeTruthy();
+    expect(await main.research_overview.run({})).toMatch(/--- summary\.md \(0 results since it was written\)[\s\S]*Data helps[\s\S]*--- notes for "Data"[\s\S]*dedup 0\.85 works/);
+
+    // A new experiment's agent starts from what is known: its aspect's notes and the summary.
+    await data.research_add.run({ type: 'method', title: 'Dedup' });
+    await data.research_try.run({ method_id: node('Dedup').id, variants: [{ title: '0.86' }] });
+    const e = doc().nodes.find((n) => n.title === '0.86')!;
+    expect(ws.transcript(e.taskId!).find((i) => i.role === 'user')!.text).toMatch(/notes\):\n## Tried\n- dedup 0\.85 works[\s\S]*summary\):\n# Where things stand/);
+
+    // Its result closes the batch: the aspect's agent is asked to update its notes.
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === dataAgent.taskId)!.status !== 'running');
+    const asked = () => ws.transcript(dataAgent.taskId).filter((i) => i.role === 'user' && /Bring the notes for "Data" up to date/.test(i.text)).length;
+    expect(asked()).toBe(0);
+    await as({ kind: 'agent', taskId: e.taskId! }).research_record.run({ value: 75 });
+    expect(asked()).toBe(1);
+    expect(doc().nodes.find((n) => n.id === e.id)!.resultAt).toBeTruthy();
+
+    // With a main agent: an aspect's new notes ask it for the summary, at most every half hour.
+    const internal = ws as unknown as { store: { data: { mainAgent?: unknown } }; connect(id: string): Promise<unknown> };
+    internal.store.data.mainAgent = { taskId: 't-main-n', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: '/tmp', createdAt: '', updatedAt: '' };
+    const sent: string[] = [];
+    const connect = internal.connect.bind(ws);
+    internal.connect = async (id: string) => (id === 't-main-n' ? { turnActive: false, session: { send: async (t: string) => (sent.push(t), 'turn') } } : connect(id));
+    await data.research_notes.run({ markdown: '## Tried\n- dedup 0.86: 75' });
+    await data.research_notes.run({ markdown: '## Tried\n- dedup 0.86: 75 (again)' });
+    await until(() => sent.length >= 1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/\[Research "Tuning"\] The notes for "Data" changed[\s\S]*research_notes \(scope "summary"\)/);
+  });
+
   it('turns existing conversations into the tree: attached as they are, with what they found; not twice, not from another project', async () => {
     const { ws, p, main, doc, node } = await setup();
     const earlier = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Dedup at 0.85', isolate: false, mockScript: 'work', instruction: 'try it' });

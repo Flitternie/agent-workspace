@@ -53,6 +53,8 @@ describe('research page (demo)', () => {
     await expect.poll(() => panel.innerText()).toContain('Which aspects move the end result?');
     expect(await page.getByTestId('research-contrib').innerText()).toMatch(/Architecture[\s\S]*1 ablation\n[\s\S]*Data[\s\S]*2 ablations/);
     expect(await panel.innerText()).toMatch(/Manage it by talking/);
+    // The summary the main agent keeps (markdown in .research/summary.md), with how fresh it is.
+    expect(await page.getByTestId('research-summary').innerText()).toMatch(/Summary[\s\S]*updated[\s\S]*Where things stand[\s\S]*Which aspects matter/);
     expect(await panel.locator('input, textarea, select').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'research-01-goal.png') });
 
@@ -71,6 +73,7 @@ describe('research page (demo)', () => {
     await node('aspect', 'Data').click();
     await expect.poll(() => panel.innerText()).toContain('Which methods are there for "Data"?');
     expect(await panel.innerText()).toMatch(/the first thing you say to it below starts one/);
+    expect(await page.getByTestId('research-notes').innerText()).toMatch(/Notes[\s\S]*Tried[\s\S]*0\.85 best/);
     expect(await panel.locator('input, textarea, select, .btn').count()).toBe(0);
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
     // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.

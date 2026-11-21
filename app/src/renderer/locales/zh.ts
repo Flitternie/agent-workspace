@@ -1022,6 +1022,13 @@ export const zh: Record<string, string> = {
   'Files in this agent’s folder': '这个 agent 目录里的文件',
   'In {dir}': '{dir} 里',
   // Research page
+  'updated {ago}': '{ago}更新',
+  '1 new result since': '之后有 1 个新结果',
+  '{n} new results since': '之后有 {n} 个新结果',
+  'Summary': '研究总结',
+  'No summary yet. The main agent writes it from the aspects’ notes as results come in; you can also ask it below.': '还没有总结。结果陆续出来后，主 agent 会根据各方面的笔记整理；也可以在下方直接让它写。',
+  'Notes': '笔记',
+  'No notes yet. Its agent writes them when a batch of experiments has its results.': '还没有笔记。每批实验出结果后，它的 agent 会写。',
   Legend: '图例',
   'Ask below to add the aspects that may move the result: data, model, training…': '在下方告诉 agent 要加哪些可能影响结果的方面：数据、模型、训练……',
   About: '关于',
