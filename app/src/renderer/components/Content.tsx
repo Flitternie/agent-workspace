@@ -232,8 +232,9 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const diffs = content.flatMap((c) => (c.type === 'diff' ? [c.diff] : []));
   const stat = diffs.length ? diffStat(diffs) : undefined;
   const hasOutput = content.some((c) => (c.type === 'terminal' ? !!c.output : true));
-  // Changes are what you review; show them. Command output opens when it failed.
-  const openByDefault = !!tool?.byUser || diffs.length > 0 || status === 'failed' || status === 'awaiting_approval';
+  // Folded by default (the row says what happened: a diff's line counts, a failure's mark); open when it
+  // is yours (a command you ran with `!`) or waits on you.
+  const openByDefault = !!tool?.byUser || status === 'awaiting_approval';
   const body = content.length ? <ToolContentView content={content} /> : item.text ? <pre>{item.text}</pre> : null;
   return (
     <details className={`msg tool tool-${status} kind-${tool?.kind ?? 'other'}`} open={openByDefault} data-testid="tool-call" data-kind={tool?.kind ?? 'other'}>

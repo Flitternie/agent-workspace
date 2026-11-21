@@ -788,13 +788,24 @@ export class Workspace {
   /** Replaces an automatic label with a model's label for `text`, unless the name changed meanwhile. */
   private refineLabel(task: Task, text: string): Promise<boolean> {
     if (!text.trim() || this.opts.demo) return Promise.resolve(false);
+    // No model to ask yet (the CLIs are still being detected right after launch, or signed out): the
+    // stopgap stays for now and is marked, so detecting them (or opening the agent) names it then.
+    if (!this.canLabel()) {
+      task.labelStale = true;
+      return Promise.resolve(false);
+    }
     const lang = labelLang(task.alias);
     const auto = task.name;
     const project = this.store.data.projects.find((p) => p.projectId === task.projectId)?.name;
     return this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
       .then((label) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!label || !t || t.name !== auto || t.nameSource === 'user') return false;
+        if (!t || t.name !== auto || t.nameSource === 'user') return false;
+        // Nothing usable came back: keep the stopgap, marked for a later try.
+        if (!label) {
+          t.labelStale = true;
+          return false;
+        }
         t.name = label;
         t.nameSource = 'auto';
         t.labelStale = undefined;
@@ -805,6 +816,8 @@ export class Workspace {
       })
       .catch((error) => {
         this.log('label suggestion failed', error);
+        const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
+        if (t && t.nameSource !== 'user' && t.name === auto) t.labelStale = true;
         return false;
       });
   }
