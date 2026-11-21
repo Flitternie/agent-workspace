@@ -1,4 +1,4 @@
-import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
@@ -395,7 +395,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
-              <UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} />
+              <UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} only={['tokens']} />
               {workTitle ? (
                 <span className="truncate" title={workTitle} data-testid="focus-work">
                   {workTitle}
@@ -587,7 +587,15 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             {/* What the agents wait on: one line right above the reply box, unfolding to answer them here. */}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} bar onPick={setAboutId} /> : null}
-            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} about={about} onClearAbout={() => setAboutId(null)} />
+            <Composer
+              task={task}
+              onBtw={isMainAgent(task) ? undefined : askBtw}
+              btwCount={btw.length}
+              inject={inject}
+              about={about}
+              onClearAbout={() => setAboutId(null)}
+              under={<UsageChips task={task} limits={snapshot.limits?.[task.provider]} now={now} only={['context', 'limits']} />}
+            />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -1116,8 +1124,11 @@ function Composer({
   inject,
   about,
   onClearAbout,
+  under,
 }: {
   task: Task;
+  /** Shown under the box, on the right (how much room is left: context, account limits). */
+  under?: ReactNode;
   onBtw?: (question: string) => void;
   btwCount?: number;
   inject?: { text: string; n: number };
@@ -1344,6 +1355,7 @@ function Composer({
           </button>
         </div>
       </div>
+      {under ? <div className="composer-under">{under}</div> : null}
       {error || attach.error ? <div className="error-text">{error || attach.error}</div> : null}
     </div>
   );

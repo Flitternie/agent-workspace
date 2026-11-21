@@ -54,6 +54,14 @@ describe('session usage in the agent header', () => {
     expect(await page.getByTestId('usage-context').innerText()).toBe('2%');
     expect(await page.getByTestId('usage-limits').innerText()).toBe('Limits 5h 34% · week 35%');
     expect(await page.getByTestId('usage-limits').getAttribute('class')).not.toContain('hot');
+    // Tokens in the header; what room is left (context, limits) under the reply box, on the right; and the
+    // context card opens upward there (no room below).
+    expect(await page.locator('.focus-meta [data-testid="usage-tokens"]').count()).toBe(1);
+    expect(await page.locator('.composer-under [data-testid="usage-context"]').count()).toBe(1);
+    expect(await page.locator('.composer-under [data-testid="usage-limits"]').count()).toBe(1);
+    const under = (await page.locator('.composer-under').boundingBox())!;
+    const box = (await page.locator('.composer-box').boundingBox())!;
+    expect(under.y).toBeGreaterThanOrEqual(box.y + box.height);
 
     // Neither the first message nor "resumed · <id>"; the session id is on the provider's tag.
     const meta = await page.locator('.focus-meta').innerText();
@@ -88,6 +96,9 @@ describe('session usage in the agent header', () => {
 
     await page.getByTestId('usage-context').click();
     expect(await page.getByTestId('usage-context-pop').innerText()).toContain('~24.7K / 1M');
+    const pop = (await page.getByTestId('usage-context-pop').boundingBox())!;
+    expect(pop.y + pop.height).toBeLessThanOrEqual((await page.getByTestId('usage-context').boundingBox())!.y);
+    await page.screenshot({ path: join(shots, 'usage-under-box.png') });
     await head('usage-context-pop.png');
     await page.mouse.click(700, 600);
     await expect.poll(() => page.getByTestId('usage-context-pop').count()).toBe(0);

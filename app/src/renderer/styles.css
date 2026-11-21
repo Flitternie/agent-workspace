@@ -5627,7 +5627,23 @@ button.subtask-row:hover {
 }
 
 /* The agent header's tokens, context and account limits: small chips; a click opens a card. */
-/* Plain text in the row (only the memory chip keeps a box); a click opens its card. */
+/* Under the reply box, on the right: how much room is left (context, account limits). */
+.composer-under {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  min-height: 18px;
+  margin-top: 5px;
+  padding-right: 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-under:empty {
+  display: none;
+}
+/* Plain text (only the memory chip keeps a box); a click opens its card. */
+.composer-under .usage-chip,
 .focus-meta .usage-chip {
   border: 0;
   background: none;
@@ -5635,11 +5651,14 @@ button.subtask-row:hover {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
+.composer-under .usage-chip:hover,
+.composer-under .usage-chip[aria-expanded='true'],
 .focus-meta .usage-chip:hover,
 .focus-meta .usage-chip[aria-expanded='true'] {
   color: var(--text);
   background: none;
 }
+.composer-under .usage-chip.hot,
 .focus-meta .usage-chip.hot {
   color: var(--needs);
 }
@@ -7417,6 +7436,7 @@ button.subtask-row:hover {
   border-radius: 4px;
   box-shadow: 0 0 0 1.5px var(--accent-soft);
 }
+.composer-under .usage-chip:focus:not(:focus-visible),
 .focus-meta .usage-chip:focus:not(:focus-visible) {
   outline: none;
 }

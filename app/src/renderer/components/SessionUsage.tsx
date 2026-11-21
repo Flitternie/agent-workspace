@@ -49,7 +49,10 @@ function UsageChip({ testId, className, title, label, children }: { testId: stri
     if (!open || !button.current) return;
     const b = button.current.getBoundingClientRect();
     const width = card.current?.offsetWidth ?? 280;
-    setPos({ left: Math.max(8, Math.min(b.left, window.innerWidth - width - 8)), top: b.bottom + 6 });
+    const height = card.current?.offsetHeight ?? 160;
+    // Below the chip, or above it when there is no room below (under the reply box).
+    const top = b.bottom + 6 + height > window.innerHeight - 8 ? Math.max(8, b.top - 6 - height) : b.bottom + 6;
+    setPos({ left: Math.max(8, Math.min(b.left, window.innerWidth - width - 8)), top });
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -111,8 +114,8 @@ function Ring({ share }: { share: number }) {
   );
 }
 
-/** The agent's tokens so far, its context now, and its provider account's limits: three chips for the header. */
-export function UsageChips({ task, limits, now }: { task: Task; limits?: ProviderLimits; now: number }) {
+/** The agent's tokens so far (header), its context now and its provider account's limits (under the reply box). */
+export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'limits'] }: { task: Task; limits?: ProviderLimits; now: number; only?: Array<'tokens' | 'context' | 'limits'> }) {
   const u = task.usage;
   const { total, cacheHit } = u ? usageTotals(u) : { total: 0, cacheHit: undefined };
   const share = u?.context && u.contextWindow ? (u.context / u.contextWindow) * 100 : undefined;
@@ -122,7 +125,7 @@ export function UsageChips({ task, limits, now }: { task: Task; limits?: Provide
   const limitsText = limits?.windows.map((w) => `${windowLabel(w)} ${w.usedPercent}%`).join(' · ') ?? '';
   return (
     <>
-      {u && total > 0 ? (
+      {only.includes('tokens') && u && total > 0 ? (
         <UsageChip
           testId="usage-tokens"
           title={t('Tokens this agent has used')}
@@ -145,7 +148,7 @@ export function UsageChips({ task, limits, now }: { task: Task; limits?: Provide
           <div className="usage-note">{t('Summed over all of this agent’s sessions.')}</div>
         </UsageChip>
       ) : null}
-      {u?.context ? (
+      {only.includes('context') && u?.context ? (
         <UsageChip
           testId="usage-context"
           title={t('Context window used')}
@@ -169,7 +172,7 @@ export function UsageChips({ task, limits, now }: { task: Task; limits?: Provide
           <div className="usage-note">{t('As of the latest model request.')}</div>
         </UsageChip>
       ) : null}
-      {limits?.windows.length ? (
+      {only.includes('limits') && limits?.windows.length ? (
         <UsageChip
           testId="usage-limits"
           className={hot ? 'hot' : undefined}
