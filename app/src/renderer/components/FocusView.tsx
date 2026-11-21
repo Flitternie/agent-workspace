@@ -30,6 +30,7 @@ import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
+import { useDraft } from '../drafts';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
@@ -585,7 +586,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             {/* What the agents wait on: one line right above the reply box, unfolding to answer them here. */}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} bar onPick={setAboutId} /> : null}
-            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} about={about} onClearAbout={() => setAboutId(null)} />
+            <Composer key={task.taskId} task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} about={about} onClearAbout={() => setAboutId(null)} />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -1123,13 +1124,27 @@ function Composer({
   about?: { id: string; alias: string; headline: string };
   onClearAbout?: () => void;
 }) {
-  const [draft, setDraft] = useState('');
+  // The unsent message is the agent's, not the box's: it is still there after the Overview or another
+  // agent, and the agent's Overview tile shows the same text.
+  const [draft, setDraft] = useDraft(task.taskId);
   const box = useRef<HTMLTextAreaElement>(null);
+  // Back to a message left half-written: ready to go on where it ended.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !el.value) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   /** The bubble pressed with nothing typed and nothing asked yet: say how, in the box, for a moment. */
   const [btwHint, setBtwHint] = useState(false);
   // Text handed back from elsewhere (a side answer brought into the conversation): into the box to edit.
+  // Only text handed back while this box is shown: the box is made anew for each agent, and an
+  // answer brought into one agent's conversation earlier must not land in the next agent's box.
+  const injected = useRef(inject?.n ?? 0);
   useEffect(() => {
-    if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
+    if (!inject?.text || inject.n === injected.current) return;
+    injected.current = inject.n;
+    setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
   }, [inject?.n]);
   // What is being said on this page shows here as it is transcribed (the voice bar has no box of
   // its own on an agent's page). `base` is what was typed before; the spoken part follows it.
@@ -1178,7 +1193,7 @@ function Composer({
     const text = await dropMentions(task.taskId, files);
     if (text) mention.insert(text);
     box.current?.focus();
-  });
+  }, task.taskId);
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';

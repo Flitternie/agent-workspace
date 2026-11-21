@@ -10,6 +10,7 @@ import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 import { AttachmentStrip, useAttachments } from './Attachments';
 import { dropMentions } from './Mentions';
+import { useDraft } from '../drafts';
 
 /** One participant tile in the meeting-style Overview. */
 export function AgentCard({
@@ -40,7 +41,8 @@ export function AgentCard({
   onOpenSubtask: (taskId: string, subtaskId: string) => void;
   now: number;
 }) {
-  const [draft, setDraft] = useState('');
+  // The same unsent message as on the agent's page: started here, finished there, or the other way round.
+  const [draft, setDraft] = useDraft(task.taskId);
   // Sub-agents unfold inside the card, above its activity; folded by default.
   const [subOpen, setSubOpen] = useState(false);
   const [error, setError] = useState('');
@@ -55,7 +57,7 @@ export function AgentCard({
   const attach = useAttachments(async (files) => {
     const text = await dropMentions(task.taskId, files);
     if (text) setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + text);
-  });
+  }, task.taskId);
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = attach.refs;

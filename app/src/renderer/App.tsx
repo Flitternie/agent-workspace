@@ -16,6 +16,7 @@ import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
 import { useTeamExpansion } from './teams';
+import { pruneDrafts } from './drafts';
 
 interface Toast {
   id: number;
@@ -233,6 +234,12 @@ export function App() {
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);
+  // Unsent messages to agents that were removed go with them. Not from the demo's made-up agents
+  // (the real ones come back after it), nor from an empty list, which may be one still loading.
+  const liveIds = snapshot?.tasks.length ? [...snapshot.tasks.map((x) => x.taskId), ...(snapshot.main ? [snapshot.main.taskId] : [])].join(' ') : '';
+  useEffect(() => {
+    if (liveIds && !snapshot?.demo) pruneDrafts(liveIds.split(' '));
+  }, [liveIds, snapshot?.demo]);
   useEffect(() => {
     if (pendingFocus && snapshot?.tasks.some((x) => x.taskId === pendingFocus)) {
       setFocusId(pendingFocus);
