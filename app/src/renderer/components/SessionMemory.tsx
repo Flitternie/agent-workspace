@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { MemoryRecord, Task, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
@@ -145,34 +145,6 @@ export function RememberButton({ onClick }: { onClick: () => void }) {
     <button className="remember-btn" onClick={onClick} data-testid="remember" title={t('Keep as memory')} aria-label={t('Keep as memory…')}>
       <Icon name="remember" size={13} />
     </button>
-  );
-}
-
-/** Right-click on the user's message: a small menu at the pointer. */
-export function RememberMenu({ x, y, onRemember, onClose }: { x: number; y: number; onRemember: () => void; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('mousedown', away);
-    window.addEventListener('keydown', esc, true);
-    return () => {
-      window.removeEventListener('mousedown', away);
-      window.removeEventListener('keydown', esc, true);
-    };
-  }, [onClose]);
-  // On the page itself: the conversation's fade mask must not clip it.
-  return createPortal(
-    <div className="context-menu" ref={ref} style={{ left: x, top: y }} role="menu" data-testid="remember-menu">
-      <button role="menuitem" onClick={onRemember} data-testid="remember-menu-item">
-        <Icon name="remember" size={13} /> {t('Keep as memory…')}
-      </button>
-    </div>,
-    document.body,
   );
 }
 

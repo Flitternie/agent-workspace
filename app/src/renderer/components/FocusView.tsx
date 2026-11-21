@@ -10,7 +10,9 @@ import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
-import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
+import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog } from './SessionMemory';
+import { menuAt, useContextMenu } from './ContextMenu';
+import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
 import { RetryNotice } from './Retry';
 import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
@@ -379,7 +381,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           )}
           <div className="focus-ident">
             <div className="focus-name">
-              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
+              <TaskName task={task} tasks={snapshot.tasks} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
               <MemoryChip
@@ -878,31 +880,27 @@ function WaitingBarRow({ item, task, now, open, onToggle, onOpen }: { item: Atte
   );
 }
 
-function TaskName({ task }: { task: Task }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(task.name);
-  useEffect(() => setName(task.name), [task.name]);
-  if (!editing)
+/** The agent's label and name in its header: double-click renames the label; right-click offers both. */
+function TaskName({ task, tasks }: { task: Task; tasks: Task[] }) {
+  const [editing, setEditing] = useState<AgentField | null>(null);
+  const menu = useContextMenu();
+  if (isMainAgent(task))
     return (
-      <span className="task-name" onDoubleClick={() => setEditing(true)} title={t('Double-click to rename')}>
+      <span className="task-name">
         <AgentName task={task} />
       </span>
     );
   return (
-    <input
-      className="input inline"
-      autoFocus
-      value={name}
-      onChange={(e) => setName(e.target.value)}
-      onBlur={() => setEditing(false)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && name.trim()) {
-          void call('task:rename', { taskId: task.taskId, name: name.trim() });
-          setEditing(false);
-        }
-        if (e.key === 'Escape') setEditing(false);
-      }}
-    />
+    <span
+      className={`task-name${editing ? ' editing' : ''}`}
+      data-testid="focus-title"
+      onDoubleClick={() => editing || setEditing('name')}
+      onContextMenu={(e) => editing || menu.open(menuAt(e, agentMenuItems(task, { onRename: setEditing })))}
+      title={editing ? undefined : t('Double-click to rename')}
+    >
+      <EditableAgentName task={task} tasks={tasks} editing={editing} onDone={() => setEditing(null)} />
+      {menu.element}
+    </span>
   );
 }
 
@@ -910,7 +908,8 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
   const ref = useRef<HTMLDivElement>(null);
   // "Keep as memory" on one of the user's messages: the dialog, and the right-click menu that opens it.
   const [remember, setRemember] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  // Right-click on a message: Copy, and on what the user said themselves, Keep as memory.
+  const menu = useContextMenu();
   const stick = useRef(true);
   // ⌘F: find in this conversation (folded turns included).
   const inner = useRef<HTMLDivElement>(null);
@@ -982,12 +981,22 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               data-role={item.role}
               data-item-id={item.id}
               onContextMenu={
-                item.role === 'user' && item.via !== 'main'
+                item.role === 'user' || item.role === 'assistant'
                   ? (e) => {
-                      // Selected text keeps the system menu (copy); otherwise ours.
-                      if (window.getSelection()?.toString()) return;
-                      e.preventDefault();
-                      setMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+                      // Copy takes the text selected in this message, else the whole message.
+                      const sel = window.getSelection();
+                      const picked = sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode) ? sel.toString() : '';
+                      const text = picked || item.text;
+                      menu.open(
+                        menuAt(
+                          e,
+                          [
+                            item.role === 'user' && item.via !== 'main' && { id: 'remember', label: t('Keep as memory…'), icon: 'remember' as const, onSelect: () => setRemember(item.id) },
+                            !!text.trim() && { id: 'copy', label: picked ? t('Copy selection') : t('Copy'), icon: 'copy' as const, onSelect: () => void navigator.clipboard.writeText(text).catch(() => {}) },
+                          ],
+                          'message-menu',
+                        ),
+                      );
                     }
                   : undefined
               }
@@ -1057,7 +1066,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
           );
         })}
       </div>
-      {menu ? <RememberMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onRemember={() => (setRemember(menu.itemId), setMenu(null))} /> : null}
+      {menu.element}
       {remember ? <RememberDialog task={task} itemId={remember} snapshot={snapshot} onClose={() => setRemember(null)} /> : null}
     </div>
     </>

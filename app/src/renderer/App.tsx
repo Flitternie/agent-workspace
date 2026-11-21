@@ -442,6 +442,7 @@ export function App() {
                     items={openItems.filter((a) => a.taskId === t.taskId)}
                     activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system' && x.tool?.name !== 'ToolSearch').slice(-5)}
                     connected={snapshot.connectedTaskIds.includes(t.taskId)}
+                    tasks={snapshot.tasks}
                     flash={flash === t.taskId}
                     selected={selectedId === t.taskId}
                     onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
