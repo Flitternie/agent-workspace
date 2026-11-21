@@ -80,6 +80,13 @@ describe('end-to-end demo script (mock agents)', () => {
     await page.locator('[data-testid="rail-item"][data-alias="Bob"]').click();
     await expect.poll(() => page.getByTestId('composer-target').innerText()).toContain('To: Bob');
     // Structured content renders the same way whichever provider produced it.
+    // The sidebar shows the whole first line of a stopgap label (cut by the column's width, not in the text).
+    expect(await page.locator('[data-testid="rail-item"][data-alias="Bob"] .agent-row-name .truncate').innerText()).toBe('Frontend dashboard components');
+    // A change is folded to its row (what file, how many lines); opened, its diff.
+    const edit = page.getByTestId('tool-call').filter({ hasText: 'src/orders.ts' }).filter({ has: page.getByTestId('diff') }).first();
+    await expect.poll(() => edit.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+    expect(await edit.locator('summary').innerText()).toMatch(/\+5[\s\S]*−2/);
+    await edit.locator('summary').click();
     await expect.poll(() => page.getByTestId('diff').first().innerText()).toContain('src/orders.ts');
     expect(await page.getByTestId('diff').first().innerText()).toMatch(/\+5[\s\S]*−2/);
     expect(await page.getByTestId('tool-call').filter({ hasText: 'npm test -- orders' }).count()).toBe(1);
@@ -176,10 +183,10 @@ describe('end-to-end demo script (mock agents)', () => {
     await card(page, 'Bob').getByTestId('card-summary').click();
     await expect.poll(() => card(page, 'Bob').getAttribute('aria-selected')).toBe('true');
     const bar = page.getByTestId('dock-input');
-    expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend dashboard… · Bob');
+    expect(await bar.getAttribute('placeholder')).toContain('Talking to Frontend dashboard components · Bob');
     await bar.fill('Make the cards a bit bigger.');
     await bar.press('Enter');
-    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to Frontend dashboard… · Bob/);
+    await expect.poll(() => page.getByTestId('voice-note').innerText()).toMatch(/Sent to Frontend dashboard components · Bob/);
     expect(await page.getByTestId('route-preview').count()).toBe(0);
     await shot(page, '06b-overview-selected');
     await card(page, 'Bob').getByTestId('card-summary').dblclick();
