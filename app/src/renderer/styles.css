@@ -625,6 +625,10 @@ body.resizing .sidebar-resizer {
 .agent-row.needs .agent-row-sub {
   color: var(--needs);
 }
+/* No session map yet (and no project or sub-agents to name): no line at all. */
+.agent-row-sub:empty {
+  display: none;
+}
 .sidebar-foot {
   flex: none;
   border-top: 1px solid var(--border);
@@ -636,13 +640,17 @@ body.resizing .sidebar-resizer {
 .sidebar-foot .sidebar-section {
   margin: 4px 0 0;
 }
-.conn-list {
+.sidebar-section-actions {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar-settings,
+.sidebar-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 8px;
-  font-size: 12px;
-  color: var(--text-2);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -650,32 +658,18 @@ body.resizing .sidebar-resizer {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+  min-width: 0;
 }
-.conn-list:hover {
-  background: var(--hover);
-}
-.conn-settings {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 3px;
+.sidebar-settings {
   color: var(--text);
   font-weight: 550;
 }
-.conn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.sidebar-warn {
+  color: var(--needs);
 }
-.conn-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px var(--text-3);
-}
-.conn.on .conn-dot {
-  background: var(--ok);
-  box-shadow: none;
+.sidebar-settings:hover,
+.sidebar-warn:hover {
+  background: var(--hover);
 }
 .toggle {
   padding: 0 8px;
@@ -1407,6 +1401,9 @@ body.resizing .sidebar-resizer {
 }
 .focus-meta {
   display: flex;
+  /* One line of mixed parts (chips, plain text, a mono path): centred on one line. */
+  align-items: center;
+  line-height: 16px;
   gap: 14px;
   font-size: 11px;
   color: var(--text-3);
@@ -3023,7 +3020,7 @@ details[open] > summary .tool-more {
 .settings-section .segmented button {
   white-space: nowrap;
 }
-.conn-list.active {
+.sidebar-settings.active {
   background: var(--selected);
 }
 
@@ -5478,9 +5475,85 @@ button.subtask-row:hover {
   text-align: left;
   cursor: pointer;
 }
-.context-menu button:hover {
+.context-menu:focus {
+  outline: none;
+}
+/* The pointer and the arrow keys move the same highlight. */
+.context-menu button.active {
   background: var(--accent);
   color: #fff;
+}
+.context-menu button:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.context-menu-gap {
+  width: 13px;
+  flex: none;
+}
+.context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* A name renamed where it stands (agent rows, project heads, the agent's header, tiles). */
+.inline-edit {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 400;
+}
+.inline-edit .input.inline {
+  width: 100%;
+  min-width: 72px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: 6px;
+}
+.inline-edit.alias-edit .input.inline {
+  min-width: 64px;
+}
+.inline-edit .input.inline.invalid {
+  border-color: var(--risk);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--risk) 18%, transparent);
+}
+.inline-edit-problem {
+  position: fixed;
+  z-index: 110;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
+  color: var(--risk);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+}
+.agent-row.editing .agent-row-name {
+  justify-content: flex-start;
+}
+.agent-row.editing .agent-row-name .truncate {
+  flex: 0 1 auto;
+  max-width: 45%;
+}
+.team-head.editing {
+  cursor: default;
+}
+.task-name.editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 260px;
+}
+.task-name.editing .inline-edit .input.inline {
+  font-size: 15px;
 }
 .remember-dialog {
   display: flex;
@@ -5620,6 +5693,151 @@ button.subtask-row:hover {
   .memory-chip .chip-short {
     display: inline;
   }
+}
+
+/* The agent header's tokens, context and account limits: small chips; a click opens a card. */
+/* Beside the reply box: outside it on the right, its bottom level with the box's (the context used). */
+.composer-box {
+  position: relative;
+}
+.composer-side {
+  position: absolute;
+  left: calc(100% + 10px);
+  /* The text's line box sits a little above the box's edge otherwise. */
+  bottom: -2px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-side:empty {
+  display: none;
+}
+.composer-side .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.composer-side .usage-chip:hover,
+.composer-side .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.composer-side .usage-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Under the reply box, on the right: the account's limits when they are close. */
+.composer-under {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  min-height: 18px;
+  margin-top: 5px;
+  padding-right: 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-under:empty {
+  display: none;
+}
+/* Plain text (only the memory chip keeps a box); a click opens its card. */
+.composer-under .usage-chip,
+.focus-meta .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.composer-under .usage-chip:hover,
+.composer-under .usage-chip[aria-expanded='true'],
+.focus-meta .usage-chip:hover,
+.focus-meta .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.composer-under .usage-chip.hot,
+.focus-meta .usage-chip.hot {
+  color: var(--needs);
+}
+.usage-ring-track {
+  stroke: var(--border);
+}
+.usage-ring-fill {
+  stroke: currentColor;
+}
+.usage-pop {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+.usage-pop-head {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.usage-row > span:first-child {
+  color: var(--text-2);
+}
+.usage-row.strong > span {
+  color: var(--text);
+  font-weight: 600;
+}
+.usage-big {
+  font-size: 15px;
+  font-weight: 600;
+}
+.usage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.usage-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-limit.hot .usage-bar > span {
+  background: var(--needs);
+}
+.usage-limit.hot .usage-row > span {
+  color: var(--needs);
+}
+.usage-note {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.session-tag {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: copy;
 }
 
 /* Project chooser (new agent): the chosen folder as a button; a searchable list under it. */
@@ -7318,4 +7536,145 @@ button.subtask-row:hover {
   background: var(--accent-soft);
   border-radius: 4px;
   box-shadow: 0 0 0 1.5px var(--accent-soft);
+}
+.composer-under .usage-chip:focus:not(:focus-visible),
+.focus-meta .usage-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* The sidebar's foot: each account's limits, a quiet line each. */
+.account-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.account-limits .usage-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.account-limits .usage-chip:hover,
+.account-limits .usage-chip[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.account-limits .usage-chip.hot {
+  color: var(--needs);
+}
+.account-limits .account-name {
+  min-width: 0;
+}
+
+.account-limits-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  /* Like the sidebar's section labels (AGENTS). */
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.account-limits-head:hover {
+  background: var(--hover);
+}
+.account-limits-head .mono {
+  margin-left: auto;
+  font-weight: 400;
+}
+.account-limits.open .account-limits-head .team-chevron {
+  transform: rotate(90deg);
+}
+.account-limits-head.hot {
+  color: var(--needs);
+}
+
+/* An account's windows: a short bar each, its share used beside it. */
+.account-windows {
+  display: inline-flex;
+  gap: 10px;
+  flex: none;
+}
+.lim {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lim-k {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.lim-bar {
+  position: relative;
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-3) 22%, transparent);
+  overflow: hidden;
+}
+.lim-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-2) 70%, transparent);
+}
+.lim-v {
+  min-width: 26px;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.lim.hot .lim-bar i {
+  background: var(--needs);
+}
+.lim.hot .lim-v {
+  color: var(--needs);
+  font-weight: 600;
+}
+.account-limits .account-name {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* A card with one figure (the context used): as wide as that figure, not the tokens card's width. */
+.usage-pop.narrow {
+  width: auto;
+  min-width: 160px;
+  max-width: 220px;
+}
+/* A folded row's "details" and its file's Preview sit together at the row's end (not split apart). */
+.tool-more + .file-actions {
+  margin-left: 10px;
+}
+
+.account-metered {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+/* The New agent dialog's pointer to Continue a session, at its top. */
+.hint.new-continue {
+  margin: -4px 0 12px;
 }

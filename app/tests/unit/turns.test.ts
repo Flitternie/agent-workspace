@@ -35,4 +35,13 @@ describe('turns', () => {
     const turn = splitTurns([user('go', 0), tool('read', 'a.ts'), tool('edit', 'a.ts'), tool('edit', 'a.ts'), tool('edit', 'b.ts'), tool('execute', 'npm test', 0, 'failed'), tool('execute', 'npm test'), say('Done.', 130)])[0];
     expect(turnSummary(turn)).toBe('6 steps · edited 2 files · ran 2 commands · 1 failed · 2 min');
   });
+
+  it('a message added while the agent worked joins that turn; one that stopped it starts a new one', () => {
+    const u = (id: string, delivery?: 'steer' | 'interrupt') => ({ id, taskId: 't', role: 'user' as const, text: id, createdAt: '2026-01-01T00:00:00Z', ...(delivery ? { delivery } : {}) });
+    const a = (id: string) => ({ id, taskId: 't', role: 'assistant' as const, text: id, createdAt: '2026-01-01T00:00:00Z' });
+    const turns = splitTurns([u('ask'), a('working'), u('also this', 'steer'), a('done'), u('next'), a('ok'), u('stop, do that', 'interrupt'), a('fine')] as never);
+    expect(turns.map((x) => x.user?.text)).toEqual(['ask', 'next', 'stop, do that']);
+    expect(turns[0].steps.map((x) => x.text)).toEqual(['working', 'also this']);
+    expect(turns[0].final?.text).toBe('done');
+  });
 });

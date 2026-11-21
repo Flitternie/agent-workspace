@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { needsYou, visibleOrder, type Team } from '../../shared/agent-order';
 import type { Task, WorkspaceSnapshot } from '../../shared/types';
-import { AgentName, Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
+import { Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
+import { AccountLimits } from './SessionUsage';
 import { useTick } from '../state';
 import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
+import { call } from '../api';
+import { InlineEdit, menuAt, menuKey, useContextMenu, type MenuItem } from './ContextMenu';
+import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
 
 /**
  * Always-visible participant list. In Focus it doubles as the rail that keeps
@@ -50,12 +54,30 @@ export function Sidebar({
   toggle: (team: Team) => void;
 }) {
   const micMode = snapshot.settings.micMode ?? 'open';
+  const signedOut = snapshot.capabilities.filter((c) => c.provider !== 'mock' && c.available && c.auth?.loggedIn === false);
   const openAll = snapshot.attention.filter((a) => a.state === 'open');
   const open = openAll.filter((a) => a.kind !== 'completion');
   // Agents set aside are not counted: whatever they were waiting on is hidden with them.
   const asideIds = new Set(snapshot.tasks.filter((t) => t.setAside).map((t) => t.taskId));
   const needYou = new Set(open.filter((a) => !asideIds.has(a.taskId)).map((a) => a.taskId)).size;
   const [showIdle, setShowIdle] = useState<Record<string, boolean>>({});
+  // Right-click: one menu at a time; a rename edits the name where it stands.
+  const menu = useContextMenu();
+  const [editing, setEditing] = useState<{ taskId: string; field: AgentField; needs: boolean } | { projectId: string } | null>(null);
+  const editingField = (t: Task, needs: boolean) => (editing && 'taskId' in editing && editing.taskId === t.taskId && editing.needs === needs ? editing.field : null);
+  const editingProject = (id: string) => !!editing && 'projectId' in editing && editing.projectId === id;
+  const projectItems = (projectId: string): MenuItem[] => [{ id: 'rename-project', label: tr('Rename project…'), icon: 'pencil', onSelect: () => setEditing({ projectId }) }];
+  const projectMenu = (e: MouseEvent, projectId: string) => menu.open(menuAt(e, projectItems(projectId)));
+  const projectNameEdit = (team: Team) => (
+    <InlineEdit
+      value={team.project.name}
+      label={tr('Project name')}
+      testId="rename-project-input"
+      className="team-name-edit"
+      onSave={(v) => call('project:rename', { projectId: team.project.projectId, name: v })}
+      onDone={() => setEditing(null)}
+    />
+  );
   // Agents whose sub-agents are unfolded (folded by default; the marks go when the turn ends).
   const [subOpen, setSubOpen] = useState<Set<string>>(new Set());
   const toggleSub = (id: string, open?: boolean) =>
@@ -88,7 +110,22 @@ export function Sidebar({
           const idleShown = showIdle[team.project.projectId];
           return (
             <div key={team.project.projectId} className={`team${open_ ? ' open' : ''}`} data-testid="team" data-project={team.project.name}>
-              <button className="team-head" onClick={() => toggle(team)} aria-expanded={open_} data-testid="team-head">
+              {editingProject(team.project.projectId) ? (
+                <div className="team-head editing" data-testid="team-head">
+                  <span className="team-chevron" aria-hidden>
+                    <Icon name="chevron" size={12} />
+                  </span>
+                  {projectNameEdit(team)}
+                </div>
+              ) : (
+              <button
+                className="team-head"
+                onClick={() => toggle(team)}
+                onContextMenu={(e) => projectMenu(e, team.project.projectId)}
+                onKeyDown={(e) => {
+                  const m = menuKey(e, () => projectItems(team.project.projectId));
+                  if (m) menu.open(m);
+                }} aria-expanded={open_} data-testid="team-head">
                 <span className="team-chevron" aria-hidden>
                   <Icon name="chevron" size={12} />
                 </span>
@@ -102,6 +139,7 @@ export function Sidebar({
                   {!team.members.length ? <span className="team-count idle">{tr('{n} idle', { n: team.idle.length })}</span> : null}
                 </span>
               </button>
+              )}
               {open_ ? (
                 <>
                   {team.members.map((t) => row(t))}
@@ -124,8 +162,8 @@ export function Sidebar({
     const agents = [...team.members, ...team.idle];
     return (
       <div key={team.project.projectId} className="team archived open" data-testid="team" data-project={team.project.name}>
-        <div className="team-head archived-head" data-testid="team-head">
-          <span className="team-name truncate">{team.project.name}</span>
+        <div className="team-head archived-head" data-testid="team-head" onContextMenu={(e) => projectMenu(e, team.project.projectId)}>
+          {editingProject(team.project.projectId) ? projectNameEdit(team) : <span className="team-name truncate">{team.project.name}</span>}
           <span className="team-counts">
             <span className="team-count idle">{agents.length === 1 ? tr('1 agent') : tr('{n} agents', { n: agents.length })}</span>
           </span>
@@ -139,28 +177,16 @@ export function Sidebar({
     const n = opts.needs ? undefined : number.get(t.taskId);
     const subs = opts.needs ? undefined : liveSubtasks(t);
     const unfolded = !!subs?.length && subOpen.has(t.taskId);
-    return (
-      // Unfolded, the row and its sub-agents are one card.
-      <div key={`${opts.needs ? 'needs-' : ''}${t.taskId}`} className={`agent-item${unfolded ? ' unfolded' : ''}${t.taskId === focusId ? ' active' : ''}`}>
-      <button
-        className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`}
-        onClick={() => onSelect(t.taskId)}
-        onKeyDown={(e) => {
-          // Like a tree: → unfolds sub-agents, ← folds them.
-          if (subs?.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-            e.preventDefault();
-            toggleSub(t.taskId, e.key === 'ArrowRight');
-          }
-        }}
-        data-testid={opts.needs ? 'needs-item' : 'rail-item'}
-        data-alias={t.alias}
-        title={`${displayName(t)} · ${PROVIDER_LABEL[t.provider]} · ${tr(STATUS_LABEL[t.status])}${n ? ` (⌘${n})` : ''}`}
-      >
+    const field = editingField(t, !!opts.needs);
+    const items = () => agentMenuItems(t, { onRename: (f) => setEditing({ taskId: t.taskId, field: f, needs: !!opts.needs }), setAside: true, onOpen: () => onSelect(t.taskId) });
+    const cls = `agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`;
+    const inner = (
+      <>
         <Alias alias={t.alias} size="sm" />
         <span className="agent-row-text">
           <span className="agent-row-name">
-            <AgentName task={t} />
-            {n ? <span className="kbd-hint">⌘{n}</span> : null}
+            <EditableAgentName task={t} tasks={snapshot.tasks} editing={field} onDone={() => setEditing(null)} />
+            {n && !field ? <span className="kbd-hint">⌘{n}</span> : null}
             <span className={`status status-${dotStatus(t)}`} data-testid="row-dot" data-dot={dotStatus(t)}>
               <span className="dot" aria-label={tr(STATUS_LABEL[t.status])} />
             </span>
@@ -168,10 +194,48 @@ export function Sidebar({
           <span className="agent-row-sub">
             <SubtaskDots subtasks={subs} open={unfolded} onToggle={() => toggleSub(t.taskId)} />
             {opts.project ? <span className="row-project">{opts.project} · </span> : null}
-            {pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : (t.summary && tr(t.summary)) || t.title}
+            {/* What it is on: the last task of its session map, never its latest message (which reads as noise
+                in a list). Waiting on the user, a short label; the question itself is in the agent. No map
+                yet, nothing. */}
+            {pending.length ? tr('Waiting on you') : snapshot.workTitles?.[t.taskId]}
           </span>
         </span>
+      </>
+    );
+    return (
+      // Unfolded, the row and its sub-agents are one card.
+      <div key={`${opts.needs ? 'needs-' : ''}${t.taskId}`} className={`agent-item${unfolded ? ' unfolded' : ''}${t.taskId === focusId ? ' active' : ''}`}>
+      {field ? (
+        // Renamed in place: an input cannot sit in a button, so the row is a plain box meanwhile.
+        <div className={`${cls} editing`} data-testid={opts.needs ? 'needs-item' : 'rail-item'} data-alias={t.alias}>
+          {inner}
+        </div>
+      ) : (
+      <button
+        className={cls}
+        onClick={() => onSelect(t.taskId)}
+        onContextMenu={(e) => menu.open(menuAt(e, items()))}
+        onKeyDown={(e) => {
+          const m = menuKey(e, items);
+          if (m) return menu.open(m);
+          // Like a tree: → unfolds sub-agents, ← folds them.
+          if (subs?.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+            e.preventDefault();
+            toggleSub(t.taskId, e.key === 'ArrowRight');
+          }
+          // F2 renames, as in a file list.
+          if (e.key === 'F2') {
+            e.preventDefault();
+            setEditing({ taskId: t.taskId, field: 'name', needs: !!opts.needs });
+          }
+        }}
+        data-testid={opts.needs ? 'needs-item' : 'rail-item'}
+        data-alias={t.alias}
+        title={`${displayName(t)} · ${PROVIDER_LABEL[t.provider]} · ${tr(STATUS_LABEL[t.status])}${n ? ` (⌘${n})` : ''}`}
+      >
+        {inner}
       </button>
+      )}
       {unfolded ? <SubtaskThread subtasks={subs!} now={now} steps={false} onOpen={(id) => onOpenSubtask(t.taskId, id)} /> : null}
       </div>
     );
@@ -208,7 +272,7 @@ export function Sidebar({
                 <span className="dot" aria-label={tr(STATUS_LABEL[snapshot.main.status])} />
               </span>
             </span>
-            <span className="agent-row-sub">{tr(snapshot.main.summary)}</span>
+            {snapshot.workTitles?.[snapshot.main.taskId] ? <span className="agent-row-sub">{snapshot.workTitles[snapshot.main.taskId]}</span> : null}
           </span>
         </button>
       ) : null}
@@ -226,9 +290,14 @@ export function Sidebar({
 
       <div className="sidebar-section">
         <span>{tr('Agents')}</span>
-        <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask}>
-          <Icon name="plus" />
-        </button>
+        <span className="sidebar-section-actions">
+          <button className="icon-btn" aria-label={tr('Continue a session…')} title={tr('Continue a session…')} onClick={onResume} data-testid="resume-session">
+            <Icon name="history" />
+          </button>
+          <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask} data-testid="sidebar-new-task">
+            <Icon name="plus" />
+          </button>
+        </span>
       </div>
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
@@ -248,23 +317,21 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-foot">
-        <button className="btn btn-block" onClick={onResume} data-testid="resume-session">
-          <Icon name="history" /> {tr('Continue a session…')}
-        </button>
-        <button className={`conn-list${settingsOpen ? ' active' : ''}`} onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
-          {snapshot.capabilities
-            .filter((c) => c.provider !== 'mock')
-            .map((c) => (
-              <span key={c.provider} className={`conn${c.available && c.auth?.loggedIn !== false ? ' on' : ''}`}>
-                <span className="conn-dot" /> {PROVIDER_LABEL[c.provider]}
-              </span>
-            ))}
-          <span className={`conn${snapshot.voice.sttAvailable ? ' on' : ''}`}>
-            <span className="conn-dot" /> {tr('Voice')}
-          </span>
-          <span className="conn-settings">
-            <Icon name="gear" /> {tr('Settings')}
-          </span>
+        {/* What each provider account has left (per machine): the account's, not any one agent's. */}
+        <AccountLimits
+          limits={snapshot.limits ?? {}}
+          now={Date.now()}
+          payAsYouGo={snapshot.capabilities.filter((c) => (c.provider === 'claude' || c.provider === 'codex') && c.auth?.loggedIn && /api key/i.test(c.auth.method ?? '')).map((c) => c.provider)}
+        />
+        {signedOut.length ? (
+          // Only a CLI that is installed but signed out is flagged: its agents cannot run. A missing CLI
+          // is a choice (one provider is enough), and voice says so where it is used.
+          <button className="sidebar-warn" onClick={onSettings} data-testid="provider-warning">
+            <Icon name="alert" size={13} /> <span className="truncate">{tr('{names} signed out', { names: signedOut.map((c) => PROVIDER_LABEL[c.provider]).join(', ') })}</span>
+          </button>
+        ) : null}
+        <button className={`sidebar-settings${settingsOpen ? ' active' : ''}`} onClick={onSettings} title={tr('Settings')} data-testid="open-settings">
+          <Icon name="gear" /> {tr('Settings')}
         </button>
         <div className="tips">
           <div>
@@ -276,6 +343,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
+      {menu.element}
     </aside>
   );
 }

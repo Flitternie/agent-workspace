@@ -137,6 +137,20 @@ describe('agent labels', () => {
     expect(named.nameSource).toBe('user');
   });
 
+  it('an agent made before any model can be asked (right after launch) is named once one can', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: '读一下 total.js，用一句话说明它做什么。不要修改文件。', isolate: false });
+    // The stopgap for now (no model yet), marked to be named later.
+    expect(nameOf(ws, t.taskId)).toMatch(/…$/);
+    expect(ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.labelStale).toBe(true);
+    // The CLIs are detected: the agent gets a name for its work.
+    (ws as unknown as { opts: { backgroundModel?: (s: string, p: string) => Promise<string> } }).opts.backgroundModel = async () => '解释 total 函数';
+    await ws.refreshCapabilities({ localOnly: true });
+    await until(() => nameOf(ws, t.taskId) === '解释 total 函数');
+    expect(ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.labelStale).toBeFalsy();
+  });
+
   it('on updating, renames every agent from an older version once by its work; only names the user set stay', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
     const old = open({ dataDir });

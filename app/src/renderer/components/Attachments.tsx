@@ -4,6 +4,7 @@ import type { ImageRef } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { Icon } from './bits';
+import { draftImages, setDraftImages } from '../drafts';
 
 /**
  * Images in a message: pasted, dropped or picked in a message box, shown as thumbnails until sent,
@@ -59,8 +60,17 @@ export interface Attachment {
  * A message box's images until it is sent: add (paste, drop, pick), remove, clear. Other files are
  * not attached: `onOtherFiles` mentions them instead (the agent reads files where it runs).
  */
-export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>) {
-  const [items, setItems] = useState<Attachment[]>([]);
+export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>, taskId?: string) {
+  // With an agent given, the images wait with its unsent message: leaving the page and coming back
+  // (or going to its Overview tile) finds them still there. Kept through a ref as well as state so an
+  // image finishing after the box is gone, or a send clearing it, still updates what is kept.
+  const [items, setItemsState] = useState<Attachment[]>(() => (taskId ? draftImages(taskId).map((ref) => ({ ref })) : []));
+  const current = useRef(items);
+  const setItems = (update: (list: Attachment[]) => Attachment[]) => {
+    current.current = update(current.current);
+    setItemsState(current.current);
+    if (taskId) setDraftImages(taskId, current.current.map((a) => a.ref));
+  };
   const [busy, setBusy] = useState(0);
   const [error, setError] = useState('');
   const count = useRef(0);
@@ -138,7 +148,7 @@ export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>) 
     dropProps,
     remove: (id: string) => setItems((list) => list.filter((a) => a.ref.id !== id)),
     clear: () => {
-      setItems([]);
+      setItems(() => []);
       setError('');
     },
     clearError: () => setError(''),

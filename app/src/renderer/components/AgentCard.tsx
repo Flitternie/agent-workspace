@@ -5,11 +5,14 @@ import { timeAgo } from '../state';
 import { diffStat } from '../../shared/content';
 import { AttentionView } from './AttentionView';
 import { DiffStat, KIND_ICON, PlanChecklist, touchedPaths } from './Content';
-import { AgentName, Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread, warningText } from './bits';
+import { Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots, SubtaskThread, warningText } from './bits';
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 import { AttachmentStrip, useAttachments } from './Attachments';
 import { dropMentions } from './Mentions';
+import { useDraft } from '../drafts';
+import { menuAt, useContextMenu } from './ContextMenu';
+import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
 
 /** One participant tile in the meeting-style Overview. */
 export function AgentCard({
@@ -19,6 +22,7 @@ export function AgentCard({
   activity,
   onPreview,
   connected,
+  tasks,
   flash,
   selected,
   onSelect,
@@ -33,6 +37,8 @@ export function AgentCard({
   /** Open this agent with a file it touched in the preview column. */
   onPreview?: (path: string, line?: number) => void;
   connected: boolean;
+  /** Every agent (a new name must be unique). */
+  tasks: Task[];
   flash: boolean;
   selected: boolean;
   onSelect: () => void;
@@ -40,10 +46,13 @@ export function AgentCard({
   onOpenSubtask: (taskId: string, subtaskId: string) => void;
   now: number;
 }) {
-  const [draft, setDraft] = useState('');
+  // The same unsent message as on the agent's page: started here, finished there, or the other way round.
+  const [draft, setDraft] = useDraft(task.taskId);
   // Sub-agents unfold inside the card, above its activity; folded by default.
   const [subOpen, setSubOpen] = useState(false);
   const [error, setError] = useState('');
+  const menu = useContextMenu();
+  const [renaming, setRenaming] = useState<AgentField | null>(null);
   const [sending, setSending] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const urgent = items.filter((i) => i.kind !== 'completion');
@@ -55,7 +64,7 @@ export function AgentCard({
   const attach = useAttachments(async (files) => {
     const text = await dropMentions(task.taskId, files);
     if (text) setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + text);
-  });
+  }, task.taskId);
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = attach.refs;
@@ -81,11 +90,11 @@ export function AgentCard({
       onClick={(e) => !isControl(e.target) && onSelect()}
       onDoubleClick={(e) => !isControl(e.target) && onOpen()}
     >
-      <header className="tile-head">
+      <header className="tile-head" onContextMenu={(e) => renaming || menu.open(menuAt(e, agentMenuItems(task, { onRename: setRenaming, setAside: true, onOpen })))}>
         <Alias alias={task.alias} size="md" />
         <div className="tile-ident">
           <div className="tile-name">
-            <AgentName task={task} />
+            <EditableAgentName task={task} tasks={tasks} editing={renaming} onDone={() => setRenaming(null)} />
             <ProviderTag provider={task.provider} />
           </div>
           {/* The original task, unless the label already says it (a label taken from the title). */}
@@ -100,6 +109,7 @@ export function AgentCard({
         <button className="icon-btn" aria-label={t('Open')} title={t('Open (⌘1–9)')} onClick={onOpen}>
           <Icon name="expand" />
         </button>
+        {menu.element}
       </header>
       <div className="tile-meta mono">
         <span className="truncate" title={task.host ? `${task.host}:${task.cwd}` : task.cwd}>

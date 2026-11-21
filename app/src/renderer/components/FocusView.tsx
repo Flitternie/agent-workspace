@@ -1,6 +1,7 @@
-import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
+import { accountKey } from '../../shared/types';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -10,8 +11,11 @@ import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
-import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
+import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog } from './SessionMemory';
+import { menuAt, useContextMenu } from './ContextMenu';
+import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
 import { RetryNotice } from './Retry';
+import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
@@ -30,6 +34,7 @@ import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
 import { dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
+import { useDraft } from '../drafts';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
@@ -59,6 +64,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Main agent: the request the user unfolded in "waiting on you"; what they write is likely about it.
   const [aboutId, setAboutId] = useState<string | null>(null);
   useEffect(() => setAboutId(null), [task.taskId]);
+  // Opened: start its session in the background so the first message does not wait for it.
+  // The main process leaves the agent's place, status and flags as they were.
+  useEffect(() => {
+    void call('task:warm', { taskId: task.taskId }).catch(() => {});
+  }, [task.taskId]);
   const aboutItem = aboutId ? snapshot.attention.find((a) => a.id === aboutId && a.state === 'open') : undefined;
   const aboutTask = aboutItem ? snapshot.tasks.find((x) => x.taskId === aboutItem.taskId) : undefined;
   const about = aboutItem && aboutTask ? { id: aboutItem.id, alias: aboutTask.alias, headline: aboutItem.headline } : undefined;
@@ -120,6 +130,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       return next;
     });
   const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  // The header's line: what the agent is on, the last task of its map (as drawn here, with the reader's
+  // corrections; else as cached for the sidebar). Never its latest message, and nothing until a map exists.
+  const workTitle = (grouping ? mapTasks.at(-1)?.title : undefined) ?? snapshot.workTitles?.[task.taskId];
   // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
   const main = isMainAgent(task);
   // By chapter: the map draws the current one; earlier chapters fold to a line each.
@@ -376,7 +389,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           )}
           <div className="focus-ident">
             <div className="focus-name">
-              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
+              <TaskName task={task} tasks={snapshot.tasks} /> <SessionTag provider={task.provider} id={session?.nativeSessionId} mode={session?.integrationMode} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
               <MemoryChip
@@ -391,9 +404,12 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
-              <span className="truncate" title={task.title}>
-                {task.title}
-              </span>
+              <UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['tokens']} />
+              {workTitle ? (
+                <span className="truncate" title={workTitle} data-testid="focus-work">
+                  {workTitle}
+                </span>
+              ) : null}
               <span title={task.host ? `${task.host}:${task.cwd}` : task.cwd}>
                 <Icon name="folder" size={12} /> {task.host ? `${task.host}:` : ''}
                 {project?.name}
@@ -401,11 +417,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               {task.worktree ? (
                 <span title={task.worktree.path}>
                   <Icon name="branch" size={12} /> {task.worktree.branch}
-                </span>
-              ) : null}
-              {session?.nativeSessionId ? (
-                <span title={session.nativeSessionId}>
-                  {session.integrationMode} · {session.nativeSessionId.slice(0, 8)}
                 </span>
               ) : null}
               {task.forkedFrom ? (
@@ -537,7 +548,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             message={
               task.worktree
                 ? t('Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.')
-                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session…', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
+                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session… (the history button next to + in the sidebar)', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
             }
             confirmLabel={t('Remove')}
             danger
@@ -585,7 +596,19 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             {/* What the agents wait on: one line right above the reply box, unfolding to answer them here. */}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} bar onPick={setAboutId} /> : null}
-            <Composer task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} about={about} onClearAbout={() => setAboutId(null)} />
+            <Composer
+              key={task.taskId}
+              task={task}
+              onBtw={isMainAgent(task) ? undefined : askBtw}
+              btwCount={btw.length}
+              inject={inject}
+              about={about}
+              onClearAbout={() => setAboutId(null)}
+              // The context is this agent's (beside the box); its account's limits only when they are close
+              // (they are the account's: in the sidebar).
+              side={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['context']} />}
+              under={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['limits-if-hot']} />}
+            />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -873,31 +896,27 @@ function WaitingBarRow({ item, task, now, open, onToggle, onOpen }: { item: Atte
   );
 }
 
-function TaskName({ task }: { task: Task }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(task.name);
-  useEffect(() => setName(task.name), [task.name]);
-  if (!editing)
+/** The agent's label and name in its header: double-click renames the label; right-click offers both. */
+function TaskName({ task, tasks }: { task: Task; tasks: Task[] }) {
+  const [editing, setEditing] = useState<AgentField | null>(null);
+  const menu = useContextMenu();
+  if (isMainAgent(task))
     return (
-      <span className="task-name" onDoubleClick={() => setEditing(true)} title={t('Double-click to rename')}>
+      <span className="task-name">
         <AgentName task={task} />
       </span>
     );
   return (
-    <input
-      className="input inline"
-      autoFocus
-      value={name}
-      onChange={(e) => setName(e.target.value)}
-      onBlur={() => setEditing(false)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && name.trim()) {
-          void call('task:rename', { taskId: task.taskId, name: name.trim() });
-          setEditing(false);
-        }
-        if (e.key === 'Escape') setEditing(false);
-      }}
-    />
+    <span
+      className={`task-name${editing ? ' editing' : ''}`}
+      data-testid="focus-title"
+      onDoubleClick={() => editing || setEditing('name')}
+      onContextMenu={(e) => editing || menu.open(menuAt(e, agentMenuItems(task, { onRename: setEditing })))}
+      title={editing ? undefined : t('Double-click to rename')}
+    >
+      <EditableAgentName task={task} tasks={tasks} editing={editing} onDone={() => setEditing(null)} />
+      {menu.element}
+    </span>
   );
 }
 
@@ -905,7 +924,8 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
   const ref = useRef<HTMLDivElement>(null);
   // "Keep as memory" on one of the user's messages: the dialog, and the right-click menu that opens it.
   const [remember, setRemember] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  // Right-click on a message: Copy, and on what the user said themselves, Keep as memory.
+  const menu = useContextMenu();
   const stick = useRef(true);
   // ⌘F: find in this conversation (folded turns included).
   const inner = useRef<HTMLDivElement>(null);
@@ -977,12 +997,22 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
               data-role={item.role}
               data-item-id={item.id}
               onContextMenu={
-                item.role === 'user' && item.via !== 'main'
+                item.role === 'user' || item.role === 'assistant'
                   ? (e) => {
-                      // Selected text keeps the system menu (copy); otherwise ours.
-                      if (window.getSelection()?.toString()) return;
-                      e.preventDefault();
-                      setMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+                      // Copy takes the text selected in this message, else the whole message.
+                      const sel = window.getSelection();
+                      const picked = sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode) ? sel.toString() : '';
+                      const text = picked || item.text;
+                      menu.open(
+                        menuAt(
+                          e,
+                          [
+                            item.role === 'user' && item.via !== 'main' && { id: 'remember', label: t('Keep as memory…'), icon: 'remember' as const, onSelect: () => setRemember(item.id) },
+                            !!text.trim() && { id: 'copy', label: picked ? t('Copy selection') : t('Copy'), icon: 'copy' as const, onSelect: () => void navigator.clipboard.writeText(text).catch(() => {}) },
+                          ],
+                          'message-menu',
+                        ),
+                      );
                     }
                   : undefined
               }
@@ -1052,7 +1082,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
           );
         })}
       </div>
-      {menu ? <RememberMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onRemember={() => (setRemember(menu.itemId), setMenu(null))} /> : null}
+      {menu.element}
       {remember ? <RememberDialog task={task} itemId={remember} snapshot={snapshot} onClose={() => setRemember(null)} /> : null}
     </div>
     </>
@@ -1114,8 +1144,14 @@ function Composer({
   inject,
   about,
   onClearAbout,
+  side,
+  under,
 }: {
   task: Task;
+  /** Beside the box, outside it on the right, level with its bottom (the context used). */
+  side?: ReactNode;
+  /** Shown under the box, on the right (the account's limits, when close). */
+  under?: ReactNode;
   onBtw?: (question: string) => void;
   btwCount?: number;
   inject?: { text: string; n: number };
@@ -1123,13 +1159,27 @@ function Composer({
   about?: { id: string; alias: string; headline: string };
   onClearAbout?: () => void;
 }) {
-  const [draft, setDraft] = useState('');
+  // The unsent message is the agent's, not the box's: it is still there after the Overview or another
+  // agent, and the agent's Overview tile shows the same text.
+  const [draft, setDraft] = useDraft(task.taskId);
   const box = useRef<HTMLTextAreaElement>(null);
+  // Back to a message left half-written: ready to go on where it ended.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !el.value) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   /** The bubble pressed with nothing typed and nothing asked yet: say how, in the box, for a moment. */
   const [btwHint, setBtwHint] = useState(false);
   // Text handed back from elsewhere (a side answer brought into the conversation): into the box to edit.
+  // Only text handed back while this box is shown: the box is made anew for each agent, and an
+  // answer brought into one agent's conversation earlier must not land in the next agent's box.
+  const injected = useRef(inject?.n ?? 0);
   useEffect(() => {
-    if (inject?.text) setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
+    if (!inject?.text || inject.n === injected.current) return;
+    injected.current = inject.n;
+    setDraft((d) => (d.trim() ? `${d.trimEnd()}\n\n${inject.text}` : inject.text));
   }, [inject?.n]);
   // What is being said on this page shows here as it is transcribed (the voice bar has no box of
   // its own on an agent's page). `base` is what was typed before; the spoken part follows it.
@@ -1178,7 +1228,7 @@ function Composer({
     const text = await dropMentions(task.taskId, files);
     if (text) mention.insert(text);
     box.current?.focus();
-  });
+  }, task.taskId);
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1341,9 +1391,31 @@ function Composer({
             <Icon name="send" />
           </button>
         </div>
+        {side ? <div className="composer-side">{side}</div> : null}
       </div>
+      {under ? <div className="composer-under">{under}</div> : null}
       {error || attach.error ? <div className="error-text">{error || attach.error}</div> : null}
     </div>
   );
 }
 
+/** The provider's tag; it carries the native session id (in its tooltip; a click copies it). */
+function SessionTag({ provider, id, mode }: { provider: Task['provider']; id?: string; mode?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!id) return <ProviderTag provider={provider} />;
+  return (
+    <button
+      className="session-tag"
+      data-testid="session-tag"
+      title={`${copied ? t('Copied') : t('Session {id} · click to copy', { id })}${mode === 'resumed' ? ` · ${t('resumed')}` : ''}`}
+      onClick={() => {
+        void navigator.clipboard.writeText(id).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      <ProviderTag provider={provider} />
+    </button>
+  );
+}

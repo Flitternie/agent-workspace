@@ -16,6 +16,7 @@ import { VoiceDock } from './components/VoiceDock';
 import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
 import { useTeamExpansion } from './teams';
+import { pruneDrafts } from './drafts';
 
 interface Toast {
   id: number;
@@ -233,6 +234,12 @@ export function App() {
   useEffect(() => {
     if (selectedId && snapshot && !snapshot.tasks.some((x) => x.taskId === selectedId)) setSelectedId(null);
   }, [selectedId, snapshot]);
+  // Unsent messages to agents that were removed go with them. Not from the demo's made-up agents
+  // (the real ones come back after it), nor from an empty list, which may be one still loading.
+  const liveIds = snapshot?.tasks.length ? [...snapshot.tasks.map((x) => x.taskId), ...(snapshot.main ? [snapshot.main.taskId] : [])].join(' ') : '';
+  useEffect(() => {
+    if (liveIds && !snapshot?.demo) pruneDrafts(liveIds.split(' '));
+  }, [liveIds, snapshot?.demo]);
   useEffect(() => {
     if (pendingFocus && snapshot?.tasks.some((x) => x.taskId === pendingFocus)) {
       setFocusId(pendingFocus);
@@ -442,6 +449,7 @@ export function App() {
                     items={openItems.filter((a) => a.taskId === t.taskId)}
                     activity={(transcripts[t.taskId] ?? []).filter((x) => x.role !== 'system' && x.tool?.name !== 'ToolSearch').slice(-5)}
                     connected={snapshot.connectedTaskIds.includes(t.taskId)}
+                    tasks={snapshot.tasks}
                     flash={flash === t.taskId}
                     selected={selectedId === t.taskId}
                     onSelect={() => setSelectedId((cur) => (cur === t.taskId ? null : t.taskId))}
@@ -486,7 +494,7 @@ export function App() {
         ))}
       </div>
 
-      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} /> : null}
+      {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} onContinue={() => setDialog('import')} /> : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
     </div>
   );
