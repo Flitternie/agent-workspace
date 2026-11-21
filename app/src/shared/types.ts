@@ -95,8 +95,56 @@ export interface Task {
   activeModel?: string;
   /** The agent's guess at what the user will say next; cleared when the user sends. */
   suggestion?: string;
+  /** Tokens this agent has used, summed over its sessions (survives restarts and resumes), and its context now. */
+  usage?: TaskUsage;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Token counts of one or more model requests, as the CLIs report them (normalized). */
+export interface UsageTokens {
+  /** Input not read from the prompt cache. */
+  input: number;
+  /** Input written to the prompt cache (Claude). */
+  cacheWrite: number;
+  /** Input read from the prompt cache. */
+  cacheRead: number;
+  /** Output, reasoning included. */
+  output: number;
+  /** Of `output`, reasoning (Codex). */
+  reasoning: number;
+}
+
+export interface TaskUsage extends UsageTokens {
+  /** What these tokens would cost at API prices (Claude Code reports it; on a subscription it is not charged). */
+  costUsd?: number;
+  /** Tokens in the context window after the latest request, and the window's size. */
+  context?: number;
+  contextWindow?: number;
+  updatedAt: string;
+}
+
+/** One rate-limit window of an account (e.g. 5 hours, a week). */
+export interface LimitWindow {
+  /** The provider's name for it ("five_hour", "seven_day", "primary"…). */
+  key: string;
+  /** Length in minutes, when known (300 = 5 hours, 10080 = a week). */
+  mins?: number;
+  usedPercent: number;
+  /** When it resets, ms since the epoch. */
+  resetsAt?: number;
+}
+
+/** A provider account's usage limits as last seen, and when. */
+export interface ProviderLimits {
+  /** Whose limits: the provider, and the machine its CLI runs on (unset: this Mac). One account each. */
+  provider?: AgentProvider;
+  host?: string;
+  windows: LimitWindow[];
+  /** When they were seen (ISO). */
+  at: string;
+  /** Codex: the account's plan ("plus", "pro"…). */
+  plan?: string;
 }
 
 /** Why a model request is retried: the model is at capacity / overloaded, the account is rate limited, or another error the provider retries. */
@@ -500,6 +548,9 @@ export interface WorkspaceSnapshot {
    * agent is on, for the sidebar row and the agent's header; absent until a map has been made.
    */
   workTitles: Record<string, string>;
+  /** Per provider: its account's usage limits as last seen (Claude Code: after a turn; Codex: also at start). */
+  /** Usage limits per account, keyed by `accountKey` (a provider on a machine: accounts differ between machines). */
+  limits: Record<string, ProviderLimits>;
 }
 
 export interface DispatchResult {
@@ -534,3 +585,6 @@ export interface BtwEntry {
   askedAt: string;
   answeredAt?: string;
 }
+
+/** One provider account: a provider's CLI on one machine ("claude" on this Mac, "codex@neptune"). */
+export const accountKey = (t: { provider: AgentProvider; host?: string }) => (t.host ? `${t.provider}@${t.host}` : t.provider);

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { needsYou, visibleOrder, type Team } from '../../shared/agent-order';
 import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import { AgentName, Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
+import { AccountLimits } from './SessionUsage';
 import { useTick } from '../state';
 import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
@@ -257,6 +258,8 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-foot">
+        {/* What each provider account has left (per machine): the account's, not any one agent's. */}
+        <AccountLimits limits={snapshot.limits ?? {}} now={Date.now()} />
         {signedOut.length ? (
           // Only a CLI that is installed but signed out is flagged: its agents cannot run. A missing CLI
           // is a choice (one provider is enough), and voice says so where it is used.

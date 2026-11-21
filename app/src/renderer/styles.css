@@ -1401,6 +1401,9 @@ body.resizing .sidebar-resizer {
 }
 .focus-meta {
   display: flex;
+  /* One line of mixed parts (chips, plain text, a mono path): centred on one line. */
+  align-items: center;
+  line-height: 16px;
   gap: 14px;
   font-size: 11px;
   color: var(--text-3);
@@ -5616,6 +5619,151 @@ button.subtask-row:hover {
   }
 }
 
+/* The agent header's tokens, context and account limits: small chips; a click opens a card. */
+/* Beside the reply box: outside it on the right, its bottom level with the box's (the context used). */
+.composer-box {
+  position: relative;
+}
+.composer-side {
+  position: absolute;
+  left: calc(100% + 10px);
+  /* The text's line box sits a little above the box's edge otherwise. */
+  bottom: -2px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-side:empty {
+  display: none;
+}
+.composer-side .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.composer-side .usage-chip:hover,
+.composer-side .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.composer-side .usage-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Under the reply box, on the right: the account's limits when they are close. */
+.composer-under {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  min-height: 18px;
+  margin-top: 5px;
+  padding-right: 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.composer-under:empty {
+  display: none;
+}
+/* Plain text (only the memory chip keeps a box); a click opens its card. */
+.composer-under .usage-chip,
+.focus-meta .usage-chip {
+  border: 0;
+  background: none;
+  padding: 0;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.composer-under .usage-chip:hover,
+.composer-under .usage-chip[aria-expanded='true'],
+.focus-meta .usage-chip:hover,
+.focus-meta .usage-chip[aria-expanded='true'] {
+  color: var(--text);
+  background: none;
+}
+.composer-under .usage-chip.hot,
+.focus-meta .usage-chip.hot {
+  color: var(--needs);
+}
+.usage-ring-track {
+  stroke: var(--border);
+}
+.usage-ring-fill {
+  stroke: currentColor;
+}
+.usage-pop {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+.usage-pop-head {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.usage-row > span:first-child {
+  color: var(--text-2);
+}
+.usage-row.strong > span {
+  color: var(--text);
+  font-weight: 600;
+}
+.usage-big {
+  font-size: 15px;
+  font-weight: 600;
+}
+.usage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.usage-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-limit.hot .usage-bar > span {
+  background: var(--needs);
+}
+.usage-limit.hot .usage-row > span {
+  color: var(--needs);
+}
+.usage-note {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.session-tag {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: copy;
+}
+
 /* Project chooser (new agent): the chosen folder as a button; a searchable list under it. */
 .project-chooser {
   position: relative;
@@ -7312,4 +7460,120 @@ button.subtask-row:hover {
   background: var(--accent-soft);
   border-radius: 4px;
   box-shadow: 0 0 0 1.5px var(--accent-soft);
+}
+.composer-under .usage-chip:focus:not(:focus-visible),
+.focus-meta .usage-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* The sidebar's foot: each account's limits, a quiet line each. */
+.account-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.account-limits .usage-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.account-limits .usage-chip:hover,
+.account-limits .usage-chip[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.account-limits .usage-chip.hot {
+  color: var(--needs);
+}
+.account-limits .account-name {
+  min-width: 0;
+}
+
+.account-limits-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  /* Like the sidebar's section labels (AGENTS). */
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.account-limits-head:hover {
+  background: var(--hover);
+}
+.account-limits-head .mono {
+  margin-left: auto;
+  font-weight: 400;
+}
+.account-limits.open .account-limits-head .team-chevron {
+  transform: rotate(90deg);
+}
+.account-limits-head.hot {
+  color: var(--needs);
+}
+
+/* An account's windows: a short bar each, its share used beside it. */
+.account-windows {
+  display: inline-flex;
+  gap: 10px;
+  flex: none;
+}
+.lim {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lim-k {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.lim-bar {
+  position: relative;
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-3) 22%, transparent);
+  overflow: hidden;
+}
+.lim-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-2) 70%, transparent);
+}
+.lim-v {
+  min-width: 26px;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.lim.hot .lim-bar i {
+  background: var(--needs);
+}
+.lim.hot .lim-v {
+  color: var(--needs);
+  font-weight: 600;
+}
+.account-limits .account-name {
+  font-weight: 500;
+  color: var(--text-2);
 }

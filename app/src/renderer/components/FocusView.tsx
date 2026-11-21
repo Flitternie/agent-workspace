@@ -1,6 +1,7 @@
-import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
+import { accountKey } from '../../shared/types';
 import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
@@ -12,6 +13,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog, RememberMenu } from './SessionMemory';
 import { RetryNotice } from './Retry';
+import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
@@ -385,7 +387,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
           )}
           <div className="focus-ident">
             <div className="focus-name">
-              <TaskName task={task} /> <ProviderTag provider={task.provider} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
+              <TaskName task={task} /> <SessionTag provider={task.provider} id={session?.nativeSessionId} mode={session?.integrationMode} /> <ModelPicker task={task} /> <StatusDot status={task.status} connected={connected} />
             </div>
             <div className="focus-meta mono">
               <MemoryChip
@@ -400,6 +402,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
+              <UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['tokens']} />
               {workTitle ? (
                 <span className="truncate" title={workTitle} data-testid="focus-work">
                   {workTitle}
@@ -412,11 +415,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               {task.worktree ? (
                 <span title={task.worktree.path}>
                   <Icon name="branch" size={12} /> {task.worktree.branch}
-                </span>
-              ) : null}
-              {session?.nativeSessionId ? (
-                <span title={session.nativeSessionId}>
-                  {session.integrationMode} · {session.nativeSessionId.slice(0, 8)}
                 </span>
               ) : null}
               {task.forkedFrom ? (
@@ -596,7 +594,19 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             ) : null}
             {/* What the agents wait on: one line right above the reply box, unfolding to answer them here. */}
             {isMainAgent(task) ? <WaitingOnYou snapshot={snapshot} now={now} onOpen={onOpen} bar onPick={setAboutId} /> : null}
-            <Composer key={task.taskId} task={task} onBtw={isMainAgent(task) ? undefined : askBtw} btwCount={btw.length} inject={inject} about={about} onClearAbout={() => setAboutId(null)} />
+            <Composer
+              key={task.taskId}
+              task={task}
+              onBtw={isMainAgent(task) ? undefined : askBtw}
+              btwCount={btw.length}
+              inject={inject}
+              about={about}
+              onClearAbout={() => setAboutId(null)}
+              // The context is this agent's (beside the box); its account's limits only when they are close
+              // (they are the account's: in the sidebar).
+              side={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['context']} />}
+              under={<UsageChips task={task} limits={snapshot.limits?.[accountKey(task)]} now={now} only={['limits-if-hot']} />}
+            />
           </div>
           {/* Maximized or too narrow, the preview takes the conversation's place under the header;
               beside it, it is a full-height column on the right (the side slot). */}
@@ -1125,8 +1135,14 @@ function Composer({
   inject,
   about,
   onClearAbout,
+  side,
+  under,
 }: {
   task: Task;
+  /** Beside the box, outside it on the right, level with its bottom (the context used). */
+  side?: ReactNode;
+  /** Shown under the box, on the right (the account's limits, when close). */
+  under?: ReactNode;
   onBtw?: (question: string) => void;
   btwCount?: number;
   inject?: { text: string; n: number };
@@ -1366,9 +1382,31 @@ function Composer({
             <Icon name="send" />
           </button>
         </div>
+        {side ? <div className="composer-side">{side}</div> : null}
       </div>
+      {under ? <div className="composer-under">{under}</div> : null}
       {error || attach.error ? <div className="error-text">{error || attach.error}</div> : null}
     </div>
   );
 }
 
+/** The provider's tag; it carries the native session id (in its tooltip; a click copies it). */
+function SessionTag({ provider, id, mode }: { provider: Task['provider']; id?: string; mode?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!id) return <ProviderTag provider={provider} />;
+  return (
+    <button
+      className="session-tag"
+      data-testid="session-tag"
+      title={`${copied ? t('Copied') : t('Session {id} · click to copy', { id })}${mode === 'resumed' ? ` · ${t('resumed')}` : ''}`}
+      onClick={() => {
+        void navigator.clipboard.writeText(id).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      <ProviderTag provider={provider} />
+    </button>
+  );
+}

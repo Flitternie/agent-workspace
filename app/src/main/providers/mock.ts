@@ -515,9 +515,29 @@ class MockSession implements ProviderSession {
     this.steered = [];
     this.record('assistant', reply);
     this.busy = false;
+    this.emitUsage();
     this.emit({ type: 'turnCompleted', status: 'completed', finalText: reply });
     // Like Claude Code's prompt suggestions: a guess at the user's next message, after the turn.
     this.emit({ type: 'suggestion', text: this.zh ? '继续，并跑一下测试' : 'Keep going and run the tests' });
+  }
+
+  /**
+   * Like Claude Code at the end of a turn: fixed token counts for it (35K, 88% read from the cache,
+   * $0.12 at API prices), the context growing with the conversation, and the account's limits
+   * (`limits-high` in the script: nearly used up).
+   */
+  private emitUsage(): void {
+    const turns = this.history?.messages.filter((m) => m.role === 'user').length ?? 1;
+    this.emit({ type: 'usage', add: { input: 1200, cacheWrite: 3000, cacheRead: 30000, output: 800, costUsd: 0.12 }, context: 20000 + turns * 4700, contextWindow: 1_000_000 });
+    const high = (this.args.mockScript ?? '').includes('limits-high');
+    const at = Date.now();
+    this.emit({
+      type: 'limits',
+      windows: [
+        { key: 'five_hour', mins: 300, usedPercent: high ? 86 : 34, resetsAt: at + 2 * 3600_000 },
+        { key: 'seven_day', mins: 10080, usedPercent: 35, resetsAt: at + 3 * 86400_000 },
+      ],
+    });
   }
 
   private record(role: 'user' | 'assistant' | 'tool', text: string): void {
