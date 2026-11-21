@@ -108,7 +108,7 @@ Every feature works the same with both CLIs:
 
 ## Privacy
 
-- **No server in between.** Agents run through the `claude` and `codex` CLIs on your machine or your server. No server of ours sits in between, and your workspace stays on your disk.
+- **No server in between.** Agents run through the `claude` and `codex` CLIs on your machine or your server, and your workspace stays on your disk.
 - **Permissions as you set them.** Permissions follow each CLI's own modes, per agent, and are never bypassed. Your CLI settings are left alone; shared memory writes only to its own marked section, after a backup.
 - **Voice can stay local.** Use OpenAI with your own key, or an on-device model (SenseVoice, Whisper, Paraformer) that sends no audio anywhere.
 
