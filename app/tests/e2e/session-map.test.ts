@@ -59,7 +59,19 @@ describe('session map', () => {
       await invoke(page, 'task:send', { taskId: a.taskId, text, via: 'text' });
     }
     await expect.poll(settled, { timeout: 30_000 }).toBe(true);
+    const railRow = page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`);
+    // No map yet: the row names no task and none of its messages; waiting on an approval, a short label.
+    const sub = () => railRow.locator('.agent-row-sub').innerText();
+    const waitingNow = async () => (await snap()).attention.some((x) => x.taskId === a.taskId && x.state === 'open' && x.kind !== 'completion');
+    await expect.poll(async () => (await sub()) === ((await waitingNow()) ? 'Waiting on you' : '')).toBe(true);
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"],[data-testid="needs-item"][data-alias="${a.alias}"]`).first().click();
+    // Once the map is made, the header shows what it is on (its last task), and so does the row once
+    // nothing is waiting on the user.
+    await expect.poll(() => page.getByTestId('focus-work').innerText(), { timeout: 15_000 }).toBe('Refund flow');
+    expect(await page.locator('.focus-meta').innerText()).not.toContain('Add the refund endpoints');
+    // (The mock ends each turn with a question; set aside here.)
+    for (const x of (await snap()).attention.filter((x) => x.taskId === a.taskId && x.state === 'open')) await invoke(page, 'attention:dismiss', { attentionId: x.id });
+    await expect.poll(sub, { timeout: 15_000 }).toBe('Refund flow');
 
     // Beside the conversation: the model's tasks, titles, state, outcome of the one in view.
     await expect.poll(() => page.getByTestId('session-map-beside').count(), { timeout: 15_000 }).toBe(1);

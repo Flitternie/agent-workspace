@@ -201,7 +201,9 @@ describe('new agent', () => {
     await page.keyboard.press('Enter');
     await expect.poll(async () => (await task()).title).toBe('Migrate the orders API to v2');
     await expect.poll(async () => (await task()).name).not.toBe((await task()).alias);
-    await expect.poll(() => page.locator('.focus-meta').innerText()).toContain('Migrate the orders API to v2');
+    // The header does not repeat its messages: with no session map yet, it names no task.
+    expect(await page.locator('.focus-meta').innerText()).not.toContain('Migrate the orders API to v2');
+    expect(await page.getByTestId('focus-work').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'new-agent-02-named.png') });
 
     // The hint's link swaps the New agent dialog for Continue a session… (same as the sidebar's history button).

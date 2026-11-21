@@ -169,7 +169,10 @@ export function Sidebar({
           <span className="agent-row-sub">
             <SubtaskDots subtasks={subs} open={unfolded} onToggle={() => toggleSub(t.taskId)} />
             {opts.project ? <span className="row-project">{opts.project} · </span> : null}
-            {pending.length ? tr('{n} waiting: {headline}', { n: pending.length, headline: pending[0].headline }) : (t.summary && tr(t.summary)) || t.title}
+            {/* What it is on: the last task of its session map, never its latest message (which reads as noise
+                in a list). Waiting on the user, a short label; the question itself is in the agent. No map
+                yet, nothing. */}
+            {pending.length ? tr('Waiting on you') : snapshot.workTitles?.[t.taskId]}
           </span>
         </span>
       </button>
@@ -209,7 +212,7 @@ export function Sidebar({
                 <span className="dot" aria-label={tr(STATUS_LABEL[snapshot.main.status])} />
               </span>
             </span>
-            <span className="agent-row-sub">{tr(snapshot.main.summary)}</span>
+            {snapshot.workTitles?.[snapshot.main.taskId] ? <span className="agent-row-sub">{snapshot.workTitles[snapshot.main.taskId]}</span> : null}
           </span>
         </button>
       ) : null}

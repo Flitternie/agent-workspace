@@ -625,6 +625,10 @@ body.resizing .sidebar-resizer {
 .agent-row.needs .agent-row-sub {
   color: var(--needs);
 }
+/* No session map yet (and no project or sub-agents to name): no line at all. */
+.agent-row-sub:empty {
+  display: none;
+}
 .sidebar-foot {
   flex: none;
   border-top: 1px solid var(--border);

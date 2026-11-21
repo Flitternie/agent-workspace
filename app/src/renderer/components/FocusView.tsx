@@ -126,6 +126,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
       return next;
     });
   const mapTasks = useMemo(() => (turnCount >= 2 ? sessionMap(transcript, forks, grouping, mapEdits) : []), [transcript, forks, grouping, turnCount, mapEdits]);
+  // The header's line: what the agent is on, the last task of its map (as drawn here, with the reader's
+  // corrections; else as cached for the sidebar). Never its latest message, and nothing until a map exists.
+  const workTitle = (grouping ? mapTasks.at(-1)?.title : undefined) ?? snapshot.workTitles?.[task.taskId];
   // The main agent's map: lanes, one per agent it handed work to (instead of one trunk of tasks).
   const main = isMainAgent(task);
   // By chapter: the map draws the current one; earlier chapters fold to a line each.
@@ -397,9 +400,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                   setPreview(null);
                 }}
               />
-              <span className="truncate" title={task.title}>
-                {task.title}
-              </span>
+              {workTitle ? (
+                <span className="truncate" title={workTitle} data-testid="focus-work">
+                  {workTitle}
+                </span>
+              ) : null}
               <span title={task.host ? `${task.host}:${task.cwd}` : task.cwd}>
                 <Icon name="folder" size={12} /> {task.host ? `${task.host}:` : ''}
                 {project?.name}

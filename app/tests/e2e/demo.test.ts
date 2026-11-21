@@ -58,8 +58,9 @@ describe('end-to-end demo script (mock agents)', () => {
       await input.press('Enter');
       await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 10_000 }).toContain(`Request ${i + 1} in this session`);
     }
-    // C's request stays visible in the rail while we talk to A.
-    await expect.poll(() => page.locator('[data-testid="rail-item"][data-alias="Charlie"]').innerText()).toContain('data-loss');
+    // C stays marked as waiting in the rail while we talk to A (a short label; the question is in C).
+    await expect.poll(() => page.locator('[data-testid="rail-item"][data-alias="Charlie"]').innerText()).toContain('Waiting on you');
+    expect(await page.locator('[data-testid="rail-item"][data-alias="Charlie"]').innerText()).not.toContain('data-loss');
     await shot(page, '02-focus-A-after-10-turns');
 
     // 5. Back to overview: C's full request is still there; answer it from its card.
