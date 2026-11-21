@@ -123,8 +123,11 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
         </div>
       </header>
       {error ? <div className="error-text pad">{error}</div> : null}
+      {/* The graph fills the page; the box floats on it at the bottom, as on an agent's page (no band of its own). */}
+      <div className="research-stage">
       <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
+      </div>
       {sidePanel
         ? side
           ? createPortal(
@@ -188,12 +191,15 @@ function Graph({
   const box = useRef<HTMLDivElement>(null);
   const L = useMemo(() => layoutGraph(doc, depth, opened), [doc, depth, opened]);
   const [view, setView] = useState({ x: 24, y: 60, k: 1 });
+  const [legend, setLegend] = useState(false);
   const fitted = useRef('');
   const fit = () => {
     const r = box.current?.getBoundingClientRect();
     if (!r) return;
     const w = L.width + 160, h = L.height + 110;
-    const k = Math.min(1.1, Math.max(0.3, Math.min(r.width / w, (r.height - 40) / h)));
+    // Room left above the box floating at the bottom.
+    const below = box.current?.parentElement?.querySelector('.research-composer')?.getBoundingClientRect().height ?? 0;
+    const k = Math.min(1.1, Math.max(0.3, Math.min(r.width / w, (r.height - 40 - below) / h)));
     setView({ x: 24, y: 60, k });
   };
   // Fit when the graph's shape changes level, not on every edit (the view stays where the user put it).
@@ -300,6 +306,9 @@ function Graph({
           <button className="icon-btn" onClick={fit} aria-label={t('Fit')} title={t('Fit')} data-testid="research-fit">
             <Icon name="expand" size={12} />
           </button>
+          <button className={`btn btn-sm btn-ghost${legend ? ' on' : ''}`} onClick={() => setLegend(!legend)} aria-expanded={legend} data-testid="research-legend-toggle">
+            {t('Legend')}
+          </button>
         </div>
       </div>
       <svg className="research-svg">
@@ -312,6 +321,7 @@ function Graph({
           ))}
         </g>
       </svg>
+      {legend ? (
       <div className="research-legend" data-testid="research-legend">
         {(['running', 'pass', 'fail', 'idea'] as const).map((s) => (
           <span key={s}>
@@ -324,7 +334,8 @@ function Graph({
         <span className="lk finding">◆ {t('Finding')}</span>
         <span className="lk-how">{t('Click: talk to its agent · ⇧-click: several · double-click: open its conversation')}</span>
       </div>
-      {!childrenOf(doc, null).length ? <div className="research-hint">{t('Add the aspects that may move the result from the side column: data, model, training…')}</div> : null}
+      ) : null}
+      {!childrenOf(doc, null).length ? <div className="research-hint">{t('Ask below to add the aspects that may move the result: data, model, training…')}</div> : null}
     </div>
   );
 }

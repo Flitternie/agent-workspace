@@ -1022,6 +1022,8 @@ export const zh: Record<string, string> = {
   'Files in this agent’s folder': '这个 agent 目录里的文件',
   'In {dir}': '{dir} 里',
   // Research page
+  Legend: '图例',
+  'Ask below to add the aspects that may move the result: data, model, training…': '在下方告诉 agent 要加哪些可能影响结果的方面：数据、模型、训练……',
   About: '关于',
   '{first} and {n} more': '「{first}」等 {n} 个',
   'Click: talk to its agent · ⇧-click: several · double-click: open its conversation': '单击：和它的 agent 对话 · ⇧ 单击：多选 · 双击：打开它的对话',

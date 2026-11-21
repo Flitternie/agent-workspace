@@ -75,6 +75,18 @@ describe('research page (demo)', () => {
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
     // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.
     expect(await page.locator('.research-composer .composer .send-btn').count()).toBe(1);
+    // It floats on the graph: the canvas runs to the bottom of the page, the box over it.
+    const geo = await page.evaluate(() => {
+      const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      return { canvas: r('.research-canvas').bottom, page: r('.research').bottom, box: r('.research-composer .composer-box').bottom };
+    });
+    expect(Math.abs(geo.canvas - geo.page)).toBeLessThanOrEqual(1);
+    expect(geo.box).toBeLessThan(geo.canvas);
+    // The legend is out of the way until asked for.
+    expect(await page.getByTestId('research-legend').count()).toBe(0);
+    await page.getByTestId('research-legend-toggle').click();
+    expect(await page.getByTestId('research-legend').innerText()).toMatch(/double-click: open its conversation/);
+    await page.getByTestId('research-legend-toggle').click();
     expect(await page.getByTestId('composer-target').innerText()).toMatch(/To: a new agent for "Data"/);
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/About\s*Data/);
     await page.getByTestId('composer-input').fill('Which method would you try first?');
