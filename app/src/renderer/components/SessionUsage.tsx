@@ -23,10 +23,34 @@ export function usageTotals(u: NonNullable<Task['usage']>): { total: number; cac
 }
 
 /** "5h", "week", "8h", "2d": a window by its length. */
+/**
+ * The windows the providers report that are shown, and how they are called (close to Claude Code's own
+ * /usage: "Current session", "Current week (all models)", "Current week (Sonnet only)"). The plan's own
+ * windows lead; any other key a provider sends (an internal or a new one) is not shown at all.
+ */
+const MAIN_KEYS = ['five_hour', 'seven_day', 'primary', 'secondary'];
+const EXTRA_LABELS: Record<string, string> = {
+  seven_day_sonnet: 'week (Sonnet only)',
+  seven_day_opus: 'week (Opus only)',
+  seven_day_overage_included: 'week · included extra usage',
+  seven_day_oauth_apps: 'week · other apps',
+  seven_day_cowork: 'week · Cowork',
+};
+
 export function windowLabel(w: LimitWindow): string {
-  const model = /opus|sonnet|haiku/i.exec(w.key)?.[0];
-  const base = !w.mins ? w.key : w.mins === 10080 ? t('week') : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
-  return model ? `${base} ${model[0].toUpperCase()}${model.slice(1).toLowerCase()}` : base;
+  if (EXTRA_LABELS[w.key]) return t(EXTRA_LABELS[w.key]);
+  if (!w.mins) return '';
+  return w.mins === 10080 ? t('week') : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
+}
+
+/** The plan's own windows (5 hours, a week): what a one-line summary shows. */
+export function mainWindows(windows: LimitWindow[]): LimitWindow[] {
+  return windows.filter((w) => MAIN_KEYS.includes(w.key) && !!w.mins);
+}
+
+/** Every window with a name to show: the plan's own first, then the known others. */
+export function shownWindows(windows: LimitWindow[]): LimitWindow[] {
+  return [...mainWindows(windows), ...windows.filter((w) => EXTRA_LABELS[w.key])];
 }
 
 /** Highlighted from this share used. */
@@ -126,10 +150,10 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
   const u = task.usage;
   const { total, cacheHit } = u ? usageTotals(u) : { total: 0, cacheHit: undefined };
   const share = u?.context && u.contextWindow ? (u.context / u.contextWindow) * 100 : undefined;
-  const hot = !!limits?.windows.some((w) => w.usedPercent >= HOT);
+  const hot = !!limits && mainWindows(limits.windows).some((w) => w.usedPercent >= HOT);
   const age = limits ? now - Date.parse(limits.at) : 0;
   const asOf = limits && age > 90_000 ? t('as of {time}', { time: timeAgo(limits.at, now) }) : '';
-  const limitsText = limits?.windows.map((w) => `${windowLabel(w)} ${w.usedPercent}%`).join(' · ') ?? '';
+  const limitsText = limits ? mainWindows(limits.windows).map((w) => `${windowLabel(w)} ${w.usedPercent}%`).join(' · ') : '';
   return (
     <>
       {only.includes('tokens') && u && total > 0 ? (
@@ -180,7 +204,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
           <div className="usage-note">{t('As of the latest model request.')}</div>
         </UsageChip>
       ) : null}
-      {(only.includes('limits') || (only.includes('limits-if-hot') && hot)) && limits?.windows.length ? (
+      {(only.includes('limits') || (only.includes('limits-if-hot') && hot)) && limits && mainWindows(limits.windows).length ? (
         <UsageChip
           testId="usage-limits"
           className={hot ? 'hot' : undefined}
@@ -188,7 +212,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
           label={
             <>
               <span className="chip-full">{only.includes('limits-if-hot') ? t('{name} limits {list}', { name: PROVIDER_LABEL[task.provider], list: limitsText }) : t('Limits {list}', { list: limitsText })}</span>
-              <span className="chip-short">{`${Math.max(...limits.windows.map((w) => w.usedPercent))}%`}</span>
+              <span className="chip-short">{`${Math.max(...mainWindows(limits.windows).map((w) => w.usedPercent))}%`}</span>
             </>
           }
         >
@@ -196,7 +220,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
             {t('{name} account limits', { name: PROVIDER_LABEL[task.provider] })}
             {limits.plan ? <span className="muted"> · {limits.plan}</span> : null}
           </div>
-          {limits.windows.map((w) => (
+          {shownWindows(limits.windows).map((w) => (
             <div key={w.key} className={`usage-limit${w.usedPercent >= HOT ? ' hot' : ''}`} data-testid="usage-limit">
               <div className="usage-row">
                 <span>{windowLabel(w)}</span>
@@ -229,7 +253,7 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
     setOpenState(on);
   };
   const rows = Object.entries(limits)
-    .filter(([, l]) => l.windows.length)
+    .filter(([, l]) => mainWindows(l.windows).length)
     .map(([key, l]) => ({ key, l, provider: (l.provider ?? key.split('@')[0]) as Task['provider'], host: l.host ?? key.split('@')[1] }))
     .sort((a, b) => Number(!!a.host) - Number(!!b.host) || (a.host ?? '').localeCompare(b.host ?? '') || a.provider.localeCompare(b.provider));
   // Signed in with an API key (this Mac): billed by use, no plan limits to show; said so, not left blank.
@@ -239,7 +263,7 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
   const machines = rows.some((r) => r.host);
   // Folded to one line (the highest use across accounts), kept on this machine; a nearly used-up window
   // still shows on the folded line.
-  const top = rows.length ? Math.max(...rows.flatMap((r) => r.l.windows.map((w) => w.usedPercent))) : 0;
+  const top = rows.length ? Math.max(...rows.flatMap((r) => mainWindows(r.l.windows).map((w) => w.usedPercent))) : 0;
   const anyHot = top >= HOT;
   return (
     <div className={`account-limits${open ? ' open' : ''}`} data-testid="account-limits">
@@ -260,7 +284,7 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
         : null}
       {open ? rows.map(({ key, l, provider, host }) => {
         const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
-        const hot = l.windows.some((w) => w.usedPercent >= HOT);
+        const hot = mainWindows(l.windows).some((w) => w.usedPercent >= HOT);
         const age = now - Date.parse(l.at);
         const asOf = age > 90_000 ? t('as of {time}', { time: timeAgo(l.at, now) }) : '';
         return (
@@ -273,7 +297,7 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
               <>
                 <span className="account-name truncate">{name}</span>
                 <span className="account-windows">
-                  {l.windows.map((w) => (
+                  {mainWindows(l.windows).map((w) => (
                     <span key={w.key} className={`lim${w.usedPercent >= HOT ? ' hot' : ''}`}>
                       <span className="lim-k">{windowLabel(w)}</span>
                       <span className="lim-bar" aria-hidden>
@@ -290,7 +314,7 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
               {t('{name} account limits', { name })}
               {l.plan ? <span className="muted"> · {l.plan}</span> : null}
             </div>
-            {l.windows.map((w) => (
+            {shownWindows(l.windows).map((w) => (
               <div key={w.key} className={`usage-limit${w.usedPercent >= HOT ? ' hot' : ''}`} data-testid="usage-limit">
                 <div className="usage-row">
                   <span>{windowLabel(w)}</span>

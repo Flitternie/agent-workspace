@@ -114,7 +114,7 @@ describe('accumulating usage', () => {
     expect([950, 2345, 24700, 115000, 999_400, 1_000_000, 1_234_000].map(formatTokens)).toEqual(['950', '2.3K', '24.7K', '115K', '999K', '1M', '1.2M']);
     expect(windowLabel({ key: 'five_hour', mins: 300, usedPercent: 1 })).toBe('5h');
     expect(windowLabel({ key: 'seven_day', mins: 10080, usedPercent: 1 })).toBe('week');
-    expect(windowLabel({ key: 'seven_day_opus', mins: 10080, usedPercent: 1 })).toBe('week Opus');
+    expect(windowLabel({ key: 'seven_day_opus', mins: 10080, usedPercent: 1 })).toBe('week (Opus only)');
   });
 });
 
@@ -133,5 +133,34 @@ describe('limits per account', () => {
     all = withLimits(all, { provider: 'claude', host: 'neptune' }, w(90));
     expect(all.claude.windows[0].usedPercent).toBe(34);
     expect(all['claude@neptune'].windows[0].usedPercent).toBe(90);
+  });
+});
+
+describe('limit windows beyond the plan', () => {
+  it('reads an overage window as extra usage over a week, and leaves it out of the one-line summary', async () => {
+    const { claudeLimits } = await import('../../src/main/providers/usage');
+    const { mainWindows, windowLabel } = await import('../../src/renderer/components/SessionUsage');
+    const windows = claudeLimits({
+      type: 'rate_limit_event',
+      rate_limit_info: {
+        unifiedWindows: {
+          five_hour: { utilization: 0.34, resetsAt: 1795299600 },
+          seven_day: { utilization: 0.35, resetsAt: 1795557600 },
+          seven_day_overage: { utilization: 0.02, resetsAt: 1795557600 },
+          seven_day_opus: { utilization: 0.1, resetsAt: 1795557600 },
+          seven_day_omelette: { utilization: 0.5, resetsAt: 1795557600 },
+        },
+      },
+    })!;
+    const over = windows.find((w) => w.key === 'seven_day_overage')!;
+    expect(over.mins).toBe(10080);
+    expect(over.overage).toBe(true);
+    // The sidebar's line: the plan's own windows only.
+    expect(mainWindows(windows).map((w) => w.key)).toEqual(['five_hour', 'seven_day']);
+    // The card: those, then the known others with their names; an unknown key (an internal one) nowhere.
+    const { shownWindows } = await import('../../src/renderer/components/SessionUsage');
+    expect(shownWindows(windows).map((w) => w.key)).toEqual(['five_hour', 'seven_day', 'seven_day_opus']);
+    expect(windowLabel(windows.find((w) => w.key === 'seven_day_opus')!)).toBe('week (Opus only)');
+    expect(shownWindows(windows).map(windowLabel).join(' ')).not.toMatch(/omelette|_/);
   });
 });

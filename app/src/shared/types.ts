@@ -130,6 +130,8 @@ export interface LimitWindow {
   key: string;
   /** Length in minutes, when known (300 = 5 hours, 10080 = a week). */
   mins?: number;
+  /** Usage beyond the plan (Claude's "…_overage" windows), not the plan's own limit. */
+  overage?: boolean;
   usedPercent: number;
   /** When it resets, ms since the epoch. */
   resetsAt?: number;

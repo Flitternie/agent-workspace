@@ -7568,7 +7568,9 @@ button.subtask-row:hover {
 .account-windows {
   display: inline-flex;
   gap: 10px;
-  flex: none;
+  /* Never wider than the sidebar: shortened rather than overflowing. */
+  min-width: 0;
+  overflow: hidden;
 }
 .lim {
   display: inline-flex;

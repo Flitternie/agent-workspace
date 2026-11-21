@@ -15,6 +15,15 @@ const ms = (v: unknown): number | undefined => {
 
 const WINDOW_MINS: Record<string, number> = { five_hour: 300, seven_day: 10080, seven_day_opus: 10080, seven_day_sonnet: 10080 };
 
+/** A window's length from its name when not listed ("seven_day_overage" → a week, "five_hour_…" → 5 h). */
+function windowMins(key: string): number | undefined {
+  if (WINDOW_MINS[key]) return WINDOW_MINS[key];
+  const m = /^(one|two|three|four|five|six|seven|\d+)_(hour|day)/.exec(key);
+  if (!m) return undefined;
+  const n = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 }[m[1] as 'one'] ?? Number(m[1]);
+  return m[2] === 'hour' ? n * 60 : n * 1440;
+}
+
 /** Claude Code `assistant` message: the context it ran with (all of its input, cached or not). */
 export function claudeContext(m: unknown): number | undefined {
   const u = rec(rec(rec(m).message).usage);
@@ -63,7 +72,8 @@ export function claudeLimits(m: unknown): LimitWindow[] | undefined {
   const unified = rec(info.unifiedWindows);
   const windows: LimitWindow[] = Object.entries(unified).flatMap(([key, w]) => {
     const u = optNum(rec(w).utilization);
-    return u === undefined ? [] : [{ key, ...(WINDOW_MINS[key] ? { mins: WINDOW_MINS[key] } : {}), usedPercent: Math.round(u * 100), ...(ms(rec(w).resetsAt) ? { resetsAt: ms(rec(w).resetsAt) } : {}) }];
+    const mins = windowMins(key);
+    return u === undefined ? [] : [{ key, ...(mins ? { mins } : {}), ...(/overage/i.test(key) ? { overage: true } : {}), usedPercent: Math.round(u * 100), ...(ms(rec(w).resetsAt) ? { resetsAt: ms(rec(w).resetsAt) } : {}) }];
   });
   // Older form: only the window that applies now.
   const key = typeof info.rateLimitType === 'string' ? info.rateLimitType : '';
