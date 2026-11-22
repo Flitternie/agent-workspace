@@ -8572,15 +8572,64 @@ button.subtask-row:hover {
 .btn.btn-icon.busy .icon {
   animation: spin 0.9s linear infinite;
 }
-/* The side column's tabs (as a preview's File / Changes), under its title. */
+/* The side column's tabs, as a browser's: a strip along the bottom of the title row; the open tab is
+   the content's own colour and runs into it (over the strip's line); the others sit flat, divided. */
+.side-top:has(.research-tabs) {
+  padding-bottom: 0;
+}
 .research-tabs {
-  margin: 0 16px 8px;
-  align-self: flex-start;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  margin: 2px -14px -1px;
+  padding: 6px 10px 0;
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--text) 6%);
+  border-top: 1px solid var(--border);
 }
 .research-tabs button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 6px 14px 7px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+/* A divider between flat tabs, not beside the open one. */
+.research-tabs button + button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  bottom: 25%;
+  width: 1px;
+  background: var(--border-strong);
+}
+.research-tabs button.on::before,
+.research-tabs button.on + button::before {
+  display: none;
+}
+.research-tabs button:not(.on):hover {
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  color: var(--text);
+}
+.research-tabs button.on {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  z-index: 1;
 }
 /* The conversation with the agent over the selection: chat only. */
 .rs-chat {

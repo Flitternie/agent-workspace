@@ -227,7 +227,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const chatTask = chatRoute.kind === 'experiment' ? taskOf(chatRoute.node.taskId) : chatRoute.kind === 'aspect' ? taskOf(chatRoute.aspect.taskId) : taskOf(doc.leadTaskId);
   const chatUnread = !!chatTask?.unread;
   const tabs = (
-    <div className="seg research-tabs" role="tablist" data-testid="research-tabs">
+    <div className="research-tabs" role="tablist" data-testid="research-tabs">
       <button role="tab" aria-selected={tab === 'view'} className={tab === 'view' ? 'on' : ''} onClick={() => setTab('view')} data-testid="research-tab-view">
         {t('Node view')}
       </button>
