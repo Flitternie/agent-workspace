@@ -92,6 +92,8 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const seenKey = `amw.research.seen.${researchId}`;
   const lastSeen = useMemo(() => localStorage.getItem(seenKey) ?? new Date().toISOString(), [seenKey]);
   const [looked, setLooked] = useState<ReadonlySet<string>>(new Set());
+  /** Nodes to bring into view (the graph pans to them): a click on a count at the top. */
+  const [look, setLook] = useState<{ ids: string[]; n: number }>({ ids: [], n: 0 });
   const menu = useContextMenu();
   useEffect(() => {
     setLooked(new Set());
@@ -171,8 +173,6 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   for (const n of doc.nodes) if ((n.taskId && (busy(n.taskId) || asking.has(n.taskId))) || (n.type === 'experiment' && statusOf(n) === 'running')) for (const a of ancestry(doc, n)) active.add(a.id);
   const fresh = new Set(exps.filter((e) => e.resultAt && e.resultAt > lastSeen && !looked.has(e.id)).map((e) => e.id));
   /** Rings the nodes of these agents (the lead's is the goal: nothing selected). */
-  /** Brings these nodes into view (the graph pans to them): a click on a count at the top. */
-  const [look, setLook] = useState<{ ids: string[]; n: number }>({ ids: [], n: 0 });
   const ring = (taskIds: string[]) => {
     const ids = doc.nodes.filter((n) => n.taskId && taskIds.includes(n.taskId)).map((n) => n.id);
     setSel(ids);
