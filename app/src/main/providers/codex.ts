@@ -663,10 +663,10 @@ class CodexSession implements ProviderSession {
     await this.server.rpc('skills/extraRoots/set', { extraRoots: [this.args.skills.root] }).catch((e: Error) => console.warn('[codex] skills', e.message));
   }
 
-  async shell(command: string): Promise<void> {
+  async shell(command: string, timeoutMs = SHELL_TIMEOUT_MS): Promise<void> {
     if (!this.server || this.server.closed || !this.threadId) throw new Error('Codex session is not connected.');
     // Codex's own `!`: runs in the thread's shell and is recorded in its history (source userShell).
-    await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs: SHELL_TIMEOUT_MS });
+    await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs });
   }
 
   async close(): Promise<void> {

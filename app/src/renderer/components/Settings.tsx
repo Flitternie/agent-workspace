@@ -781,6 +781,17 @@ const SECTIONS: Array<{ id: string; group: string; title: string; keywords: stri
   { id: 'skills', group: 'Memory and skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
   { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this computer', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'openai', group: 'Voice and OpenAI', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
+  { id: 'advanced', group: 'Advanced', title: 'Advanced', keywords: ['Latest turns shown in full', 'Tool call details', 'Move an agent to idle after', 'Main agent', 'Tool calls per message', 'Forks per message', 'Timeout for commands run with !', 'Restore defaults', 'fold', 'idle', 'timeout'] },
+];
+
+/** Settings › Advanced: rarely changed, so each a quiet dropdown; unset = `def`. */
+const ADVANCED: Array<{ key: 'openTurns' | 'toolsOpen' | 'idleAfterDays' | 'mainCallsPerTurn' | 'mainForksPerTurn' | 'commandTimeoutMin'; label: string; def: number | string; options: Array<{ v: number | string; label: () => string }> }> = [
+  { key: 'openTurns', label: 'Latest turns shown in full', def: 1, options: [...[1, 2, 3, 4, 5].map((n) => ({ v: n, label: () => (n === 1 ? t('1 turn') : t('{n} turns', { n })) })), { v: 0, label: () => t('All') }] },
+  { key: 'toolsOpen', label: 'Tool call details', def: 'folded', options: [{ v: 'folded', label: () => t('All folded') }, { v: 'failed', label: () => t('Only failed open') }, { v: 'all', label: () => t('All open') }] },
+  { key: 'idleAfterDays', label: 'Move an agent to idle after', def: 3, options: [...[1, 3, 7, 14].map((n) => ({ v: n, label: () => (n === 1 ? t('1 day') : t('{n} days', { n })) })), { v: 0, label: () => t('Never') }] },
+  { key: 'mainCallsPerTurn', label: 'Main agent: tool calls per message', def: 30, options: [10, 20, 30, 50].map((n) => ({ v: n, label: () => t('{n} calls', { n }) })) },
+  { key: 'mainForksPerTurn', label: 'Main agent: forks per message', def: 3, options: [1, 2, 3, 4, 5].map((n) => ({ v: n, label: () => (n === 1 ? t('1 agent') : t('{n} agents', { n })) })) },
+  { key: 'commandTimeoutMin', label: 'Timeout for commands run with !', def: 10, options: [5, 10, 30, 60].map((n) => ({ v: n, label: () => t('{n} min', { n }) })) },
 ];
 
 /** A settings group; hidden when the search does not match its title or contents. */
@@ -1034,6 +1045,34 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       </Section>
       <Section id="openai" query={query}>
         <OpenAiKey snapshot={snapshot} />
+      </Section>
+      <Section
+        id="advanced"
+        query={query}
+        actions={
+          <button className="btn small" disabled={ADVANCED.every((a) => (s[a.key] ?? a.def) === a.def)} onClick={() => update(Object.fromEntries(ADVANCED.map((a) => [a.key, a.def])))} data-testid="advanced-reset">
+            {t('Restore defaults')}
+          </button>
+        }
+      >
+        {ADVANCED.map((a) => (
+          <div className="settings-inline advanced-row" key={a.key}>
+            <span>{t(a.label)}</span>
+            <select
+              className="input select"
+              aria-label={t(a.label)}
+              value={String(s[a.key] ?? a.def)}
+              onChange={(e) => update({ [a.key]: a.options.find((o) => String(o.v) === e.target.value)!.v })}
+              data-testid={`adv-${a.key}`}
+            >
+              {a.options.map((o) => (
+                <option key={String(o.v)} value={String(o.v)}>
+                  {o.label()}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
       </Section>
       {error ? <div className="error-text">{error}</div> : null}
         </div>

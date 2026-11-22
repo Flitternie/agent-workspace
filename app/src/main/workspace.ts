@@ -83,6 +83,7 @@ interface LiveSession {
 }
 
 /** A `!command` the user typed is stopped after this long. */
+/** A command run with `!`: stopped after this long unless Settings › Advanced says otherwise. */
 const SHELL_TIMEOUT_MS = 10 * 60_000;
 /** How much of a command's output goes to the agent with the next message. */
 const SHELL_CONTEXT_CHARS = 20_000;
@@ -1829,7 +1830,7 @@ export class Workspace {
       try {
         const live = await this.connect(taskId);
         if (live.session.shell) {
-          await live.session.shell(command);
+          await live.session.shell(command, this.commandTimeoutMs());
           return { ok: true };
         }
       } catch (error) {
@@ -1842,11 +1843,12 @@ export class Workspace {
     const tool: ToolCallInfo = { name: 'Bash', kind: 'execute', title: `! ${first}`, locations: [], content: [terminal], byUser: true };
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: 'running', tool, createdAt: now() });
     this.changed();
+    const timeoutMs = this.commandTimeoutMs();
     const r = task.host
-      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, SHELL_TIMEOUT_MS)
+      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, timeoutMs)
       : process.platform === 'win32'
-        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS })
-        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS });
+        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs })
+        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs });
     const output = [r.stdout, r.stderr].filter((s) => s.trim()).join('\n');
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: r.code === 0 ? 'completed' : 'failed', createdAt: now() }, { content: [{ ...terminal, output: clipOutput(output), exitCode: r.code }] });
     const pending = this.shellOutput.get(taskId) ?? [];
@@ -2961,6 +2963,16 @@ export class Workspace {
       '[A new chapter of your conversation with the user starts here. The earlier conversation is not carried over; use the workspace tools for anything else.]',
       lines.length ? `What is going on now:\n${lines.join('\n')}` : 'No agent is working or waiting right now.',
     ].join('\n');
+  }
+
+  private commandTimeoutMs(): number {
+    const min = this.store.data.settings.commandTimeoutMin;
+    return min ? min * 60_000 : SHELL_TIMEOUT_MS;
+  }
+
+  mainLimits(): { calls?: number; forks?: number } {
+    const s = this.store.data.settings;
+    return { calls: s.mainCallsPerTurn, forks: s.mainForksPerTurn };
   }
 
   mainTurn(): number {

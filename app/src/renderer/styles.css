@@ -3022,6 +3022,11 @@ details[open] > summary .tool-more {
 .settings-section .segmented button {
   white-space: nowrap;
 }
+/* Advanced: one width for every dropdown, so the rows line up. */
+.advanced-row .select {
+  flex: none;
+  width: 140px;
+}
 .sidebar-settings.active {
   background: var(--selected);
 }

@@ -463,7 +463,22 @@ export interface Settings {
    * up, notes merged); from then on the shared user memory is kept in sync there.
    */
   memoryLinks?: Record<string, { linkedAt: string; /** Unlinked while offline: cleaned up when it connects. */ unlinking?: boolean }>;
+  // Advanced; unset = the defaults below.
+  /** Latest turns shown in full (1–5); 0 = every turn. Default 1. */
+  openTurns?: number;
+  /** Tool calls on opening a conversation: folded, only the failed ones open, or all open. Default folded. */
+  toolsOpen?: ToolsOpen;
+  /** Days without activity before an agent folds into its team's idle row; 0 = never. Default 3. */
+  idleAfterDays?: number;
+  /** The main agent's tool calls per message from the user. Default 30. */
+  mainCallsPerTurn?: number;
+  /** Agents the main agent may fork per message from the user. Default 3. */
+  mainForksPerTurn?: number;
+  /** Minutes before a command run with `!` is stopped. Default 10. */
+  commandTimeoutMin?: number;
 }
+
+export type ToolsOpen = 'folded' | 'failed' | 'all';
 
 /**
  * An enabled SSH host. `ssh`: whether a background (no-prompt) connection works —

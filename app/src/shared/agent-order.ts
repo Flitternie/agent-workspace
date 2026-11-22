@@ -4,7 +4,7 @@
 
 import type { AgentStatus, AttentionItem, Project, Task } from './types';
 
-/** A member who has done nothing (and been asked nothing) for this long folds into its team's idle row. */
+/** A member who has done nothing (and been asked nothing) for this long folds into its team's idle row (Settings › Advanced changes it). */
 export const IDLE_AFTER_MS = 3 * 24 * 3600_000;
 /** "Recently running": the Overview keeps an agent this long after it last did anything. */
 export const RECENT_MS = 2 * 3600_000;
@@ -126,7 +126,7 @@ function leadKey(t: Task, open: AttentionItem[]): { g: Group; at: number } {
  * first, then teams with someone working (the one that started first on top), then the rest, teams
  * whose members have all gone idle (folded) last.
  */
-export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' | 'name'>>, open: AttentionItem[], now: number): Team[] {
+export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' | 'name'>>, open: AttentionItem[], now: number, idleAfterMs = IDLE_AFTER_MS): Team[] {
   const out: Array<Team & { lead: { g: Group; at: number } }> = [];
   for (const project of projects) {
     const all = rank(
@@ -134,7 +134,7 @@ export function teams(tasks: Task[], projects: Array<Pick<Project, 'projectId' |
       open,
     );
     if (!all.length) continue;
-    const busy = (t: Task) => !isSetAside(t, open) && (tierOf(t, open) <= 2 || now - activeAt(t) < IDLE_AFTER_MS);
+    const busy = (t: Task) => !isSetAside(t, open) && (tierOf(t, open) <= 2 || now - activeAt(t) < idleAfterMs);
     const members = all.filter(busy);
     out.push({
       project,

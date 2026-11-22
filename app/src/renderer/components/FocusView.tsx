@@ -6,7 +6,7 @@ import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem,
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
-import { foldsTurn, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
+import { foldsTurn, OPEN_TURNS, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
 import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
@@ -1016,7 +1016,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
         {items.length === 0 ? <div className="muted pad">{t('No messages yet.')}</div> : null}
         {turns.map((turn, i) => {
           const entries = (list: TranscriptItem[]) => groupNotices(groupTranscript(list, main), main).map(renderEntry);
-          if (!foldsTurn(turn, i, turns.length)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
+          if (!foldsTurn(turn, i, turns.length, snapshot.settings.openTurns ?? OPEN_TURNS)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
           // An earlier turn: the message, what the agent did folded into one line, and its answer.
           return (
             <Fragment key={turn.user?.id ?? `t${i}`}>

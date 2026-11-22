@@ -161,4 +161,13 @@ describe('agent order', () => {
     // Seeing a result is not setting aside: a seen, recent agent stays listed.
     expect(team.members.map((t) => t.taskId)).toContain('kept');
   });
+
+  it('folds a member into idle after the chosen time, or never', () => {
+    const projects = [{ projectId: 'p1', name: 'shop' }];
+    const two = task('two', { updatedAt: ago(2 * 24 * H), lastUserActivityAt: ago(2 * 24 * H) });
+    expect(teams([two], projects, [], NOW)[0].members.map((t) => t.taskId)).toEqual(['two']); // default 3 days
+    expect(teams([two], projects, [], NOW, 24 * H)[0].idle.map((t) => t.taskId)).toEqual(['two']);
+    const old = task('old');
+    expect(teams([old], projects, [], NOW, Infinity)[0].members.map((t) => t.taskId)).toEqual(['old']);
+  });
 });

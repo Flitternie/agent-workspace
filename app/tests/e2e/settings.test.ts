@@ -91,4 +91,31 @@ describe('real entry: first run, settings, language', () => {
     await expect.poll(() => page.locator('.stage-head h1').innerText()).toBe('Overview');
     await page.screenshot({ path: join(shots, 'first-run-en.png') });
   }, 120_000);
+
+  it('Advanced: picks a choice per row, keeps it after a restart, restores the defaults', async () => {
+    await app?.close();
+    let page = await launch();
+    await page.getByTestId('open-settings').click();
+    const value = (key: string) => page.getByTestId(`adv-${key}`).inputValue();
+    expect(await value('openTurns')).toBe('1');
+    expect(await value('toolsOpen')).toBe('folded');
+    await expect.poll(() => page.getByTestId('advanced-reset').isDisabled()).toBe(true);
+    await page.getByTestId('adv-openTurns').selectOption('3');
+    await page.getByTestId('adv-toolsOpen').selectOption('failed');
+    await page.getByTestId('adv-idleAfterDays').selectOption('0');
+    await expect.poll(() => value('openTurns')).toBe('3');
+    await page.getByTestId('settings-advanced').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(shots, 'settings-advanced.png') });
+    await app!.close();
+    page = await launch();
+    await page.getByTestId('open-settings').click();
+    expect(await value('openTurns')).toBe('3');
+    expect(await value('toolsOpen')).toBe('failed');
+    expect(await value('idleAfterDays')).toBe('0');
+    await page.getByTestId('advanced-reset').click();
+    await expect.poll(() => value('openTurns')).toBe('1');
+    expect(await value('idleAfterDays')).toBe('3');
+    await expect.poll(() => page.getByTestId('advanced-reset').isDisabled()).toBe(true);
+    await page.keyboard.press('Escape');
+  }, 120_000);
 });

@@ -1,7 +1,7 @@
-import { useContext, useState, type MouseEvent } from 'react';
+import { createContext, useContext, useState, type MouseEvent } from 'react';
 import { openableKind, previewKind } from '../../shared/preview';
 import { diffStat, type FileDiff, type PlanEntry, type PlanInfo, type ToolContent, type ToolKind } from '../../shared/content';
-import type { TranscriptItem } from '../../shared/types';
+import type { ToolsOpen, TranscriptItem } from '../../shared/types';
 import { Icon, StatusIcon, type IconName } from './bits';
 import { PreviewContext } from './filePaths';
 import { Markdown } from './Markdown';
@@ -224,6 +224,9 @@ function FileActions({ paths }: { paths: string[] }) {
   );
 }
 
+/** Which tool calls start open (Settings › Advanced): folded, the failed ones, or all. */
+export const ToolsOpenContext = createContext<ToolsOpen>('folded');
+
 /** One tool call in the transcript: a title row that expands into its content. */
 export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const tool = item.tool;
@@ -233,8 +236,9 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const stat = diffs.length ? diffStat(diffs) : undefined;
   const hasOutput = content.some((c) => (c.type === 'terminal' ? !!c.output : true));
   // Folded by default (the row says what happened: a diff's line counts, a failure's mark); open when it
-  // is yours (a command you ran with `!`) or waits on you.
-  const openByDefault = !!tool?.byUser || status === 'awaiting_approval';
+  // is yours (a command you ran with `!`) or waits on you, or when Settings › Advanced opens it.
+  const policy = useContext(ToolsOpenContext);
+  const openByDefault = !!tool?.byUser || status === 'awaiting_approval' || policy === 'all' || (policy === 'failed' && status === 'failed');
   const body = content.length ? <ToolContentView content={content} /> : item.text ? <pre>{item.text}</pre> : null;
   return (
     <details className={`msg tool tool-${status} kind-${tool?.kind ?? 'other'}`} open={openByDefault} data-testid="tool-call" data-kind={tool?.kind ?? 'other'}>
@@ -284,8 +288,7 @@ export function groupTranscript(items: TranscriptItem[], allTools = false): Arra
   return out;
 }
 
-/** How many of the latest turns stay open; earlier ones fold to: your message, a summary, the reply. */
-/** The latest turn stays open; earlier ones fold to a line. */
+/** How many of the latest turns stay open by default (Settings › Advanced changes it); earlier ones fold to a line. */
 export const OPEN_TURNS = 1;
 
 export interface Turn {
@@ -321,9 +324,9 @@ export function splitTurns(items: TranscriptItem[]): Turn[] {
   });
 }
 
-/** Whether a turn shows folded: not one of the latest, not still going, and with steps worth folding. */
-export function foldsTurn(turn: Turn, index: number, count: number): boolean {
-  return index < count - OPEN_TURNS && !turn.live && turn.steps.length >= 2;
+/** Whether a turn shows folded: not one of the latest `open` (0: every turn open), not still going, and with steps worth folding. */
+export function foldsTurn(turn: Turn, index: number, count: number, open = OPEN_TURNS): boolean {
+  return open > 0 && index < count - open && !turn.live && turn.steps.length >= 2;
 }
 
 /** "14 steps · edited 3 files · ran 4 commands · 1 failed · 2 min" for a folded turn. */
@@ -382,8 +385,9 @@ export function ToolGroup({ items, main }: { items: TranscriptItem[]; main?: boo
   ];
   const failed = items.some((i) => i.toolStatus === 'failed');
   const label = (parts.filter(Boolean) as string[]).join(' · ');
+  const policy = useContext(ToolsOpenContext);
   return (
-    <details className="msg tool tool-group" data-testid="tool-group">
+    <details className="msg tool tool-group" data-testid="tool-group" open={policy === 'all' || (policy === 'failed' && failed)}>
       <summary>
         <span className="tool-status">
           <StatusIcon status={items.some((i) => i.toolStatus === 'running') ? 'running' : failed ? 'failed' : 'completed'} />

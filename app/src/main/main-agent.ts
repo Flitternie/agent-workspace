@@ -34,6 +34,8 @@ export interface MainAgentHost {
   agentChanges(taskId: string): Promise<string>;
   /** Counts the user's messages to the main agent; tool-call limits are per message. */
   mainTurn(): number;
+  /** Per message from the user (Settings › Advanced); unset = the defaults. */
+  mainLimits?(): { calls?: number; forks?: number };
 }
 
 /** Calls per user message: a backstop for a model stuck in a loop, not a working limit. */
@@ -58,7 +60,7 @@ function guard(host: MainAgentHost, tools: WorkspaceTool[]): WorkspaceTool[] {
       const key = `${t.name} ${JSON.stringify(args)}`;
       const same = (seen.get(key) ?? 0) + 1;
       seen.set(key, same);
-      if (++calls > MAX_CALLS_PER_TURN || same > MAX_SAME_CALL)
+      if (++calls > (host.mainLimits?.().calls ?? MAX_CALLS_PER_TURN) || same > MAX_SAME_CALL)
         return 'Not run: you already have this information. Reply to the user now, or hand the work to an agent. Do not wait for agents by checking again; their updates come to you on their own.';
       return t.run(args);
     },
@@ -170,7 +172,8 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           forkTurn = host.mainTurn();
           forks = 0;
         }
-        if (forks >= MAX_FORKS_PER_TURN) return `Not forked: at most ${MAX_FORKS_PER_TURN} forks per message from the user. Tell the user what you started, and fork more only if they ask.`;
+        const maxForks = host.mainLimits?.().forks ?? MAX_FORKS_PER_TURN;
+        if (forks >= maxForks) return `Not forked: at most ${maxForks} forks per message from the user. Tell the user what you started, and fork more only if they ask.`;
         // Taken before the await, so calls made in parallel cannot all pass the check.
         forks++;
         let forked: Awaited<ReturnType<MainAgentHost['forkFromMain']>>;

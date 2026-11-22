@@ -150,7 +150,7 @@ export interface ProviderSession {
    * its conversation (Codex). Without it, the workspace runs the command and hands the output
    * over with the next message.
    */
-  shell?(command: string): Promise<void>;
+  shell?(command: string, timeoutMs?: number): Promise<void>;
   /** Runs the following turns on `model` (unset: the CLI's default). */
   setModel?(model: string | undefined): Promise<void>;
   /** The skill library changed (same paths, new contents): pick it up without a restart. */
