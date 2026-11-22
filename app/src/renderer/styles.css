@@ -8572,19 +8572,31 @@ button.subtask-row:hover {
 .btn.btn-icon.busy .icon {
   animation: spin 0.9s linear infinite;
 }
-/* The side column's tabs, as a browser's: a strip along the bottom of the title row; the open tab is
-   the content's own colour and runs into it (over the strip's line); the others sit flat, divided. */
-.side-top:has(.research-tabs) {
-  padding-bottom: 0;
+/* A side panel with tabs, as a browser's: the tabs take the top row, on a strip, beside maximize and
+   close; the open tab is the content's own colour and runs into it; the others sit flat, divided. */
+.side-panel.with-tabs .side-top {
+  padding: 8px 8px 0 10px;
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--text) 6%);
+}
+.side-panel.with-tabs .side-head {
+  align-items: flex-end;
+}
+.side-panel.with-tabs .side-head > .icon-btn {
+  align-self: center;
+  margin-bottom: 2px;
+}
+.side-title-line {
+  padding: 2px 2px 0;
+}
+.side-title-line .panel-title {
+  font-size: 13.5px;
 }
 .research-tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: flex-end;
-  gap: 0;
-  margin: 2px -14px -1px;
-  padding: 6px 10px 0;
-  background: color-mix(in srgb, var(--panel-2) 82%, var(--text) 6%);
-  border-top: 1px solid var(--border);
+  margin-bottom: -1px;
 }
 .research-tabs button {
   position: relative;
@@ -8593,7 +8605,7 @@ button.subtask-row:hover {
   gap: 6px;
   max-width: 220px;
   min-width: 0;
-  padding: 6px 14px 7px;
+  padding: 7px 14px 8px;
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 9px 9px 0 0;
@@ -8606,7 +8618,6 @@ button.subtask-row:hover {
   text-overflow: ellipsis;
   cursor: pointer;
 }
-/* A divider between flat tabs, not beside the open one. */
 .research-tabs button + button::before {
   content: '';
   position: absolute;

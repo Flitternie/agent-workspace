@@ -239,7 +239,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   );
   const sidePanel = panel ? (
     <SidePanel
-      options={tabs}
+      tabs={tabs}
       title={selected.length > 1 ? t('{n} selected', { n: selected.length }) : selected[0] ? selected[0].title : doc.title}
       subtitle={levelName(selected)}
       label={t('Research details')}
