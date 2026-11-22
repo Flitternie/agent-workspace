@@ -406,6 +406,38 @@ describe('a research’s agents work through the research', () => {
   });
 });
 
+describe('what an agent asked the user is not lost', () => {
+  it('a research’s own messages leave it open (only the user answers it); after a restart a question stays, an approval expires', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = open(dataDir);
+    const p = await ws.addProject(repo(), 'shop');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Lead', isolate: false, mockScript: 'work', instruction: 'go' });
+    await until(() => ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status !== 'running');
+    const data = (ws as unknown as { store: { data: { attention: Array<Record<string, unknown>>; tasks: Array<Record<string, unknown>> }; save: () => void; flush: () => void } }).store;
+    const ask = (id: string, extra: Record<string, unknown> = {}) => data.data.attention.push({ id, taskId: t.taskId, kind: 'question', state: 'open', headline: 'Which next?', details: '', createdAt: new Date().toISOString(), ...extra });
+    ask('a-heur');
+    const state = (id: string) => ws.snapshot().attention.find((a) => a.id === id)?.state;
+    await ws.researchTell(undefined, t.taskId, 'Results came in.');
+    expect(state('a-heur')).toBe('open');
+    await until(() => ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status !== 'running');
+    await ws.send(t.taskId, 'Run 2 and 3.', 'text');
+    expect(state('a-heur')).toBe('resolved');
+    // A native question and a native approval, open when the app quits.
+    await until(() => ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status !== 'running');
+    ask('a-native-q', { providerRequestId: 'r1', sessionLocalId: 's1', questions: [{ id: 'q', question: 'Which next?', options: [{ id: 'o', label: 'A' }] }] });
+    data.data.attention.push({ id: 'a-native-ok', taskId: t.taskId, kind: 'approval', state: 'open', headline: 'Run rm?', details: '', providerRequestId: 'r2', sessionLocalId: 's1', options: [], createdAt: new Date().toISOString() });
+    const task = data.data.tasks.find((x) => x.taskId === t.taskId)!;
+    task.status = 'waiting_for_user';
+    data.save();
+    data.flush();
+    const again = open(dataDir);
+    const a = again.snapshot().attention;
+    expect(a.find((x) => x.id === 'a-native-q')).toMatchObject({ state: 'open', headline: 'Which next?' });
+    expect(a.find((x) => x.id === 'a-native-q')!.providerRequestId).toBeUndefined();
+    expect(a.find((x) => x.id === 'a-native-ok')!.state).toBe('expired');
+  });
+});
+
 describe('research managed by talking', () => {
   async function setup() {
     const ws = open();

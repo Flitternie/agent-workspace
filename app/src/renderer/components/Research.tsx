@@ -107,16 +107,22 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   // The room the page and its side column share: the column never takes so much that the graph (or the
   // column's own title row, with its buttons) is pushed out; a narrower window narrows it too.
   const rootRef = useRef<HTMLDivElement>(null);
-  const [pageW, setPageW] = useState(0);
+  // Measured from the page's left edge to the window's right one: the same whatever the column's width is
+  // (the page's own width shrinks as the column grows, and is measured a moment later).
+  const [shared, setShared] = useState(0);
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setPageW(el.clientWidth));
-    ro.observe(el);
-    setPageW(el.clientWidth);
-    return () => ro.disconnect();
+    const measure = () => setShared(Math.max(0, window.innerWidth - el.getBoundingClientRect().left));
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    window.addEventListener('resize', measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [!!doc]);
-  const shared = pageW + (panel && !panelMax ? panelW : 0);
   const maxPanel = shared ? Math.max(320, Math.min(shared * 0.7, shared - GRAPH_MIN)) : Infinity;
   const shownW = Math.min(panelW, maxPanel);
 

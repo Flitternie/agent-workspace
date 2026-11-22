@@ -313,6 +313,15 @@ export class Workspace {
   /** Nothing is connected after a restart: be honest about it. */
   private recoverAfterRestart(): void {
     const d = this.store.data;
+    // A question the agent asked (natively) stays open: it is answered in a message now, which the resumed
+    // session reads with what it asked; the agent still waits on the user. (Approvals expire below.)
+    for (const a of d.attention)
+      if (a.state === 'open' && a.providerRequestId && a.kind === 'question') {
+        a.providerRequestId = undefined;
+        a.sessionLocalId = undefined;
+        a.questions = undefined;
+        a.options = undefined;
+      }
     for (const t of [...d.tasks, ...(d.mainAgent ? [d.mainAgent] : [])]) {
       this.handBackRetry(t);
       this.endSubtasks(t, 'The app restarted.');
@@ -324,7 +333,7 @@ export class Workspace {
     // A side question still unanswered when the app quit will not be answered now.
     for (const list of Object.values(d.btw ?? {}))
       for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';
-    // Native approvals/questions die with the provider process: never show them as still answerable.
+    // Native approvals die with the provider process: never shown as still answerable.
     for (const a of d.attention) {
       if (a.state === 'open' && a.providerRequestId) {
         a.state = 'expired';
@@ -592,7 +601,7 @@ export class Workspace {
     const done = (s: string) => s === 'pass' || s === 'fail' || s === 'unclear' || s === 'error';
     const tell = (taskId: string | undefined, text: string) => {
       if (!taskId || taskId === by || !this.findTask(taskId)) return;
-      void this.send(taskId, text, 'text').catch(() => {});
+      void this.send(taskId, text, 'text', { keepAsks: true }).catch(() => {});
     };
     const byAspect = new Map<string, string[]>();
     for (const e of after.nodes.filter((n) => n.type === 'experiment' && done(n.status))) {
@@ -648,7 +657,7 @@ export class Workspace {
     this.summaryAsked.set(projectId, Date.now());
     const zh = this.language() === 'zh';
     const aspect = doc.nodes.find((n) => n.id === scope)?.title ?? scope;
-    void this.send(lead.taskId, zh ? `「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况。` : `The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary").`, 'text').catch(() => {});
+    void this.send(lead.taskId, zh ? `「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况。` : `The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary").`, 'text', { keepAsks: true }).catch(() => {});
   }
 
   // ResearchHost: what the research tools need.
@@ -694,7 +703,7 @@ export class Workspace {
     if (!to) throw new Error('That agent is gone.');
     const from = fromTaskId ? this.findTask(fromTaskId)?.alias : undefined;
     const zh = this.language() === 'zh';
-    const r = await this.send(to.taskId, `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${text}`, 'text');
+    const r = await this.send(to.taskId, `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${text}`, 'text', { keepAsks: true });
     if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
     return to.alias;
   }
@@ -2097,7 +2106,8 @@ export class Workspace {
   }
 
   /** Delivers text to exactly this task's native session. Never re-routed. */
-  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[]; openRequest?: string } = {}): Promise<DispatchResult> {
+  /** `keepAsks`: not the user's reply (a research's own message between its agents): what the agent asked the user stays open. */
+  async send(taskId: string, text: string, via: TranscriptItem['via'], opts: { interrupt?: boolean; images?: ImageRef[]; openRequest?: string; keepAsks?: boolean } = {}): Promise<DispatchResult> {
     const task = this.task(taskId);
     const images = opts.images?.length ? opts.images.slice(0, MAX_IMAGES) : undefined;
     const missing = images?.find((r) => !this.attachments.has(r.id));
@@ -2146,7 +2156,7 @@ export class Workspace {
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.
       for (const a of this.store.data.attention)
-        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
+        if (!opts.keepAsks && a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
           this.closeAttention(a, 'resolved', `Replied: ${clip(about, 80)}`);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
