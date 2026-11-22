@@ -95,7 +95,7 @@ export function Sidebar({
       <div key={`research-${r.id}`} className={`agent-item${on ? ' active' : ''}`}>
         <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
           <span className="alias alias-sm research-mark" aria-hidden>
-            <Icon name="branch" size={12} />
+            <Icon name="flask" size={12} />
           </span>
           <span className="agent-row-text">
             <span className="agent-row-name">
@@ -117,7 +117,7 @@ export function Sidebar({
   const newResearch = (projectId: string) =>
     researchOf(projectId) || snapshot.projects.find((p) => p.projectId === projectId)?.host ? null : (
       <button key={`new-research-${projectId}`} className="team-idle team-new-research" onClick={() => onNewResearch(projectId)} data-testid="new-research">
-        <Icon name="branch" size={11} /> {tr('New research')}
+        <Icon name="flask" size={11} /> {tr('New research')}
       </button>
     );
   // A project whose agents are all in its research has no team of its own: its research still shows.
