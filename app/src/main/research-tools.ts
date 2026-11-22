@@ -474,7 +474,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         'Blocks are fenced code blocks, ```research:<kind> with JSON options inside:',
         'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":"*" (a column per dataset, new ones added) or a list (left out: one column per metric over all its results),"cell":"best"|"latest"|"mean"|"sum","sum":["metrics added up, e.g. what was spent"],"lower":["metrics where lower is better"],"title":"..."}. Whatever this research tracks goes in as a metric, resources included (cost, GPU hours, tokens: record them as results, show them summed).',
         'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
-        'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated; it is styled like the page: plain tables and text look like the rest).',
+        'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated, no network; it is styled like the page: plain tables and text look like the rest). Put script code inside a function: top-level names like top, name or parent are the page’s own and break the script.',
         'Results for tables are recorded with research_record (results: metric, dataset, value).',
       ].join(' '),
       schema: z.object({

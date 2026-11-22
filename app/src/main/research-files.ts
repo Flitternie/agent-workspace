@@ -124,12 +124,14 @@ export class ResearchFiles {
     const { projectId: real, dir } = parseResearchId(projectId);
     if (!p.host) return createResearch(p, title, goal, sample, lang);
     await this.ready(projectId);
+    // A listing still on its way was taken before this research existed: it must not land after and hide it.
+    await this.listing.get(real);
     if (this.remote.get(projectId)?.doc) throw new Error(dir ? `${dir} already has a research.` : 'This project already has a research.');
     const doc = sample ? sampleResearch(lang, title, goal) : emptyResearch(title.trim(), goal.trim());
     this.saveDoc(projectId, doc);
     if (sample) for (const [scope, text] of Object.entries(sampleNotes(doc, lang))) this.saveNote(projectId, scope, text);
-    const dirs = this.remoteDirs.get(real);
-    if (dirs && !dirs.includes(dir ?? '')) this.remoteDirs.set(real, [...dirs, dir ?? '']);
+    const dirs = this.remoteDirs.get(real) ?? [];
+    if (!dirs.includes(dir ?? '')) this.remoteDirs.set(real, [...dirs, dir ?? '']);
     return doc;
   }
 

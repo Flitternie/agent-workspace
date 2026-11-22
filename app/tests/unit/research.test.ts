@@ -213,6 +213,25 @@ describe('repeats and noise, only when asked for', () => {
 });
 
 describe('research on an SSH host', () => {
+  it('a research created on a host while its listing is on the way is not hidden when the listing lands', async () => {
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('../../src/main/util/ssh', async (orig) => ({
+      ...(await orig<typeof import('../../src/main/util/ssh')>()),
+      // The listing was taken before the research existed, and comes back late.
+      sshRun: async (_host: string, cmd: string) => (cmd.includes('*/.research/research.json') ? (await new Promise((r) => setTimeout(r, 40)), { code: 0, stdout: '', stderr: '' }) : { code: 0, stdout: '', stderr: '' }),
+      sshRunInput: async () => ({ code: 0, stdout: '', stderr: '' }),
+    }));
+    const { ResearchFiles } = await import('../../src/main/research-files');
+    const project = { projectId: 'p', name: 'p', rootPath: '/srv/p', host: 'gpu-box', isGitRepo: true, createdAt: '' };
+    const rf = new ResearchFiles(() => project, () => project, () => {});
+    expect(rf.ids('p')).toEqual([]); // the listing starts
+    await rf.create('p', 'New', '', false, 'en');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(rf.ids('p')).toEqual(['p']);
+    vi.doUnmock('../../src/main/util/ssh');
+  });
+
   it('is fetched in one round trip, written in order, and read only once writes are done', async () => {
     const { vi } = await import('vitest');
     const files = new Map<string, string>([['/srv/p/.research/research.json', JSON.stringify(sampleResearch('en'))], ['/srv/p/.research/summary.md', '# Where things stand\n']]);
