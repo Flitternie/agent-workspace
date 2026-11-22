@@ -58,9 +58,9 @@ function toolResultText(content: unknown): string {
  * app), pre-approved, and nothing else — no built-in tools (files, shell, web,
  * sub-agents) and none of the user's own MCP servers. It coordinates; agents do the work.
  */
-function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: WorkspaceTool[]) {
-  const server = sdk.createSdkMcpServer({
-    name: 'workspace',
+function toolServer(sdk: Awaited<ReturnType<typeof loadSdk>>, name: string, tools: WorkspaceTool[]) {
+  return sdk.createSdkMcpServer({
+    name,
     version: '1.0.0',
     tools: tools.map((t) =>
       sdk.tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
@@ -72,6 +72,10 @@ function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: Works
       }),
     ),
   });
+}
+
+function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: WorkspaceTool[]) {
+  const server = toolServer(sdk, 'workspace', tools);
   return {
     tools: [],
     mcpServers: { workspace: server },
@@ -435,7 +439,10 @@ class ClaudeSession implements ProviderSession {
         // Load the user's own settings, CLAUDE.md and permission rules as the CLI would.
         settingSources: ['user', 'project', 'local'],
         // Plus: no reading the private folders (Read rules also keep Grep and Glob out of them).
-        ...(privateDeny.length ? { settings: { permissions: { deny: privateDeny.map((dir) => `Read(/${dir}/**)`) } } } : {}),
+        ...(privateDeny.length || this.args.denyEdit?.length
+          ? { settings: { permissions: { deny: [...privateDeny.map((dir) => `Read(/${dir}/**)`), ...(this.args.denyEdit ?? []).flatMap((g) => [`Edit(${g})`, `Write(${g})`])] } } }
+          : {}),
+        ...(this.args.disallowedTools?.length && !this.args.tools?.length ? { disallowedTools: this.args.disallowedTools } : {}),
         includePartialMessages: true,
         // The workspace skill library, as a local plugin (on a host: its copy there).
         ...(this.args.skills ? { plugins: [{ type: 'local' as const, path: this.args.skills.pluginDir }] } : {}),
@@ -447,6 +454,10 @@ class ClaudeSession implements ProviderSession {
         ...(this.args.model ? { model: this.args.model } : {}),
         canUseTool: this.canUseTool,
         ...(this.args.tools?.length ? mainAgentOptions(sdk, this.args.tools) : {}),
+        // A worker in a project with a research: its tools, as one more MCP server, pre-approved; the rest is as the CLI has it.
+        ...(this.args.extraTools?.length && !this.args.tools?.length
+          ? { mcpServers: { research: toolServer(sdk, 'research', this.args.extraTools) }, allowedTools: this.args.extraTools.map((t) => `mcp__research__${t.name}`) }
+          : {}),
         stderr: () => {
           /* diagnostics may contain private tool arguments; never forwarded */
         },

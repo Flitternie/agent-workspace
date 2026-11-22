@@ -52,6 +52,10 @@ import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
 import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
+import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
+import { ResearchFiles } from './research-files';
+import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
+import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -495,10 +499,362 @@ export class Workspace {
     for (const cb of this.changeListeners) cb();
   }
 
+  // ---------------------------------------------------------------- research (trees kept in a project's repos)
+  // A research is named by its id (shared/research.ts researchId): its project's for the one at the
+  // project's root, "<project>::<folder>" for one in a folder (a project holding several repositories).
+
+  /** The research files: .research/ on this Mac, or fetched from and written to the project's SSH host. */
+  private researchFiles = new ResearchFiles(
+    (id) => this.researchProject(id),
+    (projectId) => this.project(projectId),
+    () => {
+      this.researchIndex.clear();
+      this.researchIds.clear();
+      this.changed();
+    },
+    (...args) => this.log(...args),
+  );
+  /** Each research's summary (who is in it), read once and kept current on save. */
+  private researchIndex = new Map<string, ResearchSummary | null>();
+  /** Each project's researches, found once. */
+  private researchIds = new Map<string, string[]>();
+
+  /** The project a research id names, its root moved to the research's folder. */
+  private researchProject(id: string): Project {
+    const { projectId, dir } = parseResearchId(id);
+    const p = this.project(projectId);
+    if (!dir) return p;
+    if (!isResearchDir(dir)) throw new Error(`Not a folder a research can be in: ${dir}`);
+    return { ...p, projectId: id, rootPath: p.host ? `${p.rootPath.replace(/\/+$/, '')}/${dir}` : join(p.rootPath, dir) };
+  }
+
+  private summarize(id: string, doc: ResearchDoc | null): ResearchSummary | null {
+    if (!doc) return null;
+    const n = this.researchFiles.notes(id);
+    const notesAt = [n.summary?.updatedAt, n.ui?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
+    const { projectId, dir } = parseResearchId(id);
+    return { id, projectId, ...(dir ? { dir } : {}), ...(doc.color != null ? { color: doc.color } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
+  }
+
+  private researchSummaries(): ResearchSummary[] {
+    const out: ResearchSummary[] = [];
+    for (const p of this.store.data.projects) {
+      let ids = this.researchIds.get(p.projectId);
+      if (!ids) {
+        ids = this.researchFiles.ids(p.projectId);
+        this.researchIds.set(p.projectId, ids);
+      }
+      for (const id of ids) {
+        if (!this.researchIndex.has(id)) this.researchIndex.set(id, this.summarize(id, this.researchFiles.doc(id)));
+        const r = this.researchIndex.get(id);
+        if (r) out.push(r);
+      }
+    }
+    return out;
+  }
+
+  private indexResearch(projectId: string, doc: ResearchDoc | null): void {
+    this.researchIndex.set(projectId, this.summarize(projectId, doc));
+    this.changed();
+  }
+
+  /** Resolves when the research can be read as it is (pending writes done; an SSH host's fetched). */
+  researchReady(projectId: string): Promise<void> {
+    return this.researchFiles.ready(projectId);
+  }
+
+  researchGet(projectId: string): ResearchDoc | null {
+    return this.researchFiles.doc(projectId);
+  }
+
+  /** For the page: once ready (an SSH host's research is fetched first). */
+  async researchLoad(projectId: string): Promise<ResearchDoc | null> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    this.researchIndex.set(projectId, this.summarize(projectId, doc));
+    return doc;
+  }
+
+  researchSave(projectId: string, doc: ResearchDoc, by?: string): ResearchDoc {
+    const before = this.researchFiles.doc(projectId);
+    this.researchFiles.saveDoc(projectId, doc);
+    this.indexResearch(projectId, doc);
+    if (before) this.reportUp(before, doc, by);
+    return doc;
+  }
+
+  /**
+   * What happens in one part of a research reaches the agent over it, by itself: an experiment's result goes
+   * to its aspect's agent; an aspect's changed takeaway goes to the lead. Never to the agent that made the change.
+   */
+  private reportUp(before: ResearchDoc, after: ResearchDoc, by?: string): void {
+    const zh = this.language() === 'zh';
+    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'unclear' || s === 'error';
+    const tell = (taskId: string | undefined, text: string) => {
+      if (!taskId || taskId === by || !this.findTask(taskId)) return;
+      void this.send(taskId, text, 'text').catch(() => {});
+    };
+    const byAspect = new Map<string, string[]>();
+    for (const e of after.nodes.filter((n) => n.type === 'experiment' && done(n.status))) {
+      const was = before.nodes.find((n) => n.id === e.id);
+      if (was && done(was.status) && was.value === e.value && was.takeaway === e.takeaway) continue;
+      const method = after.nodes.find((n) => n.id === e.parent);
+      const aspect = after.nodes.find((n) => n.id === method?.parent);
+      if (!aspect || !method) continue;
+      const result = [e.status, e.value != null ? formatValue(aspect.metric, e.value) : '', e.takeaway ?? e.findings?.at(-1)?.text ?? ''].filter(Boolean).join(' · ');
+      byAspect.set(aspect.id, [...(byAspect.get(aspect.id) ?? []), `[${e.id}] ${method.title} / ${e.title}: ${result}`]);
+    }
+    for (const [aspectId, lines] of byAspect) {
+      const aspect = after.nodes.find((n) => n.id === aspectId)!;
+      // A method whose experiments all have their results now (some were still running before): time for the notes, unless the policy says not to.
+      const whole = after.policy?.autoNotes === false ? [] : after.nodes.filter((m) => m.type === 'method' && m.parent === aspectId).filter((m) => {
+        const now = childrenOf(after, m.id);
+        return now.length > 0 && now.every((e) => done(e.status)) && childrenOf(before, m.id).some((e) => e.status === 'running');
+      });
+      const notes = whole.map((m) => (zh ? `「${m.title}」这一批 ${childrenOf(after, m.id).length} 个实验都有结果了。可以用 research_notes 更新「${aspect.title}」的笔记。` : `All ${childrenOf(after, m.id).length} experiments of "${m.title}" have their results. You may want to update the notes for "${aspect.title}" (research_notes).`));
+      tell(aspect.taskId, [`${zh ? `「${aspect.title}」里有实验出结果了：` : `Results came in under "${aspect.title}":`}`, ...lines, zh ? '据此决定下一步（再试什么、是否已有结论），并保持这个方面和对应方法的一句话结论是最新的（research_update）。' : 'Decide what follows (what to try next, whether there is a conclusion yet), and keep this aspect’s and the method’s takeaways current (research_update).', ...notes].join('\n'));
+    }
+    for (const a of after.nodes.filter((n) => n.type === 'aspect' && n.takeaway)) {
+      if (before.nodes.find((n) => n.id === a.id)?.takeaway === a.takeaway) continue;
+      tell(after.leadTaskId, zh ? `「${a.title}」的结论更新了：${a.takeaway}` : `The takeaway of "${a.title}" changed: ${a.takeaway}`);
+    }
+  }
+
+  // Notes: .research/summary.md (the lead's) and notes/<aspect>.md (each aspect's agent's).
+  researchNotes(projectId: string): ResearchNotes {
+    return this.researchFiles.notes(projectId);
+  }
+
+  async researchLoadNotes(projectId: string): Promise<ResearchNotes> {
+    await this.researchReady(projectId);
+    return this.researchNotes(projectId);
+  }
+
+  /** When the summary was last asked for, per research (the research's policy says how often at most). */
+  private summaryAsked = new Map<string, number>();
+
+  researchWriteNote(projectId: string, scope: string, text: string): void {
+    this.researchFiles.saveNote(projectId, scope, text);
+    const doc = this.researchFiles.doc(projectId);
+    this.indexResearch(projectId, doc);
+    if (scope === 'summary' || scope === 'ui' || scope.startsWith('view:') || !doc) return;
+    // An aspect's notes moved: the lead folds them into the summary, as often as the policy allows.
+    const every = (doc.policy?.summaryEvery ?? 30) * 60_000;
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    const last = this.summaryAsked.get(projectId) ?? 0;
+    if (!every || !lead || Date.now() - last < every) return;
+    this.summaryAsked.set(projectId, Date.now());
+    const zh = this.language() === 'zh';
+    const aspect = doc.nodes.find((n) => n.id === scope)?.title ?? scope;
+    void this.send(lead.taskId, zh ? `「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况。` : `The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary").`, 'text').catch(() => {});
+  }
+
+  // ResearchHost: what the research tools need.
+  researchList(): Array<{ id: string; projectId: string; project: string; dir?: string; title: string; taskIds: string[] }> {
+    return this.researchSummaries().map((r) => ({ id: r.id, projectId: r.projectId, project: this.store.data.projects.find((p) => p.projectId === r.projectId)?.name ?? r.projectId, ...(r.dir ? { dir: r.dir } : {}), title: r.title, taskIds: r.taskIds }));
+  }
+
+  allProjects(): Array<{ projectId: string; name: string }> {
+    return this.store.data.projects.map((p) => ({ projectId: p.projectId, name: p.name }));
+  }
+
+  findTaskById(taskId: string): Task | undefined {
+    return this.findTask(taskId);
+  }
+
+  language(): 'en' | 'zh' {
+    return this.store.data.settings.language === 'zh' ? 'zh' : 'en';
+  }
+
+  /** The provider a research starts agents with: mock agents in the demo or a workspace with nothing else; else the first signed-in CLI. */
+  private researchProvider(): AgentProvider {
+    const onlyMock = Object.keys(this.opts.adapters).every((k) => k === 'mock');
+    const order: AgentProvider[] = this.opts.demo || onlyMock ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
+    const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
+    if (!p) throw new Error('No signed-in Claude Code or Codex to start an agent.');
+    return p;
+  }
+
+  /** An agent's place in a research: its lead, an aspect's agent, an experiment's, or none. */
+  private researchRole(id: string, taskId: string): 'lead' | 'aspect' | 'experiment' | 'none' {
+    const doc = this.researchGet(id);
+    if (!doc) return 'none';
+    if (doc.leadTaskId === taskId) return 'lead';
+    const n = doc.nodes.find((x) => x.taskId === taskId);
+    return n ? (n.type === 'aspect' ? 'aspect' : 'experiment') : 'none';
+  }
+
+  /** One agent of a research tells another something (research_tell): delivered as a message, marked with who sent it. */
+  async researchTell(fromTaskId: string | undefined, toTaskId: string, text: string): Promise<string> {
+    const to = this.findTask(toTaskId);
+    if (!to) throw new Error('That agent is gone.');
+    const from = fromTaskId ? this.findTask(fromTaskId)?.alias : undefined;
+    const zh = this.language() === 'zh';
+    const r = await this.send(to.taskId, `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${text}`, 'text');
+    if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+    return to.alias;
+  }
+
+  /** For a research kept in a folder of its project: which folder its agents work on. */
+  private researchWhere(id: string): string {
+    const { dir } = parseResearchId(id);
+    if (!dir) return '';
+    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的。\n\n` : `This research is about the folder ${dir}/ of the project.\n\n`;
+  }
+
+  /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
+  async researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    const node = doc?.nodes.find((n) => n.id === nodeId);
+    if (!doc || !node) throw new Error('That node is not in the research.');
+    const provider = this.researchProvider();
+    const aspect = node.type === 'aspect' ? node : doc.nodes.find((n) => n.id === doc.nodes.find((m) => m.id === node.parent)?.parent);
+    const zh = this.language() === 'zh';
+    const task = await this.createTask({
+      projectId: parseResearchId(projectId).projectId,
+      provider,
+      title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
+      instruction: `${this.researchWhere(projectId)}${researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId))}`,
+      isolate: opts.isolate,
+      ...(node.type === 'aspect' ? { researchManager: true } : {}),
+      ...(provider === 'mock' ? { mockScript: 'work' } : {}),
+    });
+    // Linked on the freshest copy: the tree may have changed while the agent started.
+    const fresh = this.researchGet(projectId)!;
+    this.researchSave(projectId, updateNode(fresh, nodeId, { taskId: task.taskId, ...(node.status === 'idea' ? { status: 'running' as const } : {}) }));
+    return task;
+  }
+
+  /** The research's lead: the agent the user lays the tree out with and talks to about all of it. Started by the first message to it. */
+  async researchStartLead(projectId: string, message: string): Promise<Task> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    if (!doc) throw new Error('This project has no research.');
+    const zh = this.language() === 'zh';
+    const task = await this.createTask({
+      projectId: parseResearchId(projectId).projectId,
+      provider: this.researchProvider(),
+      title: zh ? `${doc.title}（研究负责人）` : `${doc.title} (research lead)`,
+      instruction: `${this.researchWhere(projectId)}${leadBrief(doc, this.language(), message, this.researchNotes(projectId))}`,
+      isolate: false,
+      researchManager: true,
+      ...(this.researchProvider() === 'mock' ? { mockScript: 'work' } : {}),
+    });
+    this.researchSave(projectId, { ...this.researchGet(projectId)!, leadTaskId: task.taskId, updatedAt: new Date().toISOString() });
+    return task;
+  }
+
+  /**
+   * The box on the research page: to the agent of the nearest node over what is selected (an aspect
+   * with no agent yet: this message starts it), or to the research's lead (started by its first message).
+   */
+  async researchMessage(projectId: string, nodeIds: string[], text: string, images?: ImageRef[]): Promise<{ taskId: string; alias: string }> {
+    await this.researchReady(projectId);
+    const doc = this.researchGet(projectId);
+    if (!doc) throw new Error('This project has no research.');
+    const nodes = nodeIds.map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n);
+    const route = routeFor(doc, nodes);
+    const lang = this.language();
+    const deliver = async (taskId: string, body: string) => {
+      const r = await this.send(taskId, body, 'text', { images });
+      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+      return { taskId, alias: this.findTask(taskId)?.alias ?? '' };
+    };
+    if (route.kind === 'experiment') return deliver(route.node.taskId!, text);
+    const start = async (t: Task) => {
+      // Images come with a first message only through send: right after it starts.
+      if (images?.length) await this.send(t.taskId, '', 'text', { images });
+      return { taskId: t.taskId, alias: t.alias };
+    };
+    if (route.kind === 'aspect') {
+      const prefix = aboutPrefix(route.about, doc, lang, false);
+      const agent = route.aspect.taskId ? this.findTask(route.aspect.taskId) : undefined;
+      if (!agent) return start(await this.researchStartAgent(projectId, route.aspect.id, { isolate: false, message: `${prefix}${text}` }));
+      return deliver(agent.taskId, `${prefix}${text}`);
+    }
+    const prefix = aboutPrefix(route.about, doc, lang, false);
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    if (!lead) return start(await this.researchStartLead(projectId, `${prefix}${text}`));
+    return deliver(lead.taskId, `${prefix}${text}`);
+  }
+
+  /** Ends a research: its agents are ordinary agents of the project again; its files stay, renamed (ResearchFiles.dissolve). */
+  async researchDissolve(id: string): Promise<{ kept: string }> {
+    await this.researchReady(id);
+    if (!this.researchGet(id)) throw new Error('No research.');
+    const kept = await this.researchFiles.dissolve(id);
+    this.researchIndex.delete(id);
+    this.researchIds.delete(parseResearchId(id).projectId);
+    this.changed();
+    return { kept };
+  }
+
+  /** The conversations as the lead is asked to bring them in: read each, lay out a few broad aspects, attach. */
+  private bringIn(tasks: Task[]): string {
+    const names = tasks.map((t) => `${t.alias}${t.title ? ` (${t.title})` : ''}`).join(', ');
+    return this.language() === 'zh'
+      ? `请把这些已有的对话整理进这个研究：${names}。先用 research_read 读每个对话，按内容定出少数几个大的方面和各自的方法（同类的放在一起；为某个方法做的前期验证放在该方法下面），把得到的数字和结论记到实验上（research_record，含一句话结论），再用 research_attach 把每个对话挂到它对应的节点。最后写一份总结（research_notes，scope "summary"），并用一两句话告诉我整理成了什么样。`
+      : `Bring these existing conversations into this research: ${names}. Read each with research_read; lay out a few broad aspects and their methods from what they did (things of one kind together; an early check for a method goes under that method); record the numbers and conclusions on experiments (research_record, with a one-line takeaway); attach each conversation to its node with research_attach. Then write the summary (research_notes, scope "summary") and tell me in a line or two what it came to.`;
+  }
+
+  /** A research made from conversations the user picked: created, then its lead reads them and builds the tree. */
+  async researchFromTasks(projectId: string, taskIds: string[], title?: string, dir?: string): Promise<{ researchId: string }> {
+    const tasks = taskIds.map((id) => this.findTask(id)).filter((t): t is Task => !!t);
+    if (!tasks.length) throw new Error('Pick at least one conversation.');
+    if (tasks.some((t) => t.projectId !== projectId)) throw new Error('A research holds conversations of one project.');
+    const name = title?.trim() || tasks[0].title || tasks[0].alias;
+    await this.researchCreate(projectId, name, '', false, dir);
+    const d = dir?.trim().replace(/^\.\/+|\/+$/g, '');
+    const id = researchId(projectId, d || undefined);
+    await this.researchStartLead(id, this.bringIn(tasks));
+    return { researchId: id };
+  }
+
+  /** More conversations into a research that exists: its lead is asked (and started if it has none yet). */
+  async researchAddTasks(id: string, taskIds: string[]): Promise<void> {
+    await this.researchReady(id);
+    const doc = this.researchGet(id);
+    if (!doc) throw new Error('No research.');
+    const taken = new Set(taskIdsOf(doc));
+    const tasks = taskIds.map((t) => this.findTask(t)).filter((t): t is Task => !!t && !taken.has(t.taskId) && t.projectId === parseResearchId(id).projectId);
+    if (!tasks.length) throw new Error('Those conversations are already in it, or belong to another project.');
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    if (!lead) await this.researchStartLead(id, this.bringIn(tasks));
+    else {
+      const r = await this.send(lead.taskId, this.bringIn(tasks), 'text');
+      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+    }
+  }
+
+  /** The page puts a template in place as a node's view (to be edited from there, by an agent or by hand). */
+  async researchSetView(id: string, key: string, text: string): Promise<void> {
+    await this.researchReady(id);
+    const doc = this.researchGet(id);
+    if (!doc) throw new Error('No research.');
+    if (key !== 'goal' && !doc.nodes.some((n) => n.id === key)) throw new Error('That node is not in the research.');
+    this.researchWriteNote(id, `view:${key}`, text);
+  }
+
+  /** A research at the project's root, or in one of its folders (`dir`, relative). */
+  async researchCreate(projectId: string, title: string, goal: string, sample: boolean, dir?: string): Promise<ResearchDoc> {
+    const d = dir?.trim().replace(/^\.\/+|\/+$/g, '');
+    if (d && !isResearchDir(d)) throw new Error(`Not a folder in the project: ${dir}`);
+    const id = researchId(projectId, d || undefined);
+    const used = this.researchSummaries().map((r) => (r.color != null ? r.color : RESEARCH_COLORS.indexOf(researchColor(r) as (typeof RESEARCH_COLORS)[number])));
+    const created = await this.researchFiles.create(id, title, goal, sample, this.language());
+    const doc = { ...created, color: nextResearchColor(used) };
+    this.researchFiles.saveDoc(id, doc);
+    this.researchIds.delete(projectId);
+    this.indexResearch(id, doc);
+    return doc;
+  }
+
   snapshot(): WorkspaceSnapshot {
     this.stampStatus();
     const d = this.store.data;
     return {
+      research: this.researchSummaries(),
       projects: d.projects,
       tasks: d.tasks,
       sessions: d.sessions,
@@ -699,6 +1055,8 @@ export class Workspace {
     instruction?: string;
     isolate: boolean;
     mockScript?: string;
+    /** A research's lead or an aspect's agent (Task.researchManager). */
+    researchManager?: boolean;
     /** Images that go with the first instruction (the main agent passing on the user's). */
     images?: ImageRef[];
   }): Promise<Task> {
@@ -736,6 +1094,7 @@ export class Workspace {
       label: !args.name?.trim() && title ? { title: args.title ?? '', instruction: args.instruction } : undefined,
       mockScript: args.mockScript,
     });
+    if (args.researchManager) task.researchManager = true;
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial', { images: args.images });
@@ -1165,6 +1524,13 @@ export class Workspace {
 
     const isMain = task === this.store.data.mainAgent;
     const skills = isMain ? undefined : await this.skillsFor(task);
+    // Its project's researches are known before it starts (a host's are listed first), so it gets their tools.
+    if (!isMain) await this.researchFiles.listed(task.projectId).catch(() => {});
+    const inResearch = !isMain && this.researchSummaries().some((r) => r.projectId === task.projectId);
+    // A research's lead and aspect agents hand work out through the research (research_try: agents the page shows
+    // and the user can talk to), so they go without the CLI's own hidden sub-agents.
+    // (Known from how it was started, or, for a conversation attached later, from its place in the tree.)
+    const manages = inResearch && (!!task.researchManager || this.researchSummaries().some((r) => r.projectId === task.projectId && ['lead', 'aspect'].includes(this.researchRole(r.id, task.taskId))));
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -1178,7 +1544,12 @@ export class Workspace {
         mockScript: task.mockScript,
         model: task.model,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
-        tools: isMain ? workspaceTools(this) : undefined,
+        tools: isMain ? [...workspaceTools(this), ...researchTools(this, { kind: 'main' })] : undefined,
+        // In a project with a research, any agent may read the tree; what it may change is decided per call (its place in it).
+        extraTools: inResearch ? researchTools(this, { kind: 'agent', taskId: task.taskId }) : undefined,
+        ...(manages ? { disallowedTools: ['Agent', 'Task'] } : {}),
+        // The tree, notes and views are changed through the research tools, never by editing the files.
+        ...(inResearch ? { denyEdit: ['**/.research/**'] } : {}),
         skills,
       },
       (event) => {
@@ -3187,6 +3558,13 @@ export class Workspace {
   /** Creates a self-contained demo repo and three mock agents matching the spec's script. */
   async seedDemo(demoRepoPath: string): Promise<void> {
     const project = await this.addProject(demoRepoPath, 'demo-shop');
+    // A filled-in research to look at (no agents behind it).
+    if (!readResearch(project)) {
+      const sample = sampleResearch(this.language());
+      writeResearch(project, sample);
+      writeSampleNotes(project, sample, this.language());
+      this.researchIndex.delete(project.projectId);
+    }
     // Labels come from the titles (the demo asks no model).
     const mk = (provider: AgentProvider, title: string, mockScript: string, instruction: string) =>
       this.createTask({ projectId: project.projectId, provider, title, mockScript, instruction, isolate: true });
