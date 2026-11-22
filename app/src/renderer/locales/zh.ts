@@ -1219,6 +1219,7 @@ export const zh: Record<string, string> = {
   'What this panel shows is a view an agent can rewrite: ask below for what you want to see.': '这里显示的是一个可以由 agent 重写的视图：想看什么，在下方说。',
   'Custom (written for it)': '自定义（为它写的）',
   'Template': '模板',
+  'Panel view': '视图',
   'No aspects yet.': '还没有方面。',
   'No results recorded for this table yet.': '这张表还没有记录到结果。',
   'e.g. Which aspect deserves the next experiments?': '比如：接下来最值得在哪个方面做实验？',

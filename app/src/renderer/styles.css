@@ -8179,3 +8179,15 @@ button.subtask-row:hover {
   border: 0;
   background: transparent;
 }
+/* The row's name stays in view while the numbers scroll sideways. */
+.rs-live-name,
+.rs-live-scroll th:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--panel-2);
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 1;
+}

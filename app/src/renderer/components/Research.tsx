@@ -662,7 +662,7 @@ function ViewBar({ ctx, level, viewKey: key, text, own }: { ctx: Ctx; level: Vie
   const lang = currentLanguage() === 'zh' ? 'zh' : 'en';
   return (
     <div className="rs-viewbar" title={t('What this panel shows is a view an agent can rewrite: ask below for what you want to see.')}>
-      <span className="muted small">{t('View')}</span>
+      <span className="muted small">{t('Panel view')}</span>
       <select
         className="rs-viewpick"
         value={at?.id ?? ''}
@@ -909,6 +909,8 @@ function LiveTableBlock({ ctx, node, spec }: { ctx: Ctx; node?: ResearchNode; sp
   if (!tb.columns.length) return <div className="muted small">{t('No results recorded for this table yet.')}</div>;
   const metrics = [...new Set(tb.columns.map((c) => c.metric))];
   const grouped = tb.columns.some((c) => c.dataset);
+  // One number of decimals per column (as many as its values use, at most 3), so a column reads straight down.
+  const places = tb.columns.map((_, j) => Math.min(3, Math.max(0, ...tb.rows.map((r) => (r.cells[j] == null ? 0 : (String(r.cells[j]).split('.')[1] ?? '').length)))));
   return (
     <div className="rs-live" data-testid="research-live-table">
       {tb.title ? <div className="rs-sec">{tb.title}</div> : null}
@@ -938,12 +940,12 @@ function LiveTableBlock({ ctx, node, spec }: { ctx: Ctx; node?: ResearchNode; sp
           <tbody>
             {tb.rows.map((r, i) => (
               <tr key={r.node.id} className="clickable" onClick={() => ctx.select(r.node.id)}>
-                <td>
+                <td className="rs-live-name" title={r.node.title}>
                   <i className={`rg-dot st-${ctx.statusOf(r.node)}`} /> {r.node.title}
                 </td>
                 {r.cells.map((v, j) => (
                   <td key={j} className={`num${tb.best[j] === i ? ' rs-live-best' : ''}`}>
-                    {v == null ? '—' : formatValue(undefined, v)}
+                    {v == null ? '—' : v.toFixed(places[j])}
                   </td>
                 ))}
               </tr>
