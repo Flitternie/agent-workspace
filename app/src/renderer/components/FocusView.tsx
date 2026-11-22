@@ -500,7 +500,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 className={`btn btn-icon${syncing ? ' busy' : ''}`}
                 disabled={syncing || task.status === 'running' || task.status === 'starting' || open.some((a) => !!a.providerRequestId)}
                 aria-label={t('Sync from {cli}', { cli: PROVIDER_LABEL[task.provider] })}
-                data-tip={t('Sync from {cli}: picks up what was said there since (close it in the terminal first)', { cli: PROVIDER_LABEL[task.provider] })}
+                data-tip={t('Sync from CLI')}
                 data-testid="sync-session"
                 onClick={() => {
                   setSyncing(true);
