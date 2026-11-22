@@ -64,6 +64,24 @@ describe('research page (demo)', () => {
     expect((await invoke<{ views?: Record<string, { text: string }> }>(page, 'research:notes', { researchId: projectId })).views?.goal.text).toMatch(/research:table/);
     await page.getByTestId('research-view-pick').selectOption('overview');
     await expect.poll(() => page.getByTestId('research-live-table').count()).toBe(0);
+    // Maximized, the panel takes the graph's place; Esc puts it back at the side (still on the research page).
+    await panel.getByTestId('side-maximize').click();
+    await expect.poll(() => page.locator('.research-stage').isHidden()).toBe(true);
+    expect(await panel.isVisible()).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.locator('.research-stage').isVisible()).toBe(true);
+    expect(await page.getByTestId('research').isVisible()).toBe(true);
+    // Dragged far left, the column stops short: the graph keeps its room and the close button stays in view.
+    const bar = (await page.getByTestId('panel-resizer').boundingBox())!;
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(5, bar.y + 200, { steps: 8 });
+    await page.mouse.up();
+    const close = (await panel.getByTestId('side-close').boundingBox())!;
+    const winW = await page.evaluate(() => window.innerWidth);
+    expect(close.x + close.width).toBeLessThanOrEqual(winW);
+    expect((await page.locator('.research-stage').boundingBox())!.width).toBeGreaterThanOrEqual(350);
+    await page.getByTestId('panel-resizer').dispatchEvent('dblclick');
     await page.screenshot({ path: join(shots, 'research-01-goal.png') });
 
     // Levels.
@@ -175,6 +193,8 @@ describe('research page (demo)', () => {
     const leadId = (await doc()).leadTaskId!;
     expect((await invoke<Array<{ role: string; text: string }>>(page, 'transcript:get', { taskId: leadId })).find((i) => i.role === 'user')!.text).toMatch(/You lead the research[\s\S]*Help me lay out the next aspect\./);
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/research lead/);
+    // The page has it too once the tree is read again: the goal's panel names the lead.
+    await expect.poll(() => panel.innerText(), { timeout: 10_000 }).toMatch(/research lead/);
     await page.locator('[data-testid="research-node"][data-kind="goal"]').dblclick();
     await expect.poll(() => page.getByTestId('research').count()).toBe(0);
     await page.keyboard.press('Escape');

@@ -43,6 +43,8 @@ import { defaultView, levelOf, liveTable, parseView, templatesFor, viewKey, type
 const STATUS_LABEL: Record<ResearchStatus, string> = { idea: 'Not tried', running: 'Running', pass: 'Works', fail: 'Does not work', unclear: 'Unclear', error: 'No result' };
 const LINK_LABEL: Record<ResearchLinkKind, string> = { combine: 'Combined', mutate: 'Mutated', borrow: 'Borrows' };
 const PANEL_W = 380;
+/** The graph keeps at least this much beside the side column. */
+const GRAPH_MIN = 360;
 
 /**
  * A project's research as a graph: the goal, its aspects, their methods and experiments, with
@@ -59,7 +61,34 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const [sel, setSel] = useState<string[]>([]);
   const [panel, setPanel] = useState(true);
   const [panelW, setPanelW] = useState(PANEL_W);
+  // Maximized: the panel takes the graph's place (as a side panel does a conversation's) until Esc or restored.
+  const [panelMax, setPanelMax] = useState(false);
+  useEffect(() => {
+    if (!panelMax) return;
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setPanelMax(false);
+    };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
+  }, [panelMax]);
   const side = useContext(SideSlot);
+  // The room the page and its side column share: the column never takes so much that the graph (or the
+  // column's own title row, with its buttons) is pushed out; a narrower window narrows it too.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [pageW, setPageW] = useState(0);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setPageW(el.clientWidth));
+    ro.observe(el);
+    setPageW(el.clientWidth);
+    return () => ro.disconnect();
+  }, [!!doc]);
+  const shared = pageW + (panel && !panelMax ? panelW : 0);
+  const maxPanel = shared ? Math.max(320, Math.min(shared * 0.7, shared - GRAPH_MIN)) : Infinity;
+  const shownW = Math.min(panelW, maxPanel);
 
   // Read again whenever the tree changes (an agent's tool call writes it; the summary's stamp moves).
   const stamp = summary?.updatedAt;
@@ -114,14 +143,14 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       subtitle={levelName(selected)}
       label={t('Research details')}
       testId="research-panel"
-      frame={{ width: panelW, onClose: () => setPanel(false) }}
+      frame={{ width: shownW, maximized: panelMax, onToggleMax: () => setPanelMax(!panelMax), onClose: () => (setPanel(false), setPanelMax(false)) }}
     >
       <div className="research-side">{selected.length > 1 ? <MultiPanel ctx={ctx} nodes={selected} /> : <NodeView ctx={ctx} node={selected[0]} />}</div>
     </SidePanel>
   ) : null;
 
   return (
-    <div className="research" data-testid="research" style={{ ['--research-color' as string]: researchColor(summary ?? { id: researchId }) }}>
+    <div className="research" ref={rootRef} data-testid="research" style={{ ['--research-color' as string]: researchColor(summary ?? { id: researchId }) }}>
       <header className="stage-head drag research-head">
         <div className="research-title">
           <h1 className="truncate">{doc.title}</h1>
@@ -149,15 +178,16 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       </header>
       {error ? <div className="error-text pad">{error}</div> : null}
       {/* The graph fills the page; the box floats on it at the bottom, as on an agent's page (no band of its own). */}
-      <div className="research-stage">
+      {panelMax ? sidePanel : null}
+      <div className="research-stage" hidden={panelMax}>
       <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       </div>
-      {sidePanel
+      {sidePanel && !panelMax
         ? side
           ? createPortal(
               <>
-                <PanelResizer width={panelW} room={window.innerWidth} onChange={setPanelW} reset={PANEL_W} min={320} />
+                <PanelResizer width={shownW} room={0} onChange={(w) => setPanelW(Math.min(w, maxPanel))} reset={PANEL_W} min={320} />
                 {sidePanel}
               </>,
               side,
