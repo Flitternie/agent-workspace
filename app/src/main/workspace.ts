@@ -53,7 +53,7 @@ import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundS
 import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
-import { childrenOf, isResearchDir, parseResearchId, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
+import { childrenOf, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -521,7 +521,7 @@ export class Workspace {
     const n = this.researchFiles.notes(id);
     const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
     const { projectId, dir } = parseResearchId(id);
-    return { id, projectId, ...(dir ? { dir } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
+    return { id, projectId, ...(dir ? { dir } : {}), ...(doc.color != null ? { color: doc.color } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
   }
 
   private researchSummaries(): ResearchSummary[] {
@@ -733,7 +733,10 @@ export class Workspace {
     const d = dir?.trim().replace(/^\.\/+|\/+$/g, '');
     if (d && !isResearchDir(d)) throw new Error(`Not a folder in the project: ${dir}`);
     const id = researchId(projectId, d || undefined);
-    const doc = await this.researchFiles.create(id, title, goal, sample, this.language());
+    const used = this.researchSummaries().map((r) => (r.color != null ? r.color : RESEARCH_COLORS.indexOf(researchColor(r) as (typeof RESEARCH_COLORS)[number])));
+    const created = await this.researchFiles.create(id, title, goal, sample, this.language());
+    const doc = { ...created, color: nextResearchColor(used) };
+    this.researchFiles.saveDoc(id, doc);
     this.researchIds.delete(projectId);
     this.indexResearch(id, doc);
     return doc;

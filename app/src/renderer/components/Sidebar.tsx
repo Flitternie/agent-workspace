@@ -4,6 +4,7 @@ import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import { AgentName, Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
 import { useTick } from '../state';
 import { t as tr } from '../i18n';
+import { researchColor } from '../../shared/research';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 
 /**
@@ -94,7 +95,7 @@ export function Sidebar({
     return (
       <div key={`research-${r.id}`} className={`agent-item${on ? ' active' : ''}`}>
         <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
-          <span className="alias alias-sm research-mark" aria-hidden>
+          <span className="alias alias-sm research-mark" style={{ background: researchColor(r) }} aria-hidden>
             <Icon name="flask" size={12} />
           </span>
           <span className="agent-row-text">

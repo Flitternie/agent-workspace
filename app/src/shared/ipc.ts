@@ -40,6 +40,7 @@ const researchDoc = z.object({
   title: z.string().min(1).max(300),
   goal: text,
   leadTaskId: id.optional(),
+  color: z.number().int().min(0).max(31).optional(),
   policy: z.object({ mode: z.enum(['auto', 'direction', 'review', 'collaborative']).optional(), autoNotes: z.boolean().optional(), summaryEvery: z.number().min(0).max(100_000).optional() }).optional(),
   endMetric: researchMetric.optional(),
   nodes: z.array(researchNode).max(5000),

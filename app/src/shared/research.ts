@@ -114,6 +114,8 @@ export interface ResearchDoc {
   /** The research's own lead: the agent the user talks to about the whole of it (lays out the tree, keeps the summary). */
   leadTaskId?: string;
   policy?: ResearchPolicy;
+  /** Its colour (an index into RESEARCH_COLORS): tells several researches apart in the sidebar and on their pages. */
+  color?: number;
   /** The end-to-end metric, when there is one. */
   endMetric?: ResearchMetric;
   nodes: ResearchNode[];
@@ -151,8 +153,25 @@ export function parseResearchId(id: string): { projectId: string; dir?: string }
 /** A folder a research may live in: relative, inside the project, plain names. */
 export const isResearchDir = (dir: string): boolean => /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(dir) && !dir.split('/').some((s) => s === '.' || s === '..' || s === '.research');
 
+/** The colours researches are told apart by: distinct hues, each readable with white on it. */
+export const RESEARCH_COLORS = ['#2f6fdb', '#0f8a7e', '#b4541a', '#8a4fd8', '#c0365a', '#5f7a1f', '#a07a12', '#3a5a8c'] as const;
+/** A research's colour: its own, else one picked from its id (for one made before colours). */
+export function researchColor(r: { id: string; color?: number }): string {
+  if (r.color != null && RESEARCH_COLORS[r.color]) return RESEARCH_COLORS[r.color];
+  let h = 0;
+  for (const c of r.id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return RESEARCH_COLORS[h % RESEARCH_COLORS.length];
+}
+/** The colour for a new research: the first not used by the others (they repeat only past eight). */
+export function nextResearchColor(used: Array<number | undefined>): number {
+  const free = RESEARCH_COLORS.findIndex((_, i) => !used.includes(i));
+  return free >= 0 ? free : used.length % RESEARCH_COLORS.length;
+}
+
 /** What the sidebar needs without reading the file: that there is one, and whose agents are in it. */
 export interface ResearchSummary {
+  /** Its colour index, if it has one (researchColor). */
+  color?: number;
   /** The research's id (researchId). */
   id: string;
   projectId: string;
@@ -367,6 +386,7 @@ export function normalizeResearch(raw: unknown): ResearchDoc | null {
     goal: typeof r.goal === 'string' ? r.goal : '',
     ...(typeof r.leadTaskId === 'string' ? { leadTaskId: r.leadTaskId } : {}),
     ...(r.policy && typeof r.policy === 'object' ? { policy: r.policy } : {}),
+    ...(typeof r.color === "number" && Number.isInteger(r.color) && r.color >= 0 && r.color < RESEARCH_COLORS.length ? { color: r.color } : {}),
     endMetric: r.endMetric,
     nodes: Array.isArray(r.nodes) ? r.nodes.filter((n): n is ResearchNode => !!n && typeof n.id === 'string' && typeof n.title === 'string' && ['aspect', 'method', 'experiment'].includes(n.type)).map((n) => ({ ...n, status: n.status ?? 'idea', createdAt: n.createdAt ?? now })) : [],
     evidence: Array.isArray(r.evidence) ? r.evidence.filter((e) => !!e && typeof e.value === 'number') : [],

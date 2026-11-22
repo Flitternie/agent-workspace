@@ -27,6 +27,7 @@ import {
   type ResearchNote,
   type ResearchNotes,
   type ResearchStatus,
+  researchColor,
 } from '../../shared/research';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
@@ -119,7 +120,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   ) : null;
 
   return (
-    <div className="research" data-testid="research">
+    <div className="research" data-testid="research" style={{ ['--research-color' as string]: researchColor(summary ?? { id: researchId }) }}>
       <header className="stage-head drag research-head">
         <div className="research-title">
           <h1 className="truncate">{doc.title}</h1>
@@ -130,7 +131,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
         <div className="research-progress" title={t('{a} running · {b} work · {c} do not work', { a: count('running'), b: count('pass'), c: count('fail') + count('error') })} data-testid="research-progress">
           <span>{t('{n} experiments', { n: exps.length })}</span>
           <span className="research-bar">
-            {(['pass', 'running', 'fail', 'error'] as const).map((s) => (count(s) ? <i key={s} className={`st-${s}`} style={{ width: `${(count(s) / exps.length) * 100}%` }} /> : null))}
+            {(['pass', 'unclear', 'running', 'fail', 'error'] as const).map((s) => (count(s) ? <i key={s} className={`st-${s}`} style={{ width: `${(count(s) / exps.length) * 100}%` }} /> : null))}
           </span>
           <span className="muted">
             {count('running') ? t('{n} running', { n: count('running') }) + ' · ' : ''}
@@ -221,10 +222,11 @@ function Graph({
   const fit = () => {
     const r = box.current?.getBoundingClientRect();
     if (!r) return;
-    const w = L.width + 160, h = L.height + 110;
+    const w = L.width + 60, h = L.height + 90;
     // Room left above the box floating at the bottom.
     const below = box.current?.parentElement?.querySelector('.research-composer')?.getBoundingClientRect().height ?? 0;
-    const k = Math.min(1.1, Math.max(0.3, Math.min(r.width / w, (r.height - 40 - below) / h)));
+    // Never below a readable size: a tree too big for the page is panned (and zoomed out by hand), not shrunk unreadable.
+    const k = Math.min(1.1, Math.max(0.75, Math.min(r.width / w, h > (r.height - 40 - below) * 1.6 ? Infinity : (r.height - 40 - below) / h)));
     setView({ x: 24, y: 60, k });
   };
   // Fit when the graph's shape changes level, not on every edit (the view stays where the user put it).
@@ -464,7 +466,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     const g = best && statusOf(best) !== 'fail' ? gain(metric, best.value) : null;
     const lastFinding = exps.flatMap((e) => e.findings ?? []).at(-1);
     return (
-      <g className={`rg-node method st-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="method" data-title={n.title}>
+      <g className={`rg-node method ns-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="method" data-title={n.title}>
         {tip([n.title, t(STATUS_LABEL[st]), best ? `${t('best {v} ({name})', { v: formatValue(metric, best.value), name: best.title })}${g != null ? ` · ${pct(g)}` : ''}` : '', link ? `${t(LINK_LABEL[link.kind])}: ${doc.nodes.find((x) => x.id === link.from)?.title ?? ''}` : '', lastFinding ? `◆ ${lastFinding.text}` : '', n.design])}
         <rect className="box" width={W} height={H} rx={10} />
         <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
@@ -491,7 +493,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
   const g = gain(metric, n.value);
   const spread = n.runs && n.runs.length > 1 ? runStats(n.runs) : undefined;
   return (
-    <g className={`rg-node experiment st-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+    <g className={`rg-node experiment ns-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
       {tip([`${isBest ? '★ ' : ''}${n.title}`, t(STATUS_LABEL[st]), n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ± ${formatValue(metric, spread.sd)} (${spread.n})` : ''}${g != null ? ` · ${pct(g)}` : ''}` : '', agent ? `${agent.alias} · ${agent.summary || t(AGENT_STATUS[agent.status])}` : '', n.findings?.at(-1) ? `◆ ${n.findings.at(-1)!.text}` : ''])}
       <rect className="box" width={W} height={H} rx={10} />
       <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
@@ -563,7 +565,8 @@ function Findings({ ctx, items }: { ctx: Ctx; items: Array<{ text: string; by?: 
 }
 
 /** A markdown note kept by the agents, with how fresh it is against the results recorded since. */
-function NoteCard({ title, note, behind, empty, testId }: { title: string; note?: ResearchNote; behind: number; empty: string; testId: string }) {
+/** `of`: the name the note is about; a first heading repeating it is left out (the panel says it already). */
+function NoteCard({ title, of, note, behind, empty, testId }: { title: string; of?: string; note?: ResearchNote; behind: number; empty: string; testId: string }) {
   return (
     <div className="rs-note" data-testid={testId}>
       <div className="rs-note-head">
@@ -577,7 +580,7 @@ function NoteCard({ title, note, behind, empty, testId }: { title: string; note?
       </div>
       {note ? (
         <div className="rs-note-body">
-          <Markdown text={note.text} />
+          <Markdown text={of && note.text.trimStart().startsWith(`# ${of}\n`) ? note.text.trimStart().slice(of.length + 3) : note.text} />
         </div>
       ) : (
         <div className="muted small">{empty}</div>
@@ -598,12 +601,13 @@ function GoalPanel({ ctx }: { ctx: Ctx }) {
       <AgentLine ctx={ctx} task={ctx.taskOf(doc.leadTaskId)} role={t('research lead')} none={t('No research lead yet: what you say below starts one; lay the research out with it step by step.')} />
       <NoteCard
         title={t('Summary')}
+        of={doc.title}
         note={ctx.notes.summary}
         behind={resultsSince(doc, ctx.notes.summary?.updatedAt)}
         empty={t('No summary yet. The main agent writes it from the aspects’ notes as results come in; you can also ask it below.')}
         testId="research-summary"
       />
-      {rows.length ? (
+      {rows.length && doc.evidence.length ? (
         <div className="rs-contrib" data-testid="research-contrib">
           {rows.map((r) => (
             <div key={r.aspect.id} className="rs-contrib-row">
@@ -676,7 +680,9 @@ function Confidence({ metric, exps }: { metric?: ResearchMetric; exps: ResearchN
 function Kpis({ metric, exps, statusOf }: { metric?: ResearchMetric; exps: ResearchNode[]; statusOf: (n: ResearchNode) => ResearchStatus }) {
   const done = exps.filter((e) => e.value != null && statusOf(e) !== 'error');
   const passed = exps.filter((e) => statusOf(e) === 'pass');
-  const best = metric && passed.length ? passed.reduce((b, e) => ((metric.higherIsBetter ? e.value! > b.value! : e.value! < b.value!) ? e : b)) : undefined;
+  // The best is among those that work and have a value on the metric (a check that works has none).
+  const scored = passed.filter((e) => e.value != null);
+  const best = metric && scored.length ? scored.reduce((b, e) => ((metric.higherIsBetter ? e.value! > b.value! : e.value! < b.value!) ? e : b)) : undefined;
   return (
     <div className="rs-kpis" data-testid="research-kpis">
       {metric ? (
@@ -732,7 +738,7 @@ function ProgressChart({ metric, exps, statusOf, select }: { metric: ResearchMet
   path += ` H${x(exps.length - 1)}`;
   let record = base;
   return (
-    <svg className="rs-progress" width={Ww} height={Hh} data-testid="research-progress-chart">
+    <svg className="rs-progress" viewBox={`0 0 ${Ww} ${Hh}`} width="100%" style={{ aspectRatio: `${Ww} / ${Hh}`, height: 'auto' }} data-testid="research-progress-chart">
       <line x1={0} x2={Ww} y1={y(base)} y2={y(base)} className="base" />
       <text x={Ww - 2} y={y(base) - 3} textAnchor="end" className="base-label">
         {t('start {v}', { v: formatValue(metric, base) })}
@@ -784,6 +790,7 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
       {node.combos ? null : (
         <NoteCard
           title={t('Notes')}
+          of={node.title}
           note={ctx.notes.aspects[node.id]}
           behind={resultsSince(doc, ctx.notes.aspects[node.id]?.updatedAt, node.id)}
           empty={t('No notes yet. Its agent writes them when a batch of experiments has its results.')}
@@ -795,8 +802,8 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           <thead>
             <tr>
               <th>{t('Method')}</th>
-              <th>{m?.name ?? t('Result')}</th>
-              <th>{t('Runs')}</th>
+              {m ? <th className="num">{t('Best')}</th> : null}
+              <th className="num">{t('Experiments')}</th>
             </tr>
           </thead>
           <tbody>
@@ -809,8 +816,8 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
                     <i className={`rg-dot st-${st}`} title={t(STATUS_LABEL[st])} /> {x.title}
                     {x.links?.[0] ? <span className={`pill link-${x.links[0].kind}`}>{t(LINK_LABEL[x.links[0].kind])}</span> : null}
                   </td>
-                  <td>{best ? formatValue(m, best.value) : '—'}</td>
-                  <td>{childrenOf(doc, x.id).length}</td>
+                  {m ? <td className="num">{best ? formatValue(m, best.value) : '—'}</td> : null}
+                  <td className="num">{childrenOf(doc, x.id).length}</td>
                 </tr>
               );
             })}
@@ -846,7 +853,7 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           ))}
         </div>
       ) : null}
-      {node.design ? <div className="rs-design">{node.design}</div> : null}
+      {node.design ? <Clamp text={node.design} /> : null}
       {node.source && ctx.statusOf(node) === 'idea' ? <div className="muted small">{t('Idea from: {source}', { source: node.source })}</div> : null}
       {exps.length ? (
         <>
@@ -870,22 +877,39 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
  * Variants with their results: the change from the start in a cell tinted by its size (green better,
  * red worse, as autoresearcherUI's table does), repeated runs as mean ± spread, other metrics as columns.
  */
+/** A method's design or a variant's config: prose, a few lines, the rest on a click. */
+function Clamp({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280 || text.split('\n').length > 5;
+  return (
+    <div>
+      <div className={`rs-design${long && !open ? ' clamped' : ''}`}>{text}</div>
+      {long ? (
+        <button className="link small rs-more" onClick={() => setOpen(!open)}>
+          {open ? t('Show less') : t('Show more')}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNode; exps: ResearchNode[]; best?: ResearchNode }) {
   const m = aspect.metric;
   const others = aspect.metrics ?? [];
   const gains = exps.map((e) => gain(m, e.value)).filter((g): g is number => g != null);
   const top = Math.max(0.0001, ...gains.map(Math.abs));
+  const agents = exps.some((e) => ctx.taskOf(e.taskId));
   return (
     <table className="rs-table" data-testid="research-results">
       <thead>
         <tr>
           <th>{t('Variant')}</th>
-          <th>{m?.name ?? t('Result')}</th>
+          <th className="num">{t('Result')}</th>
           {m?.baseline != null ? <th>{t('vs start')}</th> : null}
           {others.map((o) => (
             <th key={o.name}>{o.name}</th>
           ))}
-          <th>{t('Agent')}</th>
+          {agents ? <th>{t('Agent')}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -900,7 +924,7 @@ function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNo
                 {e.title}
                 {e.findings?.length ? <span className="rs-find-count">◆ {e.findings.length}</span> : null}
               </td>
-              <td>
+              <td className="num">
                 {e.value != null ? formatValue(m, e.value) : t(STATUS_LABEL[st])}
                 {spread ? <span className="muted"> ±{formatValue(m, spread.sd)} ({spread.n})</span> : null}
               </td>
@@ -912,7 +936,7 @@ function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNo
               {others.map((o) => (
                 <td key={o.name}>{e.values?.[o.name] != null ? formatValue(o, e.values[o.name]) : '—'}</td>
               ))}
-              <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? ''}</td>
+              {agents ? <td className="muted">{ctx.taskOf(e.taskId)?.alias ?? ''}</td> : null}
             </tr>
           );
         })}
@@ -978,12 +1002,13 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
         <span>
           <i className={`rg-dot st-${st}`} /> {t(STATUS_LABEL[st])}
         </span>
-        <span>{m?.name ?? t('Result')}</span>
+        <span>{t('Result')}</span>
         <span>
           {node.value != null ? <b>{formatValue(m, node.value)}</b> : '—'}
           {node.runs && node.runs.length > 1 ? <span className="muted"> ± {formatValue(m, runStats(node.runs).sd)}</span> : null}
           {gain(m, node.value) != null ? <span className={gain(m, node.value)! >= 0 ? 'gain' : 'loss'}> {pctOf(gain(m, node.value))}</span> : null}
           {m?.baseline != null ? <span className="muted"> · {t('start {v}', { v: formatValue(m, m.baseline) })}</span> : null}
+          {m ? <span className="muted rs-metric">{m.name}</span> : null}
         </span>
         {node.runs && node.runs.length > 1 ? (
           <>
@@ -998,7 +1023,7 @@ function ExperimentPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
           </Fragment>
         ))}
       </div>
-      {node.config && node.config !== node.title ? <div className="rs-design">{node.config}</div> : null}
+      {node.config && node.config !== node.title ? <Clamp text={node.config} /> : null}
       <Findings ctx={ctx} items={node.findings ?? []} />
     </>
   );
@@ -1064,11 +1089,11 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
         : one?.type === 'aspect'
           ? t('e.g. Which methods would you try first?')
           : one?.type === 'method'
-            ? t('e.g. Try thresholds 0.82 and 0.87 in parallel')
+            ? t('e.g. Try two more variants of this in parallel')
             : one?.type === 'experiment'
-              ? t('e.g. Rerun with half the learning rate')
+              ? t('e.g. Run it again to confirm')
               : doc.nodes.length
-                ? t('e.g. Add an aspect for inference speed')
+                ? t('e.g. Add an aspect, or record an end-to-end run')
                 : t('Tell the lead what the research is about; lay out its aspects together'),
     // The selection is what the message is about: shown above the box, as on an agent's page.
     about: selected.length
