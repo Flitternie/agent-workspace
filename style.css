@@ -1647,3 +1647,11 @@ body { overflow-x: clip !important; }
 .nav::before { inset: 0 auto 0 50% !important; width: 100vw; transform: translateX(-50%); }
 /* The Team Map waits centred (it used to wait shifted half its width to the right, off the page) */
 .story .iso .tmap[data-at]:not(.on) { transform: translate(-50%, calc(-50% + 12px)); }
+/* Phone: the three hero buttons fit on one line with short labels (the icons say the rest) */
+.lbl-short { display: none; }
+@media (max-width: 640px) {
+  .hero .cta { flex-wrap: nowrap; gap: 8px; }
+  .hero .cta .btn { flex: 1 1 0; justify-content: center; min-width: 0; padding: 0 10px; gap: 7px; }
+  .hero .cta .lbl-full { display: none; }
+  .hero .cta .lbl-short { display: inline; }
+}
