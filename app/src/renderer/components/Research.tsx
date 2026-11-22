@@ -1369,6 +1369,10 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
   }, [sent]);
   const one = selected.length === 1 ? selected[0] : undefined;
   const ids = new Set(taskIdsOf(doc));
+  // A request unfolded in the bar above: the box replies to it (to its agent), as on an agent's page.
+  const [replyId, setReplyId] = useState<string | null>(null);
+  const replyItem = replyId ? snapshot.attention.find((a) => a.id === replyId && a.state === 'open') : undefined;
+  const replyTask = replyItem ? ctx.taskOf(replyItem.taskId) : undefined;
   // Who gets it (decided again in the main process when sent): the agent of the nearest node over the selection.
   const route = routeFor(doc, selected);
   const routed: Task | undefined = route.kind === 'experiment' ? ctx.taskOf(route.node.taskId) : route.kind === 'aspect' ? ctx.taskOf(route.aspect.taskId) : ctx.taskOf(doc.leadTaskId);
@@ -1382,6 +1386,24 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
         : routed
           ? t('{agent} (research lead)', { agent: routed.alias })
           : t('a new research lead');
+  const replying: ComposerTarget | undefined =
+    replyItem && replyTask
+      ? {
+          label: <span data-testid="research-to">{t('To: {alias}', { alias: replyTask.alias })}</span>,
+          placeholder: t('Reply to {alias}', { alias: replyTask.alias }),
+          about: { label: t('Replying to'), text: clip(replyItem.headline, 60), clearLabel: t('Back to the selection'), onClear: () => setReplyId(null) },
+          send: async (text, images) => {
+            try {
+              await call('task:send', { taskId: replyTask.taskId, text, via: 'text', about: replyItem.id, ...(images.length ? { images } : {}) });
+              setSent({ to: replyTask.alias, taskId: replyTask.taskId });
+              setReplyId(null);
+              return { ok: true };
+            } catch (e) {
+              return { ok: false, error: errorText(e) };
+            }
+          },
+        }
+      : undefined;
   const target: ComposerTarget = {
     label: (
       <span data-testid="research-to">
@@ -1446,9 +1468,9 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
         </div>
       ) : null}
       {/* What the research's agents wait on, answerable here: the agent page's own bar, for this research's agents. */}
-      <WaitingOnYou snapshot={snapshot} now={Date.now()} onOpen={ctx.onOpenAgent} bar only={(id) => ids.has(id)} />
+      <WaitingOnYou snapshot={snapshot} now={Date.now()} onOpen={ctx.onOpenAgent} bar only={(id) => ids.has(id)} onPick={setReplyId} />
       {/* The same box as on an agent's page (attachments, @ files of the agent it reaches), sending through the research. */}
-      <Composer task={routed} target={target} />
+      <Composer task={replying ? replyTask : routed} target={replying ?? target} />
     </div>
   );
 }

@@ -8596,3 +8596,8 @@ button.subtask-row:hover {
 .hint.new-continue {
   margin: -4px 0 12px;
 }
+/* On the research page the bar floats over the graph: its requests scroll within it, its head (and the
+   way to fold it) stays in view. */
+.research-composer .waiting-bar-list {
+  max-height: min(46vh, 420px);
+}

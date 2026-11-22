@@ -1227,6 +1227,8 @@ export const zh: Record<string, string> = {
   'Best': '最好',
   'What this panel shows is a view an agent can rewrite: ask below for what you want to see.': '这里显示的是一个可以由 agent 重写的视图：想看什么，在下方说。',
   'Its own view': '专属视图',
+  'Replying to': '回复',
+  'Back to the selection': '改回发给选中的节点',
   'no dataset': '未分数据集',
   'Template': '模板',
   'Panel view': '视图',
