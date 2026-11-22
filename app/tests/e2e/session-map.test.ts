@@ -121,6 +121,14 @@ describe('session map', () => {
     expect(await tasks.nth(1).getByTestId('map-branch').innerText()).toContain(fork.alias);
     await page.screenshot({ path: join(shots, 'map-02b-fork.png') });
 
+    // The fold caret is a quiet glyph (no box), and a task's meta line is small and grey without hover.
+    await page.mouse.move(5, 5);
+    const look = await page.evaluate(() => {
+      const caret = getComputedStyle(document.querySelector('[data-testid="map-caret"]')!);
+      const meta = getComputedStyle(document.querySelector('.map-meta')!);
+      return { border: caret.borderTopWidth, bg: caret.backgroundColor, meta: meta.fontSize };
+    });
+    expect(look).toEqual({ border: '0px', bg: 'rgba(0, 0, 0, 0)', meta: '11px' });
     // No merging tasks (it could not be undone): no such control on a task.
     await tasks.nth(1).hover();
     expect(await page.getByTestId('map-merge').count()).toBe(0);

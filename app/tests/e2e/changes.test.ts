@@ -1,4 +1,5 @@
-// Changed this turn: the list, each file's diff in the preview (File / Changes), and Follow (mock agents).
+// A change in the conversation opens in the preview, on its file or its diff (no separate Changes panel);
+// forking back to before a message leaves that message in the new agent's reply box (mock agents).
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,37 +49,30 @@ describe('changed this turn', () => {
     await expect.poll(() => page.getByTestId('agent-card').count(), { timeout: 30_000 }).toBe(1);
     await page.locator('[data-testid="rail-item"],[data-testid="needs-item"]').filter({ hasText: 'Orders' }).first().click();
 
-    // The header counts the files this turn changed; the list names them with their +/−.
-    await expect.poll(() => page.getByTestId('changes-count').innerText(), { timeout: 30_000 }).toBe('2');
-    await page.getByTestId('show-changes').click();
-    await expect.poll(() => page.getByTestId('changes-item').evaluateAll((els) => els.map((e) => e.getAttribute('data-path')))).toEqual(['src/orders.ts', 'README.md']);
-    await expect.poll(() => page.getByTestId('changes-panel').innerText()).toContain('+7');
-    await page.screenshot({ path: join(shots, 'changes-01-list.png') });
-
-    // A file from the list opens on its changes; File shows the file itself.
-    await page.getByTestId('changes-item').filter({ hasText: 'orders.ts' }).click();
+    // No Changes button (or panel): a change's row in the conversation opens it.
+    expect(await page.getByTestId('show-changes').count()).toBe(0);
+    const row = page.locator('[data-testid="tool-call"][data-kind="edit"]').filter({ hasText: 'src/orders.ts' }).first();
+    await expect.poll(() => row.count(), { timeout: 30_000 }).toBe(1);
+    await row.getByTestId('preview-file').click();
+    await expect.poll(() => page.getByTestId('file-preview').getAttribute('data-path')).toContain('orders.ts');
+    // It changed in this turn: its diff is a tab away.
+    await page.getByTestId('show-diff').click();
     await expect.poll(() => page.getByTestId('preview-diffs').innerText()).toContain('api.get');
-    await page.screenshot({ path: join(shots, 'changes-02-diff.png') });
+    await page.screenshot({ path: join(shots, 'changes-01-diff.png') });
     await page.getByTestId('show-file').click();
-    await expect.poll(() => page.getByTestId('preview-diffs').count()).toBe(0);
     await expect.poll(() => page.getByTestId('file-preview').innerText()).toContain('listOrders');
-    // Closing the preview brings the list back.
     await page.getByRole('button', { name: 'Close preview' }).click();
-    await expect.poll(() => page.getByTestId('changes-panel').count()).toBe(1);
 
-    // Follow: the next file the agent changes opens by itself, on its diff.
-    await page.getByTestId('follow-agent').check();
-    await invoke(page, 'task:send', { taskId: a.taskId, text: 'edit notes.md', via: 'text' });
-    await expect.poll(() => page.getByTestId('file-preview').getAttribute('data-path'), { timeout: 30_000 }).toBe('notes.md');
-    await expect.poll(() => page.getByTestId('preview-diffs').innerText()).toContain('Edited in request 2');
-    // A new turn: the count is this turn's files only.
-    await expect.poll(() => page.getByTestId('changes-count').innerText()).toBe('1');
-    await page.screenshot({ path: join(shots, 'changes-03-follow.png') });
-    // Follow off: a further change leaves the preview alone.
-    await page.getByRole('button', { name: 'Close preview' }).click();
-    await page.getByTestId('follow-agent').uncheck();
-    await invoke(page, 'task:send', { taskId: a.taskId, text: 'edit README.md', via: 'text' });
-    await expect.poll(() => page.getByTestId('changes-item').evaluateAll((els) => els.map((e) => e.getAttribute('data-path'))), { timeout: 30_000 }).toEqual(['README.md']);
-    expect(await page.getByTestId('file-preview').count()).toBe(0);
+    // Forking back to before a message: no instruction box; that message waits in the fork's reply box.
+    await invoke(page, 'task:send', { taskId: a.taskId, text: 'Now the refunds.', via: 'text' });
+    await expect.poll(async () => !['running', 'starting'].includes((await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === a.taskId)!.status), { timeout: 30_000 }).toBe(true);
+    await page.getByTestId('fork-task').click();
+    expect(await page.getByTestId('fork-instruction').count()).toBe(0);
+    await page.getByTestId('fork-points').getByText('Now the refunds.').click();
+    // (Same folder: this test's repository has no commit to start a worktree from.)
+    await page.locator('.modal label').filter({ hasText: 'own git worktree' }).locator('input[type="checkbox"]').uncheck();
+    await page.getByTestId('fork-confirm').click();
+    await expect.poll(() => page.locator('.focus-head').innerText(), { timeout: 15_000 }).toContain('fork');
+    await expect.poll(() => page.getByTestId('composer-input').inputValue()).toBe('Now the refunds.');
   }, 120_000);
 });

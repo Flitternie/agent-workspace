@@ -356,7 +356,14 @@ export function App() {
         ) : settingsOpen ? (
           <SettingsPage snapshot={snapshot} section={settingsSection} onClose={() => (setSettingsOpen(false), setSettingsSection(undefined))} />
         ) : focusTask ? (
-          <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
+          <FocusView
+            snapshot={snapshot}
+            task={focusTask}
+            transcript={transcripts[focusTask.taskId] ?? []}
+            now={now}
+            // An agent just made (a fork) may not be in the snapshot yet: opened once it is, not dropped.
+            onOpen={(id) => (snapshot.tasks.some((x) => x.taskId === id) || snapshot.main?.taskId === id ? setFocusId(id) : setPendingFocus(id))}
+          />
         ) : onboarding ? (
           <Onboarding snapshot={snapshot} now={now} onSettings={() => setSettingsOpen(true)} />
         ) : (
