@@ -16,7 +16,6 @@ export function SessionMap({
   current,
   onJump,
   onOpenAgent,
-  onMerge,
   origin,
 }: {
   tasks: MapTask[];
@@ -25,8 +24,6 @@ export function SessionMap({
   current: string | null;
   onJump: (turnId: string) => void;
   onOpenAgent: (taskId: string) => void;
-  /** Merge this task into the one before (the reader overrules the grouping). */
-  onMerge?: (startItemId: string) => void;
 }) {
   /** Tasks opened by hand (the current one is always open). */
   const [opened, setOpened] = useState<Set<string>>(new Set());
@@ -80,11 +77,6 @@ export function SessionMap({
               {details && !on ? (
                 <button className={`map-caret${open ? ' open' : ''}`} onClick={() => toggle(task.startItemId)} aria-label={open ? t('Fold') : t('Unfold')} data-testid="map-caret">
                   <Icon name="chevron" size={10} />
-                </button>
-              ) : null}
-              {i > 0 && onMerge ? (
-                <button className="map-merge" onClick={() => onMerge(task.startItemId)} data-tip={t('Merge into the task above')} aria-label={t('Merge into the task above')} data-testid="map-merge">
-                  <Icon name="collapse" size={10} />
                 </button>
               ) : null}
             </div>
