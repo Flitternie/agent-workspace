@@ -499,8 +499,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <button
                 className={`btn btn-icon${syncing ? ' busy' : ''}`}
                 disabled={syncing || task.status === 'running' || task.status === 'starting' || open.some((a) => !!a.providerRequestId)}
-                aria-label={t('Sync the latest of this conversation (wherever else it went on)')}
-                data-tip={t('Sync latest messages')}
+                aria-label={t('Sync')}
+                data-tip={t('Sync')}
                 data-testid="sync-session"
                 onClick={() => {
                   setSyncing(true);
