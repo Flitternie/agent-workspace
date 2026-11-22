@@ -98,6 +98,10 @@ export function Sidebar({
       ],
     });
   };
+  const projectMenu = (e: React.MouseEvent, projectId: string) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, items: [{ label: tr('New research in this project…'), onClick: () => onNewResearch(projectId), testId: 'menu-project-research' }] });
+  };
   const researchMenu = (e: React.MouseEvent, r: ResearchSummary) => {
     e.preventDefault();
     setMenu({
@@ -161,13 +165,6 @@ export function Sidebar({
       </div>
     );
   };
-  // Starting one: offered on a team when the pointer is over it (a project may hold several, one per folder).
-  const newResearch = (projectId: string) =>
-    (
-      <button key={`new-research-${projectId}`} className="team-idle team-new-research" onClick={() => onNewResearch(projectId)} data-testid="new-research">
-        <Icon name="flask" size={11} /> {tr('New research')}
-      </button>
-    );
   // A project whose agents are all in its research has no team of its own: its research still shows.
   const teamless = [...new Set(snapshot.research.map((r) => r.projectId))].filter((id) => !teamList.some((team) => team.project.projectId === id) && snapshot.projects.some((p) => p.projectId === id));
   const live = teamList.filter((team) => team.active);
@@ -184,7 +181,7 @@ export function Sidebar({
           const idleShown = showIdle[team.project.projectId];
           return (
             <div key={team.project.projectId} className={`team${open_ ? ' open' : ''}`} data-testid="team" data-project={team.project.name}>
-              <button className="team-head" onClick={() => toggle(team)} aria-expanded={open_} data-testid="team-head">
+              <button className="team-head" onClick={() => toggle(team)} onContextMenu={(e) => projectMenu(e, team.project.projectId)} aria-expanded={open_} data-testid="team-head">
                 <span className="team-chevron" aria-hidden>
                   <Icon name="chevron" size={12} />
                 </span>
@@ -210,7 +207,6 @@ export function Sidebar({
                       {idleShown ? team.idle.map((t) => row(t)) : null}
                     </>
                   ) : null}
-                  {newResearch(team.project.projectId)}
                 </>
               ) : null}
             </div>
@@ -222,7 +218,7 @@ export function Sidebar({
     const agents = [...team.members, ...team.idle];
     return (
       <div key={team.project.projectId} className="team archived open" data-testid="team" data-project={team.project.name}>
-        <div className="team-head archived-head" data-testid="team-head">
+        <div className="team-head archived-head" onContextMenu={(e) => projectMenu(e, team.project.projectId)} data-testid="team-head">
           <span className="team-name truncate">{team.project.name}</span>
           <span className="team-counts">
             <span className="team-count idle">{agents.length === 1 ? tr('1 agent') : tr('{n} agents', { n: agents.length })}</span>
@@ -339,7 +335,25 @@ export function Sidebar({
 
       <div className="sidebar-section">
         <span>{tr('Agents')}</span>
-        <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask}>
+        {/* New: an agent, or a research (its project is chosen in the dialog). */}
+        <button
+          className="icon-btn"
+          aria-label={tr('New')}
+          title={tr('New agent or research')}
+          aria-haspopup="menu"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({
+              x: r.left,
+              y: r.bottom + 4,
+              items: [
+                { label: tr('New agent'), onClick: onNewTask, testId: 'menu-new-agent' },
+                { label: tr('New research'), onClick: () => onNewResearch(''), testId: 'menu-new-research' },
+              ],
+            });
+          }}
+          data-testid="sidebar-new"
+        >
           <Icon name="plus" />
         </button>
       </div>
@@ -348,7 +362,7 @@ export function Sidebar({
         {live.map(renderTeam)}
         {teamless.map((projectId) => (
           <div key={projectId} className="team open" data-testid="team" data-project={snapshot.projects.find((p) => p.projectId === projectId)?.name}>
-            <div className="team-head archived-head">
+            <div className="team-head archived-head" onContextMenu={(e) => projectMenu(e, projectId)}>
               <span className="team-name truncate">{snapshot.projects.find((p) => p.projectId === projectId)?.name}</span>
             </div>
             {researchRows(projectId)}

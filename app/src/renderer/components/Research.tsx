@@ -29,6 +29,7 @@ import {
   type ResearchNotes,
   type ResearchStatus,
   researchColor,
+  researchId,
 } from '../../shared/research';
 import { call, errorText } from '../api';
 import { language as currentLanguage, t } from '../i18n';
@@ -39,6 +40,7 @@ import { timeAgo } from '../state';
 import { Modal } from './Dialogs';
 import { Composer, PanelResizer, WaitingOnYou, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
+import { defaultProject, ProjectChooser } from './ProjectChooser';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { parseUi, statText, type ResearchUi, type UiNodeField } from '../../shared/research-ui';
 import { defaultView, levelOf, liveTable, parseView, templatesFor, viewKey, type TableSpec, type ViewBlockKind, type ViewLevel } from '../../shared/research-views';
@@ -1408,19 +1410,21 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
 
 // ------------------------------------------------------------------ starting one
 
-export function NewResearchDialog({ snapshot, projectId, onClose, onCreated }: { snapshot: WorkspaceSnapshot; projectId: string; onClose: () => void; onCreated: () => void }) {
-  const project = snapshot.projects.find((p) => p.projectId === projectId);
+export function NewResearchDialog({ snapshot, projectId: suggested, onClose, onCreated }: { snapshot: WorkspaceSnapshot; projectId: string; onClose: () => void; onCreated: (researchId: string) => void }) {
+  const [projectId, setProjectId] = useState(suggested || defaultProject(snapshot));
   const [title, setTitle] = useState('');
   const [goal, setGoal] = useState('');
   const [sample, setSample] = useState(false);
   const [dir, setDir] = useState('');
   const [error, setError] = useState('');
+  const folder = dir.trim().replace(/^\.\/+|\/+$/g, '');
   const create = () =>
-    call('research:create', { projectId, title: title.trim() || (sample ? ' ' : ''), goal: goal.trim(), sample, ...(dir.trim() ? { dir: dir.trim() } : {}) })
-      .then(onCreated)
+    call('research:create', { projectId, title: title.trim() || (sample ? ' ' : ''), goal: goal.trim(), sample, ...(folder ? { dir: folder } : {}) })
+      .then(() => onCreated(researchId(projectId, folder || undefined)))
       .catch((e) => setError(errorText(e)));
   return (
-    <Modal title={t('New research in {project}', { project: project?.name ?? '' })} onClose={onClose}>
+    <Modal title={t('New research')} onClose={onClose}>
+      <ProjectChooser snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field" data-testid="research-new">
         <label>{t('Title')}</label>
         <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('e.g. Pretraining quality')} />
@@ -1442,7 +1446,7 @@ export function NewResearchDialog({ snapshot, projectId, onClose, onCreated }: {
         <button className="btn" onClick={onClose}>
           {t('Cancel')}
         </button>
-        <button className="btn btn-primary" onClick={create} disabled={!sample && !title.trim()} data-testid="research-create">
+        <button className="btn btn-primary" onClick={create} disabled={!projectId || (!sample && !title.trim())} data-testid="research-create">
           {t('Create')}
         </button>
       </div>

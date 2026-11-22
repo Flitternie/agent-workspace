@@ -242,8 +242,13 @@ describe('research page (demo)', () => {
     await invoke(page, 'task:create', { projectId: p2.projectId, provider: 'mock', title: 'Notes', mockScript: 'work', instruction: 'go', isolate: false });
     const team = page.locator('[data-testid="team"][data-project="notes"]');
     await expect.poll(() => team.count()).toBe(1);
-    await team.hover();
-    await team.getByTestId('new-research').click();
+    // From the + beside "Agents" (the project is chosen in the dialog), or a right-click on the project's name (it is chosen already).
+    await page.getByTestId('sidebar-new').click();
+    await page.getByTestId('menu-new-research').click();
+    expect(await page.getByTestId('research-create').count()).toBe(1);
+    await page.keyboard.press('Escape');
+    await team.getByTestId('team-head').click({ button: 'right' });
+    await page.getByTestId('menu-project-research').click();
     await page.getByTestId('research-new').locator('input').fill('Note quality');
     await page.getByTestId('research-create').click();
     await expect.poll(() => page.locator('.research-title h1').innerText()).toBe('Note quality');

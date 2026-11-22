@@ -130,6 +130,7 @@ export function App() {
   const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
   // A project's research page, and the project a new research is being started in.
   const [researchOf, setResearchOf] = useState<string | null>(null);
+  /** The new-research dialog: open with a project suggested ('' for the most recent). */
   const [newResearchIn, setNewResearchIn] = useState<string | null>(null);
   // Settings is a page in the main area, like VS Code, not a dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -507,13 +508,13 @@ export function App() {
       </div>
 
       {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} /> : null}
-      {newResearchIn ? (
+      {newResearchIn !== null ? (
         <NewResearchDialog
           snapshot={snapshot}
           projectId={newResearchIn}
           onClose={() => setNewResearchIn(null)}
-          onCreated={() => {
-            setResearchOf(newResearchIn);
+          onCreated={(id) => {
+            setResearchOf(id);
             setFocusId(null);
             setSettingsOpen(false);
             setNewResearchIn(null);
