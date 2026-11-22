@@ -374,7 +374,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
           </div>
           <div className="focus-actions">
-            {/* Grouped by use: running it, opening its folder, its session, putting it away (remove last). */}
+            {/* In order of use: running it, opening its folder, its session, putting it away (remove last). */}
             {/* Permissions: a menu with its mode's name; in a narrow agent column the same menu behind a shield icon. */}
             {isMainAgent(task) ? null : (
               <span className="perm" data-tip={t('Permissions')}>
@@ -415,10 +415,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="power" />
               </button>
             )}
-            <span className="actions-gap" aria-hidden />
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
             {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
-            <span className="actions-gap" aria-hidden />
             {/* Sync: after going on with this session elsewhere (the terminal, a desktop or editor app), pick that up here. */}
             {!isMainAgent(task) && session?.nativeSessionId ? (
               <button
@@ -455,7 +453,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="plus" />
               </button>
             ) : null}
-            <span className="actions-gap" aria-hidden />
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
             {isMainAgent(task) ? null : (
               <button
