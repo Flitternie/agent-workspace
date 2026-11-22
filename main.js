@@ -456,6 +456,7 @@ const laneOutcomes = () => [{ kind: 'out', lane: 1, st: 'w' }, { kind: 'out', la
   const ask = () => app.querySelector('.ha-agent .cv-ask');
   const cursorTo = (el) => {
     const cur = app.querySelector('.ha-cursor'), box = cur.offsetParent.getBoundingClientRect(), r = el.getBoundingClientRect();
+    if (!r.width) return; // nothing to point at (the sidebar is hidden on a phone)
     cur.style.transform = `translate(${r.left - box.left + r.width * 0.55}px, ${r.top - box.top + r.height * 0.4}px)`;
     app.classList.add('cursor-on');
   };
@@ -527,18 +528,26 @@ const laneOutcomes = () => [{ kind: 'out', lane: 1, st: 'w' }, { kind: 'out', la
   document.querySelector('.lang').addEventListener('click', () => setTimeout(draw, 0));
 })();
 
-// On narrow screens the hero window keeps its desktop layout and is scaled down to fit.
+// The hero window by room: on a phone its own compact layout at full size (one column of cards, the
+// map under the conversation); on a tablet the desktop layout scaled down; otherwise as it is.
 (function fitHero() {
   const app = document.querySelector('.hero-app'), frame = document.querySelector('.stage .window');
   if (!app || !frame) return;
   const W = 1180;
   const fit = () => {
     const room = frame.parentElement.clientWidth;
-    const small = room < 960;
-    app.classList.toggle('scaled', small);
-    app.style.width = small ? `${W}px` : '';
-    frame.style.zoom = small ? String(room / W) : '';
+    const compact = room < 640, scaled = !compact && room < 960;
+    app.classList.toggle('compact', compact);
+    app.classList.toggle('scaled', scaled);
+    app.style.width = scaled ? `${W}px` : '';
+    frame.style.zoom = scaled ? String(room / W) : '';
   };
   addEventListener('resize', fit);
   fit();
+})();
+
+// On a phone the stories do not scroll-play: each one's pieces rise in when it comes into view.
+(function seen() {
+  const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && (e.target.closest('.story').classList.add('seen'), io.unobserve(e.target))), { threshold: 0.12 });
+  document.querySelectorAll('.story .story-stage').forEach((el) => io.observe(el));
 })();
