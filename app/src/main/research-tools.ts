@@ -272,7 +272,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     const mine = me(doc);
     const aspect = aspectOf(doc, node);
     if (mine?.type === 'aspect' && aspect?.id === mine.id) return;
-    throw new Error(mine?.type === 'experiment' ? 'An experiment’s agent records its own result (research_record); its aspect’s agent changes the tree.' : 'Only this aspect’s agent (or the research’s lead) can change it.');
+    throw new Error(mine?.type === 'experiment' ? 'An experiment’s agent records its own result and takeaway with research_record (takeaway: one line); its aspect’s agent changes the rest of the tree, and research_tell reaches it.' : 'Only this aspect’s agent (or the research’s lead) can change it.');
   };
   const name = (taskId?: string) => (taskId ? host.findTaskById(taskId)?.alias : undefined);
   // Agents work in their own project's research; the main agent names one when several have one.
