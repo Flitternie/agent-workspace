@@ -1740,3 +1740,8 @@ body { overflow-x: clip !important; }
   .privacy .section-head { margin-bottom: 14px; }
 }
 @media (max-width: 640px) { .tile-side .lbl-full { display: none; } .tile-side .lbl-short { display: inline; } }
+
+/* The typed lines can never push the page wider than the screen */
+.hero { overflow-x: clip; }
+.hero .prompt { max-width: 100% !important; }
+@media (max-width: 640px) { .prompt { font-size: 15px !important; } }

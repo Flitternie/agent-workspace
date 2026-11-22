@@ -299,8 +299,8 @@ fetch('https://api.github.com/repos/Flitternie/agent-workspace/releases/latest')
 // are tired of, one thing after another. The cursor sits on the line being typed.
 (function typeLines() {
   const LINES = {
-    en: ['Stop juggling tabs and terminals.', 'Stop juggling Claude Code and Codex.', 'Stop checking which agent is stuck.', 'Stop scrolling back to see what changed.', 'Stop repeating yourself to every agent.'],
-    zh: ['不想在多个 Agent 窗口之间来回切换？', '想让 Claude Code 和 Codex 在同一个窗口里干活？', '想快速知道哪个 Agent 卡住了？', '想一眼看到每个 Agent 做过哪些改动？', '想一句话通知所有 Agent？'],
+    en: ['Stop juggling tabs and terminals.', 'Stop juggling Claude Code and Codex.', 'Stop checking which agent is stuck.', 'Stop digging through old chats.', 'Stop repeating yourself to every agent.'],
+    zh: ['不想在多个 Agent 窗口之间来回切换？', '不想在 Claude Code 和 Codex 之间来回切换？', '想快速知道哪个 Agent 卡住了？', '想一眼看到每个 Agent 做过哪些改动？', '想一句话通知所有 Agent？'],
   };
   const KEEP = { en: 5, zh: 0 };
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -322,13 +322,24 @@ fetch('https://api.github.com/repos/Flitternie/agent-workspace/releases/latest')
     if (spans.length < 2 || !LINES[lang()]) return;
     const [first, second] = spans;
     // As wide as the longest line, so a line never wraps and the block never shifts.
+    first.parentNode.style.removeProperty('font-size');
     const probe = first.cloneNode();
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
     first.parentNode.appendChild(probe);
     let widest = 0;
     for (const t of [...LINES[lang()], second.textContent]) { probe.textContent = t; widest = Math.max(widest, probe.getBoundingClientRect().width); }
     probe.remove();
-    first.parentNode.style.width = `${Math.ceil(widest) + 24}px`;
+    // If the longest line is wider than the screen, the type shrinks until it fits: the block never
+    // grows past the page (which made the page itself wider on phones while a long line was typed).
+    const block = first.parentNode;
+    block.style.removeProperty('font-size');
+    const room = block.parentNode.clientWidth - 20;
+    const need = Math.ceil(widest) + 36;
+    if (need > room) {
+      const size = parseFloat(getComputedStyle(block).fontSize) * (room / need);
+      block.style.setProperty('font-size', `${Math.floor(size * 10) / 10}px`, 'important'); // over the stylesheet's size
+      block.style.width = `${room}px`;
+    } else block.style.width = `${need}px`;
     const firstText = first.textContent, secondText = second.textContent;
     if (still) return;
     first.textContent = ''; second.textContent = '';
