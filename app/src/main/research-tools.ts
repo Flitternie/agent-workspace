@@ -62,9 +62,24 @@ export type ResearchCaller = { kind: 'main' } | { kind: 'agent'; taskId: string 
 // ------------------------------------------------------------------ briefs (what a new agent is told)
 
 /** How much to ask the user, as this research's policy says (the user's call). */
-export function modeText(mode: ResearchMode | undefined, lang: 'en' | 'zh'): string {
+/**
+ * How the research runs, as an agent is told. `aspect`: for an aspect's agent under a lead, whatever is to be
+ * agreed goes to the lead, who gathers the proposals and asks the user once (not every agent asking at once).
+ */
+export function modeText(mode: ResearchMode | undefined, lang: 'en' | 'zh', aspect?: { lead: boolean }): string {
   const zh = lang === 'zh';
-  switch (mode ?? DEFAULT_MODE) {
+  const m = mode ?? DEFAULT_MODE;
+  const toLead =
+    aspect?.lead && m !== 'auto'
+      ? zh
+        ? '要用户同意的提案先交给负责人（research_tell 发给 "lead"），由它汇总后统一问用户；不要自己直接问用户。'
+        : 'Proposals that need the user’s agreement go to the lead (research_tell to "lead"), who gathers them and asks the user once; do not ask the user yourself.'
+      : '';
+  return [modeLine(m, zh), toLead].filter(Boolean).join(' ');
+}
+
+function modeLine(mode: ResearchMode, zh: boolean): string {
+  switch (mode) {
     case 'auto':
       return zh ? '研究方式：自主推进。在预算内自己开实验，开了什么告诉用户。' : 'How this research runs: on its own. Start experiments yourself within the budget and say what you started.';
     case 'direction':
@@ -152,7 +167,7 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
             '可用的研究工具：research_overview 查看研究树；research_add 加一个方法（先作为想法，附上设计）；research_try 对一个方法并行开几个变体，每个变体一个 agent、各自独立 worktree；research_derive 组合或变异方法；research_record 记录结果；research_update 维护一句话结论（一个方法、以及这个方面目前的结论，会显示在图的节点上）；research_notes 维护这个方面的笔记（存在仓库里的 markdown），这个方面新开的 agent 会从笔记开始。具体怎么做研究由用户决定，按用户的要求来。回复保持简短，研究页面上能看到整棵树。',
           ),
           rules('aspect', lang),
-          modeText(doc.policy?.mode, lang),
+          modeText(doc.policy?.mode, lang, { lead: !!doc.leadTaskId }),
           notes?.aspects[node.id] ? L(`Your notes so far:\n${excerpt(notes.aspects[node.id].text)}`, `目前的笔记：\n${excerpt(notes.aspects[node.id].text)}`) : '',
         ]
       : [
@@ -615,6 +630,13 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         if (!full(doc)) throw new Error('How the research runs is set with its lead.');
         const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}) };
         save(projectId, { ...doc, policy, updatedAt: new Date().toISOString() });
+        // A change of mode reaches the agents already at work (their briefs said the old one).
+        if (a.mode && a.mode !== (doc.policy?.mode ?? DEFAULT_MODE)) {
+          const zh = host.language() === 'zh';
+          for (const n of doc.nodes.filter((x) => x.type === 'aspect' && x.taskId && host.findTaskById(x.taskId) && x.taskId !== (caller.kind === 'agent' ? caller.taskId : ''))) {
+            await host.researchTell(caller.kind === 'agent' ? caller.taskId : undefined, n.taskId!, `${zh ? '研究方式改了。' : 'How this research runs has changed. '}${modeText(policy.mode, host.language(), { lead: !!doc.leadTaskId })}`).catch(() => {});
+          }
+        }
         return `Settings: mode ${policy.mode ?? DEFAULT_MODE}, notes reminders ${policy.autoNotes === false ? 'off' : 'on'}, summary every ${policy.summaryEvery ?? 30} min${policy.summaryEvery === 0 ? ' (never)' : ''}.`;
       },
     },

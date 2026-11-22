@@ -390,6 +390,14 @@ describe('a research’s agents work through the research', () => {
     expect(r).toMatch(/Started .* as the agent of "Model"/);
     expect(said(node('Model').taskId!)[0]).toMatch(/You own the "Model" aspect[\s\S]*\[From .*\] Try two optimizers\./);
     await expect(data.research_tell.run({ to: (await main.research_add.run({ type: 'aspect', title: 'Infra' }), node('Infra').id), message: 'x' })).rejects.toThrow(/lead’s/);
+    // Under a lead, an aspect's agent takes proposals to the lead (in the modes that ask the user), and hears of a change of mode.
+    expect(said(node('Model').taskId!)[0]).toMatch(/review first[\s\S]*Proposals that need the user’s agreement go to the lead/);
+    await idle(node('Model').taskId!);
+    await idle(aspect.taskId);
+    const heard = said(aspect.taskId).length;
+    await as({ kind: 'agent', taskId: lead.taskId }).research_settings.run({ mode: 'auto' });
+    await until(() => said(aspect.taskId).length > heard);
+    expect(said(aspect.taskId).at(-1)).toMatch(/How this research runs has changed[\s\S]*on its own/);
   });
 });
 
