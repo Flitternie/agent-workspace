@@ -212,11 +212,13 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
             <p>
               <Icon name="check" size={13} /> {t('Kept. It reaches {names} with their next message.', { names: saved.reach.map((r) => r.alias).join(t(', ')) })}
             </p>
-            {saved.told !== undefined ? <p className="muted small">{t('Told {n} idle agents now.', { n: saved.told })}</p> : null}
-            <div className="row">
-              {saved.told === undefined && saved.reach.some((r) => r.idle) ? (
+            {/* One row: telling the idle ones now (a quiet link; it starts a turn for each), and Done. */}
+            <div className="modal-foot remember-foot">
+              {saved.told !== undefined ? (
+                <span className="muted small">{t('Told {n} idle agents now.', { n: saved.told })}</span>
+              ) : saved.reach.some((r) => r.idle) ? (
                 <button
-                  className="btn"
+                  className="link small"
                   disabled={busy}
                   data-testid="remember-tell-now"
                   title={t('Each idle agent gets a short message now (it starts a turn)')}
@@ -228,9 +230,10 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
                       .finally(() => setBusy(false));
                   }}
                 >
-                  {t('Tell the idle ones now')}
+                  {t('Tell the idle agents now')}
                 </button>
               ) : null}
+              <span className="spacer" />
               <button className="btn btn-primary" onClick={onClose} data-testid="remember-done">
                 {t('Got it')}
               </button>
@@ -309,6 +312,8 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
           </>
         ) : null}
         {error ? <div className="error-text small">{error}</div> : null}
+        {/* Saved: the row above is the dialog's only one. */}
+        {saved ? null : (
         <div className="modal-foot remember-foot">
           <button className="btn btn-ghost" disabled={!draft || busy} onClick={() => setRound((n) => n + 1)} data-testid="remember-redo">
             <Icon name="refresh" size={12} /> {t('Draft again')}
@@ -321,6 +326,7 @@ export function RememberDialog({ task, itemId, snapshot, onClose }: { task: Task
             {draft?.similar && target === 'update' ? t('Update note') : t('Save')}
           </button>
         </div>
+        )}
       </div>
     </Modal>,
     document.body,

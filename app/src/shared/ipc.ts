@@ -117,6 +117,7 @@ export const ipcSchemas = {
   'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
   'task:warm': z.object({ taskId: id }),
+  'task:sync': z.object({ taskId: id }),
   'task:stop': z.object({ taskId: id }),
   'task:rename': z.object({ taskId: id, name: z.string().min(1).max(100) }),
   'task:renameAgent': z.object({ taskId: id, alias: z.string().min(1).max(100) }),

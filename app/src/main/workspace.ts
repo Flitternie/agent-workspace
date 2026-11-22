@@ -1628,6 +1628,26 @@ export class Workspace {
     await this.connect(taskId);
   }
 
+  /**
+   * Picks up what was said elsewhere meanwhile (a session the user went on with in the terminal or
+   * another Claude Code / Codex app): the live session, which knows nothing of it, is closed quietly and the native session
+   * resumed again in the background, which replays its history into the view. Like opening the page,
+   * it changes nothing else about the agent. Not while it is working or waiting on the user.
+   */
+  async sync(taskId: string): Promise<void> {
+    const t = this.task(taskId);
+    if (t === this.store.data.mainAgent) throw new Error('The main agent has no session to sync.');
+    if (!this.currentSession(t)?.nativeSessionId) throw new Error('This agent has no session to sync yet.');
+    const l = this.live.get(taskId);
+    if (this.connecting.has(taskId)) throw new Error('Still connecting; try again in a moment.');
+    if (l && (l.turnActive || this.hasOpenNative(taskId))) throw new Error('Busy: sync when it has finished and nothing waits on you.');
+    if (l) {
+      this.live.delete(taskId);
+      await l.session.close().catch(() => {});
+    }
+    await this.connect(taskId, true);
+  }
+
   async stop(taskId: string): Promise<void> {
     this.cancelRetry(taskId);
     const l = this.live.get(taskId);
