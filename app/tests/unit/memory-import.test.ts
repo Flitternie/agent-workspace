@@ -97,7 +97,7 @@ describe('parsing', () => {
     const c = candidatesFrom(undefined, '/Users/me', files, projects);
     expect(c.map((x) => [x.file, x.suggestedScope, x.projectId, x.folderHint])).toEqual([
       ['~/.claude/projects/-Users-me-projects-agent-workspace/memory/style.md', 'project', 'p1', undefined],
-      ['~/.claude/projects/-home-me-aw/memory/remote.md', 'project', undefined, '-home-me-aw'], // p2 is on devbox, not this Mac
+      ['~/.claude/projects/-home-me-aw/memory/remote.md', 'project', undefined, '-home-me-aw'], // p2 is on devbox, not this computer
       ['~/.claude/projects/-Users-me-other/memory/chinese.md', 'project', undefined, '-Users-me-other'], // feedback too: it belongs to that folder
       ['~/AGENTS.md', 'global', undefined, undefined],
     ]);
@@ -175,7 +175,7 @@ describe('import and sync', () => {
 });
 
 describe('workspace scan over SSH (local sh, temp HOME)', () => {
-  it('scans this Mac and a host in one round trip, syncs user notes, keeps project notes manual, and injects them', async () => {
+  it('scans this computer and a host in one round trip, syncs user notes, keeps project notes manual, and injects them', async () => {
     const local = temp('amw-home-local-');
     const remote = temp('amw-home-remote-');
     const repo = temp('amw-repo-');

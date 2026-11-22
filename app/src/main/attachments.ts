@@ -7,7 +7,7 @@ import type { ImageRef } from '../shared/types';
  * The images a message carries, kept once in the app's data folder and named by their content
  * (the same image pasted twice is one file). The transcript records only the reference, so the
  * conversation shows its images without depending on the CLI's own session files, and each CLI is
- * handed the file (Codex on this Mac) or its bytes (Claude, and Codex over SSH).
+ * handed the file (Codex on this computer) or its bytes (Claude, and Codex over SSH).
  *
  * Only formats both CLIs accept are stored; the renderer converts anything else, and shrinks an
  * image that is too large, before saving (a too-large image breaks a Claude session for good,
@@ -54,7 +54,7 @@ export class AttachmentStore {
   }
 
   /**
-   * Stores an image read back from a CLI's history (base64 bytes or a file on this Mac), to show in
+   * Stores an image read back from a CLI's history (base64 bytes or a file on this computer), to show in
    * the conversation; undefined when it is not one it can keep. Any size: the CLI already took it.
    */
   saveFromHistory(src: { data: string } | { path: string }): ImageRef | undefined {

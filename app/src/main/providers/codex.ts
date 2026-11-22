@@ -215,7 +215,7 @@ function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsR
 
 /** Codex features the main agent does without (thread-level config overrides). */
 /**
- * A user message as app-server input. Images on this Mac go as files (`localImage`: Codex reads,
+ * A user message as app-server input. Images on this computer go as files (`localImage`: Codex reads,
  * shrinks and records the path, so its history keeps them). Over SSH the file is not on the host,
  * so the image goes inline as a data URL, as Codex's own client does with a remote workspace.
  */
@@ -246,7 +246,7 @@ const MAIN_AGENT_CONFIG = {
 };
 
 /**
- * Write access to the workspace, as `sandbox: 'workspace-write'`. On this Mac it is a
+ * Write access to the workspace, as `sandbox: 'workspace-write'`. On this computer it is a
  * permissions profile on top of `:workspace` that also keeps the private folders unreadable
  * (an explicit `sandbox` would override the profile).
  */

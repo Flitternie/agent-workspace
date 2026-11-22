@@ -10,7 +10,7 @@ import { stripAppText } from './memory-writeback';
 //  - User instruction files: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md,
 //    split into one note per top-level section so the user can pick; and Claude Code's
 //    user rules, ~/.claude/rules/*.md (one subfolder deep), one note per file.
-// Each note has a stable key `source|host|file|section` (host 'local' = this Mac).
+// Each note has a stable key `source|host|file|section` (host 'local' = this computer).
 // A record keeps every key whose text it holds (`importKeys`), so the same AGENTS.md
 // on two machines is one record, and a re-scan updates rather than duplicates.
 

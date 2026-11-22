@@ -117,7 +117,7 @@ function wbHash(body: string): string {
   return createHash('sha256').update(body.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
 }
 
-describe('on this Mac: nothing is deleted or overwritten', () => {
+describe('on this computer: nothing is deleted or overwritten', () => {
   it('links: backs up first (kept for good, plus a copy on the machine), marks its text with its owner', async () => {
     const h = home({ '.claude/CLAUDE.md': MINE, '.codex/AGENTS.md': MINE });
     const w = new MemoryWriteback(data(), h);
@@ -303,7 +303,7 @@ describe('linking a machine from the workspace', () => {
       expect(read(h, '.codex/AGENTS.md').startsWith('## Style\nShort replies.\n')).toBe(true);
       expect(read(h, '.codex/AGENTS.md')).toContain('Prefer short answers');
 
-      // App agents on this Mac get user memory from the files, not a second time.
+      // App agents on this computer get user memory from the files, not a second time.
       const task = { taskId: 't1', projectId: 'p', host: undefined } as Parameters<typeof memoryForTask>[0];
       expect(memoryForTask(task, ws.snapshot().memory).filter((m) => m.scope === 'global')).toHaveLength(3);
 

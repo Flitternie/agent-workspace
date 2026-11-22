@@ -239,7 +239,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
     if (p.kind === 'document') return { ...rest, frameUrl: addPreviewDoc(await documentToHtml(data ?? new Uint8Array(), p.path), 'text/html; charset=utf-8', DOCUMENT_CSP) };
     return rest;
   },
-  // A cheap look for the preview's live refresh: changed since it was read? (This Mac only.)
+  // A cheap look for the preview's live refresh: changed since it was read? (This computer only.)
   'file:stat': (i: { taskId: string; path: string; allowOutside?: boolean }) => {
     try {
       const s = statSync(workspace.previewLocalPath(i.taskId, i.path, i.allowOutside));

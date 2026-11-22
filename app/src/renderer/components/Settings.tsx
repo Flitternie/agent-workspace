@@ -351,7 +351,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
     <div className="model-picks">
       {deleting ? (
         <ConfirmDialog
-          title={t('Delete {name} from this Mac?', { name: deleting.label })}
+          title={t('Delete {name} from this computer?', { name: deleting.label })}
           confirmLabel={t('Delete')}
           danger
           onConfirm={() => void call('stt:delete', { id: deleting.id })}
@@ -365,7 +365,7 @@ function ModelPickers({ snapshot, onChange }: { snapshot: WorkspaceSnapshot; onC
         </span>
       </div>
       <div className="model-list" role="radiogroup" aria-label={t('Speech recognition model')} data-testid="stt-list">
-        <div className="model-group">{t('On this Mac')} · <span className="muted">{t('audio never leaves the computer')}</span></div>
+        <div className="model-group">{t('On this computer')} · <span className="muted">{t('audio never leaves the computer')}</span></div>
         {v.localModels.map((m, i) => (
           <ModelCard
             key={m.id}
@@ -488,7 +488,7 @@ function OpenAiKey({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     info.source === 'env'
       ? t('Using OPENAI_API_KEY from the environment') + tail
       : info.source === 'saved'
-        ? t('Saved on this Mac, encrypted') + tail
+        ? t('Saved on this computer, encrypted') + tail
         : info.source === 'file'
           ? t('Read from an openai.key file') + tail
           : t('No key yet');
@@ -779,7 +779,7 @@ const SECTIONS: Array<{ id: string; group: string; title: string; keywords: stri
   { id: 'permissions', group: 'How agents work', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval'] },
   { id: 'memory', group: 'Memory and skills', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
   { id: 'skills', group: 'Memory and skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
-  { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this Mac', 'SenseVoice', 'Whisper', 'local', 'offline'] },
+  { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this computer', 'SenseVoice', 'Whisper', 'local', 'offline'] },
   { id: 'openai', group: 'Voice and OpenAI', title: 'OpenAI', keywords: ['API key', 'OPENAI_API_KEY', 'key', 'Save key', 'cloud'] },
 ];
 
@@ -899,7 +899,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
       >
         <p className="muted small">
           {t(
-            'Uses the Claude Code and Codex already signed in on this Mac. The app never reads their credentials.',
+            'Uses the Claude Code and Codex already signed in on this computer. The app never reads their credentials.',
           )}
         </p>
         {(['claude', 'codex'] as const).map((p) => {

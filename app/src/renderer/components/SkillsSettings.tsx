@@ -8,7 +8,7 @@ const SOURCE_LABEL: Record<SkillSource, string> = { claude: 'Claude Code', codex
 
 /**
  * Settings › Skills: the app's own skill library, loaded into every agent it starts
- * (Claude Code and Codex, on this Mac and on SSH hosts), and the skills found in the
+ * (Claude Code and Codex, on this computer and on SSH hosts), and the skills found in the
  * CLIs' folders on each machine, to import from. Nothing is written to those folders.
  */
 export function SkillsSettings() {
@@ -54,7 +54,7 @@ export function SkillsSettings() {
             </label>
             {s.origin ? (
               <span className="muted small">
-                {t('from {where}', { where: `${s.origin.host ?? t('this Mac')} · ${SOURCE_LABEL[s.origin.source]}` })}
+                {t('from {where}', { where: `${s.origin.host ?? t('Local')} · ${SOURCE_LABEL[s.origin.source]}` })}
               </span>
             ) : null}
             <span className="host-actions">
@@ -81,7 +81,7 @@ export function SkillsSettings() {
       {scan && !scan.found.length ? <div className="muted small">{t('No skills in ~/.claude/skills, ~/.codex/skills or ~/.agents/skills.')}</div> : null}
       {machines.map((m) => (
         <div key={m || 'local'} className="skill-machine">
-          <div className="muted small skill-machine-name">{m || t('this Mac')}</div>
+          <div className="muted small skill-machine-name">{m || t('Local')}</div>
           {scan!.found
             .filter((f) => (f.host ?? '') === m)
             .map((f) => {

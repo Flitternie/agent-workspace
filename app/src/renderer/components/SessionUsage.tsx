@@ -258,7 +258,7 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
     .sort((a, b) => Number(!!a.host) - Number(!!b.host) || (a.host ?? '').localeCompare(b.host ?? '') || a.provider.localeCompare(b.provider));
   // Only accounts with plan limits (an API-key login is billed by use: nothing to show here).
   if (!rows.length) return null;
-  // The machine is named only when there is more than this Mac.
+  // The machine is named only when there is more than this computer.
   const machines = rows.some((r) => r.host);
   // Folded to one line (the highest use across accounts), kept on this machine; a nearly used-up window
   // still shows on the folded line.
@@ -274,9 +274,9 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
         {open ? null : <span className="mono">{top}%</span>}
       </button>
       {open ? rows.map(({ key, l, provider, host }) => {
-        const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
-        // One line each. With accounts on more than this Mac, each names its machine beside its mark ("this
-        // Mac", or the host's whole name, cut short to the sidebar's width; the full name in the tooltip). The bars keep their columns.
+        const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('Local')}` : ''}`;
+        // One line each. With accounts on more than this computer, each names its machine beside its mark
+        // ("Local", or the host's whole name, cut short to the sidebar's width; the full name in the tooltip). The bars keep their columns.
         const hot = mainWindows(l.windows).some((w) => w.usedPercent >= HOT);
         const age = now - Date.parse(l.at);
         const asOf = age > 90_000 ? t('as of {time}', { time: timeAgo(l.at, now) }) : '';
@@ -290,7 +290,7 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
               <>
                 <span className="account-name" title={name}>
                   <ProviderIcon provider={provider} />
-                  {machines ? <span className="account-host truncate">{host ?? t('this Mac')}</span> : null}
+                  {machines ? <span className="account-host truncate">{host ?? t('Local')}</span> : null}
                 </span>
                 <span className="account-windows">
                   {mainWindows(l.windows).map((w) => (

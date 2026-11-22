@@ -66,7 +66,7 @@ describe('real entry: first run, settings, language', () => {
     await expect.poll(() => page.locator('.stage-head h1').innerText()).toBe('总览');
     await page.screenshot({ path: join(shots, 'first-run-zh.png') });
 
-    // Sessions from any folder on this Mac can be continued here (import only; nothing is started).
+    // Sessions from any folder on this computer can be continued here (import only; nothing is started).
     await page.getByTestId('resume-session').click();
     await expect.poll(async () => (await page.getByTestId('session-row').count()) > 0 || (await page.getByRole('dialog').innerText()).includes('没有找到会话'), { timeout: 30_000 }).toBe(true);
     await page.screenshot({ path: join(shots, 'sessions-zh.png') });

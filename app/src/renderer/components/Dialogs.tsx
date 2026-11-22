@@ -201,14 +201,14 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
   );
 }
 
-/** Recent Claude Code / Codex sessions from any folder on this Mac (or one SSH host), newest first. */
+/** Recent Claude Code / Codex sessions from any folder on this computer (or one SSH host), newest first. */
 export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: WorkspaceSnapshot; onClose: () => void; onImported: (taskId: string) => void }) {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [provider, setProvider] = useState<'all' | 'claude' | 'codex'>('all');
   const [importing, setImporting] = useState('');
   const [showAutomated, setShowAutomated] = useState(() => readPref(AUTOMATED_KEY) === '1');
-  // Sources: this Mac plus the machines turned on in Settings › Remote machines.
+  // Sources: this computer plus the machines turned on in Settings › Remote machines.
   const hosts = snapshot.remoteHosts.map((h) => h.host);
   const [source, setSource] = useState<string>(() => {
     const saved = readSource();
@@ -267,7 +267,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
         {hosts.length ? (
           <select className="input select" value={source} onChange={(e) => setSource(e.target.value)} title={t('Where the sessions are')} data-testid="session-host">
             <option value="all">{t('All machines')}</option>
-            <option value={LOCAL}>{t('This Mac')}</option>
+            <option value={LOCAL}>{t('Local')}</option>
             {hosts.map((h) => (
               <option key={h} value={h}>
                 {h}
@@ -299,7 +299,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
         </label>
       ) : null}
       {pending.length ? (
-        <div className="muted small">{pending.length === 1 && pending[0] === LOCAL ? t('Looking for sessions…') : t('Looking for sessions on {hosts}…', { hosts: pending.map((p) => (p === LOCAL ? t('this Mac') : p)).join(', ') })}</div>
+        <div className="muted small">{pending.length === 1 && pending[0] === LOCAL ? t('Looking for sessions…') : t('Looking for sessions on {hosts}…', { hosts: pending.map((p) => (p === LOCAL ? t('Local') : p)).join(', ') })}</div>
       ) : null}
       {failed.map((f) => (
         <div key={f.src} className="warn-text small">

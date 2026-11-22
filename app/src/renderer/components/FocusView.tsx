@@ -256,14 +256,14 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const [forking, setForking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // Conversations on this Mac can be forked once saved, when their provider supports it.
+  // Conversations on this computer can be forked once saved, when their provider supports it.
   const canFork = !isMainAgent(task) && !task.host && !!snapshot.capabilities.find((c) => c.provider === task.provider)?.fork && !!session?.nativeSessionId;
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');
     fn().catch((e) => setError(errorText(e)));
   };
-  // "Open in default app" only for files on this Mac.
+  // "Open in default app" only for files on this computer.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
   // A file previewed while it has changes in the latest turn can show them (File / Changes).
@@ -1301,7 +1301,7 @@ function Composer({
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>
-                {t('Command')} · {task.host ?? t('this Mac')}
+                {t('Command')} · {task.host ?? t('Local')}
                 <span className="muted">
                   {' '}
                   — {task.provider === 'codex' ? t('runs in {dir} through Codex, which sees the output', { dir: task.cwd }) : t('runs in {dir}; {alias} sees the output with your next message', { dir: task.cwd, alias: task.alias })}

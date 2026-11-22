@@ -53,7 +53,7 @@ describe('session usage in the agent header', () => {
     await expect.poll(() => tokens.innerText()).toContain('35K tok · 88% cached');
     expect(await page.getByTestId('usage-context').innerText()).toBe('2%');
     // The account's limits are the account's, not this agent's: in the sidebar's foot, one line per account
-    // (only this Mac here, so no machine named); under the reply box only when close to the limit.
+    // (only this computer here, so no machine named); under the reply box only when close to the limit.
     const account = page.getByTestId('account-limit');
     await expect.poll(() => account.count()).toBe(1);
     expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('5h 34% week 35%');

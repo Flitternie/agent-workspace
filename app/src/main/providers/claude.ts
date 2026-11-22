@@ -81,7 +81,7 @@ function mainAgentOptions(sdk: Awaited<ReturnType<typeof loadSdk>>, tools: Works
   };
 }
 
-/** Entrypoints of saved sessions on this Mac, from the first lines of each transcript. */
+/** Entrypoints of saved sessions on this computer, from the first lines of each transcript. */
 async function localEntrypoints(ids: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (!ids.length) return out;

@@ -286,7 +286,7 @@ export class MemoryWriteback {
 
   constructor(
     dataDir: string,
-    /** The home used for this Mac (tests). */
+    /** The home used for this computer (tests). */
     private home = homedir(),
   ) {
     this.dir = join(dataDir, 'memory-backups');
@@ -463,7 +463,7 @@ export class MemoryWriteback {
     this.store(i);
     // Over the limit: say which notes the CLIs' files leave out (the app's agents still get them).
     const over = notesFor(host, files.find((f) => f.kind === 'codex-md')?.file ?? '', records).dropped;
-    if (over) res.notices.push(`${over} note(s) are not in the CLIs' files on ${host === LOCAL ? 'this Mac' : host}: user memory is over ${MAX_NOTES_CHARS.toLocaleString('en-US')} characters. Agents started by the app still get them; terminal sessions do not.`);
+    if (over) res.notices.push(`${over} note(s) are not in the CLIs' files on ${host === LOCAL ? 'this computer' : host}: user memory is over ${MAX_NOTES_CHARS.toLocaleString('en-US')} characters. Agents started by the app still get them; terminal sessions do not.`);
     return res;
   }
 

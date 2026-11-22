@@ -7,7 +7,7 @@ import { Icon, PROVIDER_LABEL } from './bits';
 
 // Where a new agent works, in two steps, the way VS Code's "Open Recent" and Zed's project picker
 // feel: the project shows as a button (the one used last, most of the time the right one). Opening it
-// asks first where: this Mac or one of the machines turned on in Settings › Remote machines (a
+// asks first where: this computer or one of the machines turned on in Settings › Remote machines (a
 // searchable list, however many there are). Then, for that place, the folder: its projects (most
 // recently used first), the folders where Claude Code or Codex sessions already ran there, or any
 // folder by typing its path (~/… or /…) with completion, listed on that machine over SSH as typed.
@@ -67,7 +67,7 @@ type Item =
 export function ProjectChooser({ snapshot, value, onChange }: { snapshot: WorkspaceSnapshot; value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<'place' | 'folder'>('place');
-  /** Where: '' = this Mac, else an SSH host. */
+  /** Where: '' = this computer, else an SSH host. */
   const [place, setPlace] = useState('');
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -86,7 +86,7 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
   const agentsIn = (p: Project) => snapshot.tasks.filter((t) => t.projectId === p.projectId).length;
   const hostOf = (key: string) => snapshot.remoteHosts.find((h) => h.host === key);
   const reachable = !place || hostOf(place)?.ssh === 'ok';
-  const placeLabel = (key: string) => key || t('This Mac');
+  const placeLabel = (key: string) => key || t('Local');
   const typed = stage === 'folder' ? splitTyped(query) : null;
   const dirKey = typed ? `${place}\n${typed.parent}` : '';
 
@@ -304,7 +304,7 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
             className="input project-search"
             autoFocus
             spellCheck={false}
-            placeholder={stage === 'place' ? t('Where? This Mac or a machine…') : place ? t('Search, or type a path on {host} (~/… or /…)', { host: place }) : t('Search, or type a path (~/… or /…)')}
+            placeholder={stage === 'place' ? t('Where? This computer or a machine…') : place ? t('Search, or type a path on {host} (~/… or /…)', { host: place }) : t('Search, or type a path (~/… or /…)')}
             defaultValue=""
             onChange={(e) => {
               // ～ / 、 from a Chinese input method: written back as ~ and / at once.
@@ -321,7 +321,7 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
               <div key={keyOf(it)}>
                 {i === 0 && it.kind === 'place' ? <div className="project-group">{t('Where')}</div> : null}
                 {i === 0 && it.kind === 'project' ? <div className="project-group">{t('Recent')}</div> : null}
-                {i === firstFound ? <div className="project-group">{place ? t('Found on {host} (Claude Code / Codex sessions)', { host: place }) : t('Found on this Mac (Claude Code / Codex sessions)')}</div> : null}
+                {i === firstFound ? <div className="project-group">{place ? t('Found on {host} (Claude Code / Codex sessions)', { host: place }) : t('Found on this computer (Claude Code / Codex sessions)')}</div> : null}
                 {i === firstAction ? <div className="project-group">{t('Other folders')}</div> : null}
                 {i === firstDir ? <div className="project-group">{t('Folders in {dir}', { dir: typed?.parent ?? '' })}</div> : null}
                 <button

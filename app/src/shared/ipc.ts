@@ -79,7 +79,7 @@ export const ipcSchemas = {
   'btw:clear': z.object({ taskId: z.string() }),
   /** Files in an agent's folder matching what is typed after @ in its message box. */
   'files:search': z.object({ taskId: id, query: z.string().max(500) }),
-  /** Files dropped on an agent's message box (their paths on this Mac): how to mention each. */
+  /** Files dropped on an agent's message box (their paths on this computer): how to mention each. */
   'files:dropped': z.object({ taskId: id, paths: z.array(z.string().min(1).max(4096)).max(20) }),
   'fs:listDirs': z.object({ dir: z.string().min(1).max(2000), host: z.string().max(200).optional() }),
   'sessions:discoverHost': z.object({ host }),

@@ -36,9 +36,9 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  // This Mac, the SSH machines in Settings, and any machine still linked after it was removed from there.
+  // This computer, the SSH machines in Settings, and any machine still linked after it was removed from there.
   const machines = [...new Set(['local', ...snapshot.remoteHosts.map((h) => h.host), ...Object.keys(snapshot.memoryShare)])];
-  const name = (h: string) => (h === 'local' ? t('This Mac') : h);
+  const name = (h: string) => (h === 'local' ? t('Local') : h);
   const reachable = (h: string) => h === 'local' || snapshot.remoteHosts.find((x) => x.host === h)?.ssh === 'ok';
 
   const act = async (id: string, fn: () => Promise<unknown>) => {
