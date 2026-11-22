@@ -6597,12 +6597,29 @@ button.subtask-row:hover {
 .map-title:hover {
   color: var(--hue) !important;
 }
-.map-caret,
-.map-caret:hover,
+.map-caret {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.map-caret:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 .map-caret.open .icon {
   transform: rotate(90deg);
 }
-.map-task:hover .map-meta {
+.map-meta {
   margin-top: 2px;
   font-size: 11px;
   color: var(--text-3);
@@ -7641,4 +7658,10 @@ button.subtask-row:hover {
 /* Syncing from the CLI: its icon turns while it works. */
 .btn.btn-icon.busy .icon {
   animation: spin 0.9s linear infinite;
+}
+
+/* Between the header's groups of buttons: a little more room than between buttons of one group. */
+.focus-actions .actions-gap {
+  flex: none;
+  width: 6px;
 }
