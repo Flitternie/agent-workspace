@@ -13,7 +13,6 @@ import { CodexAdapter } from './providers/codex';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
-import type { ResearchDoc } from '../shared/research';
 import { documentToHtml } from './documents';
 import { bundleIcon, installedApps, launch, launchCommand } from './open-in-app';
 import { cancelHostLogin, cancelLogin, desktopApps, installOnHost, loginWithApiKey, sendHostLoginCode, startHostLogin, startLogin, type LoginMethod } from './login';
@@ -154,15 +153,6 @@ const handlers: { [C in IpcChannel]: Handler } = {
   },
   'project:rename': (i: { projectId: string; name: string }) => workspace.renameProject(i.projectId, i.name),
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
-  'research:get': (i: { researchId: string }) => workspace.researchLoad(i.researchId),
-  'research:save': (i: { researchId: string; doc: ResearchDoc }) => workspace.researchSave(i.researchId, i.doc),
-  'research:notes': (i: { researchId: string }) => workspace.researchLoadNotes(i.researchId),
-  'research:message': (i: { researchId: string; nodeIds: string[]; text: string; images?: ImageRef[] }) => workspace.researchMessage(i.researchId, i.nodeIds, i.text, i.images),
-  'research:dissolve': (i: { researchId: string }) => workspace.researchDissolve(i.researchId),
-  'research:fromTasks': (i: { projectId: string; taskIds: string[]; title?: string; dir?: string }) => workspace.researchFromTasks(i.projectId, i.taskIds, i.title, i.dir),
-  'research:addTasks': (i: { researchId: string; taskIds: string[] }) => workspace.researchAddTasks(i.researchId, i.taskIds),
-  'research:view': (i: { researchId: string; key: string; text: string }) => workspace.researchSetView(i.researchId, i.key, i.text),
-  'research:create': (i: { projectId: string; dir?: string; title: string; goal: string; sample: boolean }) => workspace.researchCreate(i.projectId, i.title, i.goal, i.sample, i.dir),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),
   'ssh:check': (i: { host: string; quiet?: boolean }) => workspace.checkHost(i.host, { quiet: i.quiet }),

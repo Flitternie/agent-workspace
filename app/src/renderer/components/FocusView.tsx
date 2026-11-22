@@ -2,7 +2,7 @@ import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useS
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import { accountKey } from '../../shared/types';
-import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry, ImageRef } from '../../shared/types';
+import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem, WorkspaceSnapshot, BtwEntry } from '../../shared/types';
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
@@ -632,8 +632,8 @@ function restored(taskId: string): ShownPreview | null {
   return saved ? { ...saved, nonce: 1, again: false } : null;
 }
 
-/** The bar between the conversation and the preview: drag to resize, double-click for the default width. Other pages' side columns use it too. */
-export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min = PREVIEW_MIN }: { width: number; room: number; onChange: (w: number) => void; reset?: number; min?: number }) {
+/** The bar between the conversation and the preview: drag to resize, double-click for the default width. */
+function PanelResizer({ width, room, onChange }: { width: number; room: number; onChange: (w: number) => void }) {
   // A drag in progress ends with the bar too: if the panel goes while dragging, the pointer is not left as a resize cursor.
   const stop = useRef<(() => void) | null>(null);
   useEffect(() => () => stop.current?.(), []);
@@ -645,7 +645,7 @@ export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min
       aria-label={t('Resize the side column')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="panel-resizer"
-      onDoubleClick={() => onChange(reset)}
+      onDoubleClick={() => onChange(PREVIEW_WIDTH)}
       onPointerDown={(e) => {
         e.preventDefault();
         const startX = e.clientX;
@@ -654,7 +654,7 @@ export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min
         // On the window, so a fast drag that outruns the thin bar (or outlives it) still ends.
         const move = (ev: PointerEvent) => {
           // Room for the conversation stays; the preview never gets too narrow to read.
-          onChange(Math.min(previewMaxWidth(room), Math.max(min, startW + (startX - ev.clientX))));
+          onChange(Math.min(previewMaxWidth(room), Math.max(PREVIEW_MIN, startW + (startX - ev.clientX))));
         };
         const up = () => {
           window.removeEventListener('pointermove', move);
@@ -685,7 +685,6 @@ export function WaitingOnYou({
   limit,
   bar,
   onPick,
-  only,
 }: {
   snapshot: WorkspaceSnapshot;
   now: number;
@@ -695,14 +694,12 @@ export function WaitingOnYou({
   bar?: boolean;
   /** The row the user unfolded themselves (not one opened by itself), or null. */
   onPick?: (attentionId: string | null) => void;
-  /** Only these agents' requests (the research page: its agents). */
-  only?: (taskId: string) => boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [unfolded, setUnfolded] = useState(false);
   // The bar's open row: undefined = automatic (the only one, when there is one), null = none.
   const [picked, setPicked] = useState<string | null | undefined>(undefined);
-  const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId) && (!only || only(a.taskId)));
+  const open = snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && snapshot.tasks.some((t) => t.taskId === a.taskId));
   // Folds again once everything is answered, so the next request arrives as one line.
   useEffect(() => {
     if (!open.length) setUnfolded(false);
@@ -1125,25 +1122,8 @@ function NoticeGroup({ notices }: { notices: TranscriptItem[] }) {
   );
 }
 
-/**
- * Where a box sends when it is not an agent's own (the research page): who it goes to, what to show,
- * and how to send. The box is the same; what only fits one agent's conversation (commands, side
- * questions, suggestions, stop and send) is left out.
- */
-export interface ComposerTarget {
-  label: ReactNode;
-  placeholder: string;
-  send: (text: string, images: ImageRef[]) => Promise<{ ok: boolean; error?: string }>;
-  disabled?: boolean;
-  /** A chip above the box: what the message is about, with a way to take it back. */
-  about?: { label: string; text: string; clearLabel: string; onClear: () => void };
-  /** Questions that fit here, offered while the box is empty: a click puts one in the box (to edit or send). */
-  chips?: string[];
-}
-
-export function Composer({
+function Composer({
   task,
-  target,
   onBtw,
   btwCount = 0,
   inject,
@@ -1152,9 +1132,7 @@ export function Composer({
   side,
   under,
 }: {
-  /** The agent the box is for (on the research page: the one a message would reach, if it exists yet). */
-  task?: Task;
-  target?: ComposerTarget;
+  task: Task;
   /** Beside the box, outside it on the right, level with its bottom (the context used). */
   side?: ReactNode;
   /** Shown under the box, on the right (the account's limits, when close). */
@@ -1168,9 +1146,7 @@ export function Composer({
 }) {
   // The unsent message is the agent's, not the box's: it is still there after the Overview or another
   // agent, and the agent's Overview tile shows the same text.
-  // (On the research page the box may have no agent yet: its draft is the page's.)
-  const draftKey = task?.taskId ?? 'research';
-  const [draft, setDraft] = useDraft(draftKey);
+  const [draft, setDraft] = useDraft(task.taskId);
   const box = useRef<HTMLTextAreaElement>(null);
   // Back to a message left half-written: ready to go on where it ended.
   useLayoutEffect(() => {
@@ -1205,7 +1181,7 @@ export function Composer({
     const join = (a: string, b: string) => (a.trim() && b ? `${a.trimEnd()} ${b}` : a || b);
     const onDraft = (ev: Event) => {
       const { taskId, text, phase } = (ev as CustomEvent<{ taskId: string; text: string; phase: 'listening' | 'keep' | 'drop' }>).detail;
-      if (!task || taskId !== task.taskId) return;
+      if (taskId !== task.taskId) return;
       // A new spoken draft starts after whatever is in the box now.
       if (voiceRef.current === null) base.current = draftRef.current;
       if (phase === 'listening') {
@@ -1220,30 +1196,30 @@ export function Composer({
     };
     window.addEventListener('amw:voice-draft', onDraft);
     return () => window.removeEventListener('amw:voice-draft', onDraft);
-  }, [task?.taskId]);
+  }, [task.taskId]);
   /** Typing into, or sending, a box that holds a spoken draft takes it over: it is not sent again. */
   const takeVoice = () => {
     if (voiceRef.current === null) return;
     setVoice(null);
-    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task?.taskId } }));
+    window.dispatchEvent(new CustomEvent('amw:voice-taken', { detail: { taskId: task.taskId } }));
   };
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
   // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
-  const mention = useMentions(task?.taskId, box, draft, setDraft, { browseOnly: !task || isMainAgent(task) });
+  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task) });
   // Other files dropped here are mentioned with @, as if picked from the list.
   const attach = useAttachments(async (files) => {
-    const text = task ? await dropMentions(task.taskId, files) : '';
+    const text = await dropMentions(task.taskId, files);
     if (text) mention.insert(text);
     box.current?.focus();
-  }, draftKey);
+  }, task.taskId);
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
-  const working = !target && !!task && (task.status === 'running' || task.status === 'starting');
+  const working = task.status === 'running' || task.status === 'starting';
   // `!command` runs a command in the agent's folder, as in the CLIs.
-  const shell = !target && !!task && draft.trimStart().startsWith('!') && !isMainAgent(task);
-  const suggestion = !target && !draft && task?.suggestion ? task.suggestion : '';
+  const shell = draft.trimStart().startsWith('!') && !isMainAgent(task);
+  const suggestion = !draft && task.suggestion ? task.suggestion : '';
   /**
    * A side question ("btw"): the same box, another way to send (⌥↵, the bubble button, or a message
    * starting /btw). It goes to the side column, never into the conversation, and interrupts nothing.
@@ -1265,7 +1241,7 @@ export function Composer({
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = shell ? [] : attach.refs;
-    if ((!text && !images.length) || sending || attach.busy || target?.disabled) return;
+    if ((!text && !images.length) || sending || attach.busy) return;
     takeVoice();
     if (onBtw && /^\/btw\b/i.test(text)) return btw();
     setSending(true);
@@ -1276,13 +1252,9 @@ export function Composer({
       // A command can run for a while (its row shows it running): the box is free at once, and
       // gets the command back if it could not run.
       if (shell) setDraft('');
-      const r = target
-        ? await target.send(text, images)
-        : !task
-          ? { ok: false, error: t('Not delivered') }
-          : shell
-            ? await call('task:shell', { taskId: task.taskId, command })
-            : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt, ...(images.length ? { images } : {}), ...(about ? { about: about.id } : {}) });
+      const r = shell
+        ? await call('task:shell', { taskId: task.taskId, command })
+        : await call('task:send', { taskId: task.taskId, text, via: 'text', interrupt, ...(images.length ? { images } : {}), ...(about ? { about: about.id } : {}) });
       if (r.ok) {
         if (!shell) {
           setDraft('');
@@ -1301,15 +1273,6 @@ export function Composer({
   };
   return (
     <div className="composer">
-      {target?.about ? (
-        <div className="composer-about" data-testid="composer-about">
-          <span className="composer-about-label">{target.about.label}</span>
-          <span className="composer-about-text">{target.about.text}</span>
-          <button className="composer-about-clear" onClick={target.about.onClear} aria-label={target.about.clearLabel} title={target.about.clearLabel} data-testid="composer-about-clear">
-            <Icon name="x" size={11} />
-          </button>
-        </div>
-      ) : null}
       {about ? (
         <div className="composer-about" data-testid="composer-about">
           <span className="composer-about-label">{t('About {name}’s request', { name: about.alias })}</span>
@@ -1317,22 +1280,6 @@ export function Composer({
           <button className="composer-about-clear" onClick={onClearAbout} aria-label={t('Not about this request')} title={t('Not about this request')} data-testid="composer-about-clear">
             <Icon name="x" size={11} />
           </button>
-        </div>
-      ) : null}
-      {target?.chips?.length && !draft.trim() && !target.disabled ? (
-        <div className="composer-chips" data-testid="composer-chips">
-          {target.chips.map((c) => (
-            <button
-              key={c}
-              className="composer-chip"
-              onClick={() => {
-                setDraft(c);
-                box.current?.focus();
-              }}
-            >
-              {c}
-            </button>
-          ))}
         </div>
       ) : null}
       <MentionMenu m={mention} />
@@ -1349,10 +1296,9 @@ export function Composer({
           className="composer-input"
           rows={3}
           // A new agent with nothing asked yet: ready for its first message.
-          autoFocus={!!task && !target && !task.title.trim()}
+          autoFocus={!task.title.trim()}
           value={draft}
-          disabled={target?.disabled}
-          placeholder={target ? target.placeholder : btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: task && isMainAgent(task) ? t('Main agent') : (task?.alias ?? '') })}
+          placeholder={btwHint ? t('Type a side question, then ⌥↵') : suggestion || t('Message {alias}…', { alias: isMainAgent(task) ? t('Main agent') : task.alias })}
           onChange={(e) => {
             takeVoice();
             setDraft(e.target.value);
@@ -1396,7 +1342,7 @@ export function Composer({
               </>
             ) : (
               <>
-                {target ? target.label : task ? `${t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · ${PROVIDER_LABEL[task.provider]}` : null}
+                {t('To: {alias}', { alias: isMainAgent(task) ? t('Main agent') : task.alias })} · {PROVIDER_LABEL[task.provider]}
               </>
             )}
           </span>
@@ -1426,7 +1372,7 @@ export function Composer({
               <Icon name="btw" />
             </button>
           ) : null}
-          <button className="send-btn" aria-label={t('Send')} disabled={(!draft.trim() && !(attach.items.length && !shell)) || sending || attach.busy || !!target?.disabled} onClick={() => void send()} data-testid="composer-send">
+          <button className="send-btn" aria-label={t('Send')} disabled={(!draft.trim() && !(attach.items.length && !shell)) || sending || attach.busy} onClick={() => void send()}>
             <Icon name="send" />
           </button>
         </div>

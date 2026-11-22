@@ -70,16 +70,6 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 - **Session Map:** an agent's conversation as a tree of tasks, with outcomes, the decisions along the way and the forks that tried something else. Click a task to jump there.
 - **Team Map:** one lane per agent beside the main agent: what went to whom, and where each stands. Long conversations turn into chapters, and the map follows.
 
-## Research
-
-**Run a research with many agents, and keep it in view.**
-
-- **A tree, not a list:** the goal, its aspects, the methods tried in each and their experiments, with one-line takeaways on the nodes. A lead agent lays it out with you; each aspect has its own agent; each experiment is one agent, in parallel.
-- **Managed by talking:** select a node (or several) and say what you want; the message goes to the agent over what is selected. What is running, what waits on you and what is new since you last looked are counted at the top.
-- **Views you can ask for:** each node's panel is a view the agents write: live tables over the results (new methods add rows, new benchmarks add columns), notes, or their own HTML. The page's own labels and totals are settings the lead changes while the research runs.
-- **Kept in the repository:** the tree, notes and views are plain files in `.research/`, on this machine or on a server over SSH. Start one from **+**, or right-click conversations to turn them into one.
-
-## Memory
 ## Memory
 
 **Teach one agent. All of them know.**

@@ -118,12 +118,6 @@ export interface StartArgs {
   permissionMode?: PermissionMode;
   /** Main agent only: workspace tools it may call; the session is limited to these plus read-only tools. */
   tools?: WorkspaceTool[];
-  /** Any agent: tools added to its own (the research tools of its project), pre-approved; nothing else changes. */
-  extraTools?: WorkspaceTool[];
-  /** Built-in tools this agent goes without (a research's lead and aspect agents hand work out through the research, not to hidden sub-agents). */
-  disallowedTools?: string[];
-  /** Folders (glob paths) it may read but not write: changed through tools instead (.research/). */
-  denyEdit?: string[];
   title: string;
 }
 

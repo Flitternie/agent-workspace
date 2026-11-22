@@ -9,7 +9,6 @@ import { ImportDialog, NewTaskDialog } from './components/Dialogs';
 import { readiness, ReadinessBadge, SettingsPage } from './components/Settings';
 import { PROVIDER_LABEL } from './components/bits';
 import { FocusView } from './components/FocusView';
-import { NewResearchDialog, ResearchView } from './components/Research';
 import { SubtaskView } from './components/SubtaskView';
 import { Onboarding } from './components/Onboarding';
 import { Sidebar } from './components/Sidebar';
@@ -133,10 +132,6 @@ export function App() {
   // A task created from a dialog shows up with the next snapshot; focus it then.
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'new' | 'import' | null>(null);
-  // A project's research page, and the project a new research is being started in.
-  const [researchOf, setResearchOf] = useState<string | null>(null);
-  /** The new-research dialog: open with a project suggested ('' for the most recent). */
-  const [newResearchIn, setNewResearchIn] = useState<string | null>(null);
   // Settings is a page in the main area, like VS Code, not a dialog.
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Opened from elsewhere (e.g. an agent's memory chip) at a given section.
@@ -200,9 +195,7 @@ export function App() {
   const [galleryEl, setGalleryEl] = useState<HTMLDivElement | null>(null);
   const galleryW = useElementWidth(galleryEl);
   const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
-  // A research's agents live on its page (its one row in the sidebar), not one by one in their project's team.
-  const researchIds = new Set(snapshot?.research.flatMap((r) => r.taskIds) ?? []);
-  const teamList = snapshot ? teams(snapshot.tasks.filter((t) => !researchIds.has(t.taskId)), snapshot.projects, openAll, now) : [];
+  const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now) : [];
   const order = visibleOrder(teamList, expanded);
   // Overview: busy or recently busy agents, by priority, in as many tiles as the layout has.
   const layout = snapshot?.settings.overviewSlots ?? 0;
@@ -282,13 +275,11 @@ export function App() {
       const typing = e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (e.key === 'Escape' && !typing && !dialog) {
         // Esc steps back one level: settings / focus first, then the Overview selection.
-        // From an agent opened on a research page, back to that page.
         if (subView) setSubView(null);
         else if (settingsOpen || focusId) {
           setSettingsOpen(false);
           setFocusId(null);
-        } else if (researchOf) setResearchOf(null);
-        else setSelectedId(null);
+        } else setSelectedId(null);
       }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[0-9]$/.test(e.key) && snapshot) {
         e.preventDefault();
@@ -299,7 +290,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, snapshot, settingsOpen, focusId, subView, researchOf]);
+  }, [dialog, snapshot, settingsOpen, focusId, subView]);
 
   if (!snapshot) return <div className="loading">{t('Loading workspace…')}</div>;
   // First run: the guide takes the Overview's place on a fresh workspace until finished or skipped
@@ -321,7 +312,7 @@ export function App() {
       .catch((e) => setError(errorText(e)));
 
   return (
-    <div className={`app${researchOf && !focusTask && !settingsOpen && !subView ? ' research-open' : ''}`} style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
+    <div className="app" style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
       <SidebarResizer width={sidebarW} min={sidebarMin} onChange={setSidebarW} />
       <Sidebar
         snapshot={snapshot}
@@ -329,23 +320,13 @@ export function App() {
         onSelect={(id) => {
           setSettingsOpen(false);
           setSubView(null);
-          setResearchOf(null);
           setFocusId(id);
         }}
         onOverview={() => {
           setSettingsOpen(false);
           setSubView(null);
-          setResearchOf(null);
           setFocusId(null);
         }}
-        researchOpen={!focusTask && !settingsOpen ? researchOf : null}
-        onOpenResearch={(id) => {
-          setSettingsOpen(false);
-          setSubView(null);
-          setFocusId(null);
-          setResearchOf(id);
-        }}
-        onNewResearch={setNewResearchIn}
         onOpenSubtask={(taskId, subtaskId) => {
           setSettingsOpen(false);
           setSubView({ taskId, subtaskId });
@@ -376,8 +357,6 @@ export function App() {
           <SettingsPage snapshot={snapshot} section={settingsSection} onClose={() => (setSettingsOpen(false), setSettingsSection(undefined))} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
-        ) : researchOf && snapshot.research.some((r) => r.id === researchOf) ? (
-          <ResearchView snapshot={snapshot} researchId={researchOf} onOpenAgent={setFocusId} />
         ) : onboarding ? (
           <Onboarding snapshot={snapshot} now={now} onSettings={() => setSettingsOpen(true)} />
         ) : (
@@ -520,19 +499,6 @@ export function App() {
       </div>
 
       {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} onContinue={() => setDialog('import')} /> : null}
-      {newResearchIn !== null ? (
-        <NewResearchDialog
-          snapshot={snapshot}
-          projectId={newResearchIn}
-          onClose={() => setNewResearchIn(null)}
-          onCreated={(id) => {
-            setResearchOf(id);
-            setFocusId(null);
-            setSettingsOpen(false);
-            setNewResearchIn(null);
-          }}
-        />
-      ) : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
     </div>
   );
