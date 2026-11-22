@@ -161,6 +161,6 @@ describe('limit windows beyond the plan', () => {
     const { shownWindows } = await import('../../src/renderer/components/SessionUsage');
     expect(shownWindows(windows).map((w) => w.key)).toEqual(['five_hour', 'seven_day', 'seven_day_opus']);
     expect(windowLabel(windows.find((w) => w.key === 'seven_day_opus')!)).toBe('week (Opus only)');
-    expect(shownWindows(windows).map(windowLabel).join(' ')).not.toMatch(/omelette|_/);
+    expect(shownWindows(windows).map((w) => windowLabel(w)).join(' ')).not.toMatch(/omelette|_/);
   });
 });

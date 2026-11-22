@@ -37,10 +37,11 @@ const EXTRA_LABELS: Record<string, string> = {
   seven_day_cowork: 'week · Cowork',
 };
 
-export function windowLabel(w: LimitWindow): string {
+export function windowLabel(w: LimitWindow, short = false): string {
   if (EXTRA_LABELS[w.key]) return t(EXTRA_LABELS[w.key]);
   if (!w.mins) return '';
-  return w.mins === 10080 ? t('week') : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
+  // Short (the sidebar's narrow column): a week as "7d" beside "5h"; Chinese "周" is short already.
+  return w.mins === 10080 ? (short && language() !== 'zh' ? '7d' : t('week')) : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
 }
 
 /** The plan's own windows (5 hours, a week): what a one-line summary shows. */
@@ -295,7 +296,7 @@ export function AccountLimits({ limits, now }: { limits: Record<string, Provider
                 <span className="account-windows">
                   {mainWindows(l.windows).map((w) => (
                     <span key={w.key} className={`lim${w.usedPercent >= HOT ? ' hot' : ''}`}>
-                      <span className="lim-k">{windowLabel(w)}</span>
+                      <span className="lim-k">{windowLabel(w, true)}</span>
                       <span className="lim-bar" aria-hidden>
                         <i style={{ width: `${Math.min(100, w.usedPercent)}%` }} />
                       </span>

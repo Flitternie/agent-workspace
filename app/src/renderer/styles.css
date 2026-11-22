@@ -7558,7 +7558,7 @@ button.subtask-row:hover {
 }
 .lim {
   display: inline-grid;
-  grid-template-columns: 16px 20px 26px;
+  grid-template-columns: minmax(16px, max-content) 20px 26px;
   align-items: center;
   gap: 3px;
 }

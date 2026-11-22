@@ -56,7 +56,7 @@ describe('session usage in the agent header', () => {
     // (only this computer here, so no machine named); under the reply box only when close to the limit.
     const account = page.getByTestId('account-limit');
     await expect.poll(() => account.count()).toBe(1);
-    expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('5h 34% week 35%');
+    expect((await account.innerText()).replace(/\s+/g, ' ')).toBe('5h 34% 7d 35%');
     expect(await account.getAttribute('class')).not.toContain('hot');
     // The provider as a mark (its name in the tooltip), the bars at the row's right end.
     expect(await account.locator('.provider-icon').getAttribute('aria-label')).toBe('Mock');
@@ -67,6 +67,11 @@ describe('session usage in the agent header', () => {
       return row.right - last.right;
     });
     expect(ends).toBeLessThan(12);
+    // No label runs into its bar ("week" once did, in English).
+    const overlaps = await account.evaluate((el) =>
+      [...el.querySelectorAll('.lim')].filter((l) => l.querySelector('.lim-k')!.getBoundingClientRect().right > l.querySelector('.lim-bar')!.getBoundingClientRect().left).length,
+    );
+    expect(overlaps).toBe(0);
     // Folds to one line with the highest use, and stays so.
     await page.getByTestId('account-limits-head').click();
     await expect.poll(() => account.count()).toBe(0);
@@ -170,14 +175,14 @@ describe('session usage in the agent header', () => {
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`).click();
     await expect.poll(() => page.getByTestId('usage-tokens').innerText()).toContain('70K tok · 88% cached');
     expect(await page.getByTestId('usage-context').innerText()).toBe('3%');
-    expect((await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('5h 34% week 35%');
+    expect((await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('5h 34% 7d 35%');
 
     // Another agent of the same provider nearly used up the 5-hour window: highlighted here too.
     const b = await invoke<Task>(page, 'task:create', { projectId: p.projectId, provider: 'mock', title: 'Docs', name: 'Docs', mockScript: 'work limits-high', instruction: 'Write docs.', isolate: false });
     await expect.poll(async () => !['running', 'starting'].includes((await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.find((t) => t.taskId === b.taskId)!.status), { timeout: 30_000 }).toBe(true);
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`).click();
     // Close to the limit: the account line turns, and this agent's reply box says so too.
-    await expect.poll(async () => (await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('5h 86% week 35%');
+    await expect.poll(async () => (await page.getByTestId('account-limit').innerText()).replace(/\s+/g, ' ')).toBe('5h 86% 7d 35%');
     expect(await page.getByTestId('account-limit').getAttribute('class')).toContain('hot');
     const limits = page.locator('.composer-under [data-testid="usage-limits"]');
     expect(await page.locator('.composer-side [data-testid="usage-limits"]').count()).toBe(0);
