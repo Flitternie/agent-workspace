@@ -81,18 +81,19 @@ export function Sidebar({
   // Projects where nothing is going on (every agent idle for days or set aside) fold into one
   // "Archived" row at the end, so the list does not grow with every project ever used. A project
   // comes back by itself as soon as one of its agents does something, or is opened or messaged.
-  // A research is one row in its project's team (its agents are on its page), above the members.
-  const researchOf = (projectId: string) => snapshot.research.find((r) => r.projectId === projectId);
-  const researchRow = (projectId: string) => {
-    const r = researchOf(projectId);
-    if (!r) return null;
+  // A research is one row in its project's team (its agents are on its page), above the members; a
+  // project holding several repositories may have one per repository (kept in its folder).
+  const researchesOf = (projectId: string) => snapshot.research.filter((r) => r.projectId === projectId);
+  const researchOf = (projectId: string) => researchesOf(projectId)[0];
+  const researchRows = (projectId: string) => researchesOf(projectId).map(researchRow);
+  const researchRow = (r: (typeof snapshot.research)[number]) => {
     const ids = new Set(r.taskIds);
     const running = snapshot.tasks.filter((x) => ids.has(x.taskId) && (x.status === 'running' || x.status === 'starting')).length;
     const waiting = new Set(snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && ids.has(a.taskId)).map((a) => a.taskId)).size;
-    const on = researchOpen === projectId;
+    const on = researchOpen === r.id;
     return (
-      <div key={`research-${projectId}`} className={`agent-item${on ? ' active' : ''}`}>
-        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(projectId)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
+      <div key={`research-${r.id}`} className={`agent-item${on ? ' active' : ''}`}>
+        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
           <span className="alias alias-sm research-mark" aria-hidden>
             <Icon name="branch" size={12} />
           </span>
@@ -103,6 +104,7 @@ export function Sidebar({
             </span>
             <span className="agent-row-sub">
               {tr('Research')}
+              {r.dir ? ` · ${r.dir}` : ''}
               {r.taskIds.length ? ` · ${r.taskIds.length === 1 ? tr('1 agent') : tr('{n} agents', { n: r.taskIds.length })}` : ''}
               {running ? ` · ${tr('{n} working', { n: running })}` : ''}
             </span>
@@ -119,7 +121,7 @@ export function Sidebar({
       </button>
     );
   // A project whose agents are all in its research has no team of its own: its research still shows.
-  const teamless = snapshot.research.filter((r) => !teamList.some((team) => team.project.projectId === r.projectId) && snapshot.projects.some((p) => p.projectId === r.projectId));
+  const teamless = [...new Set(snapshot.research.map((r) => r.projectId))].filter((id) => !teamList.some((team) => team.project.projectId === id) && snapshot.projects.some((p) => p.projectId === id));
   const live = teamList.filter((team) => team.active);
   const archived = teamList.filter((team) => !team.active);
   const [archiveOpen, setArchiveOpenState] = useState(() => localStorage.getItem('amw.archiveOpen') === '1');
@@ -150,7 +152,7 @@ export function Sidebar({
               </button>
               {open_ ? (
                 <>
-                  {researchRow(team.project.projectId)}
+                  {researchRows(team.project.projectId)}
                   {team.members.map((t) => row(t))}
                   {team.idle.length ? (
                     <>
@@ -281,12 +283,12 @@ export function Sidebar({
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
         {live.map(renderTeam)}
-        {teamless.map((r) => (
-          <div key={r.projectId} className="team open" data-testid="team" data-project={snapshot.projects.find((p) => p.projectId === r.projectId)?.name}>
+        {teamless.map((projectId) => (
+          <div key={projectId} className="team open" data-testid="team" data-project={snapshot.projects.find((p) => p.projectId === projectId)?.name}>
             <div className="team-head archived-head">
-              <span className="team-name truncate">{snapshot.projects.find((p) => p.projectId === r.projectId)?.name}</span>
+              <span className="team-name truncate">{snapshot.projects.find((p) => p.projectId === projectId)?.name}</span>
             </div>
-            {researchRow(r.projectId)}
+            {researchRows(projectId)}
           </div>
         ))}
         {archived.length ? (

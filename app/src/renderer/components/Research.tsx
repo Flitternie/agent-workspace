@@ -47,8 +47,9 @@ const PANEL_W = 380;
  * combinations, mutations and borrowed ideas drawn across. What is selected decides both the side
  * column (each level its own question) and who the box at the bottom talks to (its agent).
  */
-export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: WorkspaceSnapshot; projectId: string; onOpenAgent: (taskId: string) => void }) {
-  const project = snapshot.projects.find((p) => p.projectId === projectId);
+export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: WorkspaceSnapshot; researchId: string; onOpenAgent: (taskId: string) => void }) {
+  const summary = snapshot.research.find((r) => r.id === researchId);
+  const project = snapshot.projects.find((p) => p.projectId === summary?.projectId);
   const [doc, setDoc] = useState<ResearchDoc | null | undefined>(undefined);
   const [error, setError] = useState('');
   const [depth, setDepth] = useState<GraphDepth>('method');
@@ -59,31 +60,31 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const side = useContext(SideSlot);
 
   // Read again whenever the tree changes (an agent's tool call writes it; the summary's stamp moves).
-  const stamp = snapshot.research.find((r) => r.projectId === projectId)?.updatedAt;
-  const notesStamp = snapshot.research.find((r) => r.projectId === projectId)?.notesAt;
+  const stamp = summary?.updatedAt;
+  const notesStamp = summary?.notesAt;
   const [notes, setNotes] = useState<ResearchNotes>({ aspects: {} });
   useEffect(() => {
     let live = true;
-    call('research:notes', { projectId })
+    call('research:notes', { researchId })
       .then((n) => live && setNotes(n))
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [projectId, notesStamp]);
+  }, [researchId, notesStamp]);
   useEffect(() => {
     setSel([]);
     setDoc(undefined);
-  }, [projectId]);
+  }, [researchId]);
   useEffect(() => {
     let live = true;
-    call('research:get', { projectId })
+    call('research:get', { researchId })
       .then((d) => live && setDoc(d))
       .catch((e) => live && (setError(errorText(e)), setDoc(null)));
     return () => {
       live = false;
     };
-  }, [projectId, stamp]);
+  }, [researchId, stamp]);
 
   const taskOf = (id?: string) => (id ? snapshot.tasks.find((x) => x.taskId === id) : undefined);
   const statusOf = (n: ResearchNode): ResearchStatus => (n.type === 'experiment' ? experimentStatus(n, taskOf(n.taskId)?.status) : n.type === 'method' && doc ? methodStatus(doc, n, statusOf) : n.status);
@@ -97,7 +98,7 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
   const count = (s: ResearchStatus) => exps.filter((e) => statusOf(e) === s).length;
   const select = (id: string, add: boolean) => setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
 
-  const ctx: Ctx = { snapshot, project: project.projectId, doc, notes, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
+  const ctx: Ctx = { snapshot, research: researchId, doc, notes, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
   /** A double-click opens the node's agent (a method's is its aspect's); with none yet, it just selects the node. */
   const openNode = (n?: ResearchNode) => {
     // The goal (no node) is the lead's.
@@ -167,7 +168,8 @@ export function ResearchView({ snapshot, projectId, onOpenAgent }: { snapshot: W
 
 interface Ctx {
   snapshot: WorkspaceSnapshot;
-  project: string;
+  /** The research's id. */
+  research: string;
   doc: ResearchDoc;
   notes: ResearchNotes;
   statusOf: (n: ResearchNode) => ResearchStatus;
@@ -1079,7 +1081,7 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
       : undefined,
     send: async (text, images) => {
       try {
-        const r = await call('research:message', { projectId: ctx.project, nodeIds: selected.map((n) => n.id), text, ...(images.length ? { images } : {}) });
+        const r = await call('research:message', { researchId: ctx.research, nodeIds: selected.map((n) => n.id), text, ...(images.length ? { images } : {}) });
         setSent({ to: r.alias, taskId: r.taskId });
         return { ok: true };
       } catch (e) {

@@ -139,9 +139,25 @@ export function resultsSince(doc: ResearchDoc, since: string | undefined, aspect
   return doc.nodes.filter((n) => n.type === 'experiment' && (n.status === 'pass' || n.status === 'fail' || n.status === 'unclear' || n.status === 'error') && Date.parse(n.resultAt ?? n.createdAt) > t && (!aspectId || aspectOf(doc, n)?.id === aspectId)).length;
 }
 
+/**
+ * A research's id: its project's, for the one at the project's root; "<project>::<folder>" for one kept
+ * in a folder of the project (a project holding several repositories: one research per repository).
+ */
+export const researchId = (projectId: string, dir?: string): string => (dir ? `${projectId}::${dir}` : projectId);
+export function parseResearchId(id: string): { projectId: string; dir?: string } {
+  const at = id.indexOf('::');
+  return at < 0 ? { projectId: id } : { projectId: id.slice(0, at), dir: id.slice(at + 2) };
+}
+/** A folder a research may live in: relative, inside the project, plain names. */
+export const isResearchDir = (dir: string): boolean => /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(dir) && !dir.split('/').some((s) => s === '.' || s === '..' || s === '.research');
+
 /** What the sidebar needs without reading the file: that there is one, and whose agents are in it. */
 export interface ResearchSummary {
+  /** The research's id (researchId). */
+  id: string;
   projectId: string;
+  /** The folder it is kept in, for one not at the project's root. */
+  dir?: string;
   title: string;
   taskIds: string[];
   /** Changes when the tree does (an agent's tool call, an edit): the page reads it again. */

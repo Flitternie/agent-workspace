@@ -208,6 +208,11 @@ describe('research on an SSH host', () => {
     vi.doMock('../../src/main/util/ssh', async (orig) => ({
       ...(await orig<typeof import('../../src/main/util/ssh')>()),
       sshRun: async (_host: string, cmd: string) => {
+        // Which folders hold a research: the root and one repository.
+        if (cmd.includes('*/.research/research.json')) {
+          calls.push('list');
+          return { code: 0, stdout: '.\nharness-evo\n', stderr: '' };
+        }
         calls.push('fetch');
         // What the fetch script prints: a marker line per file, then its base64.
         expect(cmd).toMatch(/research\.json summary\.md notes/);
@@ -226,7 +231,12 @@ describe('research on an SSH host', () => {
     const { ResearchFiles } = await import('../../src/main/research-files');
     const project = { projectId: 'p', name: 'p', rootPath: '/srv/p', host: 'gpu-box', isGitRepo: true, createdAt: '' };
     let changed = 0;
-    const rf = new ResearchFiles(() => project, () => changed++);
+    const rf = new ResearchFiles(() => project, () => project, () => changed++);
+    // A host project's researches: listed once, in one round trip.
+    expect(rf.ids('p')).toEqual([]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(rf.ids('p')).toEqual(['p', 'p::harness-evo']);
+    calls.length = 0;
     // Nothing until fetched; then the tree and the summary, once.
     expect(rf.doc('p')).toBeNull();
     await rf.ready('p');

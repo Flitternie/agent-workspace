@@ -14,6 +14,8 @@ import {
   formatValue,
   judge,
   methodStatus,
+  parseResearchId,
+  researchId,
   removeNode,
   resultsSince,
   routeFor,
@@ -29,11 +31,12 @@ import type { WorkspaceTool } from './main-agent';
 
 /** What the tools need from the workspace (implemented by Workspace). */
 export interface ResearchHost {
-  researchProjects(): Array<{ projectId: string; name: string }>;
+  // A research is named by its id (shared/research.ts researchId); a project may hold several, one per folder.
+  researchList(): Array<{ id: string; projectId: string; project: string; dir?: string; title: string; taskIds: string[] }>;
   allProjects(): Array<{ projectId: string; name: string }>;
-  researchGet(projectId: string): ResearchDoc | null;
-  researchSave(projectId: string, doc: ResearchDoc): ResearchDoc;
-  researchCreate(projectId: string, title: string, goal: string, sample: boolean): Promise<ResearchDoc>;
+  researchGet(id: string): ResearchDoc | null;
+  researchSave(id: string, doc: ResearchDoc): ResearchDoc;
+  researchCreate(projectId: string, title: string, goal: string, sample: boolean, dir?: string): Promise<ResearchDoc>;
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
   findTaskById(taskId: string): Task | undefined;
@@ -161,22 +164,35 @@ export function treeText(doc: ResearchDoc, taskName: (taskId?: string) => string
 
 export function researchTools(host: ResearchHost, caller: ResearchCaller): WorkspaceTool[] {
   const isMain = caller.kind === 'main';
-  /** The research the caller works in: an agent's project's; the main agent's by name or id (or the only one). */
+  /** How a research is named to agents: its project, and its folder if it is in one. */
+  const label = (r: { project: string; dir?: string }) => (r.dir ? `${r.project}/${r.dir}` : r.project);
+  /** The research the caller works in: an agent's (the one it is in, else its project's); the main agent's by name (or the only one). */
   const projectOf = (given?: unknown): string => {
+    const want = String(given ?? '').trim().toLowerCase();
+    const named = (list: ReturnType<ResearchHost['researchList']>) => list.filter((r) => [r.id, label(r), r.title, r.dir ?? ''].some((x) => x && x.toLowerCase() === want) || (!r.dir && r.project.toLowerCase() === want));
     if (caller.kind === 'agent') {
       const t = host.findTaskById(caller.taskId);
-      if (!t || !host.researchGet(t.projectId)) throw new Error('This agent is not in a project with a research.');
-      return t.projectId;
+      const all = host.researchList();
+      const mine = all.find((r) => r.taskIds.includes(caller.taskId));
+      if (mine) return mine.id;
+      const here = all.filter((r) => r.projectId === t?.projectId);
+      if (!here.length) throw new Error('This agent is not in a project with a research.');
+      if (here.length === 1) return here[0].id;
+      const hit = want ? named(here) : [];
+      if (hit.length === 1) return hit[0].id;
+      throw new Error(`This project has several researches: say which (project): ${here.map(label).join(', ')}.`);
     }
-    const all = host.researchProjects();
-    const want = String(given ?? '').trim().toLowerCase();
+    const all = host.researchList();
     if (!want) {
-      if (all.length === 1) return all[0].projectId;
-      throw new Error(all.length ? `Say which project: ${all.map((p) => p.name).join(', ')}.` : 'No project has a research yet (research_create starts one).');
+      if (all.length === 1) return all[0].id;
+      throw new Error(all.length ? `Say which research (project): ${all.map(label).join(', ')}.` : 'No project has a research yet (research_create starts one).');
     }
-    const hit = all.find((p) => p.projectId.toLowerCase() === want || p.name.toLowerCase() === want);
-    if (!hit) throw new Error(`No research in a project named "${String(given)}". With a research: ${all.map((p) => p.name).join(', ') || 'none'}.`);
-    return hit.projectId;
+    const hit = named(all);
+    if (hit.length === 1) return hit[0].id;
+    const inProject = all.filter((r) => r.project.toLowerCase() === want);
+    if (inProject.length > 1) throw new Error(`${String(given)} has several researches: ${inProject.map(label).join(', ')}.`);
+    if (inProject.length === 1) return inProject[0].id;
+    throw new Error(`No research named "${String(given)}". Researches: ${all.map(label).join(', ') || 'none'}.`);
   };
   /** The research to work on, read once pending writes are done (and, on an SSH host, once fetched). */
   const load = async (given?: unknown) => {
@@ -204,7 +220,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
   };
   const name = (taskId?: string) => (taskId ? host.findTaskById(taskId)?.alias : undefined);
   // Agents work in their own project's research; the main agent names one when several have one.
-  const projectArg = { project: z.string().optional().describe(isMain ? 'Project name or id (needed when several projects have a research).' : 'Ignored: your own project’s research.') };
+  const projectArg = { project: z.string().optional().describe(isMain ? 'Which research: its project, or project/folder for one kept in a folder (needed when there are several).' : 'Only when your project has several researches and you are in none: project/folder.') };
 
   const tools: WorkspaceTool[] = [
     {
@@ -426,15 +442,16 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     tools.push(
       {
         name: 'research_create',
-        description: 'Starts a research in a project: its title and goal (what should improve, measured how end to end). It is kept in the project’s repository and shown on its research page. Then add its aspects with research_add.',
-        schema: z.object({ project: z.string().describe('Project name or id.'), title: z.string().min(1).max(200), goal: z.string().max(2000), end_metric: z.string().max(200).optional(), higher_is_better: z.boolean().optional(), baseline: z.number().optional() }),
+        description: 'Starts a research in a project: its title and goal (what should improve, measured how end to end). It is kept in the project’s repository (or, with folder, in that folder of it: a project holding several repositories has one research per repository) and shown on its research page. Then add its aspects with research_add.',
+        schema: z.object({ project: z.string().describe('Project name or id.'), folder: z.string().max(200).optional().describe('A folder of the project to keep it in (relative), e.g. the repository it is about.'), title: z.string().min(1).max(200), goal: z.string().max(2000), end_metric: z.string().max(200).optional(), higher_is_better: z.boolean().optional(), baseline: z.number().optional() }),
         run: async (a) => {
           const want = String(a.project).toLowerCase();
           const p = host.allProjects().find((x) => x.projectId.toLowerCase() === want || x.name.toLowerCase() === want);
           if (!p) throw new Error(`No project named "${String(a.project)}".`);
-          let doc = await host.researchCreate(p.projectId, String(a.title), String(a.goal ?? ''), false);
-          if (a.end_metric) doc = host.researchSave(p.projectId, { ...doc, endMetric: { name: String(a.end_metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}) } });
-          return `Started research "${doc.title}" in ${p.name}. It shows as one row in that project's team in the sidebar.`;
+          const dir = a.folder ? String(a.folder).trim().replace(/^\.\/+|\/+$/g, '') : '';
+          let doc = await host.researchCreate(p.projectId, String(a.title), String(a.goal ?? ''), false, dir || undefined);
+          if (a.end_metric) doc = host.researchSave(researchId(p.projectId, dir || undefined), { ...doc, endMetric: { name: String(a.end_metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}) } });
+          return `Started research "${doc.title}" in ${dir ? `${p.name}/${dir}` : p.name}. It shows as one row in that project's team in the sidebar.`;
         },
       },
     );
@@ -457,7 +474,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!full(doc)) throw new Error('Bringing conversations into the research is the lead’s.');
           const agent = host.findAgent(String(a.agent));
           if (!agent) throw new Error(`No agent named "${String(a.agent)}".`);
-          if (agent.projectId !== projectId) throw new Error(`${agent.alias} works in another project; a research holds its own project’s agents.`);
+          if (agent.projectId !== parseResearchId(projectId).projectId) throw new Error(`${agent.alias} works in another project; a research holds its own project’s agents.`);
           const taken = doc.nodes.find((n) => n.taskId === agent.taskId);
           if (taken) throw new Error(`${agent.alias} is already in the research, at [${taken.id}] "${taken.title}".`);
           if (a.as === 'aspect_agent') {

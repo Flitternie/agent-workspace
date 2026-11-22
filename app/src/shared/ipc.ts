@@ -49,13 +49,14 @@ const researchDoc = z.object({
 });
 
 export const ipcSchemas = {
-  'research:get': z.object({ projectId: id }),
-  'research:save': z.object({ projectId: id, doc: researchDoc }),
-  'research:notes': z.object({ projectId: id }),
+  // A research by its id (shared/research.ts researchId: a project's, or "<project>::<folder>").
+  'research:get': z.object({ researchId: id }),
+  'research:save': z.object({ researchId: id, doc: researchDoc }),
+  'research:notes': z.object({ researchId: id }),
   'research:message': z
-    .object({ projectId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
+    .object({ researchId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
-  'research:create': z.object({ projectId: id, title: z.string().min(1).max(300), goal: text, sample: z.boolean() }),
+  'research:create': z.object({ projectId: id, dir: z.string().max(200).optional(), title: z.string().min(1).max(300), goal: text, sample: z.boolean() }),
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),
   'project:pickDirectory': z.object({}),

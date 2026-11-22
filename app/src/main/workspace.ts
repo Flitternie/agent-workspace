@@ -53,7 +53,7 @@ import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundS
 import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
-import { childrenOf, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
+import { childrenOf, isResearchDir, parseResearchId, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -487,30 +487,58 @@ export class Workspace {
     for (const cb of this.changeListeners) cb();
   }
 
-  // ---------------------------------------------------------------- research (a project's tree, in its repo)
+  // ---------------------------------------------------------------- research (trees kept in a project's repos)
+  // A research is named by its id (shared/research.ts researchId): its project's for the one at the
+  // project's root, "<project>::<folder>" for one in a folder (a project holding several repositories).
 
-  /** The research files of each project: .research/ on this Mac, or fetched from and written to its SSH host. */
+  /** The research files: .research/ on this Mac, or fetched from and written to the project's SSH host. */
   private researchFiles = new ResearchFiles(
+    (id) => this.researchProject(id),
     (projectId) => this.project(projectId),
     () => {
       this.researchIndex.clear();
+      this.researchIds.clear();
       this.changed();
     },
     (...args) => this.log(...args),
   );
-  /** Which projects have a research and whose agents are in it, read once per project and kept current on save. */
+  /** Each research's summary (who is in it), read once and kept current on save. */
   private researchIndex = new Map<string, ResearchSummary | null>();
+  /** Each project's researches, found once. */
+  private researchIds = new Map<string, string[]>();
 
-  private summarize(projectId: string, doc: ResearchDoc | null): ResearchSummary | null {
+  /** The project a research id names, its root moved to the research's folder. */
+  private researchProject(id: string): Project {
+    const { projectId, dir } = parseResearchId(id);
+    const p = this.project(projectId);
+    if (!dir) return p;
+    if (!isResearchDir(dir)) throw new Error(`Not a folder a research can be in: ${dir}`);
+    return { ...p, projectId: id, rootPath: p.host ? `${p.rootPath.replace(/\/+$/, '')}/${dir}` : join(p.rootPath, dir) };
+  }
+
+  private summarize(id: string, doc: ResearchDoc | null): ResearchSummary | null {
     if (!doc) return null;
-    const n = this.researchFiles.notes(projectId);
+    const n = this.researchFiles.notes(id);
     const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
-    return { projectId, title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
+    const { projectId, dir } = parseResearchId(id);
+    return { id, projectId, ...(dir ? { dir } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
   }
 
   private researchSummaries(): ResearchSummary[] {
-    for (const p of this.store.data.projects) if (!this.researchIndex.has(p.projectId)) this.researchIndex.set(p.projectId, this.summarize(p.projectId, this.researchFiles.doc(p.projectId)));
-    return this.store.data.projects.map((p) => this.researchIndex.get(p.projectId)).filter((x): x is ResearchSummary => !!x);
+    const out: ResearchSummary[] = [];
+    for (const p of this.store.data.projects) {
+      let ids = this.researchIds.get(p.projectId);
+      if (!ids) {
+        ids = this.researchFiles.ids(p.projectId);
+        this.researchIds.set(p.projectId, ids);
+      }
+      for (const id of ids) {
+        if (!this.researchIndex.has(id)) this.researchIndex.set(id, this.summarize(id, this.researchFiles.doc(id)));
+        const r = this.researchIndex.get(id);
+        if (r) out.push(r);
+      }
+    }
+    return out;
   }
 
   private indexResearch(projectId: string, doc: ResearchDoc | null): void {
@@ -593,9 +621,8 @@ export class Workspace {
   }
 
   // ResearchHost: what the research tools need.
-  researchProjects(): Array<{ projectId: string; name: string }> {
-    const has = new Set(this.researchSummaries().map((r) => r.projectId));
-    return this.store.data.projects.filter((p) => has.has(p.projectId)).map((p) => ({ projectId: p.projectId, name: p.name }));
+  researchList(): Array<{ id: string; projectId: string; project: string; dir?: string; title: string; taskIds: string[] }> {
+    return this.researchSummaries().map((r) => ({ id: r.id, projectId: r.projectId, project: this.store.data.projects.find((p) => p.projectId === r.projectId)?.name ?? r.projectId, ...(r.dir ? { dir: r.dir } : {}), title: r.title, taskIds: r.taskIds }));
   }
 
   allProjects(): Array<{ projectId: string; name: string }> {
@@ -619,6 +646,13 @@ export class Workspace {
     return p;
   }
 
+  /** For a research kept in a folder of its project: which folder its agents work on. */
+  private researchWhere(id: string): string {
+    const { dir } = parseResearchId(id);
+    if (!dir) return '';
+    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的（研究文件在 ${dir}/.research/）。\n\n` : `This research is about the folder ${dir}/ of the project (its files are in ${dir}/.research/).\n\n`;
+  }
+
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   async researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task> {
     await this.researchReady(projectId);
@@ -629,10 +663,10 @@ export class Workspace {
     const aspect = node.type === 'aspect' ? node : doc.nodes.find((n) => n.id === doc.nodes.find((m) => m.id === node.parent)?.parent);
     const zh = this.language() === 'zh';
     const task = await this.createTask({
-      projectId,
+      projectId: parseResearchId(projectId).projectId,
       provider,
       title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
-      instruction: researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId)),
+      instruction: `${this.researchWhere(projectId)}${researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId))}`,
       isolate: opts.isolate,
       ...(provider === 'mock' ? { mockScript: 'work' } : {}),
     });
@@ -649,10 +683,10 @@ export class Workspace {
     if (!doc) throw new Error('This project has no research.');
     const zh = this.language() === 'zh';
     const task = await this.createTask({
-      projectId,
+      projectId: parseResearchId(projectId).projectId,
       provider: this.researchProvider(),
       title: zh ? `${doc.title}（研究负责人）` : `${doc.title} (research lead)`,
-      instruction: leadBrief(doc, this.language(), message, this.researchNotes(projectId)),
+      instruction: `${this.researchWhere(projectId)}${leadBrief(doc, this.language(), message, this.researchNotes(projectId))}`,
       isolate: false,
       ...(this.researchProvider() === 'mock' ? { mockScript: 'work' } : {}),
     });
@@ -694,9 +728,14 @@ export class Workspace {
     return deliver(lead.taskId, `${prefix}${text}`);
   }
 
-  async researchCreate(projectId: string, title: string, goal: string, sample: boolean): Promise<ResearchDoc> {
-    const doc = await this.researchFiles.create(projectId, title, goal, sample, this.language());
-    this.indexResearch(projectId, doc);
+  /** A research at the project's root, or in one of its folders (`dir`, relative). */
+  async researchCreate(projectId: string, title: string, goal: string, sample: boolean, dir?: string): Promise<ResearchDoc> {
+    const d = dir?.trim().replace(/^\.\/+|\/+$/g, '');
+    if (d && !isResearchDir(d)) throw new Error(`Not a folder in the project: ${dir}`);
+    const id = researchId(projectId, d || undefined);
+    const doc = await this.researchFiles.create(id, title, goal, sample, this.language());
+    this.researchIds.delete(projectId);
+    this.indexResearch(id, doc);
     return doc;
   }
 

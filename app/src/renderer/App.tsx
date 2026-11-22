@@ -327,11 +327,11 @@ export function App() {
           setFocusId(null);
         }}
         researchOpen={!focusTask && !settingsOpen ? researchOf : null}
-        onOpenResearch={(projectId) => {
+        onOpenResearch={(id) => {
           setSettingsOpen(false);
           setSubView(null);
           setFocusId(null);
-          setResearchOf(projectId);
+          setResearchOf(id);
         }}
         onNewResearch={setNewResearchIn}
         onOpenSubtask={(taskId, subtaskId) => {
@@ -364,8 +364,8 @@ export function App() {
           <SettingsPage snapshot={snapshot} section={settingsSection} onClose={() => (setSettingsOpen(false), setSettingsSection(undefined))} />
         ) : focusTask ? (
           <FocusView snapshot={snapshot} task={focusTask} transcript={transcripts[focusTask.taskId] ?? []} now={now} onOpen={setFocusId} />
-        ) : researchOf && snapshot.research.some((r) => r.projectId === researchOf) ? (
-          <ResearchView snapshot={snapshot} projectId={researchOf} onOpenAgent={setFocusId} />
+        ) : researchOf && snapshot.research.some((r) => r.id === researchOf) ? (
+          <ResearchView snapshot={snapshot} researchId={researchOf} onOpenAgent={setFocusId} />
         ) : onboarding ? (
           <Onboarding snapshot={snapshot} now={now} onSettings={() => setSettingsOpen(true)} />
         ) : (

@@ -238,6 +238,37 @@ describe('research', () => {
   });
 });
 
+describe('several researches in a project (one per repository folder)', () => {
+  it('each kept in its folder, one row each; the main agent names them by project/folder; an agent works in the one it is in', async () => {
+    const ws = open();
+    const root = repo();
+    mkdirSync(join(root, 'hotswap'));
+    mkdirSync(join(root, 'trace'));
+    const p = await ws.addProject(root, 'projects');
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    expect(await main.research_create.run({ project: 'projects', folder: 'hotswap', title: 'Hot swap', goal: 'Raise the score' })).toMatch(/projects\/hotswap/);
+    await ws.researchCreate(p.projectId, 'Trace', 'Better distances', false, 'trace');
+    expect(existsSync(join(root, 'hotswap', '.research', 'research.json'))).toBe(true);
+    expect(existsSync(join(root, '.research'))).toBe(false);
+    expect(ws.snapshot().research.map((r) => [r.id, r.dir, r.title])).toEqual([
+      [`${p.projectId}::hotswap`, 'hotswap', 'Hot swap'],
+      [`${p.projectId}::trace`, 'trace', 'Trace'],
+    ]);
+    await expect(main.research_overview.run({})).rejects.toThrow(/projects\/hotswap, projects\/trace/);
+    expect(await main.research_add.run({ project: 'projects/trace', type: 'aspect', title: 'Labels' })).toMatch(/Labels/);
+    expect(ws.researchGet(`${p.projectId}::trace`)!.nodes.map((n) => n.title)).toEqual(['Labels']);
+    // The lead of one: started in the project, told the folder; its tools work on its own research.
+    const lead = await ws.researchMessage(`${p.projectId}::hotswap`, [], 'Lay it out with me.');
+    expect(ws.transcript(lead.taskId).find((i) => i.role === 'user')!.text).toMatch(/folder hotswap\/ of the project/);
+    expect(ws.snapshot().tasks.find((t) => t.taskId === lead.taskId)!.projectId).toBe(p.projectId);
+    const asLead = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: lead.taskId }).map((t) => [t.name, t]));
+    await asLead.research_add.run({ type: 'aspect', title: 'Monitor' });
+    expect(ws.researchGet(`${p.projectId}::hotswap`)!.nodes.map((n) => n.title)).toEqual(['Monitor']);
+    await expect(ws.researchCreate(p.projectId, 'Bad', '', false, '../x')).rejects.toThrow(/Not a folder/);
+  });
+});
+
 describe('research managed by talking', () => {
   async function setup() {
     const ws = open();

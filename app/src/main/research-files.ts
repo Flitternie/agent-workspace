@@ -1,10 +1,13 @@
-// Where a project's research lives: its repository's .research/ folder, on this Mac or on an SSH host.
-// Local files are read each time (a hand edit shows at once). A host's are fetched once into memory
-// (tree and notes in one round trip) and written back in order; readers wait for pending writes.
+// Where a research lives: a .research/ folder at the project's root or in one of its folders (one per
+// repository, for a project that holds several), on this Mac or on an SSH host. Local files are read each
+// time (a hand edit shows at once). A host's are fetched once into memory (tree and notes in one round
+// trip) and written back in order; readers wait for pending writes.
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Project } from '../shared/types';
 import { normalizeResearch, type ResearchDoc, type ResearchNotes } from '../shared/research';
 import { createResearch, readNotes, readResearch, sampleNotes, sampleResearch, writeNote, writeResearch } from './research';
-import { emptyResearch } from '../shared/research';
+import { emptyResearch, isResearchDir, parseResearchId, researchId } from '../shared/research';
 import { shq, sshError, sshRun, sshRunInput } from './util/ssh';
 
 const MARK = '@@AMW-RESEARCH';
@@ -24,13 +27,47 @@ export class ResearchFiles {
   private remote = new Map<string, Remote>();
   private fetching = new Map<string, Promise<void>>();
   private writes = new Map<string, Promise<void>>();
+  /** A host project's folders with a research (found in one round trip). */
+  private remoteDirs = new Map<string, string[]>();
+  private listing = new Map<string, Promise<void>>();
 
   constructor(
-    private project: (projectId: string) => Project,
+    /** The project a research id names, its root moved to the research's folder. */
+    private project: (id: string) => Project,
+    /** The project itself. */
+    private realProject: (projectId: string) => Project,
     /** A host's research arrived or failed to: the snapshot should show it. */
     private changed: () => void,
     private log: (...args: unknown[]) => void = () => {},
   ) {}
+
+  /** The ids of a project's researches: at its root, then in its folders (one level down). A host's: once listed. */
+  ids(projectId: string): string[] {
+    const p = this.realProject(projectId);
+    if (p.host) {
+      const dirs = this.remoteDirs.get(projectId);
+      if (!dirs) {
+        void this.list(p);
+        return [];
+      }
+      return dirs.map((d) => researchId(projectId, d || undefined));
+    }
+    const out: string[] = [];
+    if (existsSync(join(p.rootPath, '.research', 'research.json'))) out.push(projectId);
+    try {
+      for (const e of readdirSync(p.rootPath, { withFileTypes: true })) {
+        if (e.isDirectory() && !e.name.startsWith('.') && isResearchDir(e.name) && existsSync(join(p.rootPath, e.name, '.research', 'research.json'))) out.push(researchId(projectId, e.name));
+      }
+    } catch {
+      // A missing root: no research.
+    }
+    return out;
+  }
+
+  /** Lists again (a host's) on the next read: after a create. */
+  forget(projectId: string): void {
+    this.remoteDirs.delete(projectId);
+  }
 
   /** Resolves once the research can be read as it is: pending writes done, a host's fetched. */
   async ready(projectId: string): Promise<void> {
@@ -77,13 +114,36 @@ export class ResearchFiles {
 
   async create(projectId: string, title: string, goal: string, sample: boolean, lang: 'en' | 'zh'): Promise<ResearchDoc> {
     const p = this.project(projectId);
+    const { projectId: real, dir } = parseResearchId(projectId);
     if (!p.host) return createResearch(p, title, goal, sample, lang);
     await this.ready(projectId);
-    if (this.remote.get(projectId)?.doc) throw new Error('This project already has a research.');
+    if (this.remote.get(projectId)?.doc) throw new Error(dir ? `${dir} already has a research.` : 'This project already has a research.');
     const doc = sample ? sampleResearch(lang, title, goal) : emptyResearch(title.trim(), goal.trim());
     this.saveDoc(projectId, doc);
     if (sample) for (const [scope, text] of Object.entries(sampleNotes(doc, lang))) this.saveNote(projectId, scope, text);
+    const dirs = this.remoteDirs.get(real);
+    if (dirs && !dirs.includes(dir ?? '')) this.remoteDirs.set(real, [...dirs, dir ?? '']);
     return doc;
+  }
+
+  /** One round trip: which of a host project's root and folders hold a research. */
+  private list(p: Project): Promise<void> {
+    const running = this.listing.get(p.projectId);
+    if (running) return running;
+    const script = `cd ${shq(p.rootPath)} 2>/dev/null || exit 0; [ -f .research/research.json ] && echo .; for f in */.research/research.json; do [ -f "$f" ] && echo "\${f%%/*}"; done; true`;
+    const job = sshRun(p.host!, `sh -c ${shq(script)}`, 60_000)
+      .then((r) => {
+        if (r.code !== 0) throw new Error(sshError(p.host!, r.stderr));
+        const dirs = r.stdout.split('\n').map((l) => l.trim()).filter((l) => l === '.' || isResearchDir(l)).map((l) => (l === '.' ? '' : l));
+        this.remoteDirs.set(p.projectId, dirs);
+      })
+      .catch((e) => this.log('research list failed', p.host, (e as Error).message))
+      .finally(() => {
+        this.listing.delete(p.projectId);
+        this.changed();
+      });
+    this.listing.set(p.projectId, job);
+    return job;
   }
 
   /** One round trip: research.json, summary.md and notes/*.md, each with its modification time. */
