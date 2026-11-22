@@ -7637,3 +7637,8 @@ button.subtask-row:hover {
 .hint.new-continue {
   margin: -4px 0 12px;
 }
+
+/* Syncing from the CLI: its icon turns while it works. */
+.btn.btn-icon.busy .icon {
+  animation: spin 0.9s linear infinite;
+}

@@ -275,6 +275,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const mapRoom = mapBeside ? MAP_ROOM : miniFits && !(showMap && !preview) ? MINI_ROOM : 0;
   const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
   // Conversations on this Mac can be forked once saved, when their provider supports it.
   const canFork = !isMainAgent(task) && !task.host && !!snapshot.capabilities.find((c) => c.provider === task.provider)?.fork && !!session?.nativeSessionId;
@@ -491,6 +492,22 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             {isMainAgent(task) ? (
               <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
                 <Icon name="plus" />
+              </button>
+            ) : null}
+            {/* Sync from the CLI: after going on with this session in the terminal, pick that up here. */}
+            {!isMainAgent(task) && session?.nativeSessionId ? (
+              <button
+                className={`btn btn-icon${syncing ? ' busy' : ''}`}
+                disabled={syncing || task.status === 'running' || task.status === 'starting' || open.some((a) => !!a.providerRequestId)}
+                aria-label={t('Sync from {cli}', { cli: PROVIDER_LABEL[task.provider] })}
+                data-tip={t('Sync from {cli}: picks up what was said there since (close it in the terminal first)', { cli: PROVIDER_LABEL[task.provider] })}
+                data-testid="sync-session"
+                onClick={() => {
+                  setSyncing(true);
+                  run(() => call('task:sync', { taskId: task.taskId }).finally(() => setSyncing(false)));
+                }}
+              >
+                <Icon name="refresh" />
               </button>
             ) : null}
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
