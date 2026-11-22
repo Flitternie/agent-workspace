@@ -925,6 +925,13 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
+  // Another agent opened in this same view: it starts at its end (where the reader was in the last one,
+  // scrolled up or not, says nothing about this one).
+  useLayoutEffect(() => {
+    stick.current = true;
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [task.taskId]);
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
