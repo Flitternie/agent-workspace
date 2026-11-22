@@ -1,6 +1,7 @@
 // Normalized application types shared by the main process and the renderer.
 // These are NOT provider wire formats; provider ids are carried alongside.
 import type { PermissionKind, PlanInfo, ToolCallInfo, ToolContent } from './content';
+import type { ResearchSummary } from './research';
 
 export type { DiffHunk, FileDiff, PermissionKind, PlanEntry, PlanInfo, ToolCallInfo, ToolContent, ToolKind } from './content';
 
@@ -83,6 +84,8 @@ export interface Task {
   memorySeen?: Record<string, { at: string; body: string }>;
   /** Mock-provider script name; ignored by native providers. */
   mockScript?: string;
+  /** Started as a research's lead or an aspect's agent: it hands work out through the research (no hidden sub-agents). */
+  researchManager?: boolean;
   /** Overrides settings.permissionMode for this agent. */
   permissionMode?: PermissionMode;
   /** The agent whose conversation this one was forked from (alias at the time). */
@@ -512,6 +515,8 @@ export type PermissionMode = 'auto' | 'edits' | 'ask';
 export interface WorkspaceSnapshot {
   /** Demo entry: mock agents are offered and seeded. */
   demo: boolean;
+  /** Projects with a research (.research/ in their repo), and the agents working in it. */
+  research: ResearchSummary[];
   /** The main agent the user talks to by default (not one of `tasks`). */
   main?: Task;
   projects: Project[];

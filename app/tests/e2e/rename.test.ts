@@ -60,7 +60,7 @@ describe('right-click menu and renaming', () => {
     // Sidebar row: the agent's items, in the shared menu; the keyboard moves the highlight, Esc closes.
     await row(a.alias).click({ button: 'right' });
     await menu.waitFor();
-    expect(await items()).toEqual(['menu-rename-agent', 'menu-rename-title', 'menu-set-aside', 'menu-open']);
+    expect(await items()).toEqual(['menu-rename-agent', 'menu-rename-title', 'menu-set-aside', 'menu-open', 'menu-merge']);
     // From the pointer nothing is highlighted until a key or the pointer moves.
     expect(await menu.locator('button.active').count()).toBe(0);
     await page.keyboard.press('ArrowDown');
@@ -68,7 +68,8 @@ describe('right-click menu and renaming', () => {
     expect(await menu.locator('button.active').getAttribute('data-testid')).toBe('menu-rename-title');
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('ArrowUp');
-    expect(await menu.locator('button.active').getAttribute('data-testid')).toBe('menu-open');
+    // (Wraps to the last item: into a research.)
+    expect(await menu.locator('button.active').getAttribute('data-testid')).toBe('menu-merge');
     const box = (await menu.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(1440);
     await page.screenshot({ path: join(shots, 'rename-01-row-menu.png') });

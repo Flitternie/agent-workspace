@@ -6,7 +6,9 @@ import { AccountLimits } from './SessionUsage';
 import { useTick } from '../state';
 import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
-import { call } from '../api';
+import { call, errorText } from '../api';
+import { RESEARCH_COLORS, researchColor, type ResearchDoc, type ResearchSummary } from '../../shared/research';
+import { Modal } from './Dialogs';
 import { InlineEdit, menuAt, menuKey, useContextMenu, type MenuItem } from './ContextMenu';
 import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
 
@@ -37,6 +39,9 @@ export function Sidebar({
   expanded,
   toggle,
   onOpenSubtask,
+  researchOpen,
+  onOpenResearch,
+  onNewResearch,
 }: {
   snapshot: WorkspaceSnapshot;
   focusId: string | null;
@@ -52,6 +57,10 @@ export function Sidebar({
   teamList: Team[];
   expanded: (team: Team) => boolean;
   toggle: (team: Team) => void;
+  /** The research whose page is open (its id), and opening one; starting one ('' = the project is chosen in the dialog). */
+  researchOpen?: string | null;
+  onOpenResearch: (researchId: string) => void;
+  onNewResearch: (projectId: string) => void;
 }) {
   const micMode = snapshot.settings.micMode ?? 'open';
   const signedOut = snapshot.capabilities.filter((c) => c.provider !== 'mock' && c.available && c.auth?.loggedIn === false);
@@ -78,6 +87,37 @@ export function Sidebar({
       onDone={() => setEditing(null)}
     />
   );
+  // Agents picked to act on together (⌘/⇧-click), and the dialog a research's menu leads to.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [dlg, setDlg] = useState<ResearchDlg | null>(null);
+  const changeResearch = async (id: string, change: (d: ResearchDoc) => ResearchDoc) => {
+    const d = await call('research:get', { researchId: id });
+    if (d) await call('research:save', { researchId: id, doc: { ...change(d), updatedAt: new Date().toISOString() } });
+  };
+  /** For an agent's menu: what is picked (if it is among them), else itself, within its project, into a research. */
+  const researchItems = (t: Task): Array<MenuItem | '-'> => {
+    const ids = (picked.has(t.taskId) ? [...picked] : [t.taskId]).filter((id) => snapshot.tasks.find((x) => x.taskId === id)?.projectId === t.projectId);
+    return [
+      '-',
+      { id: 'merge', label: ids.length === 1 ? tr('Make a research from this conversation…') : tr('Merge {n} conversations into a research…', { n: ids.length }), icon: 'flask', onSelect: () => setDlg({ kind: 'merge', projectId: t.projectId, taskIds: ids }) },
+      ...snapshot.research
+        .filter((r) => r.projectId === t.projectId)
+        .map((r): MenuItem => ({
+          id: 'add',
+          label: tr('Add to "{title}"', { title: r.title }),
+          onSelect: () =>
+            void call('research:addTasks', { researchId: r.id, taskIds: ids })
+              .then(() => (setPicked(new Set()), onOpenResearch(r.id)))
+              .catch(() => {}),
+        })),
+    ];
+  };
+  const researchMenuItems = (r: ResearchSummary): Array<MenuItem | '-'> => [
+    { id: 'rename', label: tr('Rename…'), icon: 'pencil', onSelect: () => setDlg({ kind: 'rename', research: r }) },
+    { id: 'colour', label: tr('Colour…'), onSelect: () => setDlg({ kind: 'colour', research: r }) },
+    '-',
+    { id: 'dissolve', label: tr('Dissolve…'), icon: 'trash', onSelect: () => setDlg({ kind: 'dissolve', research: r }) },
+  ];
   // Agents whose sub-agents are unfolded (folded by default; the marks go when the turn ends).
   const [subOpen, setSubOpen] = useState<Set<string>>(new Set());
   const toggleSub = (id: string, open?: boolean) =>
@@ -96,6 +136,40 @@ export function Sidebar({
   // Projects where nothing is going on (every agent idle for days or set aside) fold into one
   // "Archived" row at the end, so the list does not grow with every project ever used. A project
   // comes back by itself as soon as one of its agents does something, or is opened or messaged.
+  // A research is one row in its project's team (its agents are on its page), above the members; a
+  // project holding several repositories may have one per repository (kept in its folder).
+  const researchesOf = (projectId: string) => snapshot.research.filter((r) => r.projectId === projectId);
+  const researchOf = (projectId: string) => researchesOf(projectId)[0];
+  const researchRows = (projectId: string) => researchesOf(projectId).map(researchRow);
+  const researchRow = (r: (typeof snapshot.research)[number]) => {
+    const ids = new Set(r.taskIds);
+    const running = snapshot.tasks.filter((x) => ids.has(x.taskId) && (x.status === 'running' || x.status === 'starting')).length;
+    const waiting = new Set(snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion' && ids.has(a.taskId)).map((a) => a.taskId)).size;
+    const on = researchOpen === r.id;
+    return (
+      <div key={`research-${r.id}`} className={`agent-item${on ? ' active' : ''}`}>
+        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} onContextMenu={(e) => menu.open(menuAt(e, researchMenuItems(r)))} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
+          <span className="alias alias-sm research-mark" style={{ background: researchColor(r) }} aria-hidden>
+            <Icon name="flask" size={12} />
+          </span>
+          <span className="agent-row-text">
+            <span className="agent-row-name">
+              <span className="truncate">{r.title}</span>
+              {waiting ? <span className="team-count needs">⚑ {waiting}</span> : null}
+            </span>
+            <span className="agent-row-sub">
+              {tr('Research')}
+              {r.dir ? ` · ${r.dir}` : ''}
+              {r.taskIds.length ? ` · ${r.taskIds.length === 1 ? tr('1 agent') : tr('{n} agents', { n: r.taskIds.length })}` : ''}
+              {running ? ` · ${tr('{n} working', { n: running })}` : ''}
+            </span>
+          </span>
+        </button>
+      </div>
+    );
+  };
+  // A project whose agents are all in its research has no team of its own: its research still shows.
+  const teamless = [...new Set(snapshot.research.map((r) => r.projectId))].filter((id) => !teamList.some((team) => team.project.projectId === id) && snapshot.projects.some((p) => p.projectId === id));
   const live = teamList.filter((team) => team.active);
   const archived = teamList.filter((team) => !team.active);
   const [archiveOpen, setArchiveOpenState] = useState(() => localStorage.getItem('amw.archiveOpen') === '1');
@@ -142,6 +216,7 @@ export function Sidebar({
               )}
               {open_ ? (
                 <>
+                  {researchRows(team.project.projectId)}
                   {team.members.map((t) => row(t))}
                   {team.idle.length ? (
                     <>
@@ -178,8 +253,8 @@ export function Sidebar({
     const subs = opts.needs ? undefined : liveSubtasks(t);
     const unfolded = !!subs?.length && subOpen.has(t.taskId);
     const field = editingField(t, !!opts.needs);
-    const items = () => agentMenuItems(t, { onRename: (f) => setEditing({ taskId: t.taskId, field: f, needs: !!opts.needs }), setAside: true, onOpen: () => onSelect(t.taskId) });
-    const cls = `agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`;
+    const items = () => [...agentMenuItems(t, { onRename: (f) => setEditing({ taskId: t.taskId, field: f, needs: !!opts.needs }), setAside: true, onOpen: () => onSelect(t.taskId) }), ...researchItems(t)];
+    const cls = `agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}${picked.has(t.taskId) ? ' picked' : ''}`;
     const inner = (
       <>
         <Alias alias={t.alias} size="sm" />
@@ -213,7 +288,21 @@ export function Sidebar({
       ) : (
       <button
         className={cls}
-        onClick={() => onSelect(t.taskId)}
+        aria-selected={picked.has(t.taskId) || undefined}
+        onClick={(e) => {
+          // ⌘/⇧-click picks agents to act on together (their menu: merge into a research); a plain click opens one.
+          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            setPicked((cur) => {
+              const next = new Set(cur);
+              if (next.has(t.taskId)) next.delete(t.taskId);
+              else next.add(t.taskId);
+              return next;
+            });
+            return;
+          }
+          if (picked.size) setPicked(new Set());
+          onSelect(t.taskId);
+        }}
         onContextMenu={(e) => menu.open(menuAt(e, items()))}
         onKeyDown={(e) => {
           const m = menuKey(e, items);
@@ -249,7 +338,7 @@ export function Sidebar({
         </span>
       </div>
 
-      <button className={`nav-item${focusId || settingsOpen ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
+      <button className={`nav-item${focusId || settingsOpen || researchOpen ? '' : ' active'}`} onClick={onOverview} title={tr('Overview (⌘0 / Esc)')}>
         <Icon name="grid" />
         <span>{tr('Overview')}</span>
         {needYou ? <span className="count">{needYou}</span> : null}
@@ -294,7 +383,25 @@ export function Sidebar({
           <button className="icon-btn" aria-label={tr('Continue a session…')} title={tr('Continue a session…')} onClick={onResume} data-testid="resume-session">
             <Icon name="history" />
           </button>
-          <button className="icon-btn" aria-label={tr('New task')} title={tr('New task')} onClick={onNewTask} data-testid="sidebar-new-task">
+          {/* New: an agent, or a research (its project is chosen in the dialog). */}
+          <button
+            className="icon-btn"
+            aria-label={tr('New')}
+            title={tr('New agent or research')}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              menu.open({
+                x: r.left,
+                y: r.bottom + 4,
+                items: [
+                  { id: 'new-agent', label: tr('New agent'), icon: 'plus', onSelect: onNewTask },
+                  { id: 'new-research', label: tr('New research'), icon: 'flask', onSelect: () => onNewResearch('') },
+                ],
+              });
+            }}
+            data-testid="sidebar-new-task"
+          >
             <Icon name="plus" />
           </button>
         </span>
@@ -302,6 +409,14 @@ export function Sidebar({
       <nav className="agent-list" aria-label="Agents" onScroll={showScrollbarAWhile} data-testid="agent-list">
         {snapshot.tasks.length === 0 ? <div className="muted small pad-x">{tr('No agents yet.')}</div> : null}
         {live.map(renderTeam)}
+        {teamless.map((projectId) => (
+          <div key={projectId} className="team open" data-testid="team" data-project={snapshot.projects.find((p) => p.projectId === projectId)?.name}>
+            <div className="team-head archived-head">
+              <span className="team-name truncate">{snapshot.projects.find((p) => p.projectId === projectId)?.name}</span>
+            </div>
+            {researchRows(projectId)}
+          </div>
+        ))}
         {archived.length ? (
           <div className="team-archive" data-testid="team-archive">
             <button className="team-head team-archive-head" onClick={() => setArchiveOpen(!archiveShown)} aria-expanded={archiveShown} data-testid="team-archive-head" title={tr('Nothing going on for 3 days; a project comes back when one of its agents is used.')}>
@@ -344,6 +459,19 @@ export function Sidebar({
         </div>
       </div>
       {menu.element}
+      {dlg ? (
+        <ResearchDialog
+          dlg={dlg}
+          snapshot={snapshot}
+          onClose={() => setDlg(null)}
+          onDone={(openId) => {
+            setDlg(null);
+            setPicked(new Set());
+            if (openId) onOpenResearch(openId);
+          }}
+          changeResearch={changeResearch}
+        />
+      ) : null}
     </aside>
   );
 }
@@ -357,5 +485,107 @@ function showScrollbarAWhile(e: { currentTarget: Element }) {
   scrollTimers.set(
     el,
     setTimeout(() => el.classList.remove('scrolling'), 900),
+  );
+}
+
+type ResearchDlg = { kind: 'merge'; projectId: string; taskIds: string[] } | { kind: 'rename'; research: ResearchSummary } | { kind: 'colour'; research: ResearchSummary } | { kind: 'dissolve'; research: ResearchSummary };
+
+/** The dialogs a research's menu leads to: conversations into a new research, a new name, dissolving it. */
+function ResearchDialog({
+  dlg,
+  snapshot,
+  onClose,
+  onDone,
+  changeResearch,
+}: {
+  dlg: ResearchDlg;
+  snapshot: WorkspaceSnapshot;
+  onClose: () => void;
+  onDone: (openId?: string) => void;
+  changeResearch: (id: string, change: (d: ResearchDoc) => ResearchDoc) => Promise<void>;
+}) {
+  const tasks = dlg.kind === 'merge' ? dlg.taskIds.map((id) => snapshot.tasks.find((t) => t.taskId === id)).filter((t): t is Task => !!t) : [];
+  const [title, setTitle] = useState(dlg.kind === 'merge' ? (tasks[0]?.title ?? '') : dlg.research.title);
+  const [dir, setDir] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = (fn: () => Promise<string | undefined | void>) => {
+    setBusy(true);
+    setError('');
+    fn()
+      .then((id) => onDone(id || undefined))
+      .catch((e) => (setError(errorText(e)), setBusy(false)));
+  };
+  if (dlg.kind === 'dissolve')
+    return (
+      <Modal title={tr('Dissolve "{title}"?', { title: dlg.research.title })} onClose={onClose}>
+        <div className="rs-text" data-testid="research-dissolve">
+          {tr('Its agents go back to the project’s list as ordinary agents. Nothing is deleted: the tree, notes and views stay in the repository, in a renamed folder (.research.dissolved-…).')}
+        </div>
+        {error ? <div className="error-text">{error}</div> : null}
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>
+            {tr('Cancel')}
+          </button>
+          <button className="btn btn-danger" disabled={busy} onClick={() => run(() => call('research:dissolve', { researchId: dlg.research.id }).then(() => undefined))} data-testid="research-dissolve-ok">
+            {tr('Dissolve')}
+          </button>
+        </div>
+      </Modal>
+    );
+  if (dlg.kind === 'colour') {
+    const now = RESEARCH_COLORS.indexOf(researchColor(dlg.research) as (typeof RESEARCH_COLORS)[number]);
+    return (
+      <Modal title={tr('Colour of "{title}"', { title: dlg.research.title })} onClose={onClose}>
+        <div className="research-swatches" data-testid="research-colours">
+          {RESEARCH_COLORS.map((c, i) => (
+            <button key={c} className={`research-swatch${now === i ? ' on' : ''}`} style={{ background: c }} aria-label={`${tr('Colour')} ${i + 1}`} aria-pressed={now === i} disabled={busy} onClick={() => run(() => changeResearch(dlg.research.id, (d) => ({ ...d, color: i })))} data-testid="research-swatch" />
+          ))}
+        </div>
+        {error ? <div className="error-text">{error}</div> : null}
+      </Modal>
+    );
+  }
+  if (dlg.kind === 'rename')
+    return (
+      <Modal title={tr('Rename the research')} onClose={onClose}>
+        <div className="field">
+          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && title.trim() && run(() => changeResearch(dlg.research.id, (d) => ({ ...d, title: title.trim() })))} data-testid="research-rename-input" />
+        </div>
+        {error ? <div className="error-text">{error}</div> : null}
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>
+            {tr('Cancel')}
+          </button>
+          <button className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => run(() => changeResearch(dlg.research.id, (d) => ({ ...d, title: title.trim() })))} data-testid="research-rename-ok">
+            {tr('Rename')}
+          </button>
+        </div>
+      </Modal>
+    );
+  return (
+    <Modal title={tasks.length === 1 ? tr('A research from this conversation') : tr('A research from {n} conversations', { n: tasks.length })} onClose={onClose}>
+      <div className="muted small" data-testid="research-merge">
+        {tasks.map((t) => t.alias).join(', ')}
+      </div>
+      <div className="field">
+        <label>{tr('Title')}</label>
+        <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="research-merge-title" />
+      </div>
+      <div className="field">
+        <label>{tr('Folder (optional)')}</label>
+        <input className="input" value={dir} onChange={(e) => setDir(e.target.value)} placeholder={tr('A folder of the project, e.g. the repository it is about')} data-testid="research-merge-dir" />
+      </div>
+      <div className="muted small">{tr('A research lead is started: it reads these conversations, lays out the tree and attaches them. They move from this list to the research’s page.')}</div>
+      {error ? <div className="error-text">{error}</div> : null}
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>
+          {tr('Cancel')}
+        </button>
+        <button className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => run(() => call('research:fromTasks', { projectId: dlg.projectId, taskIds: dlg.taskIds, title: title.trim(), ...(dir.trim() ? { dir: dir.trim() } : {}) }).then((r) => r.researchId))} data-testid="research-merge-ok">
+          {tr('Create')}
+        </button>
+      </div>
+    </Modal>
   );
 }

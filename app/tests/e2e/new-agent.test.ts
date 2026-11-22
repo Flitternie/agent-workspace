@@ -211,6 +211,7 @@ describe('new agent', () => {
 
     // The hint's link swaps the New agent dialog for Continue a session… (same as the sidebar's history button).
     await page.getByTestId('sidebar-new-task').click();
+    await page.getByTestId('menu-new-agent').click();
     await page.getByTestId('new-continue-session').click();
     await expect.poll(() => page.getByTestId('session-search').count()).toBe(1);
     expect(await page.getByTestId('create-agent').count()).toBe(0);
