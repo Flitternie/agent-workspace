@@ -555,8 +555,6 @@ export const zh: Record<string, string> = {
   'week · included extra usage': '本周 · 套餐内超额',
   'week · other apps': '本周 · 第三方应用',
   'week · Cowork': '本周 · Cowork',
-  'API key · billed by use': 'API key · 按量计费',
-  'Signed in with an API key: billed by use, with no plan limits.': '用 API key 登录：按用量计费，没有订阅额度。',
   Limits: '额度',
   '{name} limits {list}': '{name} 额度 {list}',
   'Memory sent with this message: {n}': '随这条消息同步了 {n} 条记忆',

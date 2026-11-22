@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { LimitWindow, ProviderLimits, Task } from '../../shared/types';
 import { language, t } from '../i18n';
 import { timeAgo } from '../state';
-import { Icon, PROVIDER_LABEL } from './bits';
+import { Icon, PROVIDER_LABEL, ProviderIcon } from './bits';
 
 /** 950 · 2.3K · 24.7K · 115K · 1.2M · 1M */
 export function formatTokens(n: number): string {
@@ -246,7 +246,7 @@ export function UsageChips({ task, limits, now, only = ['tokens', 'context', 'li
  * Each provider account's limits (a provider on a machine: accounts differ between machines), one line
  * each, for the sidebar's foot: they belong to the account, not to any one agent.
  */
-export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record<string, ProviderLimits>; now: number; payAsYouGo?: Task['provider'][] }) {
+export function AccountLimits({ limits, now }: { limits: Record<string, ProviderLimits>; now: number }) {
   const [open, setOpenState] = useState(() => localStorage.getItem('amw.limitsOpen') !== '0');
   const setOpen = (on: boolean) => {
     localStorage.setItem('amw.limitsOpen', on ? '1' : '0');
@@ -256,9 +256,8 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
     .filter(([, l]) => mainWindows(l.windows).length)
     .map(([key, l]) => ({ key, l, provider: (l.provider ?? key.split('@')[0]) as Task['provider'], host: l.host ?? key.split('@')[1] }))
     .sort((a, b) => Number(!!a.host) - Number(!!b.host) || (a.host ?? '').localeCompare(b.host ?? '') || a.provider.localeCompare(b.provider));
-  // Signed in with an API key (this Mac): billed by use, no plan limits to show; said so, not left blank.
-  const metered = payAsYouGo.filter((p) => !rows.some((r) => r.provider === p && !r.host));
-  if (!rows.length && !metered.length) return null;
+  // Only accounts with plan limits (an API-key login is billed by use: nothing to show here).
+  if (!rows.length) return null;
   // The machine is named only when there is more than this Mac.
   const machines = rows.some((r) => r.host);
   // Folded to one line (the highest use across accounts), kept on this machine; a nearly used-up window
@@ -272,18 +271,12 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
           <Icon name="chevron" size={12} />
         </span>
         <span>{t('Limits')}</span>
-        {open || !rows.length ? null : <span className="mono">{top}%</span>}
+        {open ? null : <span className="mono">{top}%</span>}
       </button>
-      {open
-        ? metered.map((p) => (
-            <div key={`metered-${p}`} className="account-metered" data-testid="account-metered" title={t('Signed in with an API key: billed by use, with no plan limits.')}>
-              <span className="account-name truncate">{`${PROVIDER_LABEL[p]}${machines ? ` · ${t('this Mac')}` : ''}`}</span>
-              <span className="muted">{t('API key · billed by use')}</span>
-            </div>
-          ))
-        : null}
       {open ? rows.map(({ key, l, provider, host }) => {
         const name = `${PROVIDER_LABEL[provider]}${machines ? ` · ${host ?? t('this Mac')}` : ''}`;
+        // One line each. With accounts on more than this Mac, each names its machine beside its mark ("this
+        // Mac", or the host's whole name, cut short to the sidebar's width; the full name in the tooltip). The bars keep their columns.
         const hot = mainWindows(l.windows).some((w) => w.usedPercent >= HOT);
         const age = now - Date.parse(l.at);
         const asOf = age > 90_000 ? t('as of {time}', { time: timeAgo(l.at, now) }) : '';
@@ -295,7 +288,10 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
             title={asOf ? `${t('{name} account limits', { name })} · ${asOf}` : t('{name} account limits', { name })}
             label={
               <>
-                <span className="account-name truncate">{name}</span>
+                <span className="account-name" title={name}>
+                  <ProviderIcon provider={provider} />
+                  {machines ? <span className="account-host truncate">{host ?? t('this Mac')}</span> : null}
+                </span>
                 <span className="account-windows">
                   {mainWindows(l.windows).map((w) => (
                     <span key={w.key} className={`lim${w.usedPercent >= HOT ? ' hot' : ''}`}>
@@ -311,8 +307,9 @@ export function AccountLimits({ limits, now, payAsYouGo = [] }: { limits: Record
             }
           >
             <div className="usage-pop-head">
-              {t('{name} account limits', { name })}
+              {t('{name} account limits', { name: PROVIDER_LABEL[provider] })}
               {l.plan ? <span className="muted"> · {l.plan}</span> : null}
+              {host ? <div className="usage-pop-host">{host}</div> : null}
             </div>
             {shownWindows(l.windows).map((w) => (
               <div key={w.key} className={`usage-limit${w.usedPercent >= HOT ? ' hot' : ''}`} data-testid="usage-limit">
