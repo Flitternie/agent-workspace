@@ -1,6 +1,6 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { Task, WorkspaceSnapshot } from '../../shared/types';
+import type { Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
 import {
   aspectOf,
   bestExperiment,
@@ -94,6 +94,12 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const [looked, setLooked] = useState<ReadonlySet<string>>(new Set());
   /** Nodes to bring into view (the graph pans to them): a click on a count at the top. */
   const [look, setLook] = useState<{ ids: string[]; n: number }>({ ids: [], n: 0 });
+  // The side column's tab: the node's view, or the conversation with its agent (kept from last time).
+  const [tab, setTabState] = useState<'view' | 'chat'>(() => (localStorage.getItem('amw.research.tab') === 'chat' ? 'chat' : 'view'));
+  const setTab = (v: 'view' | 'chat') => {
+    localStorage.setItem('amw.research.tab', v);
+    setTabState(v);
+  };
   const menu = useContextMenu();
   useEffect(() => {
     setLooked(new Set());
@@ -216,15 +222,39 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
     if (id && taskOf(id)) onOpenAgent(id);
     else setSel(n ? [n.id] : []);
   };
+  // Whom the column's conversation is with: whom the box would write to (the agent over the selection).
+  const chatRoute = routeFor(doc, selected);
+  const chatTask = chatRoute.kind === 'experiment' ? taskOf(chatRoute.node.taskId) : chatRoute.kind === 'aspect' ? taskOf(chatRoute.aspect.taskId) : taskOf(doc.leadTaskId);
+  const chatUnread = !!chatTask?.unread;
+  const tabs = (
+    <div className="seg research-tabs" role="tablist" data-testid="research-tabs">
+      <button role="tab" aria-selected={tab === 'view'} className={tab === 'view' ? 'on' : ''} onClick={() => setTab('view')} data-testid="research-tab-view">
+        {t('Node view')}
+      </button>
+      <button role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')} data-testid="research-tab-chat">
+        {chatTask ? t('Chat · {alias}', { alias: chatTask.alias }) : t('Chat')}
+        {chatTask && ['running', 'starting'].includes(chatTask.status) ? <i className="rg-dot st-running" aria-label={t('running')} /> : chatUnread && tab !== 'chat' ? <i className="rg-fresh-dot" aria-label={t('New reply')} /> : null}
+      </button>
+    </div>
+  );
   const sidePanel = panel ? (
     <SidePanel
+      options={tabs}
       title={selected.length > 1 ? t('{n} selected', { n: selected.length }) : selected[0] ? selected[0].title : doc.title}
       subtitle={levelName(selected)}
       label={t('Research details')}
       testId="research-panel"
       frame={{ width: shownW, maximized: panelMax, onToggleMax: () => setPanelMax(!panelMax), onClose: () => (setPanel(false), setPanelMax(false)) }}
     >
-      <div className="research-side">{selected.length > 1 ? <MultiPanel ctx={ctx} nodes={selected} /> : <NodeView ctx={ctx} node={selected[0]} />}</div>
+      <div className="research-side">
+        {tab === 'chat' ? (
+          <AgentChat ctx={ctx} task={chatTask} none={chatRoute.kind === 'lead' ? t('No research lead yet: what you say below starts one; lay the research out with it step by step.') : t('No agent yet: the first thing you say to it below starts one.')} />
+        ) : selected.length > 1 ? (
+          <MultiPanel ctx={ctx} nodes={selected} />
+        ) : (
+          <NodeView ctx={ctx} node={selected[0]} />
+        )}
+      </div>
     </SidePanel>
   ) : null;
 
@@ -285,7 +315,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       <div className="research-stage" hidden={panelMax}>
       <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} onMenu={nodeMenu} look={look} />
       {menu.element}
-      <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
+      <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} onSent={() => (setPanel(true), setTab('chat'))} />
       </div>
       {sidePanel && !panelMax
         ? side
@@ -1356,9 +1386,84 @@ function MultiPanel({ ctx, nodes }: { ctx: Ctx; nodes: ResearchNode[] }) {
   );
 }
 
+// ------------------------------------------------------------------ the column's conversation with an agent
+
+/** Messages between a research's agents and the app's own notes to them: a line, not a message. */
+const NOTE = /^(【来自 [^】]+】|\[From [^\]]+\]|「[^」]+」(里有实验出结果了|的结论更新了|的笔记更新了|这一批)|Results came in under|The takeaway of|The notes for|All \d+ experiments of|研究方式改了|How this research runs has changed)/;
+
+/**
+ * The conversation with the agent over the selection, as chat only: what the user said and what the agent
+ * replied (no tool calls, no thinking); messages from other agents and the app's notes as short lines; the
+ * first, long brief folded. Written to from the box below.
+ */
+function AgentChat({ ctx, task, none }: { ctx: Ctx; task?: Task; none: string }) {
+  const [items, setItems] = useState<TranscriptItem[]>([]);
+  const [briefOpen, setBriefOpen] = useState(false);
+  const end = useRef<HTMLDivElement>(null);
+  const stamp = task?.updatedAt;
+  useEffect(() => {
+    if (!task) {
+      setItems([]);
+      return;
+    }
+    let live = true;
+    void call('transcript:get', { taskId: task.taskId })
+      .then((list) => live && setItems(list))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [task?.taskId, stamp]);
+  // Opened, its reply is seen: as when its conversation is opened.
+  useEffect(() => {
+    if (task?.unread) void call('task:viewed', { taskId: task.taskId }).catch(() => {});
+  }, [task?.taskId, task?.unread]);
+  const shown = items.filter((i) => (i.role === 'user' || i.role === 'assistant') && i.text?.trim());
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'end' });
+  }, [shown.length, task?.taskId]);
+  if (!task) return <div className="rs-agent none muted">{none}</div>;
+  const working = ['running', 'starting'].includes(task.status);
+  return (
+    <div className="rs-chat" data-testid="research-chat">
+      <div className="rs-chat-head">
+        <Alias alias={task.alias} size="sm" />
+        <span className="rs-agent-text">
+          <b>{task.alias}</b>
+          <small>{t(AGENT_STATUS[task.status])}</small>
+        </span>
+        <button className="link small" onClick={() => ctx.onOpenAgent(task.taskId)} data-testid="research-chat-open">
+          {t('Open the whole conversation')}
+        </button>
+      </div>
+      {shown.map((i, n) => {
+        if (i.role === 'user' && n === 0 && i.text.length > 400)
+          return (
+            <button key={i.id} className="rs-chat-brief" onClick={() => setBriefOpen(!briefOpen)} data-testid="research-chat-brief">
+              {briefOpen ? <Markdown text={i.text} /> : <span className="truncate">{t('Brief')} · {i.text.replace(/\s+/g, ' ').slice(0, 80)}…</span>}
+            </button>
+          );
+        if (i.role === 'user' && NOTE.test(i.text.trim()))
+          return (
+            <div key={i.id} className="rs-chat-note" data-testid="research-chat-note">
+              {i.text.replace(/\s+/g, ' ').slice(0, 220)}
+            </div>
+          );
+        return (
+          <div key={i.id} className={`rs-chat-msg ${i.role}`} data-testid={`research-chat-${i.role}`}>
+            {i.role === 'user' ? <div className="rs-chat-text">{i.text}</div> : <Markdown text={i.text} />}
+          </div>
+        );
+      })}
+      {working ? <div className="rs-chat-note working">{t('{alias} is working…', { alias: task.alias })}</div> : null}
+      <div ref={end} />
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ the box: what is selected is who it talks to
 
-function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: ResearchNode[]; onClear: () => void }) {
+function ResearchComposer({ ctx, selected, onClear, onSent }: { ctx: Ctx; selected: ResearchNode[]; onClear: () => void; onSent: () => void }) {
   const { doc, snapshot } = ctx;
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
   // Where it went: said for a moment, then out of the way of the graph.
@@ -1448,6 +1553,7 @@ function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: Rese
       try {
         const r = await call('research:message', { researchId: ctx.research, nodeIds: selected.map((n) => n.id), text, ...(images.length ? { images } : {}) });
         setSent({ to: r.alias, taskId: r.taskId });
+        onSent();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: errorText(e) };

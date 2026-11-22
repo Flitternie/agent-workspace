@@ -137,6 +137,9 @@ describe('research page (demo)', () => {
     await page.getByTestId('composer-input').fill('Which method would you try first?');
     await page.getByTestId('composer-send').click();
     await expect.poll(() => page.getByTestId('research-sent').innerText(), { timeout: 20_000 }).toMatch(/Sent to/);
+    // The column shows the conversation it went to; back to the node's view for what follows.
+    await expect.poll(() => page.getByTestId('research-tab-chat').getAttribute('aria-selected')).toBe('true');
+    await page.getByTestId('research-tab-view').click();
     await expect.poll(async () => (await doc()).nodes.find((n) => n.title === 'Data')?.taskId ?? '').not.toBe('');
     const dataAgent = (await doc()).nodes.find((n) => n.title === 'Data')!.taskId!;
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\)/);
@@ -232,6 +235,17 @@ describe('research page (demo)', () => {
     await expect.poll(async () => (await doc()).leadTaskId ?? '', { timeout: 20_000 }).not.toBe('');
     const leadId = (await doc()).leadTaskId!;
     expect((await invoke<Array<{ role: string; text: string }>>(page, 'transcript:get', { taskId: leadId })).find((i) => i.role === 'user')!.text).toMatch(/You lead the research[\s\S]*Help me lay out the next aspect\./);
+    // Sent from the box: the column shows the conversation with that agent, chat only (the brief folded, no tool calls).
+    await expect.poll(() => page.getByTestId('research-tab-chat').getAttribute('aria-selected')).toBe('true');
+    await expect.poll(() => page.getByTestId('research-tab-chat').innerText(), { timeout: 10_000 }).toMatch(/Chat · /);
+    expect(await page.getByTestId('research-tab-view').innerText()).toBe('Node view');
+    await expect.poll(() => page.getByTestId('research-chat-brief').count()).toBe(1);
+    expect(await page.getByTestId('research-chat-brief').innerText()).toMatch(/Brief · /);
+    await expect.poll(() => page.getByTestId('research-chat-assistant').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+    expect(await page.getByTestId('research-chat').locator('.tool, [data-role="tool"]').count()).toBe(0);
+    // Back to the node's view; the choice is kept.
+    await page.getByTestId('research-tab-view').click();
+    await expect.poll(() => panel.innerText()).toMatch(/Which aspects move the end result\?/);
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/research lead/);
     // The page has it too once the tree is read again: the goal's panel names the lead.
     await expect.poll(() => panel.innerText(), { timeout: 10_000 }).toMatch(/research lead/);
