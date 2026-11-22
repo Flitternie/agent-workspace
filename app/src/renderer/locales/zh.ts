@@ -565,7 +565,7 @@ export const zh: Record<string, string> = {
   ', ': '、',
   'Told {n} idle agents now.': '已告诉 {n} 个空闲的 agent。',
   'Each idle agent gets a short message now (it starts a turn)': '给每个空闲的 agent 发一条短消息（会让它开始一轮）',
-  'Tell the idle ones now': '现在告诉空闲的',
+  'Tell the idle agents now': '现在告诉空闲的 agent',
   'Got it': '知道了',
   'Message {alias}…': '给{alias}发消息…',
   'Message {alias}': '给{alias}发消息',
