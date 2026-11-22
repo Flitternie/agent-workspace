@@ -58,6 +58,25 @@ describe('teams and overview layouts (mock agents)', () => {
     // Across teams: the "Needs you" strip lists the two waiting agents.
     await expect.poll(() => page.getByTestId('needs-item').count(), { timeout: 30_000 }).toBe(2);
     await page.screenshot({ path: join(shots, 'teams-01-sidebar.png') });
+    await page.screenshot({ path: join(shots, 'sidebar-foot.png'), clip: { x: 0, y: 0, width: 252, height: 920 } });
+
+    // "Continue a session…" is the history icon right beside "+" in the Agents header, and opens the same dialog.
+    const head = page.locator('.sidebar-section').filter({ has: page.getByTestId('sidebar-new-task') });
+    expect(await head.locator('.icon-btn').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))).toEqual(['resume-session', 'sidebar-new-task']);
+    const [hb, pb] = [(await head.getByTestId('resume-session').boundingBox())!, (await head.getByTestId('sidebar-new-task').boundingBox())!];
+    expect(Math.abs(hb.y - pb.y)).toBeLessThan(2);
+    expect(pb.x - (hb.x + hb.width)).toBeLessThan(8);
+    expect(await page.getByRole('button', { name: /Continue a session/ }).count()).toBe(1);
+    await head.getByTestId('resume-session').click();
+    await expect.poll(() => page.getByRole('dialog').innerText()).toContain('Continue an existing session');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
+    // The foot no longer lists providers and voice as connection rows: just Settings (plus a warning only for
+    // a signed-out CLI, and the accounts' usage limits, which name their provider).
+    const foot = page.locator('.sidebar-foot');
+    expect(await foot.locator('.conn, .conn-dot').count()).toBe(0);
+    expect((await foot.locator(':scope > :not([data-testid="provider-warning"]):not([data-testid="account-limits"])').allInnerTexts()).join('\n')).not.toMatch(/Claude Code|Codex|Voice/);
+    expect(await foot.getByTestId('open-settings').innerText()).toBe('Settings');
 
     // Folding a team hides its members (and their ⌘ numbers); unfolding brings them back.
     await page.getByTestId('team').first().getByTestId('team-head').click();

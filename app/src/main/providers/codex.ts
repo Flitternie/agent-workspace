@@ -1,3 +1,4 @@
+import { CodexUsage, codexLimits } from './usage';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -493,6 +494,10 @@ class CodexSession implements ProviderSession {
   private fileChanges = new Map<string, unknown>();
   /** Sub-agents spawned by this thread, for the sidebar's sub-agent marks. */
   private subtasks = new CodexSubtasks();
+  /** The thread's token totals, as increments for the workspace. */
+  private usage = new CodexUsage();
+  /** A turn was started in this session (token updates before one, as on resume, are history). */
+  private turned = false;
 
   constructor(
     private args: StartArgs,
@@ -548,6 +553,16 @@ class CodexSession implements ProviderSession {
       for (const item of Array.isArray(rec(turn).items) ? (rec(turn).items as unknown[]) : [])
         for (const e of itemEvents(item, true, true, this.args.cwd)) this.emit(e);
     this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed: !!resumeId });
+    // The account's limits need no turn: read them now (a nicety; older CLIs or API-key logins have none).
+    server
+      .rpc('account/rateLimits/read', {})
+      .then((r) => this.emitLimits(rec(r).rateLimits))
+      .catch(() => undefined);
+  }
+
+  private emitLimits(snapshot: unknown): void {
+    const limits = codexLimits(snapshot);
+    if (limits) this.emit({ type: 'limits', ...limits });
   }
 
   async send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery> {
@@ -583,6 +598,7 @@ class CodexSession implements ProviderSession {
   private async startTurn(input: unknown[]): Promise<void> {
     if (!this.server || !this.threadId) throw new Error('Codex session is not connected.');
     this.working = true;
+    this.turned = true;
     this.interruptRequested = false;
     this.lastAgentText = '';
     this.emit({ type: 'turnStarted' });
@@ -873,6 +889,14 @@ class CodexSession implements ProviderSession {
         for (const resolve of this.idleWaiters.splice(0)) resolve();
         return;
       }
+      case 'thread/tokenUsage/updated': {
+        const usage = this.usage.update(p, this.turned);
+        if (usage) this.emit(usage);
+        return;
+      }
+      case 'account/rateLimits/updated':
+        this.emitLimits(p.rateLimits);
+        return;
       case 'error':
         this.emit({ type: 'progress', text: `${p.willRetry === true ? 'Codex is retrying' : 'Codex error'}: ${str(rec(p.error).message) || 'unknown error'}` });
         return;

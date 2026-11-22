@@ -59,7 +59,19 @@ describe('session map', () => {
       await invoke(page, 'task:send', { taskId: a.taskId, text, via: 'text' });
     }
     await expect.poll(settled, { timeout: 30_000 }).toBe(true);
+    const railRow = page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"]`);
+    // No map yet: the row names no task and none of its messages; waiting on an approval, a short label.
+    const sub = () => railRow.locator('.agent-row-sub').innerText();
+    const waitingNow = async () => (await snap()).attention.some((x) => x.taskId === a.taskId && x.state === 'open' && x.kind !== 'completion');
+    await expect.poll(async () => (await sub()) === ((await waitingNow()) ? 'Waiting on you' : '')).toBe(true);
     await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"],[data-testid="needs-item"][data-alias="${a.alias}"]`).first().click();
+    // Once the map is made, the header shows what it is on (its last task), and so does the row once
+    // nothing is waiting on the user.
+    await expect.poll(() => page.getByTestId('focus-work').innerText(), { timeout: 15_000 }).toBe('Refund flow');
+    expect(await page.locator('.focus-meta').innerText()).not.toContain('Add the refund endpoints');
+    // (The mock ends each turn with a question; set aside here.)
+    for (const x of (await snap()).attention.filter((x) => x.taskId === a.taskId && x.state === 'open')) await invoke(page, 'attention:dismiss', { attentionId: x.id });
+    await expect.poll(sub, { timeout: 15_000 }).toBe('Refund flow');
 
     // Beside the conversation: the model's tasks, titles, state, outcome of the one in view.
     await expect.poll(() => page.getByTestId('session-map-beside').count(), { timeout: 15_000 }).toBe(1);
@@ -109,10 +121,16 @@ describe('session map', () => {
     expect(await tasks.nth(1).getByTestId('map-branch').innerText()).toContain(fork.alias);
     await page.screenshot({ path: join(shots, 'map-02b-fork.png') });
 
-    // The reader merges the second task into the first.
+    // No merging tasks (it could not be undone): no such control on a task.
     await tasks.nth(1).hover();
-    await tasks.nth(1).getByTestId('map-merge').click();
-    await expect.poll(titles).toEqual(['Clean the build']);
+    expect(await page.getByTestId('map-merge').count()).toBe(0);
+    // A merge saved by an older version no longer applies: the model's grouping stands after a reload.
+    await page.evaluate((id) => localStorage.setItem(`amw.mapEdits.${id}`, JSON.stringify({ merged: ['x'] })), a.taskId);
+    await page.reload();
+    await page.waitForSelector('.app');
+    await page.locator(`[data-testid="rail-item"][data-alias="${a.alias}"],[data-testid="needs-item"][data-alias="${a.alias}"]`).first().click();
+    await expect.poll(titles, { timeout: 15_000 }).toEqual(['Clean the build', 'Refund flow']);
+    expect(await page.evaluate((id) => localStorage.getItem(`amw.mapEdits.${id}`), a.taskId)).toBeNull();
 
     // Beside the map, the conversation is centred in the room left of it: the blank on its left is no
     // wider than the gap between it and the map.
@@ -133,7 +151,7 @@ describe('session map', () => {
     // Narrow: not beside the conversation; its outline (no words) at the edge opens it in the side column.
     await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => page.getByTestId('session-map-beside').count()).toBe(0);
-    await expect.poll(() => page.getByTestId('mini-task').count()).toBe(1);
+    await expect.poll(() => page.getByTestId('mini-task').count()).toBe(2);
     // The trunk only: each task's node and its decisions (what branched off, like the dropped attempt in
     // this task, is for the full map).
     expect(await page.locator('[data-testid="mini-task"] > *').evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute('class')))].sort())).toEqual(['mini-mark', 'mini-node']);
@@ -183,7 +201,7 @@ describe('session map', () => {
     await page.mouse.move(bar.x + 100, bar.y + 200, { steps: 5 });
     await page.mouse.up();
     await expect.poll(panelW).toBeLessThan(before - 40);
-    expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build']);
+    expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build', 'Refund flow']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
     // Opened there, it stays there: in a wider window, dragged as narrow as it goes (room enough now for the
     // map beside the conversation), the side column keeps it, and the pointer is not left resizing.

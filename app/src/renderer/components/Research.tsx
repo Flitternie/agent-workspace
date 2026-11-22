@@ -41,7 +41,7 @@ import { Modal } from './Dialogs';
 import { Composer, PanelResizer, WaitingOnYou, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
 import { defaultProject, ProjectChooser } from './ProjectChooser';
-import { ContextMenu, type MenuItem } from './ContextMenu';
+import { menuAt, useContextMenu } from './ContextMenu';
 import { parseUi, statText, type ResearchUi, type UiNodeField } from '../../shared/research-ui';
 import { defaultView, levelOf, liveTable, parseView, templatesFor, viewKey, type TableSpec, type ViewBlockKind, type ViewLevel } from '../../shared/research-views';
 
@@ -92,7 +92,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const seenKey = `amw.research.seen.${researchId}`;
   const lastSeen = useMemo(() => localStorage.getItem(seenKey) ?? new Date().toISOString(), [seenKey]);
   const [looked, setLooked] = useState<ReadonlySet<string>>(new Set());
-  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const menu = useContextMenu();
   useEffect(() => {
     setLooked(new Set());
     const leave = () => localStorage.setItem(seenKey, new Date().toISOString());
@@ -176,17 +176,18 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const nodeMenu = (e: ReactMouseEvent, n?: ResearchNode) => {
     const task = taskOf(n ? n.taskId : doc.leadTaskId);
     if (!task) return;
-    e.preventDefault();
     const out = () =>
       void call('research:save', { researchId, doc: { ...(n ? { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? { ...x, taskId: undefined } : x)) } : { ...doc, leadTaskId: undefined }), updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err)));
-    setMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        { label: t('Open {alias}’s conversation', { alias: task.alias }), onClick: () => onOpenAgent(task.taskId), testId: 'node-open' },
-        { label: t('Take {alias} out of the research', { alias: task.alias }), onClick: out, testId: 'node-out' },
-      ],
-    });
+    menu.open(
+      menuAt(
+        e,
+        [
+          { id: 'node-open', label: t('Open {alias}’s conversation', { alias: task.alias }), onSelect: () => onOpenAgent(task.taskId) },
+          { id: 'node-out', label: t('Take {alias} out of the research', { alias: task.alias }), onSelect: out },
+        ],
+        'research-node-menu',
+      ),
+    );
   };
   const ringFresh = () => {
     setOpened((o) => new Set([...o, ...exps.filter((e) => fresh.has(e.id)).map((e) => e.parent!)]));
@@ -270,7 +271,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       {panelMax ? sidePanel : null}
       <div className="research-stage" hidden={panelMax}>
       <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} onMenu={nodeMenu} />
-      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} testId="research-node-menu" /> : null}
+      {menu.element}
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       </div>
       {sidePanel && !panelMax

@@ -35,11 +35,14 @@ describe('sub-agents (mock agents)', () => {
   it('shows them as dots that unfold into half-height thread rows, apart from sessions', async () => {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+    // The background model's grouping for the session map (a real one is never called in tests), given
+    // only once the agents are named, so it answers nothing but the map.
+    const answer = join(mkdtempSync(join(tmpdir(), 'amw-sub-answer-')), 'answer.json');
     app = await electron.launch({
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-sub-data-')), AMW_MOCK_DELAY_MS: '150', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-sub-data-')), AMW_MOCK_DELAY_MS: '150', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_BACKGROUND_ANSWER: answer },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 }).catch(() => {});
@@ -63,6 +66,12 @@ describe('sub-agents (mock agents)', () => {
     await expect.poll(() => row.getByTestId('subtask-dots').innerText(), { timeout: 30_000 }).toBe('2/3');
     expect(await row.getByTestId('subtask-dots').getAttribute('data-state')).toBe('running');
     expect(await page.getByTestId('subtask-row').count()).toBe(0);
+    // The row's line names what the agent is on (its session map's last task), beside the mark.
+    const names = (await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.map((t) => t.name);
+    writeFileSync(answer, JSON.stringify({ tasks: [{ start: 0, title: '迁移订单接口', status: 'in_progress' }] }));
+    await invoke(page, 'session:map', { taskId: orders.taskId });
+    await expect.poll(() => row.locator('.agent-row-sub').innerText()).toContain('迁移订单接口');
+    expect((await invoke<{ tasks: Task[] }>(page, 'workspace:snapshot', {})).tasks.map((t) => t.name)).toEqual(names);
     await page.screenshot({ path: join(shots, 'subtasks-01-folded.png') });
     // Alignment: the mark's centre sits on the centre of the text beside it (sidebar line, card status).
     const align = await page.evaluate((alias) => {

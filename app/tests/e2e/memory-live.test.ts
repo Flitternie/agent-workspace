@@ -78,6 +78,9 @@ describe('memory reaches running agents', () => {
     await page.locator(`[data-testid="rail-item"][data-alias="${b.alias}"],[data-testid="needs-item"][data-alias="${b.alias}"]`).first().click();
     const sent = page.getByTestId('memory-sent');
     await expect.poll(() => sent.count()).toBe(1);
+    // (It went with an earlier message, whose turn is folded now: open it.)
+    const fold = page.getByTestId('turn-fold').filter({ has: sent });
+    if (await fold.count()) await fold.locator('summary').first().click();
     await sent.locator('summary').click();
     expect(await sent.innerText()).toContain('Prices are integer cents.');
     await page.screenshot({ path: join(shots, 'memory-live-01.png') });

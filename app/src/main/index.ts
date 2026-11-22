@@ -152,6 +152,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   },
+  'project:rename': (i: { projectId: string; name: string }) => workspace.renameProject(i.projectId, i.name),
   'project:add': (i: { rootPath: string; name?: string; host?: string }) => workspace.addProject(i.rootPath, i.name, i.host),
   'research:get': (i: { researchId: string }) => workspace.researchLoad(i.researchId),
   'research:save': (i: { researchId: string; doc: ResearchDoc }) => workspace.researchSave(i.researchId, i.doc),
@@ -201,10 +202,12 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
+  'task:warm': (i: { taskId: string }) => workspace.warm(i.taskId),
   'task:setAside': (i: { taskId: string; on: boolean }) => workspace.setAside(i.taskId, i.on),
   'task:remoteControl': (i: { taskId: string; on: boolean }) => workspace.setRemoteControl(i.taskId, i.on),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
+  'task:renameAgent': (i: { taskId: string; alias: string }) => workspace.renameAgent(i.taskId, i.alias),
   'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),
   'task:setPermissionMode': (i: { taskId: string; mode: PermissionMode }) => workspace.setPermissionMode(i.taskId, i.mode),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),

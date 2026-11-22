@@ -242,13 +242,11 @@ describe('research page (demo)', () => {
     await invoke(page, 'task:create', { projectId: p2.projectId, provider: 'mock', title: 'Notes', mockScript: 'work', instruction: 'go', isolate: false });
     const team = page.locator('[data-testid="team"][data-project="notes"]');
     await expect.poll(() => team.count()).toBe(1);
-    // From the + beside "Agents" (the project is chosen in the dialog), or a right-click on the project's name (it is chosen already).
-    await page.getByTestId('sidebar-new').click();
+    // From the + beside "Agents": a new agent, or a new research (its project is chosen in the dialog).
+    await page.getByTestId('sidebar-new-task').click();
     await page.getByTestId('menu-new-research').click();
-    expect(await page.getByTestId('research-create').count()).toBe(1);
-    await page.keyboard.press('Escape');
-    await team.getByTestId('team-head').click({ button: 'right' });
-    await page.getByTestId('menu-project-research').click();
+    // (The project used last is suggested: the one just worked in.)
+    await expect.poll(() => page.getByTestId('project-current').innerText()).toMatch(/notes/);
     await page.getByTestId('research-new').locator('input').fill('Note quality');
     await page.getByTestId('research-create').click();
     await expect.poll(() => page.locator('.research-title h1').innerText()).toBe('Note quality');
@@ -262,7 +260,8 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-rename-ok').click();
     await expect.poll(() => noteRow.innerText()).toMatch(/Notes, better/);
     await noteRow.click({ button: 'right' });
-    await page.getByTestId('context-swatch').nth(4).click();
+    await page.getByTestId('menu-colour').click();
+    await page.getByTestId('research-swatch').nth(4).click();
     await expect.poll(async () => (await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId })).color).toBe(4);
     await noteRow.click({ button: 'right' });
     await page.getByTestId('menu-dissolve').click();
@@ -290,7 +289,7 @@ describe('research page (demo)', () => {
     // The lead on the goal node: its menu opens its conversation, or takes it out of the research.
     await expect.poll(() => page.getByTestId('research-panel').innerText(), { timeout: 10_000 }).toMatch(/research lead/);
     await page.locator('[data-testid="research-node"][data-kind="goal"]').click({ button: 'right' });
-    await page.getByTestId('node-out').click();
+    await page.getByTestId('menu-node-out').click();
     await expect.poll(async () => (await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId })).leadTaskId ?? '').toBe('');
   }, 240_000);
 });

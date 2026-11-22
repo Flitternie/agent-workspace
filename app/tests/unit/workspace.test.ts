@@ -980,4 +980,134 @@ describe('user activity (orders the sidebar)', () => {
     await ws.respondAttention(ws.snapshot().attention.find((x) => x.kind === 'approval')!.id, 'deny');
     expect(Date.now() - Date.parse(at()!)).toBeLessThan(5_000);
   });
+
+  it('the snapshot names what each agent is on from its cached session map, and nothing before one exists', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const answer = JSON.stringify({ tasks: [{ start: 0, title: 'Clean the build', status: 'in_progress' }] });
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY) }, backgroundModel: async () => answer });
+    opened.push(ws);
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Build', mockScript: 'work', instruction: 'Clean the build output.', isolate: false });
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status !== 'running' && ws.transcript(a.taskId).length > 1);
+    expect(ws.snapshot().workTitles[a.taskId]).toBeUndefined();
+    let changes = 0;
+    ws.onChange(() => changes++);
+    await ws.sessionMapGrouping(a.taskId);
+    expect(ws.snapshot().workTitles[a.taskId]).toBe('Clean the build');
+    // A new snapshot goes out when the map is made, so the sidebar shows it without waiting for other news.
+    expect(changes).toBeGreaterThan(0);
+  });
+});
+
+describe('opening an agent connects it in the background', () => {
+  type T = ReturnType<Workspace['snapshot']>['tasks'][number];
+  // What the user sees of an agent, and what orders and archives it: opening must leave all of it.
+  const visible = (t: T) => ({ status: t.status, statusSince: t.statusSince, updatedAt: t.updatedAt, lastUserActivityAt: t.lastUserActivityAt, setAside: t.setAside, unread: t.unread, summary: t.summary, title: t.title, name: t.name, lastError: t.lastError });
+
+  it('after a restart: connected without a message, nothing the user sees changes until they send', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws1 = open(dataDir);
+    const p = await ws1.addProject(repo(), 'shop');
+    const task1 = (id: string) => ws1.snapshot().tasks.find((t) => t.taskId === id)!;
+    const A = await ws1.createTask({ projectId: p.projectId, provider: 'mock', title: 'A', isolate: false, instruction: 'first' });
+    await until(() => task1(A.taskId).status === 'done');
+    const B = await ws1.createTask({ projectId: p.projectId, provider: 'mock', title: 'B', isolate: false, instruction: 'second' });
+    await until(() => task1(B.taskId).status === 'done');
+    ws1.setAside(B.taskId, true);
+    const C = await ws1.createTask({ projectId: p.projectId, provider: 'mock', title: 'C', isolate: false, mockScript: 'subagents', instruction: 'go' });
+    await until(() => task1(C.taskId).status === 'running');
+    await ws1.shutdown();
+
+    const ws = open(dataDir);
+    const s = () => ws.snapshot();
+    const task = (id: string) => s().tasks.find((t) => t.taskId === id)!;
+    const order = () => rank(s().tasks, s().attention.filter((a) => a.state === 'open')).map((t) => t.alias);
+    expect(s().connectedTaskIds).toEqual([]);
+    expect(task(C.taskId).status).toBe('disconnected');
+    const before = Object.fromEntries(s().tasks.map((t) => [t.taskId, visible(t)]));
+    // The conversation as said (resuming replaces the display cache with the native history, which
+    // in the mock keeps no tool rows; that is resume's doing, not opening's).
+    const said = (id: string) => ws.transcript(id).filter((i) => i.role !== 'tool').map((i) => `${i.role}: ${i.text}`);
+    const transcripts = Object.fromEntries(s().tasks.map((t) => [t.taskId, said(t.taskId)]));
+    const orderBefore = order();
+    const sessions = s().sessions.length;
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Opened (twice, quickly: one connect), and the set-aside one, and the cut-off one.
+    for (const id of [A.taskId, A.taskId, B.taskId, C.taskId]) ws.warm(id);
+    await until(() => [A, B, C].every((t) => s().connectedTaskIds.includes(t.taskId)));
+    await settle();
+    expect(s().sessions.length).toBe(sessions + 3);
+    for (const t of [A, B]) expect(visible(task(t.taskId))).toEqual(before[t.taskId]);
+    // "Not connected" is the one thing no longer true; it stays in the same group, so in place.
+    expect(visible(task(C.taskId))).toEqual({ ...before[C.taskId], status: 'idle' });
+    expect(task(B.taskId).setAside).toBe(true);
+    expect(order()).toEqual(orderBefore);
+    // No transcript noise: the resume note waits for the session to be used.
+    for (const t of [A, B, C]) expect(said(t.taskId)).toEqual(transcripts[t.taskId]);
+    // Already connected: opening again does nothing.
+    ws.warm(A.taskId);
+    await settle();
+    expect(s().sessions.length).toBe(sessions + 3);
+
+    // Sending uses the warm session (no new one) and counts as before: activity, back from set aside.
+    const r = await ws.send(B.taskId, 'carry on', 'text');
+    expect(r.ok).toBe(true);
+    expect(s().sessions.length).toBe(sessions + 3);
+    expect(task(B.taskId).setAside).toBeUndefined();
+    expect(task(B.taskId).lastUserActivityAt).not.toBe(before[B.taskId].lastUserActivityAt);
+    expect(task(B.taskId).updatedAt).not.toBe(before[B.taskId].updatedAt);
+    expect(ws.transcript(B.taskId).some((i) => i.role === 'system' && /Resumed native mock session/.test(i.text))).toBe(true);
+    await until(() => ws.transcript(B.taskId).some((i) => /Request 2 in this session/.test(i.text)));
+  }, 15_000);
+
+  it('a background connect that fails says nothing; sending tries again and reports it', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws1 = open(dataDir);
+    const p = await ws1.addProject(repo(), 'shop');
+    const A = await ws1.createTask({ projectId: p.projectId, provider: 'mock', title: 'A', isolate: false, instruction: 'first' });
+    await until(() => ws1.snapshot().tasks.find((t) => t.taskId === A.taskId)!.status === 'done');
+    await ws1.shutdown();
+
+    const mock = new MockAdapter(join(dataDir, 'mock-sessions'), DELAY);
+    const create = mock.createSession.bind(mock);
+    mock.createSession = (args, emit) => {
+      const session = create(args, emit);
+      session.start = async () => {
+        throw new Error('no such session');
+      };
+      return session;
+    };
+    const ws = new Workspace({ dataDir, adapters: { mock } });
+    opened.push(ws);
+    const task = () => ws.snapshot().tasks.find((t) => t.taskId === A.taskId)!;
+    const before = visible(task());
+    const sessions = ws.snapshot().sessions.length;
+    ws.warm(A.taskId);
+    await settle();
+    expect(ws.snapshot().connectedTaskIds).toEqual([]);
+    expect(visible(task())).toEqual(before);
+    expect(ws.snapshot().sessions.length).toBe(sessions);
+    expect(ws.snapshot().attention.some((a) => a.kind === 'error')).toBe(false);
+
+    const r = await ws.send(A.taskId, 'hello', 'text');
+    expect(r.ok).toBe(false);
+    expect(task().status).toBe('failed');
+    expect(ws.snapshot().attention.some((a) => a.kind === 'error' && a.taskId === A.taskId)).toBe(true);
+  });
+
+  it('the main agent and agents with nothing to resume are left alone', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    const A = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'A', isolate: false, instruction: 'first' });
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === A.taskId)!.status === 'done');
+    await ws.stop(A.taskId);
+    // A remote agent: not started on a whim.
+    const store = (ws as unknown as { store: { data: { tasks: Array<{ taskId: string; host?: string }> } } }).store;
+    store.data.tasks.find((t) => t.taskId === A.taskId)!.host = 'devbox';
+    ws.warm(A.taskId);
+    ws.warm('no-such-task');
+    await settle();
+    expect(ws.snapshot().connectedTaskIds).toEqual([]);
+  });
 });

@@ -1,10 +1,10 @@
 {
   "name": "agent-workspace",
-  "version": "0.14.0",
+  "version": "0.15.1",
   "private": true,
   "description": "Run Claude Code and Codex agents in parallel from one meeting-style workspace, with a main agent and always-on voice.",
   "main": "out/main/index.cjs",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "build:main": "node scripts/build-main.mjs",
@@ -29,6 +29,8 @@
     "react-markdown": "10.1.0",
     "rehype-highlight": "7.0.2",
     "remark-breaks": "4.0.0",
+    "remark-cjk-friendly": "2.3.4",
+    "remark-cjk-friendly-gfm-strikethrough": "2.3.3",
     "remark-gfm": "4.0.1",
     "sherpa-onnx-node": "2.0.0",
     "zod": "4.6.7"

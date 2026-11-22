@@ -232,8 +232,9 @@ export function ToolCallRow({ item }: { item: TranscriptItem }) {
   const diffs = content.flatMap((c) => (c.type === 'diff' ? [c.diff] : []));
   const stat = diffs.length ? diffStat(diffs) : undefined;
   const hasOutput = content.some((c) => (c.type === 'terminal' ? !!c.output : true));
-  // Changes are what you review; show them. Command output opens when it failed.
-  const openByDefault = !!tool?.byUser || diffs.length > 0 || status === 'failed' || status === 'awaiting_approval';
+  // Folded by default (the row says what happened: a diff's line counts, a failure's mark); open when it
+  // is yours (a command you ran with `!`) or waits on you.
+  const openByDefault = !!tool?.byUser || status === 'awaiting_approval';
   const body = content.length ? <ToolContentView content={content} /> : item.text ? <pre>{item.text}</pre> : null;
   return (
     <details className={`msg tool tool-${status} kind-${tool?.kind ?? 'other'}`} open={openByDefault} data-testid="tool-call" data-kind={tool?.kind ?? 'other'}>
@@ -284,7 +285,8 @@ export function groupTranscript(items: TranscriptItem[], allTools = false): Arra
 }
 
 /** How many of the latest turns stay open; earlier ones fold to: your message, a summary, the reply. */
-export const OPEN_TURNS = 3;
+/** The latest turn stays open; earlier ones fold to a line. */
+export const OPEN_TURNS = 1;
 
 export interface Turn {
   /** The user's message that starts it (none for what came before the first one). */
@@ -297,11 +299,15 @@ export interface Turn {
   live: boolean;
 }
 
-/** The conversation as turns: each of the user's messages and what the agent did until the next one. */
+/**
+ * The conversation as turns: each of the user's messages and what the agent did until the next one. A
+ * message added while the agent was working (steering it, not stopping it) belongs to the turn it joined.
+ */
 export function splitTurns(items: TranscriptItem[]): Turn[] {
   const turns: Array<{ user?: TranscriptItem; rest: TranscriptItem[] }> = [];
   for (const it of items) {
-    if (it.role === 'user' || !turns.length) turns.push(it.role === 'user' ? { user: it, rest: [] } : { rest: [it] });
+    const starts = it.role === 'user' && !(it.delivery === 'steer' && turns.length);
+    if (starts || !turns.length) turns.push(it.role === 'user' ? { user: it, rest: [] } : { rest: [it] });
     else turns[turns.length - 1].rest.push(it);
   }
   return turns.map(({ user, rest }) => {

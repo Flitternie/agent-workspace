@@ -80,12 +80,20 @@ export function isMainAgent(t: { taskId?: string } | undefined): boolean {
   return !!t?.taskId?.startsWith('t-main-');
 }
 
-type Named = { name: string; alias: string; taskId?: string };
+type Named = { name: string; alias: string; taskId?: string; title?: string; nameSource?: 'auto' | 'user' };
 
 /** What the agent is working on ("订单接口迁移"), or its alias while it has no label yet. */
 export function labelOf(t: Named): string {
   if (isMainAgent(t)) return tr('Main agent');
-  return t.name.trim() && t.name !== t.alias ? t.name : t.alias;
+  const name = t.name.trim() && t.name !== t.alias ? t.name : t.alias;
+  // A stopgap label is the first message cut short ("读一下 README.md 和 …") until a model names the work:
+  // the whole first line then, so a wider column shows more of it (it is cut by the width, not the text).
+  if (t.nameSource !== 'user' && name.endsWith('…') && t.title) {
+    const line = (t.title.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
+    const head = name.slice(0, -1).trim();
+    if (head && line.length > head.length && line.includes(head)) return line.slice(line.indexOf(head));
+  }
+  return name;
 }
 
 /** The whole reference, for captions, tooltips and confirmations: "订单接口迁移 · 小王", or just "小王". */

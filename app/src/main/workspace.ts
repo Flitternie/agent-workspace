@@ -25,7 +25,8 @@ import type { ModelOption,
   ToolCallInfo,
   TranscriptItem,
   TransientKind,
-  WorkspaceSnapshot, BtwEntry, ImageRef } from '../shared/types';
+  WorkspaceSnapshot, BtwEntry, ImageRef, AgentStatus, TaskUsage, ProviderLimits, LimitWindow } from '../shared/types';
+import { accountKey } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -39,6 +40,7 @@ import { AttachmentStore, MAX_IMAGES } from './attachments';
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
+import { ALIAS_PROBLEM_TEXT, aliasProblem, normalizeAlias } from '../shared/agent-name';
 import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
 import { gitRoot, WorktreeService } from './worktree';
@@ -74,6 +76,14 @@ interface LiveSession {
   localId: string;
   session: ProviderSession;
   turnActive: boolean;
+  /**
+   * Connected in the background when the user opened the agent's page, and not used since. Its
+   * start-up is not activity: it must not move the agent in the sidebar, flag it or clear it.
+   * Holds the status it had, to go back to if the session ends unused.
+   */
+  warm?: { status: AgentStatus };
+  /** The "Resumed native session" note of a background connect, held back until the session is used. */
+  resumeNote?: string;
 }
 
 /** A `!command` the user typed is stopped after this long. */
@@ -124,6 +134,8 @@ export class Workspace {
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
+  /** Connects under way in the background (opening a page), whose failures stay quiet. */
+  private warming = new Set<string>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
   private changeListeners = new Set<() => void>();
@@ -831,6 +843,9 @@ export class Workspace {
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
       remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
+      // Read from the cached groupings only: nothing is asked of a model to fill it.
+      limits: d.limits ?? {},
+      workTitles: Object.fromEntries(Object.entries(d.sessionMaps ?? {}).flatMap(([id, g]) => (g.version === GROUPING_VERSION && g.tasks.length ? [[id, g.tasks.at(-1)!.title]] : []))),
     };
   }
 
@@ -1090,13 +1105,24 @@ export class Workspace {
   /** Replaces an automatic label with a model's label for `text`, unless the name changed meanwhile. */
   private refineLabel(task: Task, text: string): Promise<boolean> {
     if (!text.trim() || this.opts.demo) return Promise.resolve(false);
+    // No model to ask yet (the CLIs are still being detected right after launch, or signed out): the
+    // stopgap stays for now and is marked, so detecting them (or opening the agent) names it then.
+    if (!this.canLabel()) {
+      task.labelStale = true;
+      return Promise.resolve(false);
+    }
     const lang = labelLang(task.alias);
     const auto = task.name;
     const project = this.store.data.projects.find((p) => p.projectId === task.projectId)?.name;
     return this.suggestLabel(project ? `Project (do not repeat it): ${project}\n${text}` : text, lang)
       .then((label) => {
         const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
-        if (!label || !t || t.name !== auto || t.nameSource === 'user') return false;
+        if (!t || t.name !== auto || t.nameSource === 'user') return false;
+        // Nothing usable came back: keep the stopgap, marked for a later try.
+        if (!label) {
+          t.labelStale = true;
+          return false;
+        }
         t.name = label;
         t.nameSource = 'auto';
         t.labelStale = undefined;
@@ -1107,6 +1133,8 @@ export class Workspace {
       })
       .catch((error) => {
         this.log('label suggestion failed', error);
+        const t = this.store.data.tasks.find((x) => x.taskId === task.taskId);
+        if (t && t.nameSource !== 'user' && t.name === auto) t.labelStale = true;
         return false;
       });
   }
@@ -1220,7 +1248,8 @@ export class Workspace {
         } else grouping = parseGrouping(await ask(GROUPING_PROMPT, turnsDigest(items)), turns);
         if (grouping) {
           cache[taskId] = grouping;
-          this.store.save();
+          // Its last task's title is what the sidebar and header show for the agent: send a new snapshot.
+          this.changed();
         }
         return grouping ?? current ?? null;
       } catch (error) {
@@ -1318,6 +1347,38 @@ export class Workspace {
     this.changed();
   }
 
+  /**
+   * The agent's name (its alias, the handle the user says or types). One agent per name, case
+   * apart, and none of the router's words. What was already said under the old name stays as it was.
+   */
+  renameAgent(taskId: string, alias: string): void {
+    const t = this.task(taskId);
+    if (taskId.startsWith('t-main-')) throw new Error('The main agent keeps its name.');
+    const next = normalizeAlias(alias);
+    const problem = aliasProblem(next, this.store.data.tasks, taskId);
+    if (problem) throw new Error(ALIAS_PROBLEM_TEXT[problem]);
+    const before = t.alias;
+    if (next === before) return;
+    // No label of its own yet: its name was the label, and follows.
+    if (t.name === before) t.name = next;
+    t.alias = next;
+    // Forks name where they came from by the name it has now.
+    for (const o of this.store.data.tasks) if (o.forkedFrom?.taskId === taskId) o.forkedFrom = { ...o.forkedFrom, alias: next };
+    this.touched(t);
+    t.updatedAt = now();
+    this.changed();
+  }
+
+  renameProject(projectId: string, name: string): Project {
+    const p = this.project(projectId);
+    const next = name.replace(/\s+/g, ' ').trim();
+    if (!next) throw new Error('A project name cannot be empty.');
+    if (next === p.name) return p;
+    p.name = next.slice(0, 200);
+    this.changed();
+    return p;
+  }
+
   async remove(taskId: string): Promise<string> {
     const t = this.task(taskId);
     await this.stop(taskId);
@@ -1342,22 +1403,62 @@ export class Workspace {
     return this.store.data.sessions.find((s) => s.localId === task.sessionLocalId);
   }
 
-  /** Connects the task to its provider: resumes the recorded native session, or creates one. */
-  private connect(taskId: string): Promise<LiveSession> {
+  /**
+   * Connects the task to its provider: resumes the recorded native session, or creates one.
+   * Anything but a background connect is a use of the session: a warm one stops being quiet.
+   */
+  private connect(taskId: string, background = false): Promise<LiveSession> {
     const existing = this.live.get(taskId);
-    if (existing) return Promise.resolve(existing);
+    if (existing) return Promise.resolve(background ? existing : this.claim(taskId, existing));
     const pending = this.connecting.get(taskId);
-    if (pending) return pending;
-    const p = this.doConnect(taskId).finally(() => this.connecting.delete(taskId));
+    if (pending) {
+      if (background) return pending;
+      // A background connect that fails says nothing; asked for by the user, try again out loud.
+      const quiet = this.warming.has(taskId);
+      return pending.then(
+        (l) => this.claim(taskId, l),
+        (error) => (quiet ? this.connect(taskId) : Promise.reject(error)),
+      );
+    }
+    if (background) this.warming.add(taskId);
+    const p = this.doConnect(taskId, background).finally(() => {
+      this.connecting.delete(taskId);
+      this.warming.delete(taskId);
+    });
     this.connecting.set(taskId, p);
-    return p;
+    return background ? p : p.then((l) => this.claim(taskId, l));
   }
 
-  private async doConnect(taskId: string): Promise<LiveSession> {
+  /** A session connected in the background is being used: from now on it is like any other. */
+  private claim(taskId: string, live: LiveSession): LiveSession {
+    if (!live.warm) return live;
+    live.warm = undefined;
+    if (live.resumeNote) this.appendSystem(taskId, live.resumeNote);
+    live.resumeNote = undefined;
+    return live;
+  }
+
+  /**
+   * The user opened this agent's page: connect it now, in the background, so the first message
+   * does not wait for the session to start. Opening is not using: the agent keeps its place, its
+   * set-aside flag, unread mark, summary and status, and a failure stays quiet (sending surfaces it).
+   * Only sessions there is something to resume; not the main agent (its chapters start their own
+   * sessions) nor agents on other hosts (a remote process is not cheap to start on a whim).
+   */
+  warm(taskId: string): void {
+    const t = this.findTask(taskId);
+    if (!t || t === this.store.data.mainAgent || t.host || this.live.has(taskId) || this.connecting.has(taskId)) return;
+    if (!this.opts.adapters[t.provider] || !this.currentSession(t)?.nativeSessionId) return;
+    void this.connect(taskId, true).catch((error) => this.log('background connect failed', taskId, error));
+  }
+
+  private async doConnect(taskId: string, background = false): Promise<LiveSession> {
     const task = this.task(taskId);
     const adapter = this.opts.adapters[task.provider];
     if (!adapter) throw new Error(`Provider ${task.provider} is not available.`);
     const prev = this.currentSession(task);
+    // What a background connect leaves as it found it, whatever start-up does.
+    const before = background ? { status: task.status, summary: task.summary, lastError: task.lastError, updatedAt: task.updatedAt } : undefined;
     const resumeId = prev?.nativeSessionId || undefined;
     const record: SessionRecord = {
       localId: `s-${randomUUID().slice(0, 8)}`,
@@ -1370,8 +1471,10 @@ export class Workspace {
     };
     this.store.data.sessions.push(record);
     task.sessionLocalId = record.localId;
-    task.status = 'starting';
-    task.lastError = undefined;
+    if (!before) {
+      task.status = 'starting';
+      task.lastError = undefined;
+    }
     const injected = this.memoryGiven(task);
     task.injectedMemoryIds = injected.map((m) => m.id);
     task.memorySeen = seenOf(injected);
@@ -1409,12 +1512,20 @@ export class Workspace {
         this.handleEvent(taskId, record.localId, event);
       },
     );
-    const live: LiveSession = { localId: record.localId, session, turnActive: false };
+    const live: LiveSession = { localId: record.localId, session, turnActive: false, ...(before ? { warm: { status: before.status } } : {}) };
     this.live.set(taskId, live);
     try {
       await session.start();
     } catch (error) {
       this.live.delete(taskId);
+      if (before) {
+        // Nothing the user asked for failed: no error, no attention; the agent is as it was.
+        this.store.data.sessions = this.store.data.sessions.filter((s) => s !== record);
+        task.sessionLocalId = prev?.localId;
+        Object.assign(task, before);
+        this.changed();
+        throw error;
+      }
       const message = (error as Error).message;
       task.status = 'failed';
       task.lastError = message;
@@ -1425,15 +1536,21 @@ export class Workspace {
     } finally {
       replaying = false;
     }
+    const note = history.length ? `Resumed native ${task.provider} session ${record.nativeSessionId} (${history.length} items restored).` : resumeId ? `Resumed native ${task.provider} session ${resumeId}.` : undefined;
     // The native session is authoritative for history; replace the display cache with it.
     if (history.length) {
-      this.store.setTranscript(taskId, [
-        ...history,
-        { id: `sys-${randomUUID()}`, taskId, role: 'system', text: `Resumed native ${task.provider} session ${record.nativeSessionId} (${history.length} items restored).`, createdAt: now() },
-      ]);
+      this.store.setTranscript(taskId, [...history, ...(note && !before ? [{ id: `sys-${randomUUID()}`, taskId, role: 'system' as const, text: note, createdAt: now() }] : [])]);
       for (const cb of this.transcriptListeners) cb(taskId, null);
-    } else if (resumeId) {
-      this.appendSystem(taskId, `Resumed native ${task.provider} session ${resumeId}.`);
+    } else if (note && !before) {
+      this.appendSystem(taskId, note);
+    }
+    if (before) {
+      // Only "Not connected" is no longer true; a failure, a report or a question stays as it was.
+      live.resumeNote = note;
+      task.updatedAt = before.updatedAt;
+      if (task.status === 'disconnected') task.status = 'idle';
+      this.changed();
+      return live;
     }
     if (task.status === 'starting') task.status = 'idle';
     task.summary = resumeId ? 'Session resumed with its previous conversation.' : task.summary;
@@ -2228,7 +2345,21 @@ export class Workspace {
       this.log('dropped stale event', taskId, sessionLocalId, event.type);
       return;
     }
-    task.updatedAt = now();
+    let quiet = false;
+    if (live.warm) {
+      // A background connect ending before it was used: back to "Not connected", nothing to report.
+      if (event.type === 'sessionFailed' || event.type === 'sessionDisconnected') {
+        this.live.delete(taskId);
+        this.expireNative(taskId, sessionLocalId, 'Provider session ended.');
+        this.log('background session ended', taskId, event.type === 'sessionFailed' ? event.error : event.reason);
+        if (task.status === 'idle') task.status = live.warm.status;
+        return this.changed();
+      }
+      // Its start-up (the model, its id, history) is not activity; anything else (a turn of its own) is.
+      quiet = event.type === 'sessionStarted' || event.type === 'model' || (event.type === 'transcriptItem' && !!event.history);
+      if (!quiet) this.claim(taskId, live);
+    }
+    if (!quiet) task.updatedAt = now();
     // The provider's own retry is over once anything else happens.
     if (task.retry?.by === 'provider' && event.type !== 'retrying') task.retry = undefined;
     switch (event.type) {
@@ -2270,6 +2401,14 @@ export class Workspace {
       case 'suggestion':
         task.suggestion = clip(event.text, 500);
         break;
+      case 'usage':
+        task.usage = addUsage(task.usage, event);
+        return this.changedThrottled();
+      case 'limits': {
+        // Per account: the same provider signed in on another machine has limits of its own.
+        this.store.data.limits = withLimits(this.store.data.limits ?? {}, task, event.windows, event.plan);
+        return this.changedThrottled();
+      }
       case 'turnStarted':
         // Working again: back among the active.
         task.setAside = undefined;
@@ -3401,4 +3540,29 @@ function mergeItem(prev: TranscriptItem | undefined, item: TranscriptItem, tool?
     if (!next.toolLabel || tool?.title) next.toolLabel = mergedTool.title || next.toolLabel;
   }
   return next;
+}
+
+/** Adds a usage event to an agent's totals (kept across its sessions); context is replaced, not added. */
+export function addUsage(prev: TaskUsage | undefined, event: Extract<ProviderEvent, { type: 'usage' }>): TaskUsage {
+  const u: TaskUsage = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, reasoning: 0, ...prev, updatedAt: now() };
+  const a = event.add;
+  if (a) {
+    for (const k of ['input', 'cacheWrite', 'cacheRead', 'output', 'reasoning'] as const) u[k] += Math.max(0, a[k] ?? 0);
+    if (a.costUsd !== undefined) u.costUsd = (u.costUsd ?? 0) + Math.max(0, a.costUsd);
+  }
+  if (event.context !== undefined) u.context = event.context;
+  if (event.contextWindow !== undefined) u.contextWindow = event.contextWindow;
+  return u;
+}
+
+/** An account's latest limits recorded (an account: the task's provider on its machine), the others kept. */
+export function withLimits(all: Record<string, ProviderLimits>, task: Pick<Task, 'provider' | 'host'>, windows: LimitWindow[], plan?: string): Record<string, ProviderLimits> {
+  const key = accountKey(task);
+  return { ...all, [key]: { ...mergeLimits(all[key], windows, plan), provider: task.provider, ...(task.host ? { host: task.host } : {}) } };
+}
+
+/** The latest limits replace the windows they name; windows not mentioned are kept. */
+export function mergeLimits(prev: ProviderLimits | undefined, windows: LimitWindow[], plan?: string): ProviderLimits {
+  const keep = (prev?.windows ?? []).filter((w) => !windows.some((n) => n.key === w.key));
+  return { windows: [...windows, ...keep].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity)), at: now(), ...((plan ?? prev?.plan) ? { plan: plan ?? prev?.plan } : {}) };
 }

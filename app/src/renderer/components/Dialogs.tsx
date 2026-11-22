@@ -87,14 +87,14 @@ export function ConfirmDialog({
   );
 }
 
-export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void }) {
+/** `onContinue`: switch to Continue a session… instead, for someone who meant to pick up an existing conversation. */
+export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void; onContinue?: () => void }) {
   const providers = snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const);
   const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
   // The project used most recently (most of the time the right one); the chooser lists the rest.
   const [projectId, setProjectId] = useState(() => defaultProject(snapshot));
   const [provider, setProvider] = useState<AgentProvider>(firstAvailable);
-  // No title or name to make up: the agent's label comes from what it is asked to do (here, or its first message).
-  const [instruction, setInstruction] = useState('');
+  // No title, name or instruction here: the agent opens with its reply box focused, and its first message says what it is for.
   const [isolate, setIsolate] = useState(true);
   const [mockScript, setMockScript] = useState('ask:Should I keep backwards compatibility?');
   const [busy, setBusy] = useState(false);
@@ -120,7 +120,6 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
       const t = await call('task:create', {
         projectId,
         provider,
-        instruction: instruction.trim() || undefined,
         isolate: isolate && !project?.host,
         mockScript: provider === 'mock' ? mockScript : undefined,
       });
@@ -135,6 +134,15 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
 
   return (
     <Modal title={t('New agent')} onClose={onClose}>
+      {/* For people who meant to pick up a conversation they already have: first, before choosing anything. */}
+      {onContinue ? (
+        <div className="hint new-continue" data-testid="new-continue-hint">
+          {t('Continuing a conversation from Claude Code or Codex?')}{' '}
+          <button className="link" onClick={onContinue} data-testid="new-continue-session">
+            {t('Continue a session…')}
+          </button>
+        </div>
+      ) : null}
       <ProjectChooser snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
         <label>{t('Agent')}</label>
@@ -162,10 +170,6 @@ export function NewTaskDialog({ snapshot, onClose, onCreated }: { snapshot: Work
                   : t('{name} CLI not found on PATH.', { name: PROVIDER_LABEL[cap.provider] })}
           </div>
         ) : null}
-      </div>
-      <div className="field">
-        <label>{t('First instruction (optional)')}</label>
-        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should it do?')} data-testid="new-instruction" />
       </div>
       {provider === 'mock' ? (
         <div className="field">
