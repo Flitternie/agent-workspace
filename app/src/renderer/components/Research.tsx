@@ -171,7 +171,13 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   for (const n of doc.nodes) if ((n.taskId && (busy(n.taskId) || asking.has(n.taskId))) || (n.type === 'experiment' && statusOf(n) === 'running')) for (const a of ancestry(doc, n)) active.add(a.id);
   const fresh = new Set(exps.filter((e) => e.resultAt && e.resultAt > lastSeen && !looked.has(e.id)).map((e) => e.id));
   /** Rings the nodes of these agents (the lead's is the goal: nothing selected). */
-  const ring = (taskIds: string[]) => setSel(doc.nodes.filter((n) => n.taskId && taskIds.includes(n.taskId)).map((n) => n.id));
+  /** Brings these nodes into view (the graph pans to them): a click on a count at the top. */
+  const [look, setLook] = useState<{ ids: string[]; n: number }>({ ids: [], n: 0 });
+  const ring = (taskIds: string[]) => {
+    const ids = doc.nodes.filter((n) => n.taskId && taskIds.includes(n.taskId)).map((n) => n.id);
+    setSel(ids);
+    setLook((l) => ({ ids, n: l.n + 1 }));
+  };
   /** A right-click on a node with an agent: open its conversation, or take it out of the research (it is an ordinary agent again; the node stays). */
   const nodeMenu = (e: ReactMouseEvent, n?: ResearchNode) => {
     const task = taskOf(n ? n.taskId : doc.leadTaskId);
@@ -192,6 +198,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const ringFresh = () => {
     setOpened((o) => new Set([...o, ...exps.filter((e) => fresh.has(e.id)).map((e) => e.parent!)]));
     setSel([...fresh]);
+    setLook((l) => ({ ids: [...fresh], n: l.n + 1 }));
     setLooked((l) => new Set([...l, ...fresh]));
   };
 
@@ -270,7 +277,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       {/* The graph fills the page; the box floats on it at the bottom, as on an agent's page (no band of its own). */}
       {panelMax ? sidePanel : null}
       <div className="research-stage" hidden={panelMax}>
-      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} onMenu={nodeMenu} />
+      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} onMenu={nodeMenu} look={look} />
       {menu.element}
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       </div>
@@ -326,6 +333,7 @@ function Graph({
   active,
   fresh,
   onMenu,
+  look,
 }: {
   doc: ResearchDoc;
   depth: GraphDepth;
@@ -343,6 +351,8 @@ function Graph({
   /** Experiments with a result the user has not looked at. */
   fresh: ReadonlySet<string>;
   onMenu: (e: ReactMouseEvent, n?: ResearchNode) => void;
+  /** Nodes to bring into view (each new `n` pans once). */
+  look: { ids: string[]; n: number };
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [only, setOnly] = useState(false);
@@ -368,6 +378,19 @@ function Graph({
       fit();
     }
   });
+  // Asked to look at some nodes: pan so they sit in the room above the box (their middle at the middle).
+  useEffect(() => {
+    if (!look.n) return;
+    const r = box.current?.getBoundingClientRect();
+    const its = look.ids.map((id) => L.at.get(id)).filter((x): x is GraphItem => !!x);
+    if (!r || !its.length) return;
+    const below = box.current?.parentElement?.querySelector('.research-composer')?.getBoundingClientRect().height ?? 0;
+    setView((v) => {
+      const x0 = Math.min(...its.map((i) => i.x)), x1 = Math.max(...its.map((i) => i.x)) + GRAPH.nodeW;
+      const y0 = Math.min(...its.map((i) => i.y)), y1 = Math.max(...its.map((i) => i.y)) + GRAPH.nodeH;
+      return { k: v.k, x: r.width / 2 - ((x0 + x1) / 2) * v.k, y: (r.height - below) / 2 - ((y0 + y1) / 2) * v.k };
+    });
+  }, [look.n]);
   const zoom = (f: number, cx?: number, cy?: number) =>
     setView((v) => {
       const r = box.current!.getBoundingClientRect();
@@ -1332,6 +1355,12 @@ function MultiPanel({ ctx, nodes }: { ctx: Ctx; nodes: ResearchNode[] }) {
 function ResearchComposer({ ctx, selected, onClear }: { ctx: Ctx; selected: ResearchNode[]; onClear: () => void }) {
   const { doc, snapshot } = ctx;
   const [sent, setSent] = useState<{ to: string; taskId: string } | null>(null);
+  // Where it went: said for a moment, then out of the way of the graph.
+  useEffect(() => {
+    if (!sent) return;
+    const t = setTimeout(() => setSent(null), 8000);
+    return () => clearTimeout(t);
+  }, [sent]);
   const one = selected.length === 1 ? selected[0] : undefined;
   const ids = new Set(taskIdsOf(doc));
   // Who gets it (decided again in the main process when sent): the agent of the nearest node over the selection.
