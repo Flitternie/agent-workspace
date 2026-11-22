@@ -147,6 +147,8 @@ Object.assign(ZH, {"ov.mb": "已加上周同比，测试通过。", "ov.mc": "�
 
 Object.assign(ZH, {"cv.a1": "orders 表有 210 万行，customer_id 上没有索引。", "cv.a2": "历史页按客户筛选、按时间排序，建一个 (customer_id, created_at DESC) 的索引就够了。", "cv.m2": "好。建索引的时候会影响下单吗？", "cv.ai": "普通索引建的时候会锁写入；并发索引不锁，但更慢。", "sm.t3": "看历史页怎么查订单", "sm.m3": "1 轮 · 3 个文件", "sm.o3": "按客户筛选，按时间排序。", "sm.t4": "跑迁移测试", "sm.m4": "接下来"});
 
+Object.assign(ZH, {"sc.short": "对话旁的侧栏"});
+
 const EN = {};
 document.querySelectorAll('[data-k]').forEach((el) => (EN[el.dataset.k] = el.innerHTML));
 
@@ -575,7 +577,7 @@ const laneOutcomes = () => [{ kind: 'out', lane: 1, st: 'w' }, { kind: 'out', la
         const li = caps[i];
         if (!li) continue;
         const row = document.createElement('p');
-        row.innerHTML = `<i>${++n}</i><span class="m-cap-t"></span>`;
+        row.innerHTML = `<i></i><span class="m-cap-t"></span>`; // numbered by CSS, so hidden ones are skipped
         const t = row.querySelector('.m-cap-t');
         t.appendChild(li.querySelector('b').cloneNode(true));
         t.appendChild(li.querySelector('span').cloneNode(true));

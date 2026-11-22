@@ -1684,3 +1684,59 @@ body { overflow-x: clip !important; }
   .story#overview .main-card .press { animation: none !important; }
   .story#overview .main-card pre { font-size: 11.5px; overflow-x: auto; white-space: pre; }
 }
+
+/* Captions are numbered by a counter, so the ones a phone leaves out are skipped */
+.story .iso { counter-reset: mcap; }
+.m-cap p { counter-increment: mcap; }
+.m-cap i::before { content: counter(mcap); }
+
+/* ═════════ Phones: a shorter page. Each section keeps its one or two clearest pieces ═════════ */
+@media (max-width: 640px) {
+  /* Where one picture has several captions, their titles are enough */
+  .m-cap p:not(:only-child) .m-cap-t span { display: none; }
+  .story-sticky { padding: 44px 16px 4px !important; }
+  .story-copy h2 { margin-bottom: 16px; }
+  /* Main agent: say it, it is split up, ask how it goes (calling one by name is in the hero) */
+  .story#main-agent :is(.direct, .m-cap-2) { display: none !important; }
+  /* Work Map: the Session Map (the Team Map plays in the hero) */
+  .story#work-map :is(.wm-lanes, .m-cap-1) { display: none !important; }
+  /* Memory: message, note, where it goes; the file is one line */
+  .story#memory .mm-file { display: none !important; }
+  /* Also built in: a compact grid of names and one line each, no little pictures */
+  .more { padding: 44px 16px 8px; }
+  .more .grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .more .tile { padding: 14px; border-radius: 14px; }
+  .more .tile .mini-ui, .tile-side .sc-win, .tile-side .sc-tabs { display: none !important; }
+  .more .tile h3 { font-size: 15px; }
+  .more .tile p { margin-top: 4px; font-size: 13px; line-height: 1.45; }
+  .tile-side { display: block !important; grid-column: 1 / -1; }
+  .tile-side h3 { font-size: 16px !important; }
+  .tile-side p { max-width: none !important; }
+  .more .grid .tile:last-child:nth-child(even) { grid-column: 1 / -1; }
+  .compat { margin-top: 16px; }
+  .compat h3 { font-size: 16px; }
+  /* Privacy: three short lines */
+  .privacy { padding: 44px 16px 8px; }
+  .pv-grid { gap: 0 !important; }
+  .pv { padding: 12px 0 12px 14px !important; }
+  .pv-n { display: none; }
+  .pv h3 { font-size: 15.5px; }
+  .pv p { margin-top: 2px; font-size: 13.5px; }
+  .start { padding: 40px 16px 56px; }
+  .start-card { padding: 28px 20px !important; border-radius: 22px; }
+  .steps { gap: 16px !important; margin-top: 24px !important; }
+}
+/* Phones: the other features are just named, as chips; the CLI table and longer notes are left to the desktop page */
+@media (max-width: 640px) {
+  .more .section-head { margin-bottom: 16px; }
+  .more .grid { display: flex !important; flex-wrap: wrap; gap: 8px; }
+  .more .tile { padding: 8px 14px !important; border-radius: 999px !important; box-shadow: none; }
+  .more .tile p { display: none !important; }
+  .more .tile h3, .tile-side h3 { font-size: 14px !important; font-weight: 600; }
+  .tile-side { grid-column: auto; }
+  .more .compat { display: none; }
+  .pv p { display: none; }
+  .pv { padding: 8px 0 8px 14px !important; }
+  .privacy .section-head { margin-bottom: 14px; }
+}
+@media (max-width: 640px) { .tile-side .lbl-full { display: none; } .tile-side .lbl-short { display: inline; } }
