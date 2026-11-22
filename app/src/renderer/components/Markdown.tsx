@@ -2,6 +2,8 @@ import { memo, useContext, useEffect, useMemo, useRef, useState, type ComponentP
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
+import remarkCjkFriendly from 'remark-cjk-friendly';
+import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethrough';
 import remarkGfm from 'remark-gfm';
 import { t } from '../i18n';
 import { Icon } from './bits';
@@ -108,10 +110,13 @@ function remarkHtmlAsText() {
   return walk;
 }
 
-// Chat text uses single newlines as line breaks, as the CLIs display them.
-const remarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText, remarkFilePaths];
+// Chat text uses single newlines as line breaks, as the CLIs display them. Emphasis that closes on CJK
+// punctuation right before a letter ("**结论。**由…", where CommonMark wants a space after the
+// punctuation) is read as emphasis too: the CJK-friendly rules, for bold/italic and strikethrough.
+const cjk = [remarkCjkFriendly, remarkCjkFriendlyGfmStrikethrough];
+const remarkPlugins = [remarkGfm, ...cjk, remarkBreaks, remarkHtmlAsText, remarkFilePaths];
 /** What the user wrote: their @-mentions show as chips too. */
-const userRemarkPlugins = [remarkGfm, remarkBreaks, remarkHtmlAsText, remarkMentions, remarkFilePaths];
+const userRemarkPlugins = [remarkGfm, ...cjk, remarkBreaks, remarkHtmlAsText, remarkMentions, remarkFilePaths];
 const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
 
 /** Streaming text re-renders at most this often; the final text renders at once. */
