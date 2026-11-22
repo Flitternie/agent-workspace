@@ -56,3 +56,50 @@ describe('research views', () => {
     expect(liveTable(doc, a, { metrics: '*', datasets: '*' }).columns.map((c) => `${c.metric}@${c.dataset ?? ''}`)).toEqual(['auc12@AB', 'auc12@ITBench', 'auc12@', 'E1/E2@AB', 'cost $@']);
   });
 });
+
+describe('a research’s own interface settings', () => {
+  it('keeps what it understands, merges changes, and takes the last one back', async () => {
+    const { changeUi, normalizeUi, parseUi, parseUiFile, undoUi } = await import('../../src/shared/research-ui');
+    expect(normalizeUi({ labels: { aspect: 'Question', nope: 'x' }, statuses: { pass: 'Holds', wat: 'y' }, node: { method: ['takeaway', 'bogus', { metric: 'cost', how: 'sum', unit: '$' }, { how: 'sum' }] }, header: [{ metric: 'cost', how: 'sum' }, 3], junk: 1 })).toEqual({
+      labels: { aspect: 'Question' },
+      statuses: { pass: 'Holds' },
+      node: { method: ['takeaway', { metric: 'cost', how: 'sum', unit: '$' }] },
+      header: [{ metric: 'cost', how: 'sum' }],
+    });
+    expect(parseUi('not json')).toEqual({});
+    let file = changeUi({}, { labels: { aspect: 'Question', method: 'Approach' } }, 't1');
+    file = changeUi(file, { labels: { method: null, experiment: 'Run' }, statuses: { pass: 'Holds' } }, 't2');
+    expect(parseUi(JSON.stringify(file))).toEqual({ labels: { aspect: 'Question', experiment: 'Run' }, statuses: { pass: 'Holds' } });
+    expect(file.history).toHaveLength(2);
+    file = undoUi(parseUiFile(JSON.stringify(file)))!;
+    expect(parseUi(JSON.stringify(file))).toEqual({ labels: { aspect: 'Question', method: 'Approach' } });
+    file = undoUi(file)!;
+    expect(parseUi(JSON.stringify(file))).toEqual({});
+    expect(undoUi(file)).toBeNull();
+    // A whole setting back to the built-in.
+    expect(parseUi(JSON.stringify(changeUi({ labels: { aspect: 'Q' } }, { labels: null }, 't')))).toEqual({});
+  });
+
+  it('numbers for a node or the whole research come from recorded results', async () => {
+    const { statText, statValue } = await import('../../src/shared/research-ui');
+    let doc: ResearchDoc = emptyResearch('R', '');
+    const add = (type: 'aspect' | 'method' | 'experiment', parent: string | null, title: string, extra = {}) => {
+      const r = addNode(doc, { type, parent, title, status: 'pass', ...extra });
+      doc = r.doc;
+      return r.node;
+    };
+    const a = add('aspect', null, 'A');
+    const m1 = add('method', a.id, 'M1');
+    const m2 = add('method', a.id, 'M2');
+    add('experiment', m1.id, 'x', { results: [{ metric: 'cost', value: 3 }, { metric: 'acc', dataset: 'D', value: 0.7 }] });
+    add('experiment', m1.id, 'y', { results: [{ metric: 'cost', value: 2.5 }, { metric: 'acc', dataset: 'D', value: 0.8 }] });
+    add('experiment', m2.id, 'z', { results: [{ metric: 'cost', value: 10 }] });
+    expect(statValue(doc, m1, { metric: 'cost', how: 'sum' })).toBe(5.5);
+    expect(statValue(doc, undefined, { metric: 'cost', how: 'sum' })).toBe(15.5);
+    expect(statValue(doc, m1, { metric: 'acc' })).toBe(0.8);
+    expect(statValue(doc, m1, { metric: 'acc', lower: true })).toBe(0.7);
+    expect(statValue(doc, m2, { metric: 'acc' })).toBeUndefined();
+    expect(statText(doc, undefined, { label: 'Spent', metric: 'cost', how: 'sum', unit: '$', digits: 0 })).toBe('Spent 16$');
+    expect(statText(doc, m2, { metric: 'acc' })).toBe('');
+  });
+});

@@ -228,7 +228,7 @@ describe('research on an SSH host', () => {
         }
         calls.push('fetch');
         // What the fetch script prints: a marker line per file, then its base64.
-        expect(cmd).toMatch(/research\.json summary\.md notes/);
+        expect(cmd).toMatch(/research\.json summary\.md ui\.json notes/);
         let out = '';
         for (const [f, text] of files) out += `\n@@AMW-RESEARCH ${f.replace('/srv/p/.research/', '')} 1700000000\n${Buffer.from(text).toString('base64')}\n`;
         return { code: 0, stdout: out, stderr: '' };

@@ -30,6 +30,7 @@ import {
 } from '../shared/research';
 import type { WorkspaceTool } from './main-agent';
 import { parseView, viewKey, VIEW_TEMPLATES } from '../shared/research-views';
+import { changeUi, parseUiFile, undoUi, type UiFile } from '../shared/research-ui';
 
 /** What the tools need from the workspace (implemented by Workspace). */
 export interface ResearchHost {
@@ -86,8 +87,8 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
       ? '树的粒度（用户没有别的要求时）：方面是研究的几个大的维度（比如数据、方法、评估，具体看这个研究本身），通常只有少数几个；同一类的东西放进同一个方面，不要每个子课题开一个方面。方法是一个方面里可以相互替代的做法。实验是一次具体的运行或检查；为某个方法做的前期分析和验证，是这个方法下面的实验，不单独成为方面。'
       : 'The tree’s grain (unless the user wants otherwise): aspects are the research’s few broad dimensions (for example data, method, evaluation, whatever this research’s own are); things of one kind go in one aspect, not an aspect per sub-study. Methods are the alternatives within an aspect. Experiments are single runs or checks; an early analysis or check done for a method is an experiment under that method, not an aspect of its own.',
     zh
-      ? '研究页右侧显示的是每个节点的视图（research_view）：用户想看什么（比如核心指标的追踪表、对比、图），就写进对应节点的视图里；数字按指标和数据集记录（research_record 的 results），视图里的活表格会自动跟上新的方法和数据集。'
-      : 'The page’s side panel shows each node’s view (research_view): what the user wants to see there (a tracker of the core metrics, a comparison, a chart) goes into that node’s view; record numbers by metric and dataset (research_record results) and the live tables in views keep up with new methods and datasets.',
+      ? '研究页本身怎么显示也归这个研究自己定（research_ui：层级和状态怎么叫、图上节点显示什么、顶部的汇总比如花费），用户提出时就改。研究页右侧显示的是每个节点的视图（research_view）：用户想看什么（比如核心指标的追踪表、对比、图），就写进对应节点的视图里；数字按指标和数据集记录（research_record 的 results），视图里的活表格会自动跟上新的方法和数据集。'
+      : 'How the page itself looks is this research’s own too (research_ui: what the levels and states are called, what a node shows in the graph, totals at the top such as what was spent); change it when the user asks. The page’s side panel shows each node’s view (research_view): what the user wants to see there (a tracker of the core metrics, a comparison, a chart) goes into that node’s view; record numbers by metric and dataset (research_record results) and the live tables in views keep up with new methods and datasets.',
     zh ? '具体怎么做研究由用户决定，按用户的要求来；回复保持简短，研究页面上能看到整棵树。' : 'How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
     modeText(doc.policy?.mode, lang),
     empty ? (zh ? '现在树还是空的。' : 'The tree is empty so far.') : '',
@@ -445,6 +446,47 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         if (bad && bad.type === 'block') throw new Error(bad.error);
         host.researchWriteNote(projectId, `view:${viewKey(node)}`, text);
         return `The view of ${node ? `"${node.title}"` : 'the goal'} is updated; the page shows it now.`;
+      },
+    },
+    {
+      name: 'research_ui',
+      description: [
+        'Changes how this research’s page looks while it runs (the lead’s, when the user asks for it): settings kept in .research/ui.json, applied at once, each change undoable. With nothing given it returns the settings now.',
+        'set is merged into the settings (a key set to null goes back to the built-in):',
+        'labels {"aspect","method","experiment"} and plural {…}: what the levels are called (e.g. question / approach / run).',
+        'statuses {"idea","running","pass","fail","unclear","error"}: what the states are called (e.g. pass "holds", fail "does not hold").',
+        'questions {"goal","aspect","method","experiment"}: the line at the top of each level’s panel ("{title}" is the node’s).',
+        'node {"aspect":[…],"method":[…],"experiment":[…]}: what a node’s second line shows in the graph, in order: "takeaway", "agent", "tally", "findings", or a number from recorded results {"metric","dataset"?,"how":"best"|"sum"|"latest"|"mean"|"count","label"?,"unit"?,"digits"?,"lower"?}.',
+        'header [numbers as above]: totals at the top of the page (e.g. what was spent: {"label":"Spent","metric":"cost","how":"sum","unit":"$"}).',
+        'views {"goal","aspect","method","experiment"}: each level’s view for nodes with none of their own (markdown with blocks, as research_view takes).',
+        'undo: true takes the last change back.',
+      ].join(' '),
+      schema: z.object({ ...projectArg, set: z.record(z.string(), z.unknown()).optional(), undo: z.boolean().optional() }),
+      run: async (a) => {
+        const { projectId, doc } = await load(a.project);
+        const file = parseUiFile(host.researchNotes(projectId).ui?.text);
+        const { history = [], ...now } = file;
+        if (!a.set && !a.undo) return `Settings now: ${JSON.stringify(now)}${history.length ? ` (${history.length} earlier version${history.length === 1 ? '' : 's'} kept)` : ''}`;
+        if (!full(doc)) throw new Error('How the page looks is set with the research’s lead.');
+        let next: UiFile;
+        if (a.undo) {
+          const back = undoUi(file);
+          if (!back) throw new Error('Nothing to undo.');
+          next = back;
+        } else {
+          next = changeUi(file, a.set as Record<string, unknown>, new Date().toISOString());
+          const { history: _h, ...after } = next;
+          // What was asked for and not understood is said, not silently dropped.
+          const dropped = Object.keys(a.set as object).filter((k) => (a.set as Record<string, unknown>)[k] !== null && !(k in after));
+          if (dropped.length) throw new Error(`Not understood: ${dropped.join(', ')}. See the tool’s description for the settings and their shapes.`);
+          for (const text of Object.values(after.views ?? {})) {
+            const bad = parseView(text).find((p) => p.type === 'block' && p.error);
+            if (bad && bad.type === 'block') throw new Error(bad.error);
+          }
+        }
+        host.researchWriteNote(projectId, 'ui', JSON.stringify(next, null, 2));
+        const { history: _h2, ...shown } = next;
+        return `${a.undo ? 'Undone' : 'Applied'}; the page shows it now. Settings: ${JSON.stringify(shown)}`;
       },
     },
     {

@@ -8241,3 +8241,7 @@ button.subtask-row:hover {
   background: var(--hover);
   color: var(--text);
 }
+.research-chip.total {
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+}

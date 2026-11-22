@@ -307,6 +307,14 @@ describe('research managed by talking', () => {
     expect(node('Data').takeaway).toBe('Cleaning matters more than size');
     await expect(data.research_update.run({ node_id: node('Data').id, title: 'Renamed' })).rejects.toThrow(/lead/);
     await expect(data.research_update.run({ node_id: node('Model').id, takeaway: 'x' })).rejects.toThrow();
+    // The page's own settings: the lead's, kept in .research/ui.json, each change undoable; what is not understood is said.
+    expect(await main.research_ui.run({ set: { labels: { aspect: 'Question' }, header: [{ label: 'Spent', metric: 'cost', how: 'sum', unit: '$' }] } })).toMatch(/Applied[\s\S]*Question/);
+    expect(JSON.parse(readFileSync(join(p.rootPath, '.research', 'ui.json'), 'utf8'))).toMatchObject({ labels: { aspect: 'Question' }, history: [{ ui: {} }] });
+    await expect(main.research_ui.run({ set: { colours: { a: 1 } } })).rejects.toThrow(/Not understood: colours/);
+    await expect(data.research_ui.run({ set: { labels: { aspect: 'X' } } })).rejects.toThrow(/lead/);
+    expect(await data.research_ui.run({})).toMatch(/Settings now: \{"labels":\{"aspect":"Question"\}/);
+    expect(await main.research_ui.run({ undo: true })).toMatch(/Undone[\s\S]*Settings: \{\}/);
+    await expect(main.research_ui.run({ undo: true })).rejects.toThrow(/Nothing to undo/);
   });
 
   it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects, the research lead (started by its first message)', async () => {

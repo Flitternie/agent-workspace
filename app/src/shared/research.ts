@@ -137,6 +137,8 @@ export interface ResearchNotes {
   summary?: ResearchNote;
   /** By aspect id. */
   aspects: Record<string, ResearchNote>;
+  /** The research's interface settings, as JSON (research-ui.ts). */
+  ui?: ResearchNote;
   /** Each node's view on the page, by node id ("goal" for the goal): blocks in markdown (research-views.ts). */
   views?: Record<string, ResearchNote>;
 }

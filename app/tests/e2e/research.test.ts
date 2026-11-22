@@ -1,7 +1,7 @@
 // A project's research page, end to end (demo workspace: its example research, mock agents).
 // The page shows the tree; changes are made by talking to the agents (who have the research tools).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
@@ -196,6 +196,23 @@ describe('research page (demo)', () => {
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/Optimizer and 1 more/);
     expect(await page.getByTestId('composer-input').isDisabled()).toBe(false);
     await page.screenshot({ path: join(shots, 'research-03-multi.png') });
+
+    // The page's own settings (.research/ui.json, changed by the lead while the research runs): applied at once,
+    // and gone again when taken back.
+    const root = (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.find((x) => x.projectId === projectId)!.rootPath;
+    const touch = async (change: (d: ResearchDoc) => ResearchDoc = (x) => x) => invoke(page, 'research:save', { researchId: projectId, doc: { ...change(await doc()), updatedAt: new Date().toISOString() } });
+    writeFileSync(join(root, '.research', 'ui.json'), JSON.stringify({ plural: { aspect: 'Questions' }, statuses: { pass: 'Holds' }, header: [{ label: 'Spent', metric: 'cost', how: 'sum', unit: '$' }], node: { method: [{ label: 'spent', metric: 'cost', how: 'sum', unit: '$' }, 'tally'] } }));
+    await touch((x) => ({ ...x, nodes: x.nodes.map((n) => (n.id === 'x-new' ? { ...n, results: [{ metric: 'cost', value: 5 }] } : n)) }));
+    await expect.poll(() => page.getByTestId('research-depth-aspect').innerText()).toBe('Questions');
+    expect(await page.getByTestId('research-total').innerText()).toBe('Spent 5$');
+    expect(await node('method', 'Deduplication').textContent()).toMatch(/spent 5\$ · ✓/);
+    await page.getByTestId('research-legend-toggle').click();
+    expect(await page.getByTestId('research-legend').innerText()).toMatch(/Holds/);
+    await page.getByTestId('research-legend-toggle').click();
+    rmSync(join(root, '.research', 'ui.json'));
+    await touch();
+    await expect.poll(() => page.getByTestId('research-depth-aspect').innerText()).toBe('Aspects');
+    expect(await page.getByTestId('research-total').count()).toBe(0);
 
     // The goal's agent is the research's lead: the first message starts it; a double-click on the goal opens it.
     await page.getByTestId('research-panel').locator('.side-head').click();

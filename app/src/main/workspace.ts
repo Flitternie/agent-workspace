@@ -519,7 +519,7 @@ export class Workspace {
   private summarize(id: string, doc: ResearchDoc | null): ResearchSummary | null {
     if (!doc) return null;
     const n = this.researchFiles.notes(id);
-    const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
+    const notesAt = [n.summary?.updatedAt, n.ui?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
     const { projectId, dir } = parseResearchId(id);
     return { id, projectId, ...(dir ? { dir } : {}), ...(doc.color != null ? { color: doc.color } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
   }
@@ -588,7 +588,7 @@ export class Workspace {
     this.researchFiles.saveNote(projectId, scope, text);
     const doc = this.researchFiles.doc(projectId);
     this.indexResearch(projectId, doc);
-    if (scope === 'summary' || scope.startsWith('view:') || !doc) return;
+    if (scope === 'summary' || scope === 'ui' || scope.startsWith('view:') || !doc) return;
     // An aspect's notes moved: the lead folds them into the summary, as often as the policy allows.
     const every = (doc.policy?.summaryEvery ?? 30) * 60_000;
     const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
