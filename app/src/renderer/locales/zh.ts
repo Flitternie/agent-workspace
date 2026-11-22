@@ -549,6 +549,8 @@ export const zh: Record<string, string> = {
   'Mark read': '标为已读',
   'No report yet.': '暂无进展。',
   Activity: '最近操作',
+  'Sync from {cli}': '从 {cli} 同步',
+  'Sync from {cli}: picks up what was said there since (close it in the terminal first)': '从 {cli} 同步：拿到在那边新说的内容（先在终端里关掉它）',
   'week (Sonnet only)': '本周（仅 Sonnet）',
   'week (Opus only)': '本周（仅 Opus）',
   'week · included extra usage': '本周 · 套餐内超额',

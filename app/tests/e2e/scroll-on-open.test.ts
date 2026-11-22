@@ -1,7 +1,7 @@
 // Opening an agent shows the end of its conversation, whatever the reader did in the agent before it
 // (scrolled up there), and after a relaunch, when opening connects it and replays its history (mock agents).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
@@ -66,6 +66,18 @@ describe('opening an agent', () => {
     page = await launch();
     await open(agents[0]);
     await page.waitForTimeout(1500);
+    await expect.poll(gap).toBeLessThan(5);
+
+    // Went on with it in the terminal: the sync button (top right) picks that up, and shows the end.
+    const snap = await invoke<{ tasks: Task[]; sessions: Array<{ localId: string; nativeSessionId: string }> }>(page, 'workspace:snapshot', {});
+    const sid = snap.sessions.find((x) => x.localId === snap.tasks.find((t) => t.taskId === agents[0].taskId)!.sessionLocalId)!.nativeSessionId;
+    const file = join(scratch, 'data', 'mock-sessions', `${sid.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
+    const saved = JSON.parse(readFileSync(file, 'utf8')) as { messages: Array<{ role: string; text: string; itemId: string }> };
+    saved.messages.push({ role: 'user', text: 'Asked in the terminal.', itemId: 'cli-u1' }, { role: 'assistant', text: 'Answered in the terminal.', itemId: 'cli-a1' });
+    writeFileSync(file, JSON.stringify(saved));
+    expect(await page.getByTestId('transcript').innerText()).not.toContain('Answered in the terminal.');
+    await page.getByTestId('sync-session').click();
+    await expect.poll(() => page.getByTestId('transcript').innerText(), { timeout: 15_000 }).toContain('Answered in the terminal.');
     await expect.poll(gap).toBeLessThan(5);
   }, 120_000);
 });

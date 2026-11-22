@@ -860,3 +860,34 @@ describe('opening an agent connects it in the background', () => {
     expect(ws.snapshot().connectedTaskIds).toEqual([]);
   });
 });
+
+describe('syncing an agent from its CLI', () => {
+  it('picks up what was said in the CLI meanwhile, changing nothing else; not while it works', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = open(dataDir);
+    const p = await ws.addProject(repo(), 'shop');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Orders', instruction: 'Start.', mockScript: 'work', isolate: false });
+    await until(() => !['running', 'starting'].includes(ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status), 5000);
+    const before = ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!;
+    const session = ws.snapshot().sessions.find((s) => s.localId === before.sessionLocalId)!;
+    // Meanwhile in the terminal: the same native session goes on.
+    const file = join(dataDir, 'mock-sessions', `${session.nativeSessionId.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
+    const saved = JSON.parse(readFileSync(file, 'utf8')) as { messages: Array<{ role: string; text: string; itemId: string }> };
+    saved.messages.push({ role: 'user', text: 'Asked in the terminal.', itemId: 'cli-u1' }, { role: 'assistant', text: 'Answered in the terminal.', itemId: 'cli-a1' });
+    writeFileSync(file, JSON.stringify(saved));
+    expect(ws.transcript(t.taskId).some((i) => i.text === 'Asked in the terminal.')).toBe(false);
+
+    await ws.sync(t.taskId);
+    const texts = ws.transcript(t.taskId).map((i) => i.text);
+    expect(texts).toContain('Asked in the terminal.');
+    expect(texts).toContain('Answered in the terminal.');
+    const after = ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!;
+    expect(after.status).toBe(before.status);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.summary).toBe(before.summary);
+
+    // Working: not now.
+    await ws.send(t.taskId, 'Next step.', 'text');
+    await expect(ws.sync(t.taskId)).rejects.toThrow(/Busy/);
+  });
+});

@@ -193,6 +193,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
   'task:warm': (i: { taskId: string }) => workspace.warm(i.taskId),
+  'task:sync': (i: { taskId: string }) => workspace.sync(i.taskId),
   'task:setAside': (i: { taskId: string; on: boolean }) => workspace.setAside(i.taskId, i.on),
   'task:remoteControl': (i: { taskId: string; on: boolean }) => workspace.setRemoteControl(i.taskId, i.on),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
