@@ -8696,3 +8696,33 @@ button.subtask-row:hover {
   cursor: pointer;
   min-width: 0;
 }
+/* Nothing an agent writes widens the column (a long line, a wide table or code): the column never scrolls
+   sideways; a table or a code block scrolls within itself; long strings wrap. */
+.research-side,
+.side-panel.with-tabs {
+  overflow-x: hidden;
+}
+.rs-chat,
+.rs-chat-msg,
+.rs-chat-note,
+.rs-view {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.rs-chat .md table,
+.rs-view .md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.rs-chat .md pre,
+.rs-view .md pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+.rs-chat .md code,
+.rs-view .md code {
+  overflow-wrap: anywhere;
+}
