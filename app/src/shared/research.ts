@@ -70,6 +70,8 @@ export interface ResearchNode {
   runs?: number[];
   /** Experiment: results on the aspect's other metrics, by name. */
   values?: Record<string, number>;
+  /** Experiment: results by metric and dataset (a benchmark, a split): what live tables are made of, kept and reused. */
+  results?: ResearchResult[];
   /** Experiment: when its result was recorded. */
   resultAt?: string;
   findings?: ResearchFinding[];
@@ -133,6 +135,15 @@ export interface ResearchNotes {
   summary?: ResearchNote;
   /** By aspect id. */
   aspects: Record<string, ResearchNote>;
+  /** Each node's view on the page, by node id ("goal" for the goal): blocks in markdown (research-views.ts). */
+  views?: Record<string, ResearchNote>;
+}
+
+/** One number an experiment produced: on a metric, on a dataset if there are several. */
+export interface ResearchResult {
+  metric: string;
+  dataset?: string;
+  value: number;
 }
 
 /** Results recorded since a note was last written: how far behind it is. */

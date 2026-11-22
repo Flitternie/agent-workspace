@@ -157,6 +157,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'research:save': (i: { researchId: string; doc: ResearchDoc }) => workspace.researchSave(i.researchId, i.doc),
   'research:notes': (i: { researchId: string }) => workspace.researchLoadNotes(i.researchId),
   'research:message': (i: { researchId: string; nodeIds: string[]; text: string; images?: ImageRef[] }) => workspace.researchMessage(i.researchId, i.nodeIds, i.text, i.images),
+  'research:view': (i: { researchId: string; key: string; text: string }) => workspace.researchSetView(i.researchId, i.key, i.text),
   'research:create': (i: { projectId: string; dir?: string; title: string; goal: string; sample: boolean }) => workspace.researchCreate(i.projectId, i.title, i.goal, i.sample, i.dir),
   'ssh:hosts': () => workspace.sshHosts(),
   'ssh:setEnabled': (i: { host: string; enabled: boolean }) => workspace.setHostEnabled(i.host, i.enabled),

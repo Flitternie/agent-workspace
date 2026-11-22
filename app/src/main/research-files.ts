@@ -6,7 +6,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project } from '../shared/types';
 import { normalizeResearch, type ResearchDoc, type ResearchNotes } from '../shared/research';
-import { createResearch, readNotes, readResearch, sampleNotes, sampleResearch, writeNote, writeResearch } from './research';
+import { createResearch, isNoteScope, noteRel, readNotes, readResearch, sampleNotes, sampleResearch, writeNote, writeResearch } from './research';
 import { emptyResearch, isResearchDir, parseResearchId, researchId } from '../shared/research';
 import { shq, sshError, sshRun, sshRunInput } from './util/ssh';
 
@@ -104,12 +104,13 @@ export class ResearchFiles {
   saveNote(projectId: string, scope: string, text: string): void {
     const p = this.project(projectId);
     if (!p.host) return writeNote(p, scope, text);
-    if (scope !== 'summary' && !/^[A-Za-z0-9_-]{1,80}$/.test(scope)) throw new Error('Not a note name.');
+    if (!isNoteScope(scope)) throw new Error('Not a note name.');
     const body = text.endsWith('\n') ? text : `${text}\n`;
     const r = this.remote.get(projectId) ?? { doc: null, notes: { aspects: {} } };
     const note = { text: body, updatedAt: new Date().toISOString() };
-    this.remote.set(projectId, { ...r, notes: scope === 'summary' ? { ...r.notes, summary: note } : { ...r.notes, aspects: { ...r.notes.aspects, [scope]: note } } });
-    this.enqueue(p, scope === 'summary' ? '.research/summary.md' : `.research/notes/${scope}.md`, body);
+    const notes = scope === 'summary' ? { ...r.notes, summary: note } : scope.startsWith('view:') ? { ...r.notes, views: { ...r.notes.views, [scope.slice(5)]: note } } : { ...r.notes, aspects: { ...r.notes.aspects, [scope]: note } };
+    this.remote.set(projectId, { ...r, notes });
+    this.enqueue(p, `.research/${noteRel(scope)}`, body);
   }
 
   async create(projectId: string, title: string, goal: string, sample: boolean, lang: 'en' | 'zh'): Promise<ResearchDoc> {
@@ -150,7 +151,7 @@ export class ResearchFiles {
   private fetch(p: Project): Promise<void> {
     const running = this.fetching.get(p.projectId);
     if (running) return running;
-    const script = `cd ${shq(p.rootPath)}/.research 2>/dev/null || exit 0; for f in research.json summary.md notes/*.md; do [ -f "$f" ] || continue; t=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"); printf '\\n${MARK} %s %s\\n' "$f" "$t"; base64 < "$f"; done`;
+    const script = `cd ${shq(p.rootPath)}/.research 2>/dev/null || exit 0; for f in research.json summary.md notes/*.md views/*.md; do [ -f "$f" ] || continue; t=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"); printf '\\n${MARK} %s %s\\n' "$f" "$t"; base64 < "$f"; done`;
     const job = sshRun(p.host!, `sh -c ${shq(script)}`, 60_000)
       .then((r) => {
         if (r.code !== 0) throw new Error(sshError(p.host!, r.stderr));
@@ -200,6 +201,7 @@ export function parseFetch(out: string): Remote {
       }
     } else if (file === 'summary.md') r.notes.summary = { text, updatedAt };
     else if (file.startsWith('notes/')) r.notes.aspects[file.slice(6).replace(/\.md$/, '')] = { text, updatedAt };
+    else if (file.startsWith('views/')) (r.notes.views ??= {})[file.slice(6).replace(/\.md$/, '')] = { text, updatedAt };
   }
   return r;
 }

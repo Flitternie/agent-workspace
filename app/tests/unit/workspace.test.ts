@@ -284,6 +284,24 @@ describe('research managed by talking', () => {
     return { ws, p, as, main, doc, node };
   }
 
+  it('views: the lead writes what the page shows (from a template or its own), results by dataset feed live tables; an aspect agent writes only its own', async () => {
+    const { ws, p, as, main, node } = await setup();
+    expect(await main.research_view.run({ template: 'tracker' })).toMatch(/view of the goal/);
+    expect(ws.researchNotes(p.projectId).views!.goal.text).toMatch(/research:table/);
+    await expect(main.research_view.run({ markdown: '```research:wat\n```' })).rejects.toThrow(/No block/);
+    await main.research_try.run({ method_id: (await main.research_add.run({ type: 'method', parent_id: node('Data').id, title: 'Dedup' }), node('Dedup').id), variants: [{ title: 'v1' }] });
+    const v1 = node('v1');
+    await main.research_record.run({ experiment_id: v1.id, results: [{ metric: 'quality', dataset: 'A', value: 72 }, { metric: 'quality', dataset: 'B', value: 70 }] });
+    await main.research_record.run({ experiment_id: v1.id, results: [{ metric: 'quality', dataset: 'B', value: 71 }] });
+    expect(node('v1').results).toEqual([{ metric: 'quality', dataset: 'A', value: 72 }, { metric: 'quality', dataset: 'B', value: 71 }]);
+    const first = await ws.researchMessage(p.projectId, [node('Data').id], 'hi');
+    const data = as({ kind: 'agent', taskId: first.taskId });
+    await expect(data.research_view.run({ node_id: 'goal', markdown: 'x' })).rejects.toThrow(/lead/);
+    await expect(data.research_view.run({ node_id: node('Model').id, markdown: 'x' })).rejects.toThrow();
+    expect(await data.research_view.run({ markdown: '## Data\n\n```research:table\n{"metrics":["quality"]}\n```' })).toMatch(/"Data"/);
+    expect(ws.researchNotes(p.projectId).views![node('Data').id].text).toMatch(/## Data/);
+  });
+
   it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects, the research lead (started by its first message)', async () => {
     const { ws, p, doc, node } = await setup();
     const first = await ws.researchMessage(p.projectId, [node('Data').id], 'Which methods would you try?');

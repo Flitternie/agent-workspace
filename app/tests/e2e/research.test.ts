@@ -52,10 +52,18 @@ describe('research page (demo)', () => {
     const panel = page.getByTestId('research-panel');
     await expect.poll(() => panel.innerText()).toContain('Which aspects move the end result?');
     expect(await page.getByTestId('research-contrib').innerText()).toMatch(/Architecture[\s\S]*1 ablation\n[\s\S]*Data[\s\S]*2 ablations/);
-    expect(await panel.innerText()).toMatch(/Manage it by talking/);
+    // What the panel shows is a view: its level's template until one is put in place or written for it.
+    expect(await page.getByTestId('research-view-pick').inputValue()).toBe('overview');
     // The summary the main agent keeps (markdown in .research/summary.md), with how fresh it is.
     expect(await page.getByTestId('research-summary').innerText()).toMatch(/Summary[\s\S]*updated[\s\S]*Where things stand[\s\S]*Which aspects matter/);
-    expect(await panel.locator('input, textarea, select').count()).toBe(0);
+    expect(await panel.locator('input, textarea').count()).toBe(0);
+    // Another template: a live table of every method's results, kept in .research/views/goal.md.
+    await page.getByTestId('research-view-pick').selectOption('tracker');
+    await expect.poll(() => page.getByTestId('research-live-table').count()).toBe(1);
+    expect(await page.getByTestId('research-live-table').innerText()).toMatch(/Method[\s\S]*quality/);
+    expect((await invoke<{ views?: Record<string, { text: string }> }>(page, 'research:notes', { researchId: projectId })).views?.goal.text).toMatch(/research:table/);
+    await page.getByTestId('research-view-pick').selectOption('overview');
+    await expect.poll(() => page.getByTestId('research-live-table').count()).toBe(0);
     await page.screenshot({ path: join(shots, 'research-01-goal.png') });
 
     // Levels.
@@ -81,7 +89,7 @@ describe('research page (demo)', () => {
     await page.getByTestId('composer-chips').getByText('What has worked so far?').click();
     expect(await page.getByTestId('composer-input').inputValue()).toBe('What has worked so far?');
     await page.getByTestId('composer-input').fill('');
-    expect(await panel.locator('input, textarea, select, .btn').count()).toBe(0);
+    expect(await panel.locator('input, textarea, .btn').count()).toBe(0);
     expect(await page.getByTestId('research-to').innerText()).toMatch(/a new agent for "Data"/);
     // The box is the agent page's own: its round send button, "To: …" in its foot, the selection above it.
     expect(await page.locator('.research-composer .composer .send-btn').count()).toBe(1);

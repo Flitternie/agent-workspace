@@ -519,7 +519,7 @@ export class Workspace {
   private summarize(id: string, doc: ResearchDoc | null): ResearchSummary | null {
     if (!doc) return null;
     const n = this.researchFiles.notes(id);
-    const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
+    const notesAt = [n.summary?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
     const { projectId, dir } = parseResearchId(id);
     return { id, projectId, ...(dir ? { dir } : {}), ...(doc.color != null ? { color: doc.color } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
   }
@@ -588,7 +588,7 @@ export class Workspace {
     this.researchFiles.saveNote(projectId, scope, text);
     const doc = this.researchFiles.doc(projectId);
     this.indexResearch(projectId, doc);
-    if (scope === 'summary' || !doc) return;
+    if (scope === 'summary' || scope.startsWith('view:') || !doc) return;
     // An aspect's notes moved: the lead folds them into the summary, as often as the policy allows.
     const every = (doc.policy?.summaryEvery ?? 30) * 60_000;
     const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
@@ -726,6 +726,15 @@ export class Workspace {
     const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
     if (!lead) return start(await this.researchStartLead(projectId, `${prefix}${text}`));
     return deliver(lead.taskId, `${prefix}${text}`);
+  }
+
+  /** The page puts a template in place as a node's view (to be edited from there, by an agent or by hand). */
+  async researchSetView(id: string, key: string, text: string): Promise<void> {
+    await this.researchReady(id);
+    const doc = this.researchGet(id);
+    if (!doc) throw new Error('No research.');
+    if (key !== 'goal' && !doc.nodes.some((n) => n.id === key)) throw new Error('That node is not in the research.');
+    this.researchWriteNote(id, `view:${key}`, text);
   }
 
   /** A research at the project's root, or in one of its folders (`dir`, relative). */

@@ -56,6 +56,7 @@ export interface Outputs {
   'research:create': ResearchDoc;
   'research:message': { taskId: string; alias: string };
   'research:notes': ResearchNotes;
+  'research:view': void;
   'attachment:save': ImageRef;
   'task:interrupt': void;
   'task:models': ModelOption[];

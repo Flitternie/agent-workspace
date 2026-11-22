@@ -26,8 +26,10 @@ import {
   type ResearchDoc,
   type ResearchNode,
   type ResearchNotes,
+  type ResearchResult,
 } from '../shared/research';
 import type { WorkspaceTool } from './main-agent';
+import { parseView, viewKey, VIEW_TEMPLATES } from '../shared/research-views';
 
 /** What the tools need from the workspace (implemented by Workspace). */
 export interface ResearchHost {
@@ -83,6 +85,9 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
     zh
       ? '树的粒度（用户没有别的要求时）：方面是研究的几个大的维度（比如数据、方法、评估，具体看这个研究本身），通常只有少数几个；同一类的东西放进同一个方面，不要每个子课题开一个方面。方法是一个方面里可以相互替代的做法。实验是一次具体的运行或检查；为某个方法做的前期分析和验证，是这个方法下面的实验，不单独成为方面。'
       : 'The tree’s grain (unless the user wants otherwise): aspects are the research’s few broad dimensions (for example data, method, evaluation, whatever this research’s own are); things of one kind go in one aspect, not an aspect per sub-study. Methods are the alternatives within an aspect. Experiments are single runs or checks; an early analysis or check done for a method is an experiment under that method, not an aspect of its own.',
+    zh
+      ? '研究页右侧显示的是每个节点的视图（research_view）：用户想看什么（比如核心指标的追踪表、对比、图），就写进对应节点的视图里；数字按指标和数据集记录（research_record 的 results），视图里的活表格会自动跟上新的方法和数据集。'
+      : 'The page’s side panel shows each node’s view (research_view): what the user wants to see there (a tracker of the core metrics, a comparison, a chart) goes into that node’s view; record numbers by metric and dataset (research_record results) and the live tables in views keep up with new methods and datasets.',
     zh ? '具体怎么做研究由用户决定，按用户的要求来；回复保持简短，研究页面上能看到整棵树。' : 'How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
     modeText(doc.policy?.mode, lang),
     empty ? (zh ? '现在树还是空的。' : 'The tree is empty so far.') : '',
@@ -320,6 +325,11 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         value: z.number().optional(),
         runs: z.array(z.number()).min(2).max(200).optional().describe('Each run’s value, when it was run several times (only if the user asked for repeats).'),
         metrics: z.record(z.string(), z.number()).optional().describe('Values of the aspect’s other metrics, by name.'),
+        results: z
+          .array(z.object({ metric: z.string().min(1).max(200), dataset: z.string().max(200).optional(), value: z.number() }))
+          .max(500)
+          .optional()
+          .describe('Numbers by metric and dataset (a benchmark, a split), for live tables: each replaces the one with the same metric and dataset; others are kept.'),
         works: z.boolean().optional().describe('For an aspect judged by hand.'),
         no_result: z.boolean().optional().describe('It ran but produced no usable result.'),
         finding: z.string().max(2000).optional(),
@@ -341,8 +351,14 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         } else if (typeof a.value === 'number') next = updateNode(next, e.id, { value: a.value, runs: undefined, status: judge(metric, a.value), resultAt: at });
         else if (typeof a.works === 'boolean') next = updateNode(next, e.id, { status: a.works ? 'pass' : 'fail', resultAt: at });
         if (a.metrics && Object.keys(a.metrics as object).length) next = updateNode(next, e.id, { values: { ...(next.nodes.find((n) => n.id === e.id)!.values ?? {}), ...(a.metrics as Record<string, number>) } });
+        if (Array.isArray(a.results) && a.results.length) {
+          const add = (a.results as ResearchResult[]).map((r) => ({ metric: String(r.metric), ...(r.dataset ? { dataset: String(r.dataset) } : {}), value: Number(r.value) }));
+          const same = (x: ResearchResult, y: ResearchResult) => x.metric === y.metric && (x.dataset ?? '') === (y.dataset ?? '');
+          const kept = (next.nodes.find((n) => n.id === e.id)!.results ?? []).filter((x) => !add.some((y) => same(x, y)));
+          next = updateNode(next, e.id, { results: [...kept, ...add], resultAt: at, ...(e.status === 'idea' || e.status === 'running' ? { status: 'unclear' as const } : {}) });
+        }
         if (a.finding) next = addFinding(next, e.id, String(a.finding), name(caller.kind === 'agent' ? caller.taskId : undefined) ?? (isMain ? 'main agent' : undefined));
-        if (next === doc) throw new Error('Nothing to record: give value, runs, metrics, works, no_result or finding.');
+        if (next === doc) throw new Error('Nothing to record: give value, runs, metrics, results, works, no_result or finding.');
         host.researchSave(projectId, next);
         const now = next.nodes.find((n) => n.id === e.id)!;
         const spread = now.runs && now.runs.length > 1 ? ` ± ${formatValue(metric, runStats(now.runs).sd)} over ${now.runs.length} runs` : '';
@@ -395,6 +411,38 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         }
         host.researchWriteNote(projectId, scope, String(a.markdown));
         return scope === 'summary' ? 'Summary updated.' : `Notes for "${doc.nodes.find((n) => n.id === scope)!.title}" updated.`;
+      },
+    },
+    {
+      name: 'research_view',
+      description: [
+        'Writes what the research page shows for a node (its side panel): markdown, with live blocks in it. The user may ask for what they want to see (a table of the core metrics, a comparison, a chart); write it here, and rewrite it when they ask for something else. The whole view: it replaces the last one. Leave markdown out and give template to start from one.',
+        'Blocks are fenced code blocks, ```research:<kind> with JSON options inside:',
+        'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":[...] or "*","cell":"best"|"latest"|"mean","lower":["metrics where lower is better"],"title":"..."}.',
+        'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
+        'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated; it is styled like the page: plain tables and text look like the rest).',
+        'Results for tables are recorded with research_record (results: metric, dataset, value).',
+      ].join(' '),
+      schema: z.object({
+        ...projectArg,
+        node_id: z.string().optional().describe('The node (default: the goal for the lead and main agent, your own node otherwise); "goal" for the goal.'),
+        markdown: z.string().min(1).max(100_000).optional(),
+        template: z.enum(VIEW_TEMPLATES.map((v) => v.id) as [string, ...string[]]).optional().describe(`Start from a template: ${VIEW_TEMPLATES.map((v) => `${v.id} (${v.levels.join('/')})`).join(', ')}.`),
+      }),
+      run: async (a) => {
+        const { projectId, doc } = await load(a.project);
+        const mine = me(doc);
+        const id = String(a.node_id ?? (full(doc) ? 'goal' : (mine?.id ?? '')));
+        if (!id) throw new Error('Give node_id.');
+        const node = id === 'goal' ? undefined : nodeIn(doc, id);
+        if (!node && !full(doc)) throw new Error('The goal’s view is the lead’s.');
+        if (node && !full(doc) && mine?.id !== node.id) mayChange(doc, node);
+        const text = a.markdown ? String(a.markdown) : a.template ? VIEW_TEMPLATES.find((v) => v.id === a.template)!.text : '';
+        if (!text) throw new Error('Give markdown or template.');
+        const bad = parseView(text).find((p) => p.type === 'block' && p.error);
+        if (bad && bad.type === 'block') throw new Error(bad.error);
+        host.researchWriteNote(projectId, `view:${viewKey(node)}`, text);
+        return `The view of ${node ? `"${node.title}"` : 'the goal'} is updated; the page shows it now.`;
       },
     },
     {

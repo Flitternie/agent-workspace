@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project } from '../shared/types';
-import { emptyResearch, normalizeResearch, type ResearchDoc, type ResearchNode, type ResearchNotes } from '../shared/research';
+import { emptyResearch, normalizeResearch, type ResearchDoc, type ResearchNode, type ResearchNote, type ResearchNotes } from '../shared/research';
 import { atomicWrite } from './store';
 
 const DIR = '.research';
@@ -47,26 +47,33 @@ export function writeResearch(project: Project, doc: ResearchDoc): void {
 // .research/summary.md: the whole research (the main agent's); .research/notes/<aspect id>.md: one per
 // aspect (its agent's). Plain markdown so people and agents read and edit them alike, with git history.
 
+// .research/views/<node id>.md: what the page shows for a node ("goal" for the goal), scope "view:<id>".
 const NOTE_ID = /^[A-Za-z0-9_-]{1,80}$/;
-export const noteFile = (project: Project, scope: string) => (scope === 'summary' ? join(project.rootPath, DIR, 'summary.md') : join(project.rootPath, DIR, 'notes', `${scope}.md`));
+export const isNoteScope = (scope: string) => scope === 'summary' || NOTE_ID.test(scope) || (scope.startsWith('view:') && NOTE_ID.test(scope.slice(5)));
+/** Where a note is, relative to the research's folder. */
+export const noteRel = (scope: string) => (scope === 'summary' ? 'summary.md' : scope.startsWith('view:') ? `views/${scope.slice(5)}.md` : `notes/${scope}.md`);
+export const noteFile = (project: Project, scope: string) => join(project.rootPath, DIR, noteRel(scope));
 
 export function readNotes(project: Project): ResearchNotes {
   const out: ResearchNotes = { aspects: {} };
   if (project.host) return out;
   const read = (file: string) => (existsSync(file) ? { text: readFileSync(file, 'utf8'), updatedAt: statSync(file).mtime.toISOString() } : undefined);
   out.summary = read(noteFile(project, 'summary'));
-  const dir = join(project.rootPath, DIR, 'notes');
-  if (existsSync(dir))
-    for (const f of readdirSync(dir)) {
-      const id = f.replace(/\.md$/, '');
-      if (f.endsWith('.md') && NOTE_ID.test(id)) out.aspects[id] = read(join(dir, f))!;
-    }
+  out.views = {};
+  for (const [sub, into] of [['notes', out.aspects], ['views', out.views]] as Array<[string, Record<string, ResearchNote>]>) {
+    const dir = join(project.rootPath, DIR, sub);
+    if (existsSync(dir))
+      for (const f of readdirSync(dir)) {
+        const id = f.replace(/\.md$/, '');
+        if (f.endsWith('.md') && NOTE_ID.test(id)) into[id] = read(join(dir, f))!;
+      }
+  }
   return out;
 }
 
 export function writeNote(project: Project, scope: string, text: string): void {
   local(project);
-  if (scope !== 'summary' && !NOTE_ID.test(scope)) throw new Error('Not a note name.');
+  if (!isNoteScope(scope)) throw new Error('Not a note name.');
   const file = noteFile(project, scope);
   mkdirSync(join(file, '..'), { recursive: true });
   atomicWrite(file, text.endsWith('\n') ? text : `${text}\n`);

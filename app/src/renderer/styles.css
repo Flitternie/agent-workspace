@@ -8126,3 +8126,56 @@ button.subtask-row:hover {
 .rs-table th {
   white-space: nowrap;
 }
+/* A node's view: which one (a template, or written for it), then its parts in the panel's flow. */
+.rs-viewbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+  padding: 8px 0 0;
+}
+.rs-viewpick {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.rs-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.rs-view-md {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.rs-view-md > :first-child {
+  margin-top: 0;
+}
+/* Live tables: as wide as they need, scrolled sideways in the column; each column's best in bold. */
+.rs-live-scroll {
+  overflow-x: auto;
+}
+.rs-live-scroll .rs-table {
+  width: auto;
+  min-width: 100%;
+}
+.rs-live-group {
+  text-align: center !important;
+  border-bottom: none !important;
+}
+.rs-live-best {
+  font-weight: 700;
+  color: var(--ok);
+}
+.rs-html {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}

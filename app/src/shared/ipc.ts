@@ -31,6 +31,7 @@ const researchNode = z.object({
   value: z.number().optional(),
   runs: z.array(z.number()).max(200).optional(),
   values: z.record(z.string().max(200), z.number()).optional(),
+  results: z.array(z.object({ metric: z.string().min(1).max(200), dataset: z.string().max(200).optional(), value: z.number() })).max(2000).optional(),
   resultAt: z.string().max(40).optional(),
   findings: z.array(z.object({ id, text: text, by: z.string().max(200).optional(), at: z.string().max(40) })).max(200).optional(),
   createdAt: z.string().max(40),
@@ -57,6 +58,7 @@ export const ipcSchemas = {
   'research:message': z
     .object({ researchId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
+  'research:view': z.object({ researchId: id, key: id, text: z.string().min(1).max(100_000) }),
   'research:create': z.object({ projectId: id, dir: z.string().max(200).optional(), title: z.string().min(1).max(300), goal: text, sample: z.boolean() }),
   'workspace:snapshot': z.object({}),
   'transcript:get': z.object({ taskId: id }),
