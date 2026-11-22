@@ -713,62 +713,11 @@ function Kpis({ metric, exps, statusOf }: { metric?: ResearchMetric; exps: Resea
   );
 }
 
-/**
- * The search at a glance (after autoresearcherUI's hero chart): each experiment by when it started, the
- * dashed start, a step line through the running best; failures and running ones in a lane at the top.
- * A click selects the experiment.
- */
-function ProgressChart({ metric, exps, statusOf, select }: { metric: ResearchMetric; exps: ResearchNode[]; statusOf: (n: ResearchNode) => ResearchStatus; select: (id: string) => void }) {
-  const Ww = 330, Hh = 118, lane = 14, pad = 8;
-  const vals = exps.filter((e) => e.value != null && statusOf(e) !== 'error').map((e) => e.value!);
-  if (!exps.length) return null;
-  const base = metric.baseline ?? vals[0] ?? 0;
-  const lo = Math.min(base, ...vals), hi = Math.max(base, ...vals);
-  const x = (i: number) => pad + (exps.length === 1 ? (Ww - 2 * pad) / 2 : (i / (exps.length - 1)) * (Ww - 2 * pad));
-  const y = (v: number) => Hh - pad - ((v - lo) / (hi - lo || 1)) * (Hh - 2 * pad - lane - 6);
-  const better = (a: number, b: number) => (metric.higherIsBetter ? a > b : a < b);
-  let best = base;
-  let path = `M${x(0)},${y(base)}`;
-  exps.forEach((e, i) => {
-    if (statusOf(e) === 'pass' && e.value != null && better(e.value, best)) {
-      path += ` H${x(i)} V${y(e.value)}`;
-      best = e.value;
-    }
-  });
-  path += ` H${x(exps.length - 1)}`;
-  let record = base;
-  return (
-    <svg className="rs-progress" viewBox={`0 0 ${Ww} ${Hh}`} width="100%" style={{ aspectRatio: `${Ww} / ${Hh}`, height: 'auto' }} data-testid="research-progress-chart">
-      <line x1={0} x2={Ww} y1={y(base)} y2={y(base)} className="base" />
-      <text x={Ww - 2} y={y(base) - 3} textAnchor="end" className="base-label">
-        {t('start {v}', { v: formatValue(metric, base) })}
-      </text>
-      <path d={path} className="best-line" />
-      {exps.map((e, i) => {
-        const st = statusOf(e);
-        const label = `${e.title}: ${e.value != null ? formatValue(metric, e.value) : t(STATUS_LABEL[st])}`;
-        if (st === 'running' || st === 'error' || e.value == null)
-          return (
-            <rect key={e.id} x={x(i) - 1.5} y={3} width={3} height={lane - 4} rx={1.5} className={`st-${st} lane`} onClick={() => select(e.id)}>
-              <title>{label}</title>
-            </rect>
-          );
-        const isRecord = st === 'pass' && better(e.value, record);
-        if (isRecord) record = e.value;
-        return (
-          <circle key={e.id} cx={x(i)} cy={y(e.value)} r={isRecord ? 4.2 : 3} className={`st-${st}${isRecord ? ' record' : ' faint'}`} onClick={() => select(e.id)}>
-            <title>{label}</title>
-          </circle>
-        );
-      })}
-    </svg>
-  );
-}
-
 function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
   const { doc } = ctx;
   const methods = childrenOf(doc, node.id);
   const m = node.metric;
+  const top = Math.max(0.0001, ...methods.map((x) => Math.abs(gain(m, bestExperiment(doc, x)?.value) ?? 0)));
   return (
     <>
       <Question>{node.combos ? t('How do methods from different aspects work together?') : t('Which methods are there for "{aspect}"?', { aspect: node.title })}</Question>
@@ -783,7 +732,6 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
       {experimentsUnder(doc, node).length ? (
         <>
           <Kpis metric={m} exps={experimentsUnder(doc, node)} statusOf={ctx.statusOf} />
-          {m ? <ProgressChart metric={m} exps={experimentsUnder(doc, node)} statusOf={ctx.statusOf} select={ctx.select} /> : null}
           <Confidence metric={m} exps={experimentsUnder(doc, node)} />
         </>
       ) : null}
@@ -803,12 +751,14 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
             <tr>
               <th>{t('Method')}</th>
               {m ? <th className="num">{t('Best')}</th> : null}
+              {m?.baseline != null ? <th className="num">{t('vs start')}</th> : null}
               <th className="num">{t('Experiments')}</th>
             </tr>
           </thead>
           <tbody>
             {methods.map((x) => {
               const st = ctx.statusOf(x);
+
               const best = bestExperiment(doc, x);
               return (
                 <tr key={x.id} className="clickable" onClick={() => ctx.select(x.id)}>
@@ -817,6 +767,7 @@ function AspectPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
                     {x.links?.[0] ? <span className={`pill link-${x.links[0].kind}`}>{t(LINK_LABEL[x.links[0].kind])}</span> : null}
                   </td>
                   {m ? <td className="num">{best ? formatValue(m, best.value) : '—'}</td> : null}
+                  {m?.baseline != null ? <HeatCell g={best ? gain(m, best.value) : null} top={top} /> : null}
                   <td className="num">{childrenOf(doc, x.id).length}</td>
                 </tr>
               );
@@ -861,7 +812,6 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
             {t('Results')} · {m?.name ?? t('judged by hand')}
           </div>
           <Kpis metric={m} exps={exps} statusOf={ctx.statusOf} />
-          {m ? <ResultBars metric={m} exps={exps} statusOf={ctx.statusOf} select={ctx.select} /> : null}
           <Confidence metric={m} exps={exps} />
           <ResultTable ctx={ctx} aspect={aspect} exps={exps} best={best} />
         </>
@@ -877,6 +827,15 @@ function MethodPanel({ ctx, node }: { ctx: Ctx; node: ResearchNode }) {
  * Variants with their results: the change from the start in a cell tinted by its size (green better,
  * red worse, as autoresearcherUI's table does), repeated runs as mean ± spread, other metrics as columns.
  */
+/** A change against the start, tinted by its size (green better, red worse) among the rows'. */
+function HeatCell({ g, top }: { g: number | null; top: number }) {
+  return (
+    <td className="rs-heat num" style={g != null ? { background: `${g >= 0 ? 'rgba(22,163,74,' : 'rgba(192,38,45,'}${0.08 + 0.3 * (Math.abs(g) / top)})` } : undefined}>
+      {g != null ? pctOf(g) : '—'}
+    </td>
+  );
+}
+
 /** A method's design or a variant's config: prose, a few lines, the rest on a click. */
 function Clamp({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -928,11 +887,7 @@ function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNo
                 {e.value != null ? formatValue(m, e.value) : t(STATUS_LABEL[st])}
                 {spread ? <span className="muted"> ±{formatValue(m, spread.sd)} ({spread.n})</span> : null}
               </td>
-              {m?.baseline != null ? (
-                <td className="rs-heat" style={g != null ? { background: `${g >= 0 ? 'rgba(22,163,74,' : 'rgba(192,38,45,'}${0.08 + 0.3 * (Math.abs(g) / top)})` } : undefined}>
-                  {pctOf(g)}
-                </td>
-              ) : null}
+              {m?.baseline != null ? <HeatCell g={g} top={top} /> : null}
               {others.map((o) => (
                 <td key={o.name}>{e.values?.[o.name] != null ? formatValue(o, e.values[o.name]) : '—'}</td>
               ))}
@@ -942,40 +897,6 @@ function ResultTable({ ctx, aspect, exps, best }: { ctx: Ctx; aspect: ResearchNo
         })}
       </tbody>
     </table>
-  );
-}
-
-function ResultBars({ metric, exps, statusOf, select }: { metric: ResearchMetric; exps: ResearchNode[]; statusOf: (n: ResearchNode) => ResearchStatus; select: (id: string) => void }) {
-  const vals = exps.map((e) => e.value).filter((v): v is number => v != null);
-  const base = metric.baseline ?? (vals.length ? vals[0] : 0);
-  const lo = Math.min(base, ...vals), hi = Math.max(base, ...vals);
-  const Hh = 76, Ww = 320;
-  const y = (v: number) => Hh - 10 - ((v - lo) / (hi - lo || 1)) * (Hh - 24);
-  const bw = Math.max(10, Math.min(30, (Ww - 16) / Math.max(exps.length, 1) - 6));
-  return (
-    <svg className="rs-bars" width={Ww} height={Hh} data-testid="research-bars">
-      <line x1={0} x2={Ww} y1={y(base)} y2={y(base)} className="base" />
-      <text x={Ww - 2} y={y(base) - 3} textAnchor="end" className="base-label">
-        {t('start {v}', { v: formatValue(metric, base) })}
-      </text>
-      {exps.map((e, i) => {
-        const x = 8 + i * (bw + 6);
-        const st = statusOf(e);
-        return e.value != null ? (
-          <rect key={e.id} x={x} y={Math.min(y(e.value), y(base))} width={bw} height={Math.max(2, Math.abs(y(e.value) - y(base)))} rx={3} className={`st-${st}`} onClick={() => select(e.id)}>
-            <title>
-              {e.title}: {formatValue(metric, e.value)}
-            </title>
-          </rect>
-        ) : (
-          <rect key={e.id} x={x} y={Hh - 14} width={bw} height={5} rx={2.5} className={`st-${st} pending`} onClick={() => select(e.id)}>
-            <title>
-              {e.title}: {t(STATUS_LABEL[st])}
-            </title>
-          </rect>
-        );
-      })}
-    </svg>
   );
 }
 

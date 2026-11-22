@@ -7924,20 +7924,6 @@ button.subtask-row:hover {
   flex-direction: column;
   gap: 3px;
 }
-.rs-bars rect {
-  cursor: pointer;
-}
-.rs-bars rect.pending {
-  opacity: 0.55;
-}
-.rs-bars .base {
-  stroke: var(--text-3);
-  stroke-dasharray: 3 3;
-}
-.rs-bars .base-label {
-  font-size: 10px;
-  fill: var(--text-3);
-}
 /* Sidebar: the research's one row, and starting one */
 .research-mark {
   background: var(--ink);
@@ -8066,7 +8052,7 @@ button.subtask-row:hover {
   fill: #d4a72c;
   background: #d4a72c;
 }
-/* Side column: numbers, the progress chart, the advisory confidence, tinted changes. */
+/* Side column: numbers, the advisory confidence, tinted changes. */
 .rs-kpis {
   display: flex;
   flex-wrap: wrap;
@@ -8098,30 +8084,6 @@ button.subtask-row:hover {
 }
 .research-side .loss {
   color: var(--risk);
-}
-.rs-progress .base {
-  stroke: var(--text-3);
-  stroke-dasharray: 3 3;
-}
-.rs-progress .base-label {
-  font-size: 10px;
-  fill: var(--text-3);
-}
-.rs-progress .best-line {
-  fill: none;
-  stroke: var(--ok);
-  stroke-width: 1.8;
-}
-.rs-progress circle,
-.rs-progress rect {
-  cursor: pointer;
-}
-.rs-progress circle.faint {
-  opacity: 0.5;
-}
-.rs-progress circle.record {
-  stroke: var(--panel);
-  stroke-width: 1.5;
 }
 .rs-conf {
   align-self: flex-start;

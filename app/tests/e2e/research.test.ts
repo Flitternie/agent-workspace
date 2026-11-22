@@ -74,9 +74,9 @@ describe('research page (demo)', () => {
     await expect.poll(() => panel.innerText()).toContain('Which methods are there for "Data"?');
     expect(await panel.innerText()).toMatch(/the first thing you say to it below starts one/);
     expect(await page.getByTestId('research-notes').innerText()).toMatch(/Notes[\s\S]*Tried[\s\S]*0\.85 best/);
-    // The aspect at a glance: start → best, how many ran and work, the search as a step line through the best.
+    // The aspect at a glance: start → best, how many ran and work; each method's best and its change from the start.
     expect(await page.getByTestId('research-kpis').innerText()).toMatch(/start → best[\s\S]*71\.0 → 77\.9[\s\S]*experiments[\s\S]*work/);
-    expect(await page.getByTestId('research-progress-chart').locator('circle').count()).toBeGreaterThan(3);
+    expect(await page.getByTestId('research-panel').locator('.rs-table').first().innerText()).toMatch(/Best\s+vs start\s+Experiments[\s\S]*\+\d/);
     // Questions that fit, offered while the box is empty: a click fills it.
     await page.getByTestId('composer-chips').getByText('What has worked so far?').click();
     expect(await page.getByTestId('composer-input').inputValue()).toBe('What has worked so far?');
