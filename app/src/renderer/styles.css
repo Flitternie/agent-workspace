@@ -8191,3 +8191,53 @@ button.subtask-row:hover {
   text-overflow: ellipsis;
   z-index: 1;
 }
+/* What is going on, at the top: a click rings those nodes. */
+.research-now {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.research-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.research-chip:hover {
+  border-color: var(--border-strong);
+}
+.research-chip.wait {
+  color: #9a6700;
+  border-color: #e3c56b;
+  background: rgba(212, 167, 44, 0.12);
+}
+.rg-fresh-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* On a node: waiting on the user (an amber frame), a result not looked at yet (a dot at its corner). */
+.rg-node.waiting .box {
+  stroke: #d4a72c;
+  stroke-width: 2;
+}
+.rg-node .rg-fresh {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.research-only.on {
+  background: var(--hover);
+  color: var(--text);
+}

@@ -82,6 +82,19 @@ describe('research tree', () => {
     expect(spots.size).toBe(all.items.length);
   });
 
+  it('unfolds what is in progress: an experiment at work is drawn by itself, the rest of its method stay folded; or only what is in progress', () => {
+    const dedup = byTitle('Deduplication');
+    const live = byTitle('threshold 0.85');
+    const active = new Set([live.id, dedup.id, dedup.parent!]);
+    const g = layoutGraph(doc, 'method', new Set(), { active });
+    expect(g.items.filter((i) => i.kind === 'experiment').map((i) => i.node!.title)).toEqual(['threshold 0.85']);
+    expect(g.items.find((i) => i.id === `runs:${dedup.id}`)!.runs!.map((e) => e.title)).toEqual(['threshold 0.8', 'threshold 0.9']);
+    // Only what is in progress: its aspect, its method, itself (even at the aspect depth).
+    const only = layoutGraph(doc, 'aspect', new Set(), { active, only: true });
+    expect(only.items.map((i) => i.kind)).toEqual(['experiment', 'method', 'aspect', 'goal']);
+    expect(layoutGraph(doc, 'method', new Set(), { active: new Set(), only: true }).items.map((i) => i.kind)).toEqual(['goal']);
+  });
+
   it('edits make a new doc; removing a method takes its experiments and the links to it', () => {
     const pos = byTitle('Positional encoding');
     const yarn = byTitle('Positional encoding · length extrapolation');

@@ -112,8 +112,8 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
           L(`You own the "${node.title}" aspect of the research "${doc.title}" (${doc.goal}).`, `你负责研究「${doc.title}」（${doc.goal}）中的「${node.title}」方面。`),
           how,
           L(
-            'The research tools: research_overview shows the tree; research_add lists a method (as an idea, with its design); research_try starts variants of a method in parallel, one agent each in its own worktree; research_derive combines or mutates methods; research_record records results; research_notes keeps this aspect’s notes (markdown in the repository), which new agents here start from. How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
-            '可用的研究工具：research_overview 查看研究树；research_add 加一个方法（先作为想法，附上设计）；research_try 对一个方法并行开几个变体，每个变体一个 agent、各自独立 worktree；research_derive 组合或变异方法；research_record 记录结果；research_notes 维护这个方面的笔记（存在仓库里的 markdown），这个方面新开的 agent 会从笔记开始。具体怎么做研究由用户决定，按用户的要求来。回复保持简短，研究页面上能看到整棵树。',
+            'The research tools: research_overview shows the tree; research_add lists a method (as an idea, with its design); research_try starts variants of a method in parallel, one agent each in its own worktree; research_derive combines or mutates methods; research_record records results; research_update keeps one-line takeaways (what a method, and this aspect, comes to so far: the graph shows them on the nodes); research_notes keeps this aspect’s notes (markdown in the repository), which new agents here start from. How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
+            '可用的研究工具：research_overview 查看研究树；research_add 加一个方法（先作为想法，附上设计）；research_try 对一个方法并行开几个变体，每个变体一个 agent、各自独立 worktree；research_derive 组合或变异方法；research_record 记录结果；research_update 维护一句话结论（一个方法、以及这个方面目前的结论，会显示在图的节点上）；research_notes 维护这个方面的笔记（存在仓库里的 markdown），这个方面新开的 agent 会从笔记开始。具体怎么做研究由用户决定，按用户的要求来。回复保持简短，研究页面上能看到整棵树。',
           ),
           modeText(doc.policy?.mode, lang),
           notes?.aspects[node.id] ? L(`Your notes so far:\n${excerpt(notes.aspects[node.id].text)}`, `目前的笔记：\n${excerpt(notes.aspects[node.id].text)}`) : '',
@@ -126,8 +126,8 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
           aspect && notes?.aspects[aspect.id] ? L(`What is known in this aspect so far (its notes):\n${excerpt(notes.aspects[aspect.id].text)}`, `这个方面目前已知的情况（它的笔记）：\n${excerpt(notes.aspects[aspect.id].text)}`) : '',
           notes?.summary ? L(`The research so far (its summary):\n${excerpt(notes.summary.text, 1200)}`, `整项研究目前的情况（总结）：\n${excerpt(notes.summary.text, 1200)}`) : '',
           L(
-            `When done, call research_record with the result${m ? ` (${m.name})` : ' (works or not)'} and one finding worth keeping. Then reply in a line or two.`,
-            `完成后调用 research_record 记录结果${m ? `（${m.name}）` : '（有效或无效）'}和一条值得留下的发现，然后用一两句话回复。`,
+            `When done, call research_record with the result${m ? ` (${m.name})` : ' (works or not)'} , a one-line takeaway (what it comes to) and one finding worth keeping. Then reply in a line or two.`,
+            `完成后调用 research_record 记录结果${m ? `（${m.name}）` : '（有效或无效）'}、一句话结论（takeaway）和一条值得留下的发现，然后用一两句话回复。`,
           ),
         ];
   return [...parts, message ?? ''].filter(Boolean).join('\n\n');
@@ -333,6 +333,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         works: z.boolean().optional().describe('For an aspect judged by hand.'),
         no_result: z.boolean().optional().describe('It ran but produced no usable result.'),
         finding: z.string().max(2000).optional(),
+        takeaway: z.string().max(200).optional().describe('What this experiment comes to, in one short line (shown on its node in the graph).'),
       }),
       run: async (a) => {
         const { projectId, doc } = await load(a.project);
@@ -357,6 +358,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           const kept = (next.nodes.find((n) => n.id === e.id)!.results ?? []).filter((x) => !add.some((y) => same(x, y)));
           next = updateNode(next, e.id, { results: [...kept, ...add], resultAt: at, ...(e.status === 'idea' || e.status === 'running' ? { status: 'unclear' as const } : {}) });
         }
+        if (a.takeaway) next = updateNode(next, e.id, { takeaway: String(a.takeaway) });
         if (a.finding) next = addFinding(next, e.id, String(a.finding), name(caller.kind === 'agent' ? caller.taskId : undefined) ?? (isMain ? 'main agent' : undefined));
         if (next === doc) throw new Error('Nothing to record: give value, runs, metrics, results, works, no_result or finding.');
         host.researchSave(projectId, next);
@@ -418,7 +420,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       description: [
         'Writes what the research page shows for a node (its side panel): markdown, with live blocks in it. The user may ask for what they want to see (a table of the core metrics, a comparison, a chart); write it here, and rewrite it when they ask for something else. The whole view: it replaces the last one. Leave markdown out and give template to start from one.',
         'Blocks are fenced code blocks, ```research:<kind> with JSON options inside:',
-        'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":[...] or "*","cell":"best"|"latest"|"mean","lower":["metrics where lower is better"],"title":"..."}.',
+        'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":[...] or "*","cell":"best"|"latest"|"mean"|"sum","sum":["metrics added up, e.g. what was spent"],"lower":["metrics where lower is better"],"title":"..."}. Whatever this research tracks goes in as a metric, resources included (cost, GPU hours, tokens: record them as results, show them summed).',
         'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
         'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated; it is styled like the page: plain tables and text look like the rest).',
         'Results for tables are recorded with research_record (results: metric, dataset, value).',
@@ -447,12 +449,14 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     },
     {
       name: 'research_update',
-      description: 'Changes a node: its title or design, notes that a method borrows an idea from another, or removes it (with everything under it; git history keeps it).',
-      schema: z.object({ ...projectArg, node_id: z.string(), title: z.string().min(1).max(200).optional(), design: z.string().max(4000).optional(), borrows_from: z.string().optional(), note: z.string().max(300).optional(), noise: z.number().min(0).optional().describe('An aspect: how noisy one run is, as the user says (0 to forget it).'), remove: z.boolean().optional() }),
+      description: 'Changes a node: its title or design, its takeaway (what it comes to so far, in one short line: the graph shows it on the node, so keep it current as results come in), notes that a method borrows an idea from another, or removes it (with everything under it; git history keeps it).',
+      schema: z.object({ ...projectArg, node_id: z.string(), title: z.string().min(1).max(200).optional(), design: z.string().max(4000).optional(), takeaway: z.string().max(200).optional().describe('One short line: what this aspect, method or experiment comes to so far ("" to clear).'), borrows_from: z.string().optional(), note: z.string().max(300).optional(), noise: z.number().min(0).optional().describe('An aspect: how noisy one run is, as the user says (0 to forget it).'), remove: z.boolean().optional() }),
       run: async (a) => {
         const { projectId, doc } = await load(a.project);
         const n = nodeIn(doc, a.node_id);
-        if (n.type === 'aspect' && !full(doc)) throw new Error('Only the research’s lead changes aspects.');
+        // An aspect's own agent keeps its aspect's takeaway; anything else about an aspect is the lead's.
+        const onlyTakeaway = a.takeaway !== undefined && !a.title && a.design === undefined && !a.remove && !a.borrows_from && typeof a.noise !== 'number';
+        if (n.type === 'aspect' && !full(doc) && !(onlyTakeaway && me(doc)?.id === n.id)) throw new Error('Only the research’s lead changes aspects.');
         mayChange(doc, n);
         if (a.remove) {
           host.researchSave(projectId, removeNode(doc, n.id));
@@ -460,6 +464,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         }
         let next = doc;
         if (a.title || a.design !== undefined) next = updateNode(next, n.id, { ...(a.title ? { title: String(a.title) } : {}), ...(a.design !== undefined ? { design: String(a.design) || undefined } : {}) });
+        if (a.takeaway !== undefined) next = updateNode(next, n.id, { takeaway: String(a.takeaway).trim() || undefined });
         if (typeof a.noise === 'number') {
           if (n.type !== 'aspect' || !n.metric) throw new Error('Noise belongs to an aspect with a metric.');
           next = updateNode(next, n.id, { metric: { ...n.metric, noise: a.noise || undefined } });

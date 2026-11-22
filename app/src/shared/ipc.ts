@@ -25,6 +25,7 @@ const researchNode = z.object({
   metrics: z.array(researchMetric).max(20).optional(),
   combos: z.boolean().optional(),
   design: text.optional(),
+  takeaway: z.string().max(300).optional(),
   source: short.optional(),
   links: z.array(z.object({ from: id, kind: z.enum(['combine', 'mutate', 'borrow']), note: short.optional() })).max(20).optional(),
   config: text.optional(),

@@ -45,9 +45,14 @@ describe('research views', () => {
     expect(tb.columns.map((c) => `${c.metric}@${c.dataset}`)).toEqual(['auc12@AB', 'auc12@ITBench', 'E1/E2@AB']);
     expect(tb.rows.map((r) => r.node.title)).toEqual(['ncd', 'fgw', 'bi-encoder']);
     expect(tb.best).toEqual([0, 2, 0]);
+    // What a research tracks is its own: resources are metrics like any other, added up per row.
+    doc = updateNode(doc, e1.id, { results: [...(doc.nodes.find((n) => n.id === e1.id)!.results ?? []), { metric: 'cost $', value: 3 }] });
+    add('experiment', ncd.id, 'ncd rerun', { results: [{ metric: 'cost $', value: 2.5 }] });
+    const spent = liveTable(doc, a, { metrics: ['cost $'], sum: ['cost $'], lower: ['cost $'] });
+    expect(spent.rows.map((r) => [r.node.title, ...r.cells])).toEqual([['ncd', 5.5]]);
     // Lower is better where it says so; a plain value counts on the aspect's metric (no dataset).
     const x = add('experiment', fgw.id, 'plain', { value: 0.5 });
     expect(resultsOf(doc, x)).toEqual([{ metric: 'auc12', value: 0.5 }]);
-    expect(liveTable(doc, a, { metrics: '*', datasets: '*' }).columns.map((c) => `${c.metric}@${c.dataset ?? ''}`)).toEqual(['auc12@AB', 'auc12@ITBench', 'auc12@', 'E1/E2@AB']);
+    expect(liveTable(doc, a, { metrics: '*', datasets: '*' }).columns.map((c) => `${c.metric}@${c.dataset ?? ''}`)).toEqual(['auc12@AB', 'auc12@ITBench', 'auc12@', 'E1/E2@AB', 'cost $@']);
   });
 });

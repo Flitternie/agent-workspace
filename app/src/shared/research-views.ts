@@ -95,8 +95,10 @@ export interface TableSpec {
   metrics?: string[] | '*';
   /** Datasets per metric; "*" (default) for every one found (a column each, new ones added as they come). */
   datasets?: string[] | '*';
-  /** A row's cell when several experiments have one: best (default), latest, or mean. */
-  cell?: 'best' | 'latest' | 'mean';
+  /** A row's cell when several experiments have one: best (default), latest, mean, or sum (what was spent: cost, GPU hours). */
+  cell?: 'best' | 'latest' | 'mean' | 'sum';
+  /** Metrics that are added up whatever `cell` says (resources used). */
+  sum?: string[];
   /** Metrics where lower is better (else as the aspect's metric says, else higher). */
   lower?: string[];
   title?: string;
@@ -148,6 +150,7 @@ export function liveTable(doc: ResearchDoc, at: ResearchNode | undefined, spec: 
       if (!hits.length) return undefined;
       if (spec.cell === 'latest') return [...hits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)!.value;
       if (spec.cell === 'mean') return hits.reduce((s, h) => s + h.value, 0) / hits.length;
+      if (spec.cell === 'sum' || spec.sum?.includes(c.metric)) return hits.reduce((s, h) => s + h.value, 0);
       return hits.reduce((b, h) => ((c.lowerIsBetter ? h.value < b : h.value > b) ? h.value : b), hits[0].value);
     }),
   }));

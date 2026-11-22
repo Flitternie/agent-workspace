@@ -300,6 +300,13 @@ describe('research managed by talking', () => {
     await expect(data.research_view.run({ node_id: node('Model').id, markdown: 'x' })).rejects.toThrow();
     expect(await data.research_view.run({ markdown: '## Data\n\n```research:table\n{"metrics":["quality"]}\n```' })).toMatch(/"Data"/);
     expect(ws.researchNotes(p.projectId).views![node('Data').id].text).toMatch(/## Data/);
+    // One-line takeaways (what the graph shows on a node): with a result; an aspect's own agent keeps its aspect's.
+    await main.research_record.run({ experiment_id: v1.id, takeaway: 'Dedup helps on A only' });
+    expect(node('v1').takeaway).toBe('Dedup helps on A only');
+    await data.research_update.run({ node_id: node('Data').id, takeaway: 'Cleaning matters more than size' });
+    expect(node('Data').takeaway).toBe('Cleaning matters more than size');
+    await expect(data.research_update.run({ node_id: node('Data').id, title: 'Renamed' })).rejects.toThrow(/lead/);
+    await expect(data.research_update.run({ node_id: node('Model').id, takeaway: 'x' })).rejects.toThrow();
   });
 
   it('the box: an aspect without an agent starts one with its brief; then the same agent, told what it is about; across aspects, the research lead (started by its first message)', async () => {

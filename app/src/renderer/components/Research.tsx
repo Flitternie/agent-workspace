@@ -10,6 +10,7 @@ import {
   formatValue,
   GRAPH,
   layoutGraph,
+  ancestry,
   methodStatus,
   resultsSince,
   routeFor,
@@ -74,6 +75,19 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
     return () => window.removeEventListener('keydown', esc, true);
   }, [panelMax]);
   const side = useContext(SideSlot);
+  // What is new since the user last had this research open (kept on this Mac): marked until looked at.
+  const seenKey = `amw.research.seen.${researchId}`;
+  const lastSeen = useMemo(() => localStorage.getItem(seenKey) ?? new Date().toISOString(), [seenKey]);
+  const [looked, setLooked] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setLooked(new Set());
+    const leave = () => localStorage.setItem(seenKey, new Date().toISOString());
+    window.addEventListener('beforeunload', leave);
+    return () => {
+      leave();
+      window.removeEventListener('beforeunload', leave);
+    };
+  }, [seenKey]);
   // The room the page and its side column share: the column never takes so much that the graph (or the
   // column's own title row, with its buttons) is pushed out; a narrower window narrows it too.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -127,7 +141,26 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const selected = sel.map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is ResearchNode => !!n);
   const exps = doc.nodes.filter((n) => n.type === 'experiment');
   const count = (s: ResearchStatus) => exps.filter((e) => statusOf(e) === s).length;
-  const select = (id: string, add: boolean) => setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
+  const select = (id: string, add: boolean) => {
+    if (id) setLooked((l) => new Set(l).add(id));
+    setSel((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.length === 1 && cur[0] === id ? [] : [id]));
+  };
+  // Who is at work and who waits on the user: what the graph unfolds, and the counts at the top.
+  const asking = new Set(snapshot.attention.filter((a) => a.state === 'open' && a.kind !== 'completion').map((a) => a.taskId));
+  const busy = (id?: string) => ['running', 'starting'].includes(taskOf(id)?.status ?? '');
+  const inResearch = taskIdsOf(doc);
+  const runningTasks = inResearch.filter((id) => busy(id));
+  const waitingTasks = inResearch.filter((id) => asking.has(id));
+  const active = new Set<string>();
+  for (const n of doc.nodes) if ((n.taskId && (busy(n.taskId) || asking.has(n.taskId))) || (n.type === 'experiment' && statusOf(n) === 'running')) for (const a of ancestry(doc, n)) active.add(a.id);
+  const fresh = new Set(exps.filter((e) => e.resultAt && e.resultAt > lastSeen && !looked.has(e.id)).map((e) => e.id));
+  /** Rings the nodes of these agents (the lead's is the goal: nothing selected). */
+  const ring = (taskIds: string[]) => setSel(doc.nodes.filter((n) => n.taskId && taskIds.includes(n.taskId)).map((n) => n.id));
+  const ringFresh = () => {
+    setOpened((o) => new Set([...o, ...exps.filter((e) => fresh.has(e.id)).map((e) => e.parent!)]));
+    setSel([...fresh]);
+    setLooked((l) => new Set([...l, ...fresh]));
+  };
 
   const ctx: Ctx = { snapshot, research: researchId, doc, notes, statusOf, taskOf, select: (id) => setSel(id ? [id] : []), onOpenAgent, setError };
   /** A double-click opens the node's agent (a method's is its aspect's); with none yet, it just selects the node. */
@@ -163,11 +196,28 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
           <span className="research-bar">
             {(['pass', 'unclear', 'running', 'fail', 'error'] as const).map((s) => (count(s) ? <i key={s} className={`st-${s}`} style={{ width: `${(count(s) / exps.length) * 100}%` }} /> : null))}
           </span>
-          <span className="muted">
-            {count('running') ? t('{n} running', { n: count('running') }) + ' · ' : ''}
-            {t('{n} work', { n: count('pass') })}
-          </span>
+          <span className="muted">{t('{n} work', { n: count('pass') })}</span>
         </div>
+        {/* What is going on, at a glance; a click rings those nodes in the graph. */}
+        {runningTasks.length || waitingTasks.length || fresh.size ? (
+          <div className="research-now" data-testid="research-now">
+            {runningTasks.length ? (
+              <button className="research-chip run" onClick={() => ring(runningTasks)} data-testid="research-now-running">
+                <i className="rg-dot st-running" /> {t('{n} running', { n: runningTasks.length })}
+              </button>
+            ) : null}
+            {waitingTasks.length ? (
+              <button className="research-chip wait" onClick={() => ring(waitingTasks)} data-testid="research-now-waiting">
+                ⚑ {t('{n} waiting on you', { n: waitingTasks.length })}
+              </button>
+            ) : null}
+            {fresh.size ? (
+              <button className="research-chip new" onClick={ringFresh} title={t('Results recorded since you last had this research open')} data-testid="research-now-new">
+                <i className="rg-fresh-dot" /> {fresh.size === 1 ? t('1 new result') : t('{n} new results', { n: fresh.size })}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="stage-actions">
           {panel ? null : (
             <button className="btn" onClick={() => setPanel(true)} data-testid="research-panel-open">
@@ -180,7 +230,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       {/* The graph fills the page; the box floats on it at the bottom, as on an agent's page (no band of its own). */}
       {panelMax ? sidePanel : null}
       <div className="research-stage" hidden={panelMax}>
-      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
+      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} />
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       </div>
       {sidePanel && !panelMax
@@ -232,6 +282,8 @@ function Graph({
   statusOf,
   taskOf,
   snapshot,
+  active,
+  fresh,
 }: {
   doc: ResearchDoc;
   depth: GraphDepth;
@@ -244,9 +296,15 @@ function Graph({
   statusOf: (n: ResearchNode) => ResearchStatus;
   taskOf: (id?: string) => Task | undefined;
   snapshot: WorkspaceSnapshot;
+  /** Nodes with an agent at work or waiting on the user, and their ancestors: always unfolded. */
+  active: ReadonlySet<string>;
+  /** Experiments with a result the user has not looked at. */
+  fresh: ReadonlySet<string>;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const L = useMemo(() => layoutGraph(doc, depth, opened), [doc, depth, opened]);
+  const [only, setOnly] = useState(false);
+  const activeKey = [...active].sort().join(',');
+  const L = useMemo(() => layoutGraph(doc, depth, opened, { active, only }), [doc, depth, opened, activeKey, only]);
   const [view, setView] = useState({ x: 24, y: 60, k: 1 });
   const [legend, setLegend] = useState(false);
   const fitted = useRef('');
@@ -262,8 +320,8 @@ function Graph({
   };
   // Fit when the graph's shape changes level, not on every edit (the view stays where the user put it).
   useLayoutEffect(() => {
-    if (fitted.current !== depth) {
-      fitted.current = depth;
+    if (fitted.current !== `${depth}:${only}`) {
+      fitted.current = `${depth}:${only}`;
       fit();
     }
   });
@@ -354,6 +412,9 @@ function Graph({
             </button>
           ))}
         </div>
+        <button className={`btn btn-sm btn-ghost research-only${only ? ' on' : ''}`} onClick={() => setOnly(!only)} aria-pressed={only} title={t('Show only what has an agent at work or waiting on you')} data-testid="research-only">
+          {t('In progress only')}
+        </button>
         <div className="research-zoom">
           <button className="icon-btn" onClick={() => zoom(1.2)} aria-label={t('Zoom in')} title={t('Zoom in')}>
             +
@@ -375,7 +436,7 @@ function Graph({
           {/* Under the nodes, so they never cover a title or a number; a selected method's own links come forward. */}
           <g className={`rg-links${sel.length ? ' has-sel' : ''}`}>{cross}</g>
           {L.items.map((it) => (
-            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} openNode={openNode} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} />
+            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} openNode={openNode} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} fresh={fresh} />
           ))}
         </g>
       </svg>
@@ -393,6 +454,7 @@ function Graph({
         <span className="lk-how">{t('Click: talk to its agent · ⇧-click: several · double-click: open its conversation')}</span>
       </div>
       ) : null}
+      {only && !active.size ? <div className="research-hint">{t('Nothing in progress right now.')}</div> : null}
       {!childrenOf(doc, null).length ? <div className="research-hint">{t('Ask below to add the aspects that may move the result: data, model, training…')}</div> : null}
     </div>
   );
@@ -400,10 +462,35 @@ function Graph({
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n?: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot }) {
+/** Clipped to a width: a CJK character counts as two. */
+const clipW = (s: string, units: number) => {
+  let w = 0;
+  for (let i = 0; i < s.length; i++) {
+    w += s.charCodeAt(i) > 0x2e7f ? 2 : 1;
+    if (w > units) return `${s.slice(0, Math.max(0, i - 1))}…`;
+  }
+  return s;
+};
+const sinceText = (iso?: string) => {
+  const m = iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000)) : 0;
+  return m < 1 ? '' : m < 60 ? t('{n} min', { n: m }) : t('{n} h', { n: (m / 60).toFixed(1) });
+};
+
+function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot, fresh }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n?: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot; fresh: ReadonlySet<string> }) {
   const { nodeW: W, nodeH: H } = GRAPH;
-  const at = `translate(${it.x},${it.y})`;
   const waiting = (taskId?: string) => (taskId ? snapshot.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.kind !== 'completion').length : 0);
+  /** What an agent is up to, as far as the user cares: waiting on them, or running (for how long); else nothing. */
+  const doing = (task?: Task): string => {
+    if (!task) return '';
+    if (waiting(task.taskId)) return `${task.alias} · ${t('waiting on you')}`;
+    if (task.status === 'running' || task.status === 'starting') return [task.alias, t('running'), sinceText(task.statusSince)].filter(Boolean).join(' · ');
+    return '';
+  };
+  /** A result not looked at yet: on the node itself, or under it when nothing is drawn below it. */
+  const under = (id: string): string[] => doc.nodes.filter((x) => x.parent === id).flatMap((x) => [x.id, ...under(x.id)]);
+  const isFresh = it.kind === 'runs' ? it.runs!.some((e) => fresh.has(e.id)) : it.node ? fresh.has(it.node.id) || (!it.children.length && under(it.node.id).some((id) => fresh.has(id))) : false;
+  const freshDot = isFresh ? <circle cx={W - 1} cy={H - 1} r={4.5} className="rg-fresh" /> : null;
+  const at = `translate(${it.x},${it.y})`;
   const badge = (n: number) =>
     n ? (
       <g transform={`translate(${W - 6},-6)`} className="rg-badge">
@@ -448,6 +535,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
           {running ? t('{n} running', { n: running }) : found ? `◆ ${found}` : t('Show ›')}
         </text>
         {badge(runs.reduce((s, e) => s + waiting(e.taskId), 0))}
+        {freshDot}
       </g>
     );
   }
@@ -469,8 +557,8 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     const exps = experimentsUnder(doc, n);
     const bestG = Math.max(-Infinity, ...exps.filter((e) => statusOf(e) === 'pass').map((e) => gain(n.metric, e.value) ?? -Infinity));
     return (
-      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="aspect" data-title={n.title}>
-        {tip([n.title, n.metric ? `${n.metric.name} (${n.metric.higherIsBetter ? '↑' : '↓'})` : t('judged by hand'), agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : t('no agent yet'), tally(exps)])}
+      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="aspect" data-title={n.title}>
+        {tip([n.title, n.takeaway, n.metric ? `${n.metric.name} (${n.metric.higherIsBetter ? '↑' : '↓'})` : t('judged by hand'), agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : t('no agent yet'), tally(exps)])}
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 strong">
           {clip(n.title, 13)}
@@ -479,12 +567,15 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
           {bestG > -Infinity ? pct(bestG) : methods.length === 1 ? t('1 method') : t('{n} methods', { n: methods.length })}
         </text>
         <text x={12} y={41} className="t2">
-          {clip(`${agent ? agent.alias : t('no agent yet')} · ${n.metric ? n.metric.name : t('judged by hand')}`, 22)}
+          {doing(agent) ? clipW(doing(agent), 34) : n.takeaway ? clipW(n.takeaway, 34) : clip(`${agent ? agent.alias : t('no agent yet')} · ${n.metric ? n.metric.name : t('judged by hand')}`, 22)}
         </text>
-        <text x={W - 10} y={41} className="t2 tally" textAnchor="end">
-          {tally(exps)}
-        </text>
+        {doing(agent) || n.takeaway ? null : (
+          <text x={W - 10} y={41} className="t2 tally" textAnchor="end">
+            {tally(exps)}
+          </text>
+        )}
         {badge(waiting(n.taskId))}
+        {freshDot}
       </g>
     );
   }
@@ -498,7 +589,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     const lastFinding = exps.flatMap((e) => e.findings ?? []).at(-1);
     return (
       <g className={`rg-node method ns-${st}${isSel ? ' sel' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="method" data-title={n.title}>
-        {tip([n.title, t(STATUS_LABEL[st]), best ? `${t('best {v} ({name})', { v: formatValue(metric, best.value), name: best.title })}${g != null ? ` · ${pct(g)}` : ''}` : '', link ? `${t(LINK_LABEL[link.kind])}: ${doc.nodes.find((x) => x.id === link.from)?.title ?? ''}` : '', lastFinding ? `◆ ${lastFinding.text}` : '', n.design])}
+        {tip([n.title, n.takeaway, t(STATUS_LABEL[st]), best ? `${t('best {v} ({name})', { v: formatValue(metric, best.value), name: best.title })}${g != null ? ` · ${pct(g)}` : ''}` : '', link ? `${t(LINK_LABEL[link.kind])}: ${doc.nodes.find((x) => x.id === link.from)?.title ?? ''}` : '', lastFinding ? `◆ ${lastFinding.text}` : '', n.design])}
         <rect className="box" width={W} height={H} rx={10} />
         <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
         <text x={25} y={21} className="t1">
@@ -508,9 +599,10 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
           {best ? formatValue(metric, best.value) : st === 'running' ? '…' : ''}
         </text>
         <text x={12} y={41} className="t2">
-          {clip(st === 'idea' ? (n.source ?? t('Not tried')) : [link ? t(LINK_LABEL[link.kind]) : '', tally(exps), found ? `◆${found}` : ''].filter(Boolean).join(' · '), 26)}
+          {n.takeaway ? clipW(n.takeaway, 34) : clip(st === 'idea' ? (n.source ?? t('Not tried')) : [link ? t(LINK_LABEL[link.kind]) : '', tally(exps), found ? `◆${found}` : ''].filter(Boolean).join(' · '), 26)}
         </text>
-        {g != null ? (
+        {freshDot}
+        {g != null && !n.takeaway ? (
           <text x={W - 10} y={41} className={`t2 ${g >= 0 ? 'gain' : 'loss'}`} textAnchor="end">
             {pct(g)}
           </text>
@@ -524,8 +616,8 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
   const g = gain(metric, n.value);
   const spread = n.runs && n.runs.length > 1 ? runStats(n.runs) : undefined;
   return (
-    <g className={`rg-node experiment ns-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
-      {tip([`${isBest ? '★ ' : ''}${n.title}`, t(STATUS_LABEL[st]), n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ± ${formatValue(metric, spread.sd)} (${spread.n})` : ''}${g != null ? ` · ${pct(g)}` : ''}` : '', agent ? `${agent.alias} · ${agent.summary || t(AGENT_STATUS[agent.status])}` : '', n.findings?.at(-1) ? `◆ ${n.findings.at(-1)!.text}` : ''])}
+    <g className={`rg-node experiment ns-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+      {tip([`${isBest ? '★ ' : ''}${n.title}`, n.takeaway, t(STATUS_LABEL[st]), n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ± ${formatValue(metric, spread.sd)} (${spread.n})` : ''}${g != null ? ` · ${pct(g)}` : ''}` : '', agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : '', n.findings?.at(-1) ? `◆ ${n.findings.at(-1)!.text}` : ''])}
       <rect className="box" width={W} height={H} rx={10} />
       <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
       <text x={25} y={21} className="t1">
@@ -536,12 +628,15 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
         {n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ±${formatValue(metric, spread.sd)}` : ''}` : st === 'running' ? '…' : ''}
       </text>
       <text x={12} y={41} className="t2">
-        {clip(agent ? `${agent.alias} · ${st === 'running' && agent.summary ? agent.summary : agent.worktree ? t('own worktree') : t('shared folder')}` : t('no agent'), 24)}
+        {doing(agent) ? clipW(doing(agent), 34) : n.takeaway ? clipW(n.takeaway, 34) : agent ? agent.alias : st === 'running' ? t('running') : t('no agent')}
       </text>
-      <text x={W - 10} y={41} className={n.findings?.length ? 't-find' : `t2 ${g != null && g >= 0 ? 'gain' : 'loss'}`} textAnchor="end">
-        {n.findings?.length ? `◆ ${n.findings.length}` : pct(g)}
-      </text>
+      {doing(agent) || n.takeaway ? null : (
+        <text x={W - 10} y={41} className={n.findings?.length ? 't-find' : `t2 ${g != null && g >= 0 ? 'gain' : 'loss'}`} textAnchor="end">
+          {n.findings?.length ? `◆ ${n.findings.length}` : pct(g)}
+        </text>
+      )}
       {badge(waiting(n.taskId))}
+      {freshDot}
     </g>
   );
 }

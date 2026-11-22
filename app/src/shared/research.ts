@@ -56,6 +56,8 @@ export interface ResearchNode {
   metrics?: ResearchMetric[];
   /** Aspect: the row of cross-aspect combinations (validated end to end). */
   combos?: boolean;
+  /** What it comes to, in one line (kept by its agent): what the graph shows once there is something to say. */
+  takeaway?: string;
   /** Method: its design, a few lines. */
   design?: string;
   /** Method: where the idea came from when not tried yet (an agent, a paper). */
@@ -309,22 +311,38 @@ export interface GraphLayout {
 
 export const GRAPH = { nodeW: 216, nodeH: 54, colGap: 268, rowGap: 68 } as const;
 
+/** What the graph is laid out by, beyond its depth: who is at work, and whether only that is shown. */
+export interface GraphActivity {
+  /** Nodes with something going on (an agent running or waiting on the user), and their ancestors. */
+  active: ReadonlySet<string>;
+  /** Only what is going on. */
+  only?: boolean;
+}
+
 /**
  * Left to right: the goal, aspects, methods, experiments. Down to `depth`; a method's experiments fold
- * into one item unless shown one by one (the experiment depth, or that method opened).
+ * into one item unless shown one by one (the experiment depth, or that method opened). Experiments with
+ * something going on are always shown one by one (the rest of their method's stay folded): with many
+ * running in parallel, what is in progress is what is on the page.
  */
-export function layoutGraph(doc: ResearchDoc, depth: GraphDepth, opened: ReadonlySet<string> = new Set()): GraphLayout {
+export function layoutGraph(doc: ResearchDoc, depth: GraphDepth, opened: ReadonlySet<string> = new Set(), activity?: GraphActivity): GraphLayout {
   const items: GraphItem[] = [];
   const at = new Map<string, GraphItem>();
   let row = 0;
   const build = (kind: GraphItem['kind'], id: string, node: ResearchNode | undefined, d: number): GraphItem => {
     const item: GraphItem = { kind, id, node, depth: d, x: 0, y: 0, children: [] };
-    if (kind === 'goal') for (const a of childrenOf(doc, null)) item.children.push(build('aspect', a.id, a, d + 1));
-    if (kind === 'aspect' && depth !== 'aspect') for (const m of childrenOf(doc, id)) item.children.push(build('method', m.id, m, d + 1));
+    const live = (n: ResearchNode) => !!activity?.active.has(n.id);
+    const shown = (n: ResearchNode) => !activity?.only || live(n);
+    if (kind === 'goal') for (const a of childrenOf(doc, null).filter(shown)) item.children.push(build('aspect', a.id, a, d + 1));
+    if (kind === 'aspect' && (depth !== 'aspect' || activity?.only)) for (const m of childrenOf(doc, id).filter(shown)) item.children.push(build('method', m.id, m, d + 1));
     if (kind === 'method') {
       const exps = childrenOf(doc, id);
-      if (depth === 'experiment' || opened.has(id)) for (const e of exps) item.children.push(build('experiment', e.id, e, d + 1));
-      else if (exps.length) item.children.push({ kind: 'runs', id: `runs:${id}`, runs: exps, depth: d + 1, x: 0, y: 0, children: [] });
+      if (depth === 'experiment' || opened.has(id)) for (const e of exps.filter(shown)) item.children.push(build('experiment', e.id, e, d + 1));
+      else {
+        for (const e of exps.filter(live)) item.children.push(build('experiment', e.id, e, d + 1));
+        const rest = exps.filter((e) => !live(e));
+        if (rest.length && !activity?.only) item.children.push({ kind: 'runs', id: `runs:${id}`, runs: rest, depth: d + 1, x: 0, y: 0, children: [] });
+      }
     }
     return item;
   };

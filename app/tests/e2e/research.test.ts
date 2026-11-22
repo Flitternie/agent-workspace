@@ -161,7 +161,20 @@ describe('research page (demo)', () => {
     // When an agent changes the tree (its tool writes the file), the page follows.
     const d = await doc();
     const dedup = d.nodes.find((n) => n.title === 'Deduplication')!;
-    await invoke(page, 'research:save', { researchId: projectId, doc: { ...d, nodes: [...d.nodes, { id: 'x-new', type: 'experiment', parent: dedup.id, title: 'threshold 0.87', status: 'pass', value: 78.2, createdAt: new Date().toISOString(), findings: [{ id: 'f-new', text: '0.87 keeps the code samples', at: new Date().toISOString() }] }], updatedAt: new Date().toISOString() } });
+    await invoke(page, 'research:save', { researchId: projectId, doc: { ...d, nodes: [...d.nodes, { id: 'x-new', type: 'experiment', parent: dedup.id, title: 'threshold 0.87', status: 'pass', value: 78.2, resultAt: new Date().toISOString(), takeaway: 'Best so far', createdAt: new Date().toISOString(), findings: [{ id: 'f-new', text: '0.87 keeps the code samples', at: new Date().toISOString() }] }], updatedAt: new Date().toISOString() } });
+    // A result since the page was opened: counted at the top; a click rings it (its method unfolds), with its one-line takeaway on the node.
+    await expect.poll(() => page.getByTestId('research-now-new').innerText()).toMatch(/1 new result/);
+    await page.getByTestId('research-now-new').click();
+    await expect.poll(() => node('experiment', 'threshold 0.87').textContent()).toMatch(/Best so far/);
+    await expect.poll(() => page.getByTestId('research-now-new').count()).toBe(0);
+    // Only what is in progress: the branches with something running, no folded finished ones.
+    const methodsShown = () => page.locator('[data-testid="research-node"][data-kind="method"]').count();
+    const allMethods = await methodsShown();
+    await page.getByTestId('research-only').click();
+    await expect.poll(methodsShown).toBeLessThan(allMethods);
+    expect(await page.locator('[data-testid="research-node"][data-kind="runs"]').count()).toBe(0);
+    await page.getByTestId('research-only').click();
+    await expect.poll(methodsShown).toBe(allMethods);
     await node('method', 'Deduplication').click();
     await expect.poll(() => panel.innerText()).toMatch(/threshold 0\.87[\s\S]*78\.2[\s\S]*0\.87 keeps the code samples/);
     // Changes from the start, tinted by size; the best variant starred.
@@ -175,8 +188,9 @@ describe('research page (demo)', () => {
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/\(Data aspect\)/);
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/threshold 0\.8 and 1 more/);
     await page.getByTestId('research-depth-method').click();
-    await node('method', 'Optimizer').click();
-    await node('method', 'Activation').click({ modifiers: ['Shift'] });
+    // (Dispatched: with what is in progress unfolded, a node may sit under the floating box.)
+    await node('method', 'Optimizer').dispatchEvent('click');
+    await node('method', 'Activation').dispatchEvent('click', { shiftKey: true });
     // Across aspects: the research's own lead (none yet: the first message starts it).
     await expect.poll(() => page.getByTestId('research-to').innerText()).toMatch(/To: a new research lead/);
     expect(await page.getByTestId('composer-about').innerText()).toMatch(/Optimizer and 1 more/);
