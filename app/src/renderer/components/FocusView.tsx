@@ -19,7 +19,6 @@ import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
 import { ConfirmDialog, ForkDialog } from './Dialogs';
 import { RemoteControlButton } from './RemoteControl';
-import { ChangesPanel } from './Changes';
 import { BtwPanel } from './Btw';
 import { SidePanel } from './SidePanel';
 import { SessionMap, SessionMiniMap } from './SessionMap';
@@ -196,16 +195,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // would leave too narrow a column; then nothing (nothing floats over the messages).
   const MINI_ROOM = 48;
   const miniFits = !mapBeside && hasMap && threadW - MINI_ROOM - 32 >= 520;
-  const [showChanges, setShowChangesState] = useState(() => localStorage.getItem('amw.showChanges') === '1');
-  const setShowChanges = (on: boolean) => {
-    localStorage.setItem('amw.showChanges', on ? '1' : '0');
-    setShowChangesState(on);
-  };
-  const [follow, setFollowState] = useState(() => localStorage.getItem('amw.follow') === '1');
-  const setFollow = (on: boolean) => {
-    localStorage.setItem('amw.follow', on ? '1' : '0');
-    setFollowState(on);
-  };
   // A file preview takes the Memory column while open; closing it brings Memory back if it was on.
   // Kept per agent: back on this agent, its file is shown again. `nonce` marks each request, so
   // asking for the file already shown jumps to the line and flashes instead of reloading it.
@@ -254,17 +243,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // Too narrow for both (the conversation keeps 400px, a side panel 300px): the panel covers it.
   const narrow = bodyW > 0 && bodyW < PREVIEW_MIN + CONVERSATION_MIN;
   // Which panel the side column shows: one at a time, the preview first.
-  const sideKind: 'preview' | 'map' | 'btw' | 'changes' | 'memory' | null = preview
-    ? 'preview'
-    : showMap && hasMap
-      ? 'map'
-      : showBtw && btw.length
-        ? 'btw'
-        : showChanges
-          ? 'changes'
-          : showMemory
-            ? 'memory'
-            : null;
+  const sideKind: 'preview' | 'map' | 'btw' | 'memory' | null = preview ? 'preview' : showMap && hasMap ? 'map' : showBtw && btw.length ? 'btw' : showMemory ? 'memory' : null;
   useEffect(() => {
     setPreviewMax(false);
   }, [sideKind]);
@@ -287,22 +266,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // "Open in default app" only for files on this Mac.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
-  // Follow: a change the agent makes after this view opened shows in the preview, as its diff.
-  const seenChange = useRef<string | null>(null);
-  const latest = changes.which === 'current' ? changes.files.at(-1) : undefined;
-  useEffect(() => {
-    seenChange.current = null;
-  }, [task.taskId]);
-  useEffect(() => {
-    const id = latest?.lastItemId ?? '';
-    if (seenChange.current === null) {
-      seenChange.current = id;
-      return;
-    }
-    if (!follow || !latest || id === seenChange.current) return;
-    seenChange.current = id;
-    setPreview(latest.path, { line: latest.line, diff: true });
-  }, [latest?.lastItemId, follow]);
+  // A file previewed while it has changes in the latest turn can show them (File / Changes).
   const previewDiffs = preview ? changes.files.find((f) => f.path === preview.path || resolvePosix(task.cwd, f.path) === resolvePosix(task.cwd, preview.path))?.diffs : undefined;
   /** The frame every side panel shares: one width, maximize (unless it already covers), close. */
   const frame = (onClose: () => void) => ({ width: shownWidth, maximized: covering, onToggleMax: narrow ? undefined : () => setPreviewMax(!previewMax), onClose });
@@ -357,8 +321,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
         }}
         onBring={(text) => thenConversation(() => setInject((cur) => ({ text, n: cur.n + 1 })))}
       />
-    ) : sideKind === 'changes' ? (
-      <ChangesPanel frame={frame(() => setShowChanges(false))} task={task} changes={changes} follow={follow} onFollow={setFollow} onOpen={(path, line) => setPreview(path, { line, diff: true })} />
     ) : sideKind === 'memory' ? (
       <AgentMemoryPanel snapshot={snapshot} task={task} frame={frame(() => setShowMemory(false))} />
     ) : null;
@@ -381,12 +343,11 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <MemoryChip
                 snapshot={snapshot}
                 task={task}
-                open={showMemory && !preview && !showChanges && !showBtw}
+                open={showMemory && !preview && !showBtw}
                 onToggle={() => {
-                  const on = preview || showChanges || showBtw ? true : !showMemory;
+                  const on = preview || showBtw ? true : !showMemory;
                   setShowMemory(on);
                   setShowBtw(false);
-                  if (on) setShowChanges(false);
                   setPreview(null);
                 }}
               />
@@ -413,7 +374,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
           </div>
           <div className="focus-actions">
-            {/* Grouped by use: running it, looking at what it did, its session, putting it away (remove last). */}
+            {/* Grouped by use: running it, opening its folder, its session, putting it away (remove last). */}
             {/* Permissions: a menu with its mode's name; in a narrow agent column the same menu behind a shield icon. */}
             {isMainAgent(task) ? null : (
               <span className="perm" data-tip={t('Permissions')}>
@@ -455,25 +416,6 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               </button>
             )}
             <span className="actions-gap" aria-hidden />
-            {/* The files changed in the latest turn (a count while there are some). */}
-            <button
-              className={`btn btn-icon btn-badged${showChanges && !preview && !showBtw ? ' btn-pressed' : ''}`}
-              data-tip={t('Changes')}
-              aria-label={t('Changed this turn')}
-              aria-pressed={showChanges && !preview && !showBtw}
-              data-testid="show-changes"
-              onClick={() => {
-                const on = preview || showBtw ? true : !showChanges;
-                setShowChanges(on);
-                setShowBtw(false);
-                setShowMap(false);
-                if (on) setShowMemory(false);
-                setPreview(null);
-              }}
-            >
-              <Icon name="diff" />
-              {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
-            </button>
             {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
             {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
             <span className="actions-gap" aria-hidden />

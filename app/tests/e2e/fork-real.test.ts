@@ -57,7 +57,6 @@ describe.runIf(enabled)('fork a real Claude Code conversation', () => {
     await page.locator(`[data-testid="agent-card"][data-alias="${a.alias}"]`).getByRole('button', { name: 'Open' }).click();
     await page.getByTestId('fork-task').click();
     await page.getByTestId('fork-points').getByText(/PLUM-9/).click();
-    await page.getByTestId('fork-instruction').fill('What is the codeword? Reply with only the codeword.');
     await page.screenshot({ path: join(shots, 'fork-01-dialog.png') });
     await page.getByTestId('fork-confirm').click();
 
@@ -65,6 +64,8 @@ describe.runIf(enabled)('fork a real Claude Code conversation', () => {
       .poll(async () => (await snap()).tasks.find((t) => t.forkedFrom?.taskId === a.taskId), { timeout: 30_000 })
       .toBeTruthy()
       .then(async () => (await snap()).tasks.find((t) => t.forkedFrom?.taskId === a.taskId)!);
+    // The message it was forked back before waits in its reply box; this test asks something else instead.
+    await invoke(page, 'task:send', { taskId: fork.taskId, text: 'What is the codeword? Reply with only the codeword.', via: 'text' });
     expect(fork.cwd).not.toBe(a.cwd);
     await settled(fork.taskId);
     expect(await lastReply(fork.taskId)).toMatch(/KIWI-3/);
