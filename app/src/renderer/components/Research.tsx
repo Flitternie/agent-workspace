@@ -853,7 +853,7 @@ function ViewBar({ ctx, level, viewKey: key, text, own }: { ctx: Ctx; level: Vie
         }}
         data-testid="research-view-pick"
       >
-        {at ? null : <option value="">{own ? t('Custom (written for it)') : t('Template')}</option>}
+        {at ? null : <option value="">{own ? t('Its own view') : t('Template')}</option>}
         {list.map((v) => (
           <option key={v.id} value={v.id}>
             {v.name[lang]}

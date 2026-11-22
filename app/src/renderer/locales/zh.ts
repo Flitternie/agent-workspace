@@ -1226,7 +1226,7 @@ export const zh: Record<string, string> = {
   'e.g. Run it again to confirm': '比如：再跑一次确认',
   'Best': '最好',
   'What this panel shows is a view an agent can rewrite: ask below for what you want to see.': '这里显示的是一个可以由 agent 重写的视图：想看什么，在下方说。',
-  'Custom (written for it)': '自定义（为它写的）',
+  'Its own view': '专属视图',
   'Template': '模板',
   'Panel view': '视图',
   'New': '新建',

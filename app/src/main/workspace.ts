@@ -612,7 +612,9 @@ export class Workspace {
         return now.length > 0 && now.every((e) => done(e.status)) && childrenOf(before, m.id).some((e) => e.status === 'running');
       });
       const notes = whole.map((m) => (zh ? `「${m.title}」这一批 ${childrenOf(after, m.id).length} 个实验都有结果了。可以用 research_notes 更新「${aspect.title}」的笔记。` : `All ${childrenOf(after, m.id).length} experiments of "${m.title}" have their results. You may want to update the notes for "${aspect.title}" (research_notes).`));
-      tell(aspect.taskId, [`${zh ? `「${aspect.title}」里有实验出结果了：` : `Results came in under "${aspect.title}":`}`, ...lines, zh ? '据此决定下一步（再试什么、是否已有结论），并保持这个方面和对应方法的一句话结论是最新的（research_update）。' : 'Decide what follows (what to try next, whether there is a conclusion yet), and keep this aspect’s and the method’s takeaways current (research_update).', ...notes].join('\n'));
+      // To the aspect's agent; with none (the lead runs this aspect itself), to the lead.
+      const to = aspect.taskId && this.findTask(aspect.taskId) ? aspect.taskId : after.leadTaskId;
+      tell(to, [`${zh ? `「${aspect.title}」里有实验出结果了：` : `Results came in under "${aspect.title}":`}`, ...lines, zh ? '据此决定下一步（再试什么、是否已有结论），并保持这个方面和对应方法的一句话结论是最新的（research_update）。' : 'Decide what follows (what to try next, whether there is a conclusion yet), and keep this aspect’s and the method’s takeaways current (research_update).', ...notes].join('\n'));
     }
     for (const a of after.nodes.filter((n) => n.type === 'aspect' && n.takeaway)) {
       if (before.nodes.find((n) => n.id === a.id)?.takeaway === a.takeaway) continue;

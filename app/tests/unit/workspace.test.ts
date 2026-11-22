@@ -373,6 +373,23 @@ describe('a research’s agents work through the research', () => {
     await idle(aspect.taskId);
     expect(await as({ kind: 'agent', taskId: lead.taskId }).research_tell.run({ to: node('Dedup').id, message: 'Pause this.' })).toBe(`Told ${aspect.alias}.`);
     await expect(data.research_tell.run({ to: node('Data').id, message: 'x' })).rejects.toThrow(/That is you/);
+    // An aspect the lead runs itself (no agent of its own): its results reach the lead.
+    await main.research_add.run({ type: 'aspect', title: 'Solo' });
+    await main.research_add.run({ type: 'method', parent_id: node('Solo').id, title: 'Alone' });
+    await as({ kind: 'agent', taskId: lead.taskId }).research_try.run({ method_id: node('Alone').id, variants: [{ title: 'a1' }] });
+    await idle(node('a1').taskId!);
+    await idle(lead.taskId);
+    const leadNow = said(lead.taskId).length;
+    await as({ kind: 'agent', taskId: node('a1').taskId! }).research_record.run({ works: true, takeaway: 'Fine alone' });
+    await until(() => said(lead.taskId).length > leadNow);
+    expect(said(lead.taskId).at(-1)).toMatch(/Results came in under "Solo"[\s\S]*Fine alone/);
+    await idle(lead.taskId);
+    // The lead hands an aspect's work to its own agent: an aspect without one gets it, started with the message.
+    await main.research_add.run({ type: 'aspect', title: 'Model' });
+    const r = await as({ kind: 'agent', taskId: lead.taskId }).research_tell.run({ to: node('Model').id, message: 'Try two optimizers.' });
+    expect(r).toMatch(/Started .* as the agent of "Model"/);
+    expect(said(node('Model').taskId!)[0]).toMatch(/You own the "Model" aspect[\s\S]*\[From .*\] Try two optimizers\./);
+    await expect(data.research_tell.run({ to: (await main.research_add.run({ type: 'aspect', title: 'Infra' }), node('Infra').id), message: 'x' })).rejects.toThrow(/lead’s/);
   });
 });
 

@@ -137,7 +137,7 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
   const m = aspect?.metric;
   const how = m
     ? L(`Validation: ${m.name} (${m.higherIsBetter ? 'higher is better' : 'lower is better'})${m.baseline != null ? `, starting at ${formatValue(m, m.baseline)}` : ''}.`, `验证方式：${m.name}（${m.higherIsBetter ? '越高越好' : '越低越好'}）${m.baseline != null ? `，起点 ${formatValue(m, m.baseline)}` : ''}。`)
-    : L('Validation: judged by the user (works / does not work).', '验证方式：由用户判断（有效 / 无效）。');
+    : L('Validation: by judgement, works or does not work.', '验证方式：凭判断，有效或无效。');
   const parts =
     node.type === 'aspect'
       ? [
@@ -158,6 +158,9 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
           how,
           aspect && notes?.aspects[aspect.id] ? L(`What is known in this aspect so far (its notes):\n${excerpt(notes.aspects[aspect.id].text)}`, `这个方面目前已知的情况（它的笔记）：\n${excerpt(notes.aspects[aspect.id].text)}`) : '',
           notes?.summary ? L(`The research so far (its summary):\n${excerpt(notes.summary.text, 1200)}`, `整项研究目前的情况（总结）：\n${excerpt(notes.summary.text, 1200)}`) : '',
+          doc.policy?.mode === 'collaborative'
+            ? ''
+            : L('Judge the result yourself (against the start, or by what you saw when there is no metric) and say why in the finding; do not ask the user to judge it.', '结果由你自己判断（和起点比；没有指标时按你看到的情况），在发现里写明理由；不要让用户来判断。'),
           L(
             `When done, call research_record (mcp__research__research_record) with the result${m ? ` (${m.name})` : ' (works or not)'}, a one-line takeaway (what it comes to) and one finding worth keeping: that is how your aspect’s agent and the user learn of it. If you find something along the way that others should know now, or need a decision, tell them with research_tell (to "lead" or a node’s id). Do not edit the files in .research/. Then reply in a line or two.`,
             `完成后调用 research_record（mcp__research__research_record）记录结果${m ? `（${m.name}）` : '（有效或无效）'}、一句话结论（takeaway）和一条值得留下的发现：所属方面的 agent 和用户就是这样得知结果的。中途发现别人现在就该知道的事，或需要别人拿主意，用 research_tell 告诉对方（发给 "lead" 或某个节点的 id）。不要直接改 .research/ 里的文件。然后用一两句话回复。`,
@@ -245,7 +248,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
   const nodeIn = (doc: ResearchDoc, id: unknown, type?: ResearchNode['type']): ResearchNode => {
     const n = doc.nodes.find((x) => x.id === String(id ?? ''));
     if (!n) throw new Error(`No node [${String(id)}]. research_overview lists the ids.`);
-    if (type && n.type !== type) throw new Error(`[${n.id}] is ${n.type === 'aspect' ? 'an aspect' : `a ${n.type}`}, not ${type === 'aspect' ? 'an aspect' : `a ${type}`}.`);
+    if (type && n.type !== type) throw new Error(`[${n.id}] is ${n.type === 'aspect' ? 'an aspect' : `a ${n.type}`}, not ${type === 'aspect' || type === 'experiment' ? `an ${type}` : `a ${type}`}.`);
     return n;
   };
   /** The caller's own node, if it is one of the research's agents. */
@@ -304,7 +307,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           const others = (a.other_metrics as Array<{ name: string; higher_is_better?: boolean }> | undefined)?.map((x) => ({ name: x.name, higherIsBetter: x.higher_is_better !== false }));
           const r = addNode(doc, { type: 'aspect', parent: null, title: String(a.title), status: 'running', ...(a.metric ? { metric: { name: String(a.metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}), ...(typeof a.noise === 'number' ? { noise: a.noise } : {}) } } : {}), ...(others?.length ? { metrics: others } : {}) });
           save(projectId, r.doc);
-          return `Added aspect [${r.node.id}] "${r.node.title}". Its agent starts when the user first talks to it on the research page.`;
+          return `Added aspect [${r.node.id}] "${r.node.title}". Its agent starts with the first thing told to it (research_tell, or the user on the research page).`;
         }
         const aspect = a.parent_id ? nodeIn(doc, a.parent_id, 'aspect') : me(doc)?.type === 'aspect' ? me(doc)! : undefined;
         if (!aspect) throw new Error('Give parent_id: the aspect the method belongs to.');
@@ -421,7 +424,10 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!full(doc)) throw new Error('Combining across aspects is the research lead’s (validated end to end).');
           where = childrenOf(next, null).find((x) => x.combos);
           if (!where) {
-            const r = addNode(next, { type: 'aspect', parent: null, title: host.language() === 'zh' ? '跨方面组合' : 'Across aspects', status: 'running', combos: true, ...(doc.endMetric ? { metric: doc.endMetric } : {}) });
+            // Validated end to end: on the research's end metric, else on the metric the combined aspects share.
+            const shared = aspects.map((id) => doc.nodes.find((n) => n.id === id)?.metric);
+            const metric = doc.endMetric ?? (shared.every((m) => m && m.name === shared[0]?.name && m.higherIsBetter === shared[0]?.higherIsBetter) ? shared[0] : undefined);
+            const r = addNode(next, { type: 'aspect', parent: null, title: host.language() === 'zh' ? '跨方面组合' : 'Across aspects', status: 'running', combos: true, ...(metric ? { metric } : {}) });
             next = r.doc;
             where = r.node;
           }
@@ -484,14 +490,23 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     },
     {
       name: 'research_tell',
-      description: 'Tells another agent of this research something, as a message it reads at its next step: the lead ("lead"), or the agent of a node (an aspect’s agent by the aspect’s or one of its methods’ id; an experiment’s by the experiment’s id). Use it to pass on what another part of the research should know (a finding that changes its plan, a result it waits for), to ask it something, or to redirect it. Results recorded with research_record reach the aspect’s agent by themselves.',
+      description: 'Tells another agent of this research something, as a message it reads at its next step: the lead ("lead"), or the agent of a node (an aspect’s agent by the aspect’s or one of its methods’ id; an experiment’s by the experiment’s id). An aspect with no agent yet gets one, started with this message: that is how the lead hands an aspect’s work to its own agent. Use it to pass on what another part of the research should know (a finding that changes its plan, a result it waits for), to ask it something, or to redirect it. Results recorded with research_record reach the aspect’s agent by themselves.',
       schema: z.object({ ...projectArg, to: z.string().describe('"lead", or a node id.'), message: z.string().min(1).max(8000) }),
       run: async (a) => {
-        const { doc } = await load(a.project);
+        const { projectId, doc } = await load(a.project);
         const to = String(a.to);
         const node = to === 'lead' ? undefined : nodeIn(doc, to);
         const taskId = !node ? doc.leadTaskId : node.type === 'method' ? aspectOf(doc, node)?.taskId : node.taskId;
-        if (!taskId || !host.findTaskById(taskId)) throw new Error(node ? `"${node.title}" has no agent yet.` : 'This research has no lead yet.');
+        if (!taskId || !host.findTaskById(taskId)) {
+          // An aspect (or a method's aspect) without its agent: started now, briefed, with this message.
+          const aspect = node && (node.type === 'aspect' ? node : node.type === 'method' ? aspectOf(doc, node) : undefined);
+          if (!aspect || aspect.combos) throw new Error(node ? `"${node.title}" has no agent (an experiment’s agent starts with research_try).` : 'This research has no lead yet.');
+          if (!full(doc)) throw new Error('Starting an aspect’s agent is the lead’s.');
+          const from = caller.kind === 'agent' ? host.findTaskById(caller.taskId)?.alias : undefined;
+          const zh = host.language() === 'zh';
+          const t = await host.researchStartAgent(projectId, aspect.id, { isolate: false, message: `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${String(a.message)}` });
+          return `Started ${t.alias} as the agent of "${aspect.title}", with your message.`;
+        }
         if (caller.kind === 'agent' && taskId === caller.taskId) throw new Error('That is you.');
         const alias = await host.researchTell(caller.kind === 'agent' ? caller.taskId : undefined, taskId, String(a.message));
         return `Told ${alias}.`;
