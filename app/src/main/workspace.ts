@@ -667,7 +667,9 @@ export class Workspace {
   }
 
   /** The provider a research starts agents with: mock agents in the demo or a workspace with nothing else; else the first signed-in CLI. */
-  private researchProvider(): AgentProvider {
+  private async researchProvider(): Promise<AgentProvider> {
+    // Right after launch the CLIs may not be checked yet: checked now rather than refused.
+    if (!this.capabilities.length) await this.refreshCapabilities({ localOnly: true });
     const onlyMock = Object.keys(this.opts.adapters).every((k) => k === 'mock');
     const order: AgentProvider[] = this.opts.demo || onlyMock ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
     const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
@@ -708,7 +710,7 @@ export class Workspace {
     const doc = this.researchGet(projectId);
     const node = doc?.nodes.find((n) => n.id === nodeId);
     if (!doc || !node) throw new Error('That node is not in the research.');
-    const provider = this.researchProvider();
+    const provider = await this.researchProvider();
     const aspect = node.type === 'aspect' ? node : doc.nodes.find((n) => n.id === doc.nodes.find((m) => m.id === node.parent)?.parent);
     const zh = this.language() === 'zh';
     const task = await this.createTask({
@@ -732,14 +734,15 @@ export class Workspace {
     const doc = this.researchGet(projectId);
     if (!doc) throw new Error('This project has no research.');
     const zh = this.language() === 'zh';
+    const leadProvider = await this.researchProvider();
     const task = await this.createTask({
       projectId: parseResearchId(projectId).projectId,
-      provider: this.researchProvider(),
+      provider: leadProvider,
       title: zh ? `${doc.title}（研究负责人）` : `${doc.title} (research lead)`,
       instruction: `${this.researchWhere(projectId)}${leadBrief(doc, this.language(), message, this.researchNotes(projectId))}`,
       isolate: false,
       researchManager: true,
-      ...(this.researchProvider() === 'mock' ? { mockScript: 'work' } : {}),
+      ...(leadProvider === 'mock' ? { mockScript: 'work' } : {}),
     });
     this.researchSave(projectId, { ...this.researchGet(projectId)!, leadTaskId: task.taskId, updatedAt: new Date().toISOString() });
     return task;

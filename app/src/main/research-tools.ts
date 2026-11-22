@@ -358,7 +358,8 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         experiment_id: z.string().optional(),
         value: z.number().optional(),
         runs: z.array(z.number()).min(2).max(200).optional().describe('Each run’s value, when it was run several times (only if the user asked for repeats).'),
-        metrics: z.record(z.string(), z.number()).optional().describe('Values of the aspect’s other metrics, by name.'),
+        // (A list, not a record: a record's schema breaks the SDK's tool listing, and then no research tool is listed at all.)
+        metrics: z.array(z.object({ name: z.string().min(1).max(200), value: z.number() })).max(50).optional().describe('Values of the aspect’s other metrics.'),
         results: z
           .array(z.object({ metric: z.string().min(1).max(200), dataset: z.string().max(200).optional(), value: z.number() }))
           .max(500)
@@ -385,7 +386,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           next = updateNode(next, e.id, { value: mean, runs, status: judge(metric, mean, runs), resultAt: at });
         } else if (typeof a.value === 'number') next = updateNode(next, e.id, { value: a.value, runs: undefined, status: judge(metric, a.value), resultAt: at });
         else if (typeof a.works === 'boolean') next = updateNode(next, e.id, { status: a.works ? 'pass' : 'fail', resultAt: at });
-        if (a.metrics && Object.keys(a.metrics as object).length) next = updateNode(next, e.id, { values: { ...(next.nodes.find((n) => n.id === e.id)!.values ?? {}), ...(a.metrics as Record<string, number>) } });
+        if (Array.isArray(a.metrics) && a.metrics.length) next = updateNode(next, e.id, { values: { ...(next.nodes.find((n) => n.id === e.id)!.values ?? {}), ...Object.fromEntries((a.metrics as Array<{ name: string; value: number }>).map((m) => [String(m.name), Number(m.value)])) } });
         if (Array.isArray(a.results) && a.results.length) {
           const add = (a.results as ResearchResult[]).map((r) => ({ metric: String(r.metric), ...(r.dataset ? { dataset: String(r.dataset) } : {}), value: Number(r.value) }));
           const same = (x: ResearchResult, y: ResearchResult) => x.metric === y.metric && (x.dataset ?? '') === (y.dataset ?? '');
@@ -509,7 +510,15 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         'views {"goal","aspect","method","experiment"}: each level’s view for nodes with none of their own (markdown with blocks, as research_view takes).',
         'undo: true takes the last change back.',
       ].join(' '),
-      schema: z.object({ ...projectArg, set: z.record(z.string(), z.unknown()).optional(), undo: z.boolean().optional() }),
+      // (Each setting named, loosely typed: checked by research-ui's normalizeUi. No record: see research_record.)
+      schema: z.object({
+        ...projectArg,
+        set: z
+          .object({ labels: z.any(), plural: z.any(), statuses: z.any(), questions: z.any(), node: z.any(), header: z.any(), views: z.any() })
+          .partial()
+          .optional(),
+        undo: z.boolean().optional(),
+      }),
       run: async (a) => {
         const { projectId, doc } = await load(a.project);
         const file = parseUiFile(host.researchNotes(projectId).ui?.text);
