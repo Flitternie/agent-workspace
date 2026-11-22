@@ -4914,51 +4914,6 @@ button.subtask-row:hover {
   text-align: center;
   box-shadow: 0 0 0 2px var(--panel);
 }
-.changes-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.changes-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.changes-item:hover {
-  background: var(--hover);
-}
-.changes-name {
-  font-weight: 500;
-  white-space: nowrap;
-}
-.changes-dir {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-.follow-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--text-2);
-  white-space: nowrap;
-  cursor: pointer;
-}
 .seg {
   display: inline-flex;
   align-self: flex-start;
@@ -4988,12 +4943,6 @@ button.subtask-row:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-.changes-sub {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
 }
 
 /* The permission menu (see the narrow agent column rule for its icon form). */
@@ -6597,12 +6546,29 @@ button.subtask-row:hover {
 .map-title:hover {
   color: var(--hue) !important;
 }
-.map-caret,
-.map-caret:hover,
+.map-caret {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.map-caret:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 .map-caret.open .icon {
   transform: rotate(90deg);
 }
-.map-task:hover .map-meta {
+.map-meta {
   margin-top: 2px;
   font-size: 11px;
   color: var(--text-3);
@@ -7636,4 +7602,9 @@ button.subtask-row:hover {
 /* The New agent dialog's pointer to Continue a session, at its top. */
 .hint.new-continue {
   margin: -4px 0 12px;
+}
+
+/* Syncing from the CLI: its icon turns while it works. */
+.btn.btn-icon.busy .icon {
+  animation: spin 0.9s linear infinite;
 }

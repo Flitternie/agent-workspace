@@ -75,6 +75,7 @@ export interface Outputs {
   'task:retry': void;
   'task:resume': void;
   'task:warm': void;
+  'task:sync': void;
   'task:stop': void;
   'task:rename': void;
   'task:renameAgent': void;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentProvider, ForkPoint, NativeSessionInfo, Task, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
+import { setDraftText } from '../drafts';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
 import { t } from '../i18n';
@@ -378,7 +379,6 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   /** '' = the whole conversation as it is now. */
   const [upTo, setUpTo] = useState('');
   const [isolate, setIsolate] = useState(!!project?.isGitRepo);
-  const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -389,17 +389,15 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
         setError(errorText(e));
       });
   }, [task.taskId]);
-  const pick = (id: string) => {
-    const before = points?.find((p) => p.upToMessageId === upTo)?.prompt ?? '';
-    // Going back to a prompt offers it again, to edit and send; typed text is kept.
-    if (!instruction.trim() || instruction === before) setInstruction(points?.find((p) => p.upToMessageId === id)?.prompt ?? '');
-    setUpTo(id);
-  };
+  const pick = (id: string) => setUpTo(id);
   const fork = async () => {
     setBusy(true);
     setError('');
     try {
-      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo, instruction: instruction.trim() || undefined });
+      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo });
+      // Forked back to before a message: that message waits in the new agent's reply box, to edit and send.
+      const prompt = upTo ? points?.find((p) => p.upToMessageId === upTo)?.prompt : undefined;
+      if (prompt) setDraftText(t.taskId, prompt);
       onForked(t.taskId);
       onClose();
     } catch (e) {
@@ -432,10 +430,6 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
         {t('Run in its own git worktree')}{' '}
         {project?.isGitRepo ? t('(with {name}’s files as they are now, uncommitted changes included)', { name: task.alias }) : t('(not a git repo — will share the folder)')}
       </label>
-      <div className="field">
-        <label>{t('First instruction (optional)')}</label>
-        <textarea className="input" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={t('What should the new agent do?')} data-testid="fork-instruction" />
-      </div>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>
