@@ -168,6 +168,10 @@ describe('end-to-end demo script (mock agents)', () => {
     // Kept: it says which running agents get it with their next message (the project's three).
     await expect.poll(() => page.getByTestId('remember-saved').count()).toBe(1);
     expect(await page.getByTestId('remember-saved').innerText()).toMatch(/Alice|Bob|Charlie/);
+    // One row of buttons once kept: the drafting row (draft again, cancel, save) is gone.
+    expect(await page.locator('.remember-foot').count()).toBe(1);
+    expect(await page.getByTestId('remember-save').count()).toBe(0);
+    await page.screenshot({ path: join(shots, '05c-remember-saved.png') });
     await page.getByTestId('remember-done').click();
     await page.getByTestId('memory-chip').click();
     await expect.poll(() => page.getByTestId('agent-memory').innerText()).toContain('Use the shared Button component');
