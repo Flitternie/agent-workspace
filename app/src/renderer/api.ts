@@ -58,6 +58,7 @@ export interface Outputs {
   'research:message': { taskId: string; alias: string };
   'research:notes': ResearchNotes;
   'research:view': void;
+  'research:html': string;
   'research:dissolve': { kept: string };
   'research:fromTasks': { researchId: string };
   'research:addTasks': void;

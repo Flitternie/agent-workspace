@@ -105,6 +105,9 @@ function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
   ].join('\n');
 }
 
+/** The user reads the agents' replies: in the workspace's language. */
+const replyIn = (lang: 'en' | 'zh') => (lang === 'zh' ? '回复用户和其他 agent 时都用中文。' : '');
+
 export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string, notes?: ResearchNotes): string {
   const zh = lang === 'zh';
   const empty = !doc.nodes.length;
@@ -124,6 +127,7 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
     modeText(doc.policy?.mode, lang),
     empty ? (zh ? '现在树还是空的。' : 'The tree is empty so far.') : '',
     notes?.summary ? (zh ? `目前的总结：\n${excerpt(notes.summary.text)}` : `The summary so far:\n${excerpt(notes.summary.text)}`) : '',
+    replyIn(lang),
     message ?? '',
   ]
     .filter(Boolean)
@@ -166,7 +170,10 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
             `完成后调用 research_record（mcp__research__research_record）记录结果${m ? `（${m.name}）` : '（有效或无效）'}、一句话结论（takeaway）和一条值得留下的发现：所属方面的 agent 和用户就是这样得知结果的。中途发现别人现在就该知道的事，或需要别人拿主意，用 research_tell 告诉对方（发给 "lead" 或某个节点的 id）。不要直接改 .research/ 里的文件。然后用一两句话回复。`,
           ),
         ];
-  return [...parts, message ?? ''].filter(Boolean).join('\n\n');
+  const tail = node.type === 'experiment'
+    ? L('Others may record results while you work: before saying how yours compares, look at the latest (research_overview).', '你工作期间别人也可能记录结果：说自己的结果和别人比怎么样之前，先看最新的（research_overview）。')
+    : '';
+  return [...parts, tail, replyIn(lang), message ?? ''].filter(Boolean).join('\n\n');
 }
 
 /** The prefix that tells an agent which nodes a message is about. */
@@ -248,7 +255,11 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
   const nodeIn = (doc: ResearchDoc, id: unknown, type?: ResearchNode['type']): ResearchNode => {
     const n = doc.nodes.find((x) => x.id === String(id ?? ''));
     if (!n) throw new Error(`No node [${String(id)}]. research_overview lists the ids.`);
-    if (type && n.type !== type) throw new Error(`[${n.id}] is ${n.type === 'aspect' ? 'an aspect' : `a ${n.type}`}, not ${type === 'aspect' || type === 'experiment' ? `an ${type}` : `a ${type}`}.`);
+    if (type && n.type !== type) {
+      const kids = type === 'experiment' && n.type === 'method' ? doc.nodes.filter((x) => x.parent === n.id) : [];
+      const hint = kids.length ? ` Its experiments: ${kids.map((x) => `[${x.id}] "${x.title}"`).join(', ')}.` : type === 'experiment' && n.type === 'method' ? ' It has no experiments yet: start them with research_try.' : '';
+      throw new Error(`[${n.id}] is ${n.type === 'aspect' ? 'an aspect' : `a ${n.type}`}, not ${type === 'aspect' || type === 'experiment' ? `an ${type}` : `a ${type}`}.${hint}`);
+    }
     return n;
   };
   /** The caller's own node, if it is one of the research's agents. */
@@ -367,7 +378,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           .array(z.object({ metric: z.string().min(1).max(200), dataset: z.string().max(200).optional(), value: z.number() }))
           .max(500)
           .optional()
-          .describe('Numbers by metric and dataset (a benchmark, a split), for live tables: each replaces the one with the same metric and dataset; others are kept.'),
+          .describe('Numbers by metric and dataset, for live tables: each replaces the one with the same metric and dataset; others are kept. A dataset is what it was measured on (a benchmark, a split, a test set), never the variant’s own settings (those are its title and config); leave it out when there is only one.'),
         works: z.boolean().optional().describe('For an aspect judged by hand.'),
         no_result: z.boolean().optional().describe('It ran but produced no usable result.'),
         finding: z.string().max(2000).optional(),
@@ -461,7 +472,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       description: [
         'Writes what the research page shows for a node (its side panel): markdown, with live blocks in it. The user may ask for what they want to see (a table of the core metrics, a comparison, a chart); write it here, and rewrite it when they ask for something else. The whole view: it replaces the last one. Leave markdown out and give template to start from one.',
         'Blocks are fenced code blocks, ```research:<kind> with JSON options inside:',
-        'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":[...] or "*","cell":"best"|"latest"|"mean"|"sum","sum":["metrics added up, e.g. what was spent"],"lower":["metrics where lower is better"],"title":"..."}. Whatever this research tracks goes in as a metric, resources included (cost, GPU hours, tokens: record them as results, show them summed).',
+        'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":"*" (a column per dataset, new ones added) or a list (left out: one column per metric over all its results),"cell":"best"|"latest"|"mean"|"sum","sum":["metrics added up, e.g. what was spent"],"lower":["metrics where lower is better"],"title":"..."}. Whatever this research tracks goes in as a metric, resources included (cost, GPU hours, tokens: record them as results, show them summed).',
         'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
         'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated; it is styled like the page: plain tables and text look like the rest).',
         'Results for tables are recorded with research_record (results: metric, dataset, value).',

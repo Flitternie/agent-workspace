@@ -1113,7 +1113,7 @@ function LiveTableBlock({ ctx, node, spec }: { ctx: Ctx; node?: ResearchNode; sp
               <th>{spec.rows === 'experiments' ? levelLabel('experiment') : spec.rows === 'aspects' ? levelLabel('aspect') : levelLabel('method')}</th>
               {tb.columns.map((c, j) => (
                 <th key={j} className="num">
-                  {grouped ? (c.dataset ?? '—') : `${c.metric}${c.lowerIsBetter ? ' ↓' : ''}`}
+                  {grouped ? (c.dataset ?? t('no dataset')) : `${c.metric}${c.lowerIsBetter ? ' ↓' : ''}`}
                 </th>
               ))}
             </tr>
@@ -1167,7 +1167,16 @@ svg{max-width:100%;height:auto}
 </style></head><body>${html}<script>
 new ResizeObserver(()=>parent.postMessage({amwHeight:document.documentElement.scrollHeight},'*')).observe(document.body);
 </script></body></html>`;
-  return <iframe ref={ref} className="rs-html" sandbox="allow-scripts" srcDoc={doc} style={{ height: h }} title="view" data-testid="research-html" />;
+  // Served from amw-preview:// (as HTML previews are): a srcdoc frame would inherit the app's CSP and run no script.
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    let live = true;
+    void call('research:html', { html: doc }).then((u) => live && setSrc(u)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [doc]);
+  return <iframe ref={ref} className="rs-html" sandbox="allow-scripts" src={src || 'about:blank'} style={{ height: h }} title="view" data-testid="research-html" />;
 }
 
 /** Change from the start as a percentage, positive when better. */

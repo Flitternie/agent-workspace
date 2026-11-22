@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
@@ -136,11 +136,11 @@ function servePreviews(): void {
   });
 }
 
-/** Keeps the latest few documents (one per refresh); older frames show "expired". */
-function addPreviewDoc(body: string | Uint8Array, type = 'text/html; charset=utf-8', csp: string | undefined = PREVIEW_CSP): string {
-  const key = randomUUID();
+/** Keeps the latest few documents (one per refresh); older frames show "expired". `key`: the same document keeps its address. */
+function addPreviewDoc(body: string | Uint8Array, type = 'text/html; charset=utf-8', csp: string | undefined = PREVIEW_CSP, key: string = randomUUID()): string {
+  previewDocs.delete(key);
   previewDocs.set(key, { body, type, csp });
-  for (const k of previewDocs.keys()) if (previewDocs.size > 8) previewDocs.delete(k);
+  for (const k of previewDocs.keys()) if (previewDocs.size > 40) previewDocs.delete(k);
   return `${PREVIEW_SCHEME}://doc/${key}`;
 }
 
@@ -161,6 +161,8 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'research:dissolve': (i: { researchId: string }) => workspace.researchDissolve(i.researchId),
   'research:fromTasks': (i: { projectId: string; taskIds: string[]; title?: string; dir?: string }) => workspace.researchFromTasks(i.projectId, i.taskIds, i.title, i.dir),
   'research:addTasks': (i: { researchId: string; taskIds: string[] }) => workspace.researchAddTasks(i.researchId, i.taskIds),
+  // A research view's HTML block: served like a preview (its own CSP; the iframe's sandbox has no same-origin), by its content.
+  'research:html': (i: { html: string }) => addPreviewDoc(i.html, undefined, undefined, `v-${createHash('sha256').update(i.html).digest('hex').slice(0, 32)}`),
   'research:view': (i: { researchId: string; key: string; text: string }) => workspace.researchSetView(i.researchId, i.key, i.text),
   'research:create': (i: { projectId: string; dir?: string; title: string; goal: string; sample: boolean }) => workspace.researchCreate(i.projectId, i.title, i.goal, i.sample, i.dir),
   'ssh:hosts': () => workspace.sshHosts(),

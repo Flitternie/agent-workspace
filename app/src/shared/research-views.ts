@@ -93,7 +93,7 @@ export interface TableSpec {
   under?: string;
   /** Metrics as columns, in order; "*" (default) for every one found. */
   metrics?: string[] | '*';
-  /** Datasets per metric; "*" (default) for every one found (a column each, new ones added as they come). */
+  /** Datasets per metric: "*" for every one found (a column each, new ones added as they come), or a list. Left out: one column per metric, over all its results. */
   datasets?: string[] | '*';
   /** A row's cell when several experiments have one: best (default), latest, mean, or sum (what was spent: cost, GPU hours). */
   cell?: 'best' | 'latest' | 'mean' | 'sum';
@@ -106,7 +106,8 @@ export interface TableSpec {
 
 export interface LiveTable {
   title?: string;
-  columns: Array<{ metric: string; dataset?: string; lowerIsBetter: boolean }>;
+  /** `all`: over every dataset (no split asked for). */
+  columns: Array<{ metric: string; dataset?: string; all?: boolean; lowerIsBetter: boolean }>;
   rows: Array<{ node: ResearchNode; cells: Array<number | undefined> }>;
   /** Per column, the row index of the best value. */
   best: Array<number | undefined>;
@@ -140,13 +141,13 @@ export function liveTable(doc: ResearchDoc, at: ResearchNode | undefined, spec: 
   const lowerOf = (metric: string) => spec.lower?.includes(metric) ?? doc.nodes.some((n) => n.type === 'aspect' && n.metric?.name === metric && !n.metric.higherIsBetter);
   for (const metric of metrics) {
     const ds = found.filter((c) => c.metric === metric).map((c) => c.dataset);
-    const wanted = Array.isArray(spec.datasets) ? spec.datasets : ds.length ? [...new Set(ds)] : [undefined];
-    for (const dataset of wanted) columns.push({ metric, ...(dataset ? { dataset } : {}), lowerIsBetter: lowerOf(metric) });
+    const wanted = Array.isArray(spec.datasets) ? spec.datasets : spec.datasets === '*' && ds.length ? [...new Set(ds)] : [undefined];
+    for (const dataset of wanted) columns.push({ metric, ...(dataset ? { dataset } : {}), ...(spec.datasets === undefined ? { all: true } : {}), lowerIsBetter: lowerOf(metric) });
   }
   const rows = rowNodes.map((node, i) => ({
     node,
     cells: columns.map((c) => {
-      const hits = per[i].filter((r) => r.metric === c.metric && (r.dataset ?? undefined) === (c.dataset ?? undefined));
+      const hits = per[i].filter((r) => r.metric === c.metric && (c.all || (r.dataset ?? undefined) === (c.dataset ?? undefined)));
       if (!hits.length) return undefined;
       if (spec.cell === 'latest') return [...hits].sort((a, b) => a.at.localeCompare(b.at)).at(-1)!.value;
       if (spec.cell === 'mean') return hits.reduce((s, h) => s + h.value, 0) / hits.length;

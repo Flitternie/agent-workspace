@@ -62,6 +62,15 @@ describe('research page (demo)', () => {
     await expect.poll(() => page.getByTestId('research-live-table').count()).toBe(1);
     expect(await page.getByTestId('research-live-table').innerText()).toMatch(/Method[\s\S]*quality/);
     expect((await invoke<{ views?: Record<string, { text: string }> }>(page, 'research:notes', { researchId: projectId })).views?.goal.text).toMatch(/research:table/);
+    // An agent's own HTML runs its script (served on its own, not as a srcdoc under the app's CSP).
+    await invoke(page, 'research:view', { researchId: projectId, key: 'goal', text: '```html 120\n<div id="out">waiting</div><script>document.getElementById("out").textContent = "drawn by script"</script>\n```' });
+    await expect.poll(() => page.getByTestId('research-html').count()).toBe(1);
+    await expect
+      .poll(async () => {
+        const f = page.frames().find((x) => x.url().startsWith('amw-preview://'));
+        return f ? f.evaluate(() => document.getElementById('out')?.textContent ?? '').catch(() => '') : '';
+      })
+      .toBe('drawn by script');
     await page.getByTestId('research-view-pick').selectOption('overview');
     await expect.poll(() => page.getByTestId('research-live-table').count()).toBe(0);
     // Maximized, the panel takes the graph's place; Esc puts it back at the side (still on the research page).

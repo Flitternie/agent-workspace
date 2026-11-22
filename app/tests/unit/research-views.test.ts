@@ -28,7 +28,7 @@ describe('research views', () => {
     const fgw = add('method', a.id, 'fgw');
     add('experiment', fgw.id, 'fgw run', { results: [{ metric: 'auc12', dataset: 'AB', value: 0.82 }] });
     add('method', a.id, 'llm judge'); // not tried: no row
-    const spec = { metrics: ['auc12', 'E1/E2'], lower: ['E1/E2'] };
+    const spec = { metrics: ['auc12', 'E1/E2'], datasets: '*' as const, lower: ['E1/E2'] };
     let tb = liveTable(doc, a, spec);
     expect(tb.columns.map((c) => `${c.metric}@${c.dataset}`)).toEqual(['auc12@AB', 'E1/E2@AB']);
     expect(tb.rows.map((r) => [r.node.title, ...r.cells])).toEqual([
@@ -45,6 +45,10 @@ describe('research views', () => {
     expect(tb.columns.map((c) => `${c.metric}@${c.dataset}`)).toEqual(['auc12@AB', 'auc12@ITBench', 'E1/E2@AB']);
     expect(tb.rows.map((r) => r.node.title)).toEqual(['ncd', 'fgw', 'bi-encoder']);
     expect(tb.best).toEqual([0, 2, 0]);
+    // No split asked for: one column per metric, over every dataset.
+    const flat = liveTable(doc, a, { metrics: ['auc12'] });
+    expect(flat.columns).toEqual([{ metric: 'auc12', all: true, lowerIsBetter: false }]);
+    expect(flat.rows.map((r) => [r.node.title, ...r.cells])).toEqual([['ncd', 0.89], ['fgw', 0.82], ['bi-encoder', 0.86]]);
     // What a research tracks is its own: resources are metrics like any other, added up per row.
     doc = updateNode(doc, e1.id, { results: [...(doc.nodes.find((n) => n.id === e1.id)!.results ?? []), { metric: 'cost $', value: 3 }] });
     add('experiment', ncd.id, 'ncd rerun', { results: [{ metric: 'cost $', value: 2.5 }] });
