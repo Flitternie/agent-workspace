@@ -413,6 +413,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             </div>
           </div>
           <div className="focus-actions">
+            {/* Grouped by use: running it, looking at what it did, its session, putting it away (remove last). */}
             {/* Permissions: a menu with its mode's name; in a narrow agent column the same menu behind a shield icon. */}
             {isMainAgent(task) ? null : (
               <span className="perm" data-tip={t('Permissions')}>
@@ -453,22 +454,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="power" />
               </button>
             )}
-            {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
-            {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
-            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
-            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
-            {canFork ? (
-              <button
-                className="btn btn-icon"
-                aria-label={t('Fork')}
-                data-testid="fork-task"
-                disabled={task.status === 'running' || task.status === 'starting'}
-                onClick={() => setForking(true)}
-                data-tip={task.status === 'running' || task.status === 'starting' ? t('Fork after this turn') : t('Fork')}
-              >
-                <Icon name="branch" />
-              </button>
-            ) : null}
+            <span className="actions-gap" aria-hidden />
             {/* The files changed in the latest turn (a count while there are some). */}
             <button
               className={`btn btn-icon btn-badged${showChanges && !preview && !showBtw ? ' btn-pressed' : ''}`}
@@ -488,12 +474,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
               <Icon name="diff" />
               {changes.which === 'current' && changes.files.length ? <span className="badge" data-testid="changes-count">{changes.files.length}</span> : null}
             </button>
-            {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
-            {isMainAgent(task) ? (
-              <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
-                <Icon name="plus" />
-              </button>
-            ) : null}
+            {/* The agent's folder (its worktree) in the user's own editor, Git app, terminal or Finder. */}
+            {!task.host ? <OpenInApp taskId={task.taskId} iconOnly /> : null}
+            <span className="actions-gap" aria-hidden />
             {/* Sync: after going on with this session elsewhere (the terminal, a desktop or editor app), pick that up here. */}
             {!isMainAgent(task) && session?.nativeSessionId ? (
               <button
@@ -510,6 +493,27 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="refresh" />
               </button>
             ) : null}
+            {canFork ? (
+              <button
+                className="btn btn-icon"
+                aria-label={t('Fork')}
+                data-testid="fork-task"
+                disabled={task.status === 'running' || task.status === 'starting'}
+                onClick={() => setForking(true)}
+                data-tip={task.status === 'running' || task.status === 'starting' ? t('Fork after this turn') : t('Fork')}
+              >
+                <Icon name="branch" />
+              </button>
+            ) : null}
+            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
+            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
+            {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
+            {isMainAgent(task) ? (
+              <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
+                <Icon name="plus" />
+              </button>
+            ) : null}
+            <span className="actions-gap" aria-hidden />
             {/* Set aside: out of the Overview, folded into its team's idle row, until it works, asks or is messaged. */}
             {isMainAgent(task) ? null : (
               <button
