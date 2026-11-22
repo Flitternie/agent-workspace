@@ -302,6 +302,80 @@ describe('starting and ending a research from the sidebar', () => {
   });
 });
 
+describe('a research’s agents work through the research', () => {
+  it('get its tools; the lead and aspect agents go without hidden sub-agents and none edits .research/; results and takeaways travel up; agents tell each other', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const started: Array<{ title: string; tools: string[]; disallowed?: string[]; denyEdit?: string[] }> = [];
+    class Spy extends MockAdapter {
+      override createSession(args: Parameters<MockAdapter['createSession']>[0], onEvent: Parameters<MockAdapter['createSession']>[1]) {
+        started.push({ title: args.title, tools: (args.extraTools ?? []).map((t) => t.name), disallowed: args.disallowedTools, denyEdit: args.denyEdit });
+        return super.createSession(args, onEvent);
+      }
+    }
+    const ws = new Workspace({ dataDir, adapters: { mock: new Spy(join(dataDir, 'mock-sessions'), DELAY) } });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    await ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const as = (caller: { kind: 'main' } | { kind: 'agent'; taskId: string }) => Object.fromEntries(researchTools(ws, caller).map((t) => [t.name, t]));
+    const main = as({ kind: 'main' });
+    await main.research_add.run({ type: 'aspect', title: 'Data', metric: 'quality', higher_is_better: true, baseline: 70 });
+    const doc = () => ws.researchGet(p.projectId)!;
+    const node = (title: string) => doc().nodes.find((n) => n.title === title)!;
+    const said = (taskId: string) => ws.transcript(taskId).filter((i) => i.role === 'user').map((i) => i.text);
+    const idle = (taskId: string) => until(() => ws.snapshot().tasks.find((t) => t.taskId === taskId)!.status !== 'running');
+
+    // The lead and the aspect's agent: the research tools, no built-in sub-agents, .research/ read-only.
+    const lead = await ws.researchMessage(p.projectId, [], 'Lay it out.');
+    const aspect = await ws.researchMessage(p.projectId, [node('Data').id], 'What would you try?');
+    for (const title of ['Tuning (research lead)', 'Data (research)']) {
+      const s0 = started.find((x) => x.title === title)!;
+      expect(s0.tools).toEqual(expect.arrayContaining(['research_overview', 'research_try', 'research_record', 'research_tell']));
+      expect(s0.disallowed).toEqual(['Agent', 'Task']);
+      expect(s0.denyEdit).toEqual(['**/.research/**']);
+    }
+    expect(said(aspect.taskId)[0]).toMatch(/research_try[\s\S]*no built-in sub-agent tool[\s\S]*research_tell/);
+    await idle(lead.taskId);
+    await idle(aspect.taskId);
+
+    // Work handed out by the aspect's agent: an agent of the research (its own sub-agents kept), told to record and to tell.
+    const data = as({ kind: 'agent', taskId: aspect.taskId });
+    await data.research_add.run({ type: 'method', parent_id: node('Data').id, title: 'Dedup' });
+    await data.research_try.run({ method_id: node('Dedup').id, variants: [{ title: 'v1' }] });
+    const v1 = node('v1');
+    const exp = started.find((x) => x.title.endsWith('v1'))!;
+    expect(exp.tools).toContain('research_record');
+    expect(exp.disallowed).toBeUndefined();
+    expect(said(v1.taskId!)[0]).toMatch(/research_record[\s\S]*research_tell/);
+    await idle(v1.taskId!);
+    await idle(aspect.taskId);
+
+    // Its result reaches the aspect's agent by itself (not the experiment that recorded it).
+    const before = said(aspect.taskId).length;
+    await as({ kind: 'agent', taskId: v1.taskId! }).research_record.run({ value: 74, takeaway: 'Dedup helps' });
+    await until(() => said(aspect.taskId).length > before);
+    expect(said(aspect.taskId).at(-1)).toMatch(/Results came in under "Data"[\s\S]*Dedup \/ v1: pass · 74[\s\S]*Dedup helps/);
+    expect(said(v1.taskId!).some((x) => /Results came in/.test(x))).toBe(false);
+    await idle(aspect.taskId);
+
+    // The aspect's conclusion reaches the lead; its own change is not echoed to it.
+    const leadBefore = said(lead.taskId).length;
+    const aspectBefore = said(aspect.taskId).length;
+    await data.research_update.run({ node_id: node('Data').id, takeaway: 'Cleaning beats size' });
+    await until(() => said(lead.taskId).length > leadBefore);
+    expect(said(lead.taskId).at(-1)).toMatch(/takeaway of "Data" changed: Cleaning beats size/);
+    expect(said(aspect.taskId).length).toBe(aspectBefore);
+    await idle(lead.taskId);
+
+    // Told directly: an experiment's agent to the lead, the lead to an aspect's agent (by a method's id too).
+    expect(await as({ kind: 'agent', taskId: v1.taskId! }).research_tell.run({ to: 'lead', message: 'The eval set leaks.' })).toBe(`Told ${lead.alias}.`);
+    expect(said(lead.taskId).at(-1)).toMatch(new RegExp(`\\[From ${ws.snapshot().tasks.find((t) => t.taskId === v1.taskId)!.alias}\\] The eval set leaks\\.`));
+    await idle(aspect.taskId);
+    expect(await as({ kind: 'agent', taskId: lead.taskId }).research_tell.run({ to: node('Dedup').id, message: 'Pause this.' })).toBe(`Told ${aspect.alias}.`);
+    await expect(data.research_tell.run({ to: node('Data').id, message: 'x' })).rejects.toThrow(/That is you/);
+  });
+});
+
 describe('research managed by talking', () => {
   async function setup() {
     const ws = open();

@@ -55,7 +55,7 @@ import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundS
 import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
-import { childrenOf, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
+import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
 /** Words that clearly approve (zh / en). */
@@ -575,12 +575,49 @@ export class Workspace {
     return doc;
   }
 
-  researchSave(projectId: string, doc: ResearchDoc): ResearchDoc {
+  researchSave(projectId: string, doc: ResearchDoc, by?: string): ResearchDoc {
     const before = this.researchFiles.doc(projectId);
     this.researchFiles.saveDoc(projectId, doc);
     this.indexResearch(projectId, doc);
-    if (before) this.nudgeNotes(projectId, before, doc);
+    if (before) this.reportUp(before, doc, by);
     return doc;
+  }
+
+  /**
+   * What happens in one part of a research reaches the agent over it, by itself: an experiment's result goes
+   * to its aspect's agent; an aspect's changed takeaway goes to the lead. Never to the agent that made the change.
+   */
+  private reportUp(before: ResearchDoc, after: ResearchDoc, by?: string): void {
+    const zh = this.language() === 'zh';
+    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'unclear' || s === 'error';
+    const tell = (taskId: string | undefined, text: string) => {
+      if (!taskId || taskId === by || !this.findTask(taskId)) return;
+      void this.send(taskId, text, 'text').catch(() => {});
+    };
+    const byAspect = new Map<string, string[]>();
+    for (const e of after.nodes.filter((n) => n.type === 'experiment' && done(n.status))) {
+      const was = before.nodes.find((n) => n.id === e.id);
+      if (was && done(was.status) && was.value === e.value && was.takeaway === e.takeaway) continue;
+      const method = after.nodes.find((n) => n.id === e.parent);
+      const aspect = after.nodes.find((n) => n.id === method?.parent);
+      if (!aspect || !method) continue;
+      const result = [e.status, e.value != null ? formatValue(aspect.metric, e.value) : '', e.takeaway ?? e.findings?.at(-1)?.text ?? ''].filter(Boolean).join(' · ');
+      byAspect.set(aspect.id, [...(byAspect.get(aspect.id) ?? []), `[${e.id}] ${method.title} / ${e.title}: ${result}`]);
+    }
+    for (const [aspectId, lines] of byAspect) {
+      const aspect = after.nodes.find((n) => n.id === aspectId)!;
+      // A method whose experiments all have their results now (some were still running before): time for the notes, unless the policy says not to.
+      const whole = after.policy?.autoNotes === false ? [] : after.nodes.filter((m) => m.type === 'method' && m.parent === aspectId).filter((m) => {
+        const now = childrenOf(after, m.id);
+        return now.length > 0 && now.every((e) => done(e.status)) && childrenOf(before, m.id).some((e) => e.status === 'running');
+      });
+      const notes = whole.map((m) => (zh ? `「${m.title}」这一批 ${childrenOf(after, m.id).length} 个实验都有结果了。可以用 research_notes 更新「${aspect.title}」的笔记。` : `All ${childrenOf(after, m.id).length} experiments of "${m.title}" have their results. You may want to update the notes for "${aspect.title}" (research_notes).`));
+      tell(aspect.taskId, [`${zh ? `「${aspect.title}」里有实验出结果了：` : `Results came in under "${aspect.title}":`}`, ...lines, zh ? '据此决定下一步（再试什么、是否已有结论），并保持这个方面和对应方法的一句话结论是最新的（research_update）。' : 'Decide what follows (what to try next, whether there is a conclusion yet), and keep this aspect’s and the method’s takeaways current (research_update).', ...notes].join('\n'));
+    }
+    for (const a of after.nodes.filter((n) => n.type === 'aspect' && n.takeaway)) {
+      if (before.nodes.find((n) => n.id === a.id)?.takeaway === a.takeaway) continue;
+      tell(after.leadTaskId, zh ? `「${a.title}」的结论更新了：${a.takeaway}` : `The takeaway of "${a.title}" changed: ${a.takeaway}`);
+    }
   }
 
   // Notes: .research/summary.md (the lead's) and notes/<aspect>.md (each aspect's agent's).
@@ -612,26 +649,6 @@ export class Workspace {
     void this.send(lead.taskId, zh ? `「${aspect}」的笔记更新了。请用 research_overview 看各方面的笔记，再用 research_notes 把总结（scope "summary"）更新成现在的情况。` : `The notes for "${aspect}" changed. Read the aspects' notes (research_overview) and bring the summary up to date with research_notes (scope "summary").`, 'text').catch(() => {});
   }
 
-  /**
-   * A method whose experiments all have their results now (some were still running before): its
-   * aspect's agent is asked to bring the aspect's notes up to date, unless the research's policy says not to.
-   */
-  private nudgeNotes(projectId: string, before: ResearchDoc, after: ResearchDoc): void {
-    if (after.policy?.autoNotes === false) return;
-    const done = (s: string) => s === 'pass' || s === 'fail' || s === 'unclear' || s === 'error';
-    const zh = this.language() === 'zh';
-    for (const m of after.nodes.filter((n) => n.type === 'method')) {
-      const now = childrenOf(after, m.id);
-      const was = childrenOf(before, m.id);
-      if (!now.length || !now.every((e) => done(e.status))) continue;
-      if (!was.some((e) => e.status === 'running')) continue;
-      const aspect = after.nodes.find((n) => n.id === m.parent);
-      const agent = aspect?.taskId ? this.findTask(aspect.taskId) : undefined;
-      if (!aspect || !agent) continue;
-      void this.send(agent.taskId, zh ? `「${m.title}」这一批 ${now.length} 个实验都有结果了。可以用 research_notes 更新「${aspect.title}」的笔记。` : `All ${now.length} experiments of "${m.title}" have their results. You may want to update the notes for "${aspect.title}" (research_notes).`, 'text').catch(() => {});
-    }
-  }
-
   // ResearchHost: what the research tools need.
   researchList(): Array<{ id: string; projectId: string; project: string; dir?: string; title: string; taskIds: string[] }> {
     return this.researchSummaries().map((r) => ({ id: r.id, projectId: r.projectId, project: this.store.data.projects.find((p) => p.projectId === r.projectId)?.name ?? r.projectId, ...(r.dir ? { dir: r.dir } : {}), title: r.title, taskIds: r.taskIds }));
@@ -658,11 +675,31 @@ export class Workspace {
     return p;
   }
 
+  /** An agent's place in a research: its lead, an aspect's agent, an experiment's, or none. */
+  private researchRole(id: string, taskId: string): 'lead' | 'aspect' | 'experiment' | 'none' {
+    const doc = this.researchGet(id);
+    if (!doc) return 'none';
+    if (doc.leadTaskId === taskId) return 'lead';
+    const n = doc.nodes.find((x) => x.taskId === taskId);
+    return n ? (n.type === 'aspect' ? 'aspect' : 'experiment') : 'none';
+  }
+
+  /** One agent of a research tells another something (research_tell): delivered as a message, marked with who sent it. */
+  async researchTell(fromTaskId: string | undefined, toTaskId: string, text: string): Promise<string> {
+    const to = this.findTask(toTaskId);
+    if (!to) throw new Error('That agent is gone.');
+    const from = fromTaskId ? this.findTask(fromTaskId)?.alias : undefined;
+    const zh = this.language() === 'zh';
+    const r = await this.send(to.taskId, `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${text}`, 'text');
+    if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+    return to.alias;
+  }
+
   /** For a research kept in a folder of its project: which folder its agents work on. */
   private researchWhere(id: string): string {
     const { dir } = parseResearchId(id);
     if (!dir) return '';
-    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的（研究文件在 ${dir}/.research/）。\n\n` : `This research is about the folder ${dir}/ of the project (its files are in ${dir}/.research/).\n\n`;
+    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的。\n\n` : `This research is about the folder ${dir}/ of the project.\n\n`;
   }
 
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
@@ -680,6 +717,7 @@ export class Workspace {
       title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
       instruction: `${this.researchWhere(projectId)}${researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId))}`,
       isolate: opts.isolate,
+      ...(node.type === 'aspect' ? { researchManager: true } : {}),
       ...(provider === 'mock' ? { mockScript: 'work' } : {}),
     });
     // Linked on the freshest copy: the tree may have changed while the agent started.
@@ -700,6 +738,7 @@ export class Workspace {
       title: zh ? `${doc.title}（研究负责人）` : `${doc.title} (research lead)`,
       instruction: `${this.researchWhere(projectId)}${leadBrief(doc, this.language(), message, this.researchNotes(projectId))}`,
       isolate: false,
+      researchManager: true,
       ...(this.researchProvider() === 'mock' ? { mockScript: 'work' } : {}),
     });
     this.researchSave(projectId, { ...this.researchGet(projectId)!, leadTaskId: task.taskId, updatedAt: new Date().toISOString() });
@@ -1016,6 +1055,8 @@ export class Workspace {
     instruction?: string;
     isolate: boolean;
     mockScript?: string;
+    /** A research's lead or an aspect's agent (Task.researchManager). */
+    researchManager?: boolean;
     /** Images that go with the first instruction (the main agent passing on the user's). */
     images?: ImageRef[];
   }): Promise<Task> {
@@ -1053,6 +1094,7 @@ export class Workspace {
       label: !args.name?.trim() && title ? { title: args.title ?? '', instruction: args.instruction } : undefined,
       mockScript: args.mockScript,
     });
+    if (args.researchManager) task.researchManager = true;
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial', { images: args.images });
@@ -1482,6 +1524,13 @@ export class Workspace {
 
     const isMain = task === this.store.data.mainAgent;
     const skills = isMain ? undefined : await this.skillsFor(task);
+    // Its project's researches are known before it starts (a host's are listed first), so it gets their tools.
+    if (!isMain) await this.researchFiles.listed(task.projectId).catch(() => {});
+    const inResearch = !isMain && this.researchSummaries().some((r) => r.projectId === task.projectId);
+    // A research's lead and aspect agents hand work out through the research (research_try: agents the page shows
+    // and the user can talk to), so they go without the CLI's own hidden sub-agents.
+    // (Known from how it was started, or, for a conversation attached later, from its place in the tree.)
+    const manages = inResearch && (!!task.researchManager || this.researchSummaries().some((r) => r.projectId === task.projectId && ['lead', 'aspect'].includes(this.researchRole(r.id, task.taskId))));
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -1497,7 +1546,10 @@ export class Workspace {
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? [...workspaceTools(this), ...researchTools(this, { kind: 'main' })] : undefined,
         // In a project with a research, any agent may read the tree; what it may change is decided per call (its place in it).
-        extraTools: !isMain && this.researchSummaries().some((r) => r.projectId === task.projectId) ? researchTools(this, { kind: 'agent', taskId: task.taskId }) : undefined,
+        extraTools: inResearch ? researchTools(this, { kind: 'agent', taskId: task.taskId }) : undefined,
+        ...(manages ? { disallowedTools: ['Agent', 'Task'] } : {}),
+        // The tree, notes and views are changed through the research tools, never by editing the files.
+        ...(inResearch ? { denyEdit: ['**/.research/**'] } : {}),
         skills,
       },
       (event) => {

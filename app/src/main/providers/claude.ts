@@ -439,7 +439,10 @@ class ClaudeSession implements ProviderSession {
         // Load the user's own settings, CLAUDE.md and permission rules as the CLI would.
         settingSources: ['user', 'project', 'local'],
         // Plus: no reading the private folders (Read rules also keep Grep and Glob out of them).
-        ...(privateDeny.length ? { settings: { permissions: { deny: privateDeny.map((dir) => `Read(/${dir}/**)`) } } } : {}),
+        ...(privateDeny.length || this.args.denyEdit?.length
+          ? { settings: { permissions: { deny: [...privateDeny.map((dir) => `Read(/${dir}/**)`), ...(this.args.denyEdit ?? []).flatMap((g) => [`Edit(${g})`, `Write(${g})`])] } } }
+          : {}),
+        ...(this.args.disallowedTools?.length && !this.args.tools?.length ? { disallowedTools: this.args.disallowedTools } : {}),
         includePartialMessages: true,
         // The workspace skill library, as a local plugin (on a host: its copy there).
         ...(this.args.skills ? { plugins: [{ type: 'local' as const, path: this.args.skills.pluginDir }] } : {}),

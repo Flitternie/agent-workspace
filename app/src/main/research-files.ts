@@ -64,6 +64,12 @@ export class ResearchFiles {
     return out;
   }
 
+  /** Resolves once a project's researches are known (a host's: listed), so an agent starting now gets their tools. */
+  async listed(projectId: string): Promise<void> {
+    const p = this.realProject(projectId);
+    if (p.host && !this.remoteDirs.has(projectId)) await this.list(p);
+  }
+
   /** Lists again (a host's) on the next read: after a create. */
   forget(projectId: string): void {
     this.remoteDirs.delete(projectId);

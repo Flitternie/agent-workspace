@@ -84,6 +84,8 @@ export interface Task {
   memorySeen?: Record<string, { at: string; body: string }>;
   /** Mock-provider script name; ignored by native providers. */
   mockScript?: string;
+  /** Started as a research's lead or an aspect's agent: it hands work out through the research (no hidden sub-agents). */
+  researchManager?: boolean;
   /** Overrides settings.permissionMode for this agent. */
   permissionMode?: PermissionMode;
   /** The agent whose conversation this one was forked from (alias at the time). */

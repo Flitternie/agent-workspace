@@ -38,7 +38,10 @@ export interface ResearchHost {
   researchList(): Array<{ id: string; projectId: string; project: string; dir?: string; title: string; taskIds: string[] }>;
   allProjects(): Array<{ projectId: string; name: string }>;
   researchGet(id: string): ResearchDoc | null;
-  researchSave(id: string, doc: ResearchDoc): ResearchDoc;
+  /** `by`: the agent whose tool call it is (it is not told about its own change). */
+  researchSave(id: string, doc: ResearchDoc, by?: string): ResearchDoc;
+  /** One agent of the research tells another something; resolves to the receiver's name. */
+  researchTell(fromTaskId: string | undefined, toTaskId: string, text: string): Promise<string>;
   researchCreate(projectId: string, title: string, goal: string, sample: boolean, dir?: string): Promise<ResearchDoc>;
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
@@ -77,6 +80,31 @@ export function modeText(mode: ResearchMode | undefined, lang: 'en' | 'zh'): str
 const excerpt = (text: string | undefined, n = 1800) => (text ? (text.length > n ? `${text.slice(0, n)}\n…` : text).trim() : '');
 
 /** The research's lead: the user talks to it about the whole research, and lays the tree out with it step by step. */
+/**
+ * How a research's agents work, whatever the research: the tree is the shared state (changed only through
+ * the tools, as things happen), work is handed out as agents of the research, and agents tell each other.
+ */
+function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
+  const zh = lang === 'zh';
+  return [
+    zh
+      ? '几条固定的做法（工具名都以 mcp__research__ 开头）：'
+      : 'How it works here, always (the tools’ names start with mcp__research__):',
+    zh
+      ? '· 研究树是大家共享的状态，用户在页面上实时看它。只通过研究工具读写：看树用 research_overview，不要直接读或改 .research/ 里的文件。'
+      : '· The tree is everyone’s shared state, and the user watches it live. Read and change it only through the research tools: research_overview to see it; never read or edit the files in .research/ directly.',
+    zh
+      ? '· 边做边更新，不要攒到最后：要试一个新做法，先 research_add 把它加到树上；有了结果马上 research_record（带一句话结论）；结论变了就 research_update 改 takeaway。'
+      : '· Keep it current as you go, not at the end: before trying something new, put it on the tree (research_add); record a result as soon as there is one (research_record, with a one-line takeaway); when a conclusion changes, update its takeaway (research_update).',
+    zh
+      ? `· 要把工作分出去并行做，用 research_try${role === 'lead' ? '（或让对应方面的 agent 去做）' : ''}：每个变体是研究里的一个 agent，会出现在页面上，用户能看到、能和它对话。你没有内置的子 agent 工具，也不要用别的办法在后台偷偷分工。`
+      : `· To hand work out in parallel, use research_try${role === 'lead' ? ' (or have that aspect’s agent do it)' : ''}: each variant is an agent of the research, shown on the page, that the user can see and talk to. You have no built-in sub-agent tool; do not hand work out behind the page some other way.`,
+    zh
+      ? '· agent 之间用 research_tell 通信：把别的部分需要知道的事告诉它的 agent 或负责人（会改变对方计划的发现、对方在等的结果），需要对方做事也用它。实验记录的结果会自动送到所属方面的 agent。'
+      : '· Agents talk with research_tell: tell another part’s agent, or the lead, what it needs to know (a finding that changes its plan, a result it waits for), or ask it to do something. Results recorded by experiments reach their aspect’s agent by themselves.',
+  ].join('\n');
+}
+
 export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string, notes?: ResearchNotes): string {
   const zh = lang === 'zh';
   const empty = !doc.nodes.length;
@@ -85,6 +113,7 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
     zh
       ? '用户会和你一起把研究的结构一步步展开：有哪些方面会影响结果、每个方面怎么验证、各有哪些方法。用研究工具把谈定的东西落到树上（research_add、research_derive、research_evidence、research_update），用 research_settings 记下用户想要的研究方式。每个方面有自己的 agent，方面内的工作交给它们。研究总结（research_notes，scope "summary"）由你维护。用户也可能让你把已有的对话整理进来：先用 research_read 读，再 research_attach。'
       : 'The user lays the research out with you step by step: which aspects may move the result, how each is validated, which methods each has. Put what you agree on into the tree with the research tools (research_add, research_derive, research_evidence, research_update), and record how the user wants the research run with research_settings. Each aspect has its own agent; leave the work within an aspect to it. You keep the research summary (research_notes, scope "summary"). The user may also ask you to bring earlier conversations in: read them with research_read, then attach them with research_attach.',
+    rules('lead', lang),
     zh
       ? '树的粒度（用户没有别的要求时）：方面是研究的几个大的维度（比如数据、方法、评估，具体看这个研究本身），通常只有少数几个；同一类的东西放进同一个方面，不要每个子课题开一个方面。方法是一个方面里可以相互替代的做法。实验是一次具体的运行或检查；为某个方法做的前期分析和验证，是这个方法下面的实验，不单独成为方面。'
       : 'The tree’s grain (unless the user wants otherwise): aspects are the research’s few broad dimensions (for example data, method, evaluation, whatever this research’s own are); things of one kind go in one aspect, not an aspect per sub-study. Methods are the alternatives within an aspect. Experiments are single runs or checks; an early analysis or check done for a method is an experiment under that method, not an aspect of its own.',
@@ -118,6 +147,7 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
             'The research tools: research_overview shows the tree; research_add lists a method (as an idea, with its design); research_try starts variants of a method in parallel, one agent each in its own worktree; research_derive combines or mutates methods; research_record records results; research_update keeps one-line takeaways (what a method, and this aspect, comes to so far: the graph shows them on the nodes); research_notes keeps this aspect’s notes (markdown in the repository), which new agents here start from. How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
             '可用的研究工具：research_overview 查看研究树；research_add 加一个方法（先作为想法，附上设计）；research_try 对一个方法并行开几个变体，每个变体一个 agent、各自独立 worktree；research_derive 组合或变异方法；research_record 记录结果；research_update 维护一句话结论（一个方法、以及这个方面目前的结论，会显示在图的节点上）；research_notes 维护这个方面的笔记（存在仓库里的 markdown），这个方面新开的 agent 会从笔记开始。具体怎么做研究由用户决定，按用户的要求来。回复保持简短，研究页面上能看到整棵树。',
           ),
+          rules('aspect', lang),
           modeText(doc.policy?.mode, lang),
           notes?.aspects[node.id] ? L(`Your notes so far:\n${excerpt(notes.aspects[node.id].text)}`, `目前的笔记：\n${excerpt(notes.aspects[node.id].text)}`) : '',
         ]
@@ -129,8 +159,8 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
           aspect && notes?.aspects[aspect.id] ? L(`What is known in this aspect so far (its notes):\n${excerpt(notes.aspects[aspect.id].text)}`, `这个方面目前已知的情况（它的笔记）：\n${excerpt(notes.aspects[aspect.id].text)}`) : '',
           notes?.summary ? L(`The research so far (its summary):\n${excerpt(notes.summary.text, 1200)}`, `整项研究目前的情况（总结）：\n${excerpt(notes.summary.text, 1200)}`) : '',
           L(
-            `When done, call research_record with the result${m ? ` (${m.name})` : ' (works or not)'} , a one-line takeaway (what it comes to) and one finding worth keeping. Then reply in a line or two.`,
-            `完成后调用 research_record 记录结果${m ? `（${m.name}）` : '（有效或无效）'}、一句话结论（takeaway）和一条值得留下的发现，然后用一两句话回复。`,
+            `When done, call research_record (mcp__research__research_record) with the result${m ? ` (${m.name})` : ' (works or not)'}, a one-line takeaway (what it comes to) and one finding worth keeping: that is how your aspect’s agent and the user learn of it. If you find something along the way that others should know now, or need a decision, tell them with research_tell (to "lead" or a node’s id). Do not edit the files in .research/. Then reply in a line or two.`,
+            `完成后调用 research_record（mcp__research__research_record）记录结果${m ? `（${m.name}）` : '（有效或无效）'}、一句话结论（takeaway）和一条值得留下的发现：所属方面的 agent 和用户就是这样得知结果的。中途发现别人现在就该知道的事，或需要别人拿主意，用 research_tell 告诉对方（发给 "lead" 或某个节点的 id）。不要直接改 .research/ 里的文件。然后用一两句话回复。`,
           ),
         ];
   return [...parts, message ?? ''].filter(Boolean).join('\n\n');
@@ -175,6 +205,7 @@ export function treeText(doc: ResearchDoc, taskName: (taskId?: string) => string
 
 export function researchTools(host: ResearchHost, caller: ResearchCaller): WorkspaceTool[] {
   const isMain = caller.kind === 'main';
+  const save = (id: string, doc: ResearchDoc) => host.researchSave(id, doc, caller.kind === 'agent' ? caller.taskId : undefined);
   /** How a research is named to agents: its project, and its folder if it is in one. */
   const label = (r: { project: string; dir?: string }) => (r.dir ? `${r.project}/${r.dir}` : r.project);
   /** The research the caller works in: an agent's (the one it is in, else its project's); the main agent's by name (or the only one). */
@@ -272,14 +303,14 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!full(doc)) throw new Error('Only the research’s lead adds aspects.');
           const others = (a.other_metrics as Array<{ name: string; higher_is_better?: boolean }> | undefined)?.map((x) => ({ name: x.name, higherIsBetter: x.higher_is_better !== false }));
           const r = addNode(doc, { type: 'aspect', parent: null, title: String(a.title), status: 'running', ...(a.metric ? { metric: { name: String(a.metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}), ...(typeof a.noise === 'number' ? { noise: a.noise } : {}) } } : {}), ...(others?.length ? { metrics: others } : {}) });
-          host.researchSave(projectId, r.doc);
+          save(projectId, r.doc);
           return `Added aspect [${r.node.id}] "${r.node.title}". Its agent starts when the user first talks to it on the research page.`;
         }
         const aspect = a.parent_id ? nodeIn(doc, a.parent_id, 'aspect') : me(doc)?.type === 'aspect' ? me(doc)! : undefined;
         if (!aspect) throw new Error('Give parent_id: the aspect the method belongs to.');
         mayChange(doc, aspect);
         const r = addNode(doc, { type: 'method', parent: aspect.id, title: String(a.title), status: 'idea', ...(a.design ? { design: String(a.design) } : {}), ...(a.source ? { source: String(a.source) } : {}) });
-        host.researchSave(projectId, r.doc);
+        save(projectId, r.doc);
         return `Added method [${r.node.id}] "${r.node.title}" to "${aspect.title}" (not tried yet).`;
       },
     },
@@ -305,14 +336,14 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           made.push(r.node);
         }
         if (method.status === 'idea') next = updateNode(next, method.id, { status: 'running' });
-        host.researchSave(projectId, next);
+        save(projectId, next);
         const started: string[] = [];
         for (const e of made) {
           try {
             const t = await host.researchStartAgent(projectId, e.id, { isolate: true });
             started.push(`[${e.id}] "${e.title}" → ${t.alias}`);
           } catch (error) {
-            host.researchSave(projectId, updateNode(host.researchGet(projectId)!, e.id, { status: 'idea' }));
+            save(projectId, updateNode(host.researchGet(projectId)!, e.id, { status: 'idea' }));
             started.push(`[${e.id}] "${e.title}" not started: ${(error as Error).message}`);
           }
         }
@@ -364,7 +395,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         if (a.takeaway) next = updateNode(next, e.id, { takeaway: String(a.takeaway) });
         if (a.finding) next = addFinding(next, e.id, String(a.finding), name(caller.kind === 'agent' ? caller.taskId : undefined) ?? (isMain ? 'main agent' : undefined));
         if (next === doc) throw new Error('Nothing to record: give value, runs, metrics, results, works, no_result or finding.');
-        host.researchSave(projectId, next);
+        save(projectId, next);
         const now = next.nodes.find((n) => n.id === e.id)!;
         const spread = now.runs && now.runs.length > 1 ? ` ± ${formatValue(metric, runStats(now.runs).sd)} over ${now.runs.length} runs` : '';
         return `Recorded on "${e.title}": ${now.status}${now.value != null ? ` (${formatValue(metric, now.value)}${spread})` : ''}${a.finding ? ', with a finding' : ''}.`;
@@ -395,7 +426,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           }
         }
         const r = addNode(next, { type: 'method', parent: where.id, title: String(a.title), status: 'idea', ...(a.design ? { design: String(a.design) } : {}), links: from.map((m) => ({ from: m.id, kind: a.kind as 'combine' | 'mutate' })) });
-        host.researchSave(projectId, r.doc);
+        save(projectId, r.doc);
         return `Made method [${r.node.id}] "${r.node.title}" in "${where.title}" (${a.kind} of ${from.map((m) => `"${m.title}"`).join(', ')}).`;
       },
     },
@@ -451,6 +482,21 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       },
     },
     {
+      name: 'research_tell',
+      description: 'Tells another agent of this research something, as a message it reads at its next step: the lead ("lead"), or the agent of a node (an aspect’s agent by the aspect’s or one of its methods’ id; an experiment’s by the experiment’s id). Use it to pass on what another part of the research should know (a finding that changes its plan, a result it waits for), to ask it something, or to redirect it. Results recorded with research_record reach the aspect’s agent by themselves.',
+      schema: z.object({ ...projectArg, to: z.string().describe('"lead", or a node id.'), message: z.string().min(1).max(8000) }),
+      run: async (a) => {
+        const { doc } = await load(a.project);
+        const to = String(a.to);
+        const node = to === 'lead' ? undefined : nodeIn(doc, to);
+        const taskId = !node ? doc.leadTaskId : node.type === 'method' ? aspectOf(doc, node)?.taskId : node.taskId;
+        if (!taskId || !host.findTaskById(taskId)) throw new Error(node ? `"${node.title}" has no agent yet.` : 'This research has no lead yet.');
+        if (caller.kind === 'agent' && taskId === caller.taskId) throw new Error('That is you.');
+        const alias = await host.researchTell(caller.kind === 'agent' ? caller.taskId : undefined, taskId, String(a.message));
+        return `Told ${alias}.`;
+      },
+    },
+    {
       name: 'research_ui',
       description: [
         'Changes how this research’s page looks while it runs (the lead’s, when the user asks for it): settings kept in .research/ui.json, applied at once, each change undoable. With nothing given it returns the settings now.',
@@ -503,7 +549,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         if (n.type === 'aspect' && !full(doc) && !(onlyTakeaway && me(doc)?.id === n.id)) throw new Error('Only the research’s lead changes aspects.');
         mayChange(doc, n);
         if (a.remove) {
-          host.researchSave(projectId, removeNode(doc, n.id));
+          save(projectId, removeNode(doc, n.id));
           return `Removed "${n.title}" and what was under it.`;
         }
         let next = doc;
@@ -519,7 +565,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           next = updateNode(next, n.id, { links: [...(n.links ?? []).filter((l) => l.from !== src.id), { from: src.id, kind: 'borrow', ...(a.note ? { note: String(a.note) } : {}) }] });
         }
         if (next === doc) throw new Error('Nothing to change.');
-        host.researchSave(projectId, next);
+        save(projectId, next);
         return `Updated "${n.title}".`;
       },
     },
@@ -533,7 +579,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         const { projectId, doc } = await load(a.project);
         if (!full(doc)) throw new Error('How the research runs is set with its lead.');
         const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}) };
-        host.researchSave(projectId, { ...doc, policy, updatedAt: new Date().toISOString() });
+        save(projectId, { ...doc, policy, updatedAt: new Date().toISOString() });
         return `Settings: mode ${policy.mode ?? DEFAULT_MODE}, notes reminders ${policy.autoNotes === false ? 'off' : 'on'}, summary every ${policy.summaryEvery ?? 30} min${policy.summaryEvery === 0 ? ' (never)' : ''}.`;
       },
     },
@@ -550,7 +596,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!p) throw new Error(`No project named "${String(a.project)}".`);
           const dir = a.folder ? String(a.folder).trim().replace(/^\.\/+|\/+$/g, '') : '';
           let doc = await host.researchCreate(p.projectId, String(a.title), String(a.goal ?? ''), false, dir || undefined);
-          if (a.end_metric) doc = host.researchSave(researchId(p.projectId, dir || undefined), { ...doc, endMetric: { name: String(a.end_metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}) } });
+          if (a.end_metric) doc = save(researchId(p.projectId, dir || undefined), { ...doc, endMetric: { name: String(a.end_metric), higherIsBetter: a.higher_is_better !== false, ...(typeof a.baseline === 'number' ? { baseline: a.baseline } : {}) } });
           return `Started research "${doc.title}" in ${dir ? `${p.name}/${dir}` : p.name}. It shows as one row in that project's team in the sidebar.`;
         },
       },
@@ -592,7 +638,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (taken) throw new Error(`${agent.alias} is already in the research, at [${taken.id}] "${taken.title}".`);
           if (a.as === 'aspect_agent') {
             const aspect = nodeIn(doc, a.node_id, 'aspect');
-            host.researchSave(projectId, updateNode(doc, aspect.id, { taskId: agent.taskId }));
+            save(projectId, updateNode(doc, aspect.id, { taskId: agent.taskId }));
             return `${agent.alias} now owns the aspect "${aspect.title}".`;
           }
           const method = nodeIn(doc, a.node_id, 'method');
@@ -603,7 +649,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           let next = r.doc;
           if (a.finding) next = addFinding(next, r.node.id, String(a.finding), agent.alias);
           if (method.status === 'idea') next = updateNode(next, method.id, { status: 'running' });
-          host.researchSave(projectId, next);
+          save(projectId, next);
           return `Attached ${agent.alias} as experiment [${r.node.id}] "${r.node.title}" under "${method.title}" (${status}). It now lives on the research page, not in the sidebar's team.`;
         },
       },
@@ -615,7 +661,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           const { projectId, doc } = await load(a.project);
           if (!full(doc)) throw new Error('End-to-end runs and ablations are recorded by the lead.');
           if (a.kind === 'ablation') nodeIn(doc, a.aspect_id, 'aspect');
-          host.researchSave(projectId, { ...doc, evidence: [...doc.evidence, { id: `ev-${Date.now().toString(36)}`, kind: a.kind as 'e2e' | 'ablation', title: String(a.title), value: Number(a.value), delta: Number(a.delta), ...(a.kind === 'ablation' ? { aspect: String(a.aspect_id) } : {}), at: new Date().toISOString() }], updatedAt: new Date().toISOString() });
+          save(projectId, { ...doc, evidence: [...doc.evidence, { id: `ev-${Date.now().toString(36)}`, kind: a.kind as 'e2e' | 'ablation', title: String(a.title), value: Number(a.value), delta: Number(a.delta), ...(a.kind === 'ablation' ? { aspect: String(a.aspect_id) } : {}), at: new Date().toISOString() }], updatedAt: new Date().toISOString() });
           return `Recorded ${a.kind === 'e2e' ? 'an end-to-end run' : 'an ablation'}: ${String(a.title)}.`;
         },
       },
