@@ -551,3 +551,37 @@ const laneOutcomes = () => [{ kind: 'out', lane: 1, st: 'w' }, { kind: 'out', la
   const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && (e.target.closest('.story').classList.add('seen'), io.unobserve(e.target))), { threshold: 0.12 });
   document.querySelectorAll('.story .story-stage').forEach((el) => io.observe(el));
 })();
+
+// Phone: each caption sits right above the piece it explains (built once; hidden on wide screens,
+// where the captions stay in the left column). [caption indexes] → the piece they go above.
+(function phoneCaptions() {
+  const PLAN = {
+    overview: [[[0, 1, 2], '.main-card'], [[3, 4], '.m1']],
+    'main-agent': [[[0], '.say'], [[1], '.hub'], [[2], '.direct'], [[3], '.summary']],
+    'work-map': [[[0, 1, 2, 3], '.wm-smap'], [[4], '.wm-lanes']],
+    memory: [[[0], '.mm-chat'], [[1], '.mm-note'], [[2], '.mm-targets'], [[3], '.mm-file']],
+  };
+  for (const [id, groups] of Object.entries(PLAN)) {
+    const story = document.getElementById(id);
+    if (!story) continue;
+    const caps = story.querySelectorAll('.caps li');
+    let n = 0;
+    groups.forEach(([idx, sel], g) => {
+      const target = story.querySelector(`.iso ${sel}`);
+      if (!target) return;
+      const box = document.createElement('div');
+      box.className = `m-cap m-cap-${g}`;
+      for (const i of idx) {
+        const li = caps[i];
+        if (!li) continue;
+        const row = document.createElement('p');
+        row.innerHTML = `<i>${++n}</i><span class="m-cap-t"></span>`;
+        const t = row.querySelector('.m-cap-t');
+        t.appendChild(li.querySelector('b').cloneNode(true));
+        t.appendChild(li.querySelector('span').cloneNode(true));
+        box.appendChild(row);
+      }
+      target.parentNode.insertBefore(box, target);
+    });
+  }
+})();

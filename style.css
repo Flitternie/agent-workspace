@@ -1655,3 +1655,32 @@ body { overflow-x: clip !important; }
   .hero .cta .lbl-full { display: none; }
   .hero .cta .lbl-short { display: inline; }
 }
+
+/* ═════════ Phone: a caption right above each piece (see phoneCaptions in main.js) ═════════ */
+.m-cap { display: none; }
+@media (max-width: 960px) {
+  .story .caps { display: none !important; }
+  .story .iso > .m-cap { display: flex !important; flex-direction: column; gap: 8px; margin: 14px 0 0 !important; padding: 0 2px; }
+  .story .iso > .m-cap:first-child { margin-top: 0 !important; }
+  .m-cap p { display: flex; gap: 10px; align-items: flex-start; margin: 0; }
+  .m-cap i { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: #0f1419; color: #fff; font: 600 11.5px var(--mono); font-style: normal; }
+  .m-cap-t b { display: block; font-size: 15.5px; font-weight: 650; line-height: 1.35; }
+  .m-cap-t span { display: block; margin-top: 1px; color: var(--text-2); font-size: 13.5px; line-height: 1.45; }
+  .story .iso { gap: 10px !important; }
+
+  /* 01 Overview on a phone: first the one card asking permission, then the sorted team */
+  .story#overview .m-cap-0 { order: 0; }
+  .story#overview .main-card { order: 1 !important; box-shadow: 0 0 0 2px #fbbf24, var(--shadow) !important; }
+  .story#overview .m-cap-1 { order: 2; }
+  .story#overview .m3 { order: 3 !important; }
+  .story#overview .m2 { order: 4 !important; }
+  .story#overview .m1 { order: 5 !important; }
+  .story#overview .main-card :is(.acts, .tag) { display: block !important; }
+  .story#overview .main-card .tag { display: inline-block !important; }
+  .story#overview .main-card .perm { display: block !important; max-height: none !important; opacity: 1 !important; }
+  .story#overview .main-card :is(.report, .team-only) { display: none !important; }
+  .story#overview .main-card .s-needs { display: inline-flex !important; }
+  .story#overview .main-card :is(.s-work, .s-done) { display: none !important; }
+  .story#overview .main-card .press { animation: none !important; }
+  .story#overview .main-card pre { font-size: 11.5px; overflow-x: auto; white-space: pre; }
+}
