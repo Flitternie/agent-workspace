@@ -7608,9 +7608,3 @@ button.subtask-row:hover {
 .btn.btn-icon.busy .icon {
   animation: spin 0.9s linear infinite;
 }
-
-/* Between the header's groups of buttons: a little more room than between buttons of one group. */
-.focus-actions .actions-gap {
-  flex: none;
-  width: 6px;
-}
