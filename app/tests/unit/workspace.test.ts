@@ -389,7 +389,12 @@ describe('a research’s agents work through the research', () => {
     const r = await as({ kind: 'agent', taskId: lead.taskId }).research_tell.run({ to: node('Model').id, message: 'Try two optimizers.' });
     expect(r).toMatch(/Started .* as the agent of "Model"/);
     expect(said(node('Model').taskId!)[0]).toMatch(/You own the "Model" aspect[\s\S]*\[From .*\] Try two optimizers\./);
-    await expect(data.research_tell.run({ to: (await main.research_add.run({ type: 'aspect', title: 'Infra' }), node('Infra').id), message: 'x' })).rejects.toThrow(/lead’s/);
+    await main.research_add.run({ type: 'aspect', title: 'Infra' });
+    await idle(lead.taskId);
+    expect(await data.research_tell.run({ to: node('Infra').id, message: 'Infra needs a look.' })).toMatch(/no agent of its own: told the lead/);
+    expect(said(lead.taskId).at(-1)).toMatch(/For "Infra", which has no agent of its own\) Infra needs a look\./);
+    expect(node('Infra').taskId).toBeUndefined();
+    await idle(lead.taskId);
     // Under a lead, an aspect's agent takes proposals to the lead (in the modes that ask the user), and hears of a change of mode.
     expect(said(node('Model').taskId!)[0]).toMatch(/review first[\s\S]*Proposals that need the user’s agreement go to the lead/);
     await idle(node('Model').taskId!);

@@ -527,7 +527,13 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           // An aspect (or a method's aspect) without its agent: started now, briefed, with this message.
           const aspect = node && (node.type === 'aspect' ? node : node.type === 'method' ? aspectOf(doc, node) : undefined);
           if (!aspect || aspect.combos) throw new Error(node ? `"${node.title}" has no agent (an experiment’s agent starts with research_try).` : 'This research has no lead yet.');
-          if (!full(doc)) throw new Error('Starting an aspect’s agent is the lead’s.');
+          // Anyone but the lead: the message goes to the lead, who runs that aspect (or starts its agent).
+          if (!full(doc)) {
+            if (!doc.leadTaskId || !host.findTaskById(doc.leadTaskId)) throw new Error(`"${aspect.title}" has no agent, and the research no lead yet.`);
+            const zh = host.language() === 'zh';
+            const lead = await host.researchTell(caller.kind === 'agent' ? caller.taskId : undefined, doc.leadTaskId, `${zh ? `（给「${aspect.title}」，它还没有自己的 agent）` : `(For "${aspect.title}", which has no agent of its own) `}${String(a.message)}`);
+            return `"${aspect.title}" has no agent of its own: told the lead (${lead}) instead.`;
+          }
           const from = caller.kind === 'agent' ? host.findTaskById(caller.taskId)?.alias : undefined;
           const zh = host.language() === 'zh';
           const t = await host.researchStartAgent(projectId, aspect.id, { isolate: false, message: `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${String(a.message)}` });
