@@ -494,13 +494,13 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="plus" />
               </button>
             ) : null}
-            {/* Sync from the CLI: after going on with this session in the terminal, pick that up here. */}
+            {/* Sync: after going on with this session elsewhere (the terminal, a desktop or editor app), pick that up here. */}
             {!isMainAgent(task) && session?.nativeSessionId ? (
               <button
                 className={`btn btn-icon${syncing ? ' busy' : ''}`}
                 disabled={syncing || task.status === 'running' || task.status === 'starting' || open.some((a) => !!a.providerRequestId)}
-                aria-label={t('Sync from {cli}', { cli: PROVIDER_LABEL[task.provider] })}
-                data-tip={t('Sync from CLI')}
+                aria-label={t('Sync the latest of this conversation (wherever else it went on)')}
+                data-tip={t('Sync latest messages')}
                 data-testid="sync-session"
                 onClick={() => {
                   setSyncing(true);
