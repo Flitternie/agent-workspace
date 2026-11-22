@@ -2,7 +2,7 @@
 // repository, for a project that holds several), on this Mac or on an SSH host. Local files are read each
 // time (a hand edit shows at once). A host's are fetched once into memory (tree and notes in one round
 // trip) and written back in order; readers wait for pending writes.
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project } from '../shared/types';
 import { normalizeResearch, type ResearchDoc, type ResearchNotes } from '../shared/research';
@@ -125,6 +125,27 @@ export class ResearchFiles {
     const dirs = this.remoteDirs.get(real);
     if (dirs && !dirs.includes(dir ?? '')) this.remoteDirs.set(real, [...dirs, dir ?? '']);
     return doc;
+  }
+
+  /**
+   * Ends a research without deleting anything: its folder is renamed (.research.dissolved-<when>), so the
+   * tree, notes and views stay in the repository and a new research can be started in its place.
+   */
+  async dissolve(id: string): Promise<string> {
+    const p = this.project(id);
+    const { projectId: real, dir } = parseResearchId(id);
+    const kept = `.research.dissolved-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+    if (!p.host) {
+      renameSync(join(p.rootPath, '.research'), join(p.rootPath, kept));
+      return kept;
+    }
+    await this.ready(id);
+    const r = await sshRun(p.host, `sh -c ${shq(`cd ${shq(p.rootPath)} && mv .research ${shq(kept)}`)}`, 60_000);
+    if (r.code !== 0) throw new Error(sshError(p.host, r.stderr));
+    this.remote.delete(id);
+    const dirs = this.remoteDirs.get(real);
+    if (dirs) this.remoteDirs.set(real, dirs.filter((d) => d !== (dir ?? '')));
+    return kept;
   }
 
   /** One round trip: which of a host project's root and folders hold a research. */

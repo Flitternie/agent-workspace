@@ -269,6 +269,39 @@ describe('several researches in a project (one per repository folder)', () => {
   });
 });
 
+describe('starting and ending a research from the sidebar', () => {
+  it('conversations picked become a research (its lead is asked to read and attach them); more join later; dissolved, its files stay and the place is free again', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Tune the cache', isolate: false, mockScript: 'work', instruction: 'go' });
+    const b = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Profile it', isolate: false, mockScript: 'work', instruction: 'go' });
+    const c = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Later one', isolate: false, mockScript: 'work', instruction: 'go' });
+    const { researchId: rid } = await ws.researchFromTasks(p.projectId, [a.taskId, b.taskId]);
+    expect(rid).toBe(p.projectId);
+    const doc = ws.researchGet(rid)!;
+    expect(doc.title).toBe('Tune the cache');
+    const brief = ws.transcript(doc.leadTaskId!).find((i) => i.role === 'user')!.text;
+    expect(brief).toMatch(new RegExp(`Bring these existing conversations into this research: ${a.alias} \\(Tune the cache\\), ${b.alias} \\(Profile it\\)[\\s\\S]*research_read[\\s\\S]*research_attach`));
+    // The lead reads a conversation of its project; others may not.
+    const { researchTools } = await import('../../src/main/research-tools');
+    const as = (taskId: string) => Object.fromEntries(researchTools(ws, { kind: 'agent', taskId }).map((t) => [t.name, t]));
+    expect(await as(doc.leadTaskId!).research_read.run({ agent: a.alias })).toMatch(/go/);
+    await expect(as(c.taskId).research_read.run({ agent: a.alias })).rejects.toThrow(/lead/);
+    // One more, later: the lead is asked.
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === doc.leadTaskId)!.status !== 'running');
+    await ws.researchAddTasks(rid, [c.taskId]);
+    expect(ws.transcript(doc.leadTaskId!).filter((i) => i.role === 'user').at(-1)!.text).toMatch(new RegExp(`${c.alias} \\(Later one\\)`));
+    await expect(ws.researchAddTasks(rid, [doc.leadTaskId!])).rejects.toThrow(/already in it/);
+    // Dissolved: gone from the page, nothing deleted, its agents ordinary again; a new one can start there.
+    const { kept } = await ws.researchDissolve(rid);
+    expect(ws.snapshot().research).toEqual([]);
+    expect(existsSync(join(p.rootPath, '.research'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(p.rootPath, kept, 'research.json'), 'utf8')).title).toBe('Tune the cache');
+    await ws.researchCreate(p.projectId, 'Again', '', false);
+    expect(ws.snapshot().research.map((r) => r.title)).toEqual(['Again']);
+  });
+});
+
 describe('research managed by talking', () => {
   async function setup() {
     const ws = open();

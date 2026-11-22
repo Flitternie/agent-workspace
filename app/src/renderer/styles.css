@@ -8245,3 +8245,40 @@ button.subtask-row:hover {
   cursor: default;
   font-variant-numeric: tabular-nums;
 }
+/* Context menus: a divider, a destructive item, a row of colours. */
+.context-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.context-menu button.danger {
+  color: var(--risk);
+}
+.context-menu button.danger:hover {
+  background: var(--risk);
+  color: #fff;
+}
+.context-swatches {
+  display: flex;
+  gap: 6px;
+  padding: 7px 10px;
+}
+.context-menu .context-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  flex: none;
+}
+.context-menu .context-swatch.on {
+  border-color: var(--text);
+}
+.context-menu .context-swatch:hover {
+  transform: scale(1.15);
+}
+/* Agents picked in the sidebar (⌘/⇧-click) to act on together. */
+.agent-row.picked {
+  background: var(--hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}

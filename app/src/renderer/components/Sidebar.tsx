@@ -4,7 +4,10 @@ import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import { AgentName, Alias, displayName, Icon, Kbd, liveSubtasks, PROVIDER_LABEL, STATUS_LABEL, SubtaskDots, SubtaskThread } from './bits';
 import { useTick } from '../state';
 import { t as tr } from '../i18n';
-import { researchColor } from '../../shared/research';
+import { RESEARCH_COLORS, researchColor, type ResearchDoc, type ResearchSummary } from '../../shared/research';
+import { call, errorText } from '../api';
+import { ContextMenu, type MenuItem } from './ContextMenu';
+import { Modal } from './Dialogs';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 
 /**
@@ -64,6 +67,50 @@ export function Sidebar({
   const asideIds = new Set(snapshot.tasks.filter((t) => t.setAside).map((t) => t.taskId));
   const needYou = new Set(open.filter((a) => !asideIds.has(a.taskId)).map((a) => a.taskId)).size;
   const [showIdle, setShowIdle] = useState<Record<string, boolean>>({});
+  // Agents picked to act on together (⌘/⇧-click), the menu a right-click opens, and the dialog a choice in it opens.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [dlg, setDlg] = useState<{ kind: 'merge'; projectId: string; taskIds: string[] } | { kind: 'rename'; research: ResearchSummary } | { kind: 'dissolve'; research: ResearchSummary } | null>(null);
+  const changeResearch = async (id: string, change: (d: ResearchDoc) => ResearchDoc) => {
+    const d = await call('research:get', { researchId: id });
+    if (d) await call('research:save', { researchId: id, doc: { ...change(d), updatedAt: new Date().toISOString() } });
+  };
+  /** A right-click on an agent: what is picked (if it is among them), else itself; within its project. */
+  const agentMenu = (e: React.MouseEvent, t: Task) => {
+    e.preventDefault();
+    const ids = (picked.has(t.taskId) ? [...picked] : [t.taskId]).filter((id) => snapshot.tasks.find((x) => x.taskId === id)?.projectId === t.projectId);
+    const n = ids.length;
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: n === 1 ? tr('Make a research from this conversation…') : tr('Merge {n} conversations into a research…', { n }), onClick: () => setDlg({ kind: 'merge', projectId: t.projectId, taskIds: ids }), testId: 'menu-merge' },
+        ...snapshot.research
+          .filter((r) => r.projectId === t.projectId)
+          .map((r): MenuItem => ({
+            label: tr('Add to "{title}"', { title: r.title }),
+            onClick: () =>
+              void call('research:addTasks', { researchId: r.id, taskIds: ids })
+                .then(() => (setPicked(new Set()), onOpenResearch(r.id)))
+                .catch(() => {}),
+            testId: 'menu-add',
+          })),
+      ],
+    });
+  };
+  const researchMenu = (e: React.MouseEvent, r: ResearchSummary) => {
+    e.preventDefault();
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: tr('Rename…'), onClick: () => setDlg({ kind: 'rename', research: r }), testId: 'menu-rename' },
+        { label: tr('Colour'), swatches: RESEARCH_COLORS, current: RESEARCH_COLORS.indexOf(researchColor(r) as (typeof RESEARCH_COLORS)[number]), onPick: (i) => void changeResearch(r.id, (d) => ({ ...d, color: i })).catch(() => {}) },
+        'sep',
+        { label: tr('Dissolve…'), danger: true, onClick: () => setDlg({ kind: 'dissolve', research: r }), testId: 'menu-dissolve' },
+      ],
+    });
+  };
   // Agents whose sub-agents are unfolded (folded by default; the marks go when the turn ends).
   const [subOpen, setSubOpen] = useState<Set<string>>(new Set());
   const toggleSub = (id: string, open?: boolean) =>
@@ -94,7 +141,7 @@ export function Sidebar({
     const on = researchOpen === r.id;
     return (
       <div key={`research-${r.id}`} className={`agent-item${on ? ' active' : ''}`}>
-        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
+        <button className={`agent-row research-row${on ? ' active' : ''}${waiting ? ' needs' : ''}`} onClick={() => onOpenResearch(r.id)} onContextMenu={(e) => researchMenu(e, r)} data-testid="research-row" title={tr('Research: {title}', { title: r.title })}>
           <span className="alias alias-sm research-mark" style={{ background: researchColor(r) }} aria-hidden>
             <Icon name="flask" size={12} />
           </span>
@@ -114,9 +161,9 @@ export function Sidebar({
       </div>
     );
   };
-  // Starting one: offered on a team without one, when the pointer is over it.
+  // Starting one: offered on a team when the pointer is over it (a project may hold several, one per folder).
   const newResearch = (projectId: string) =>
-    researchOf(projectId) || snapshot.projects.find((p) => p.projectId === projectId)?.host ? null : (
+    (
       <button key={`new-research-${projectId}`} className="team-idle team-new-research" onClick={() => onNewResearch(projectId)} data-testid="new-research">
         <Icon name="flask" size={11} /> {tr('New research')}
       </button>
@@ -194,8 +241,23 @@ export function Sidebar({
       // Unfolded, the row and its sub-agents are one card.
       <div key={`${opts.needs ? 'needs-' : ''}${t.taskId}`} className={`agent-item${unfolded ? ' unfolded' : ''}${t.taskId === focusId ? ' active' : ''}`}>
       <button
-        className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`}
-        onClick={() => onSelect(t.taskId)}
+        className={`agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}${picked.has(t.taskId) ? ' picked' : ''}`}
+        aria-selected={picked.has(t.taskId) || undefined}
+        onClick={(e) => {
+          // ⌘/⇧-click picks agents to act on together (right-click: merge into a research); a plain click opens one.
+          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            setPicked((cur) => {
+              const next = new Set(cur);
+              if (next.has(t.taskId)) next.delete(t.taskId);
+              else next.add(t.taskId);
+              return next;
+            });
+            return;
+          }
+          if (picked.size) setPicked(new Set());
+          onSelect(t.taskId);
+        }}
+        onContextMenu={(e) => agentMenu(e, t)}
         onKeyDown={(e) => {
           // Like a tree: → unfolds sub-agents, ← folds them.
           if (subs?.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
@@ -335,6 +397,20 @@ export function Sidebar({
           </div>
         </div>
       </div>
+      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} /> : null}
+      {dlg ? (
+        <ResearchDialog
+          dlg={dlg}
+          snapshot={snapshot}
+          onClose={() => setDlg(null)}
+          onDone={(openId) => {
+            setDlg(null);
+            setPicked(new Set());
+            if (openId) onOpenResearch(openId);
+          }}
+          changeResearch={changeResearch}
+        />
+      ) : null}
     </aside>
   );
 }
@@ -348,5 +424,92 @@ function showScrollbarAWhile(e: { currentTarget: Element }) {
   scrollTimers.set(
     el,
     setTimeout(() => el.classList.remove('scrolling'), 900),
+  );
+}
+
+/** The dialogs a research's menu leads to: conversations into a new research, a new name, dissolving it. */
+function ResearchDialog({
+  dlg,
+  snapshot,
+  onClose,
+  onDone,
+  changeResearch,
+}: {
+  dlg: { kind: 'merge'; projectId: string; taskIds: string[] } | { kind: 'rename'; research: ResearchSummary } | { kind: 'dissolve'; research: ResearchSummary };
+  snapshot: WorkspaceSnapshot;
+  onClose: () => void;
+  onDone: (openId?: string) => void;
+  changeResearch: (id: string, change: (d: ResearchDoc) => ResearchDoc) => Promise<void>;
+}) {
+  const tasks = dlg.kind === 'merge' ? dlg.taskIds.map((id) => snapshot.tasks.find((t) => t.taskId === id)).filter((t): t is Task => !!t) : [];
+  const [title, setTitle] = useState(dlg.kind === 'merge' ? (tasks[0]?.title ?? '') : dlg.research.title);
+  const [dir, setDir] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = (fn: () => Promise<string | undefined | void>) => {
+    setBusy(true);
+    setError('');
+    fn()
+      .then((id) => onDone(id || undefined))
+      .catch((e) => (setError(errorText(e)), setBusy(false)));
+  };
+  if (dlg.kind === 'dissolve')
+    return (
+      <Modal title={tr('Dissolve "{title}"?', { title: dlg.research.title })} onClose={onClose}>
+        <div className="rs-text" data-testid="research-dissolve">
+          {tr('Its agents go back to the project’s list as ordinary agents. Nothing is deleted: the tree, notes and views stay in the repository, in a renamed folder (.research.dissolved-…).')}
+        </div>
+        {error ? <div className="error-text">{error}</div> : null}
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>
+            {tr('Cancel')}
+          </button>
+          <button className="btn btn-danger" disabled={busy} onClick={() => run(() => call('research:dissolve', { researchId: dlg.research.id }).then(() => undefined))} data-testid="research-dissolve-ok">
+            {tr('Dissolve')}
+          </button>
+        </div>
+      </Modal>
+    );
+  if (dlg.kind === 'rename')
+    return (
+      <Modal title={tr('Rename the research')} onClose={onClose}>
+        <div className="field">
+          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && title.trim() && run(() => changeResearch(dlg.research.id, (d) => ({ ...d, title: title.trim() })))} data-testid="research-rename-input" />
+        </div>
+        {error ? <div className="error-text">{error}</div> : null}
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>
+            {tr('Cancel')}
+          </button>
+          <button className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => run(() => changeResearch(dlg.research.id, (d) => ({ ...d, title: title.trim() })))} data-testid="research-rename-ok">
+            {tr('Rename')}
+          </button>
+        </div>
+      </Modal>
+    );
+  return (
+    <Modal title={tasks.length === 1 ? tr('A research from this conversation') : tr('A research from {n} conversations', { n: tasks.length })} onClose={onClose}>
+      <div className="muted small" data-testid="research-merge">
+        {tasks.map((t) => t.alias).join(', ')}
+      </div>
+      <div className="field">
+        <label>{tr('Title')}</label>
+        <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="research-merge-title" />
+      </div>
+      <div className="field">
+        <label>{tr('Folder (optional)')}</label>
+        <input className="input" value={dir} onChange={(e) => setDir(e.target.value)} placeholder={tr('A folder of the project, e.g. the repository it is about')} data-testid="research-merge-dir" />
+      </div>
+      <div className="muted small">{tr('A research lead is started: it reads these conversations, lays out the tree and attaches them. They move from this list to the research’s page.')}</div>
+      {error ? <div className="error-text">{error}</div> : null}
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>
+          {tr('Cancel')}
+        </button>
+        <button className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => run(() => call('research:fromTasks', { projectId: dlg.projectId, taskIds: dlg.taskIds, title: title.trim(), ...(dir.trim() ? { dir: dir.trim() } : {}) }).then((r) => r.researchId))} data-testid="research-merge-ok">
+          {tr('Create')}
+        </button>
+      </div>
+    </Modal>
   );
 }

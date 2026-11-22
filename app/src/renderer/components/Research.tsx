@@ -39,6 +39,7 @@ import { timeAgo } from '../state';
 import { Modal } from './Dialogs';
 import { Composer, PanelResizer, WaitingOnYou, type ComposerTarget } from './FocusView';
 import { SidePanel } from './SidePanel';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { parseUi, statText, type ResearchUi, type UiNodeField } from '../../shared/research-ui';
 import { defaultView, levelOf, liveTable, parseView, templatesFor, viewKey, type TableSpec, type ViewBlockKind, type ViewLevel } from '../../shared/research-views';
 
@@ -89,6 +90,7 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const seenKey = `amw.research.seen.${researchId}`;
   const lastSeen = useMemo(() => localStorage.getItem(seenKey) ?? new Date().toISOString(), [seenKey]);
   const [looked, setLooked] = useState<ReadonlySet<string>>(new Set());
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   useEffect(() => {
     setLooked(new Set());
     const leave = () => localStorage.setItem(seenKey, new Date().toISOString());
@@ -168,6 +170,22 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
   const fresh = new Set(exps.filter((e) => e.resultAt && e.resultAt > lastSeen && !looked.has(e.id)).map((e) => e.id));
   /** Rings the nodes of these agents (the lead's is the goal: nothing selected). */
   const ring = (taskIds: string[]) => setSel(doc.nodes.filter((n) => n.taskId && taskIds.includes(n.taskId)).map((n) => n.id));
+  /** A right-click on a node with an agent: open its conversation, or take it out of the research (it is an ordinary agent again; the node stays). */
+  const nodeMenu = (e: ReactMouseEvent, n?: ResearchNode) => {
+    const task = taskOf(n ? n.taskId : doc.leadTaskId);
+    if (!task) return;
+    e.preventDefault();
+    const out = () =>
+      void call('research:save', { researchId, doc: { ...(n ? { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? { ...x, taskId: undefined } : x)) } : { ...doc, leadTaskId: undefined }), updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err)));
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: t('Open {alias}’s conversation', { alias: task.alias }), onClick: () => onOpenAgent(task.taskId), testId: 'node-open' },
+        { label: t('Take {alias} out of the research', { alias: task.alias }), onClick: out, testId: 'node-out' },
+      ],
+    });
+  };
   const ringFresh = () => {
     setOpened((o) => new Set([...o, ...exps.filter((e) => fresh.has(e.id)).map((e) => e.parent!)]));
     setSel([...fresh]);
@@ -249,7 +267,8 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
       {/* The graph fills the page; the box floats on it at the bottom, as on an agent's page (no band of its own). */}
       {panelMax ? sidePanel : null}
       <div className="research-stage" hidden={panelMax}>
-      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} />
+      <Graph doc={doc} depth={depth} setDepth={setDepth} openNode={openNode} opened={opened} toggleOpen={(id) => setOpened((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; })} sel={sel} select={select} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} active={active} fresh={fresh} onMenu={nodeMenu} />
+      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} testId="research-node-menu" /> : null}
       <ResearchComposer ctx={ctx} selected={selected} onClear={() => setSel([])} />
       </div>
       {sidePanel && !panelMax
@@ -303,6 +322,7 @@ function Graph({
   snapshot,
   active,
   fresh,
+  onMenu,
 }: {
   doc: ResearchDoc;
   depth: GraphDepth;
@@ -319,6 +339,7 @@ function Graph({
   active: ReadonlySet<string>;
   /** Experiments with a result the user has not looked at. */
   fresh: ReadonlySet<string>;
+  onMenu: (e: ReactMouseEvent, n?: ResearchNode) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [only, setOnly] = useState(false);
@@ -455,7 +476,7 @@ function Graph({
           {/* Under the nodes, so they never cover a title or a number; a selected method's own links come forward. */}
           <g className={`rg-links${sel.length ? ' has-sel' : ''}`}>{cross}</g>
           {L.items.map((it) => (
-            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} openNode={openNode} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} fresh={fresh} />
+            <GraphNode key={it.id} it={it} doc={doc} sel={sel} select={select} toggleOpen={toggleOpen} openNode={openNode} statusOf={statusOf} taskOf={taskOf} snapshot={snapshot} fresh={fresh} onMenu={onMenu} />
           ))}
         </g>
       </svg>
@@ -495,7 +516,7 @@ const sinceText = (iso?: string) => {
   return m < 1 ? '' : m < 60 ? t('{n} min', { n: m }) : t('{n} h', { n: (m / 60).toFixed(1) });
 };
 
-function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot, fresh }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n?: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot; fresh: ReadonlySet<string> }) {
+function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskOf, snapshot, fresh, onMenu }: { it: GraphItem; doc: ResearchDoc; sel: string[]; select: (id: string, add: boolean) => void; toggleOpen: (id: string) => void; openNode: (n?: ResearchNode) => void; statusOf: (n: ResearchNode) => ResearchStatus; taskOf: (id?: string) => Task | undefined; snapshot: WorkspaceSnapshot; fresh: ReadonlySet<string>; onMenu: (e: ReactMouseEvent, n?: ResearchNode) => void }) {
   const { nodeW: W, nodeH: H } = GRAPH;
   const waiting = (taskId?: string) => (taskId ? snapshot.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.kind !== 'completion').length : 0);
   /** What an agent is up to, as far as the user cares: waiting on them, or running (for how long); else nothing. */
@@ -528,7 +549,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     ) : null;
   if (it.kind === 'goal')
     return (
-      <g className={`rg-node goal${sel.length ? '' : ' sel'}`} transform={at} onClick={() => select('', false)} onDoubleClick={() => openNode()} data-testid="research-node" data-kind="goal">
+      <g className={`rg-node goal${sel.length ? '' : ' sel'}`} transform={at} onClick={() => select('', false)} onDoubleClick={() => openNode()} onContextMenu={(e) => onMenu(e)} data-testid="research-node" data-kind="goal">
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 inv">
           {clip(doc.title, 16)}
@@ -586,7 +607,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
     const bestG = Math.max(-Infinity, ...exps.filter((e) => statusOf(e) === 'pass').map((e) => gain(n.metric, e.value) ?? -Infinity));
     const own = custom(n, { agent: agent?.alias, tally: tally(exps), findings: exps.reduce((a, e) => a + (e.findings?.length ?? 0), 0) });
     return (
-      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="aspect" data-title={n.title}>
+      <g className={`rg-node aspect${n.combos ? ' combos' : ''}${isSel ? ' sel' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} onContextMenu={(e) => onMenu(e, n)} data-testid="research-node" data-kind="aspect" data-title={n.title}>
         {tip([n.title, n.takeaway, n.metric ? `${n.metric.name} (${n.metric.higherIsBetter ? '↑' : '↓'})` : t('judged by hand'), agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : t('no agent yet'), tally(exps)])}
         <rect className="box" width={W} height={H} rx={10} />
         <text x={12} y={22} className="t1 strong">
@@ -647,7 +668,7 @@ function GraphNode({ it, doc, sel, select, toggleOpen, openNode, statusOf, taskO
   const spread = n.runs && n.runs.length > 1 ? runStats(n.runs) : undefined;
   const own = custom(n, { agent: agent?.alias, findings: n.findings?.length });
   return (
-    <g className={`rg-node experiment ns-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} data-testid="research-node" data-kind="experiment" data-title={n.title}>
+    <g className={`rg-node experiment ns-${st}${isSel ? ' sel' : ''}${isBest ? ' best' : ''}${waiting(n.taskId) ? ' waiting' : ''}`} transform={at} onClick={click} onDoubleClick={dbl} onContextMenu={(e) => onMenu(e, n)} data-testid="research-node" data-kind="experiment" data-title={n.title}>
       {tip([`${isBest ? '★ ' : ''}${n.title}`, n.takeaway, statusName(st), n.value != null ? `${formatValue(metric, n.value)}${spread ? ` ± ${formatValue(metric, spread.sd)} (${spread.n})` : ''}${g != null ? ` · ${pct(g)}` : ''}` : '', agent ? `${agent.alias} · ${t(AGENT_STATUS[agent.status])}` : '', n.findings?.at(-1) ? `◆ ${n.findings.at(-1)!.text}` : ''])}
       <rect className="box" width={W} height={H} rx={10} />
       <circle cx={14} cy={17} r={4.8} className={`st-${st}`} />
@@ -1392,9 +1413,10 @@ export function NewResearchDialog({ snapshot, projectId, onClose, onCreated }: {
   const [title, setTitle] = useState('');
   const [goal, setGoal] = useState('');
   const [sample, setSample] = useState(false);
+  const [dir, setDir] = useState('');
   const [error, setError] = useState('');
   const create = () =>
-    call('research:create', { projectId, title: title.trim() || (sample ? ' ' : ''), goal: goal.trim(), sample })
+    call('research:create', { projectId, title: title.trim() || (sample ? ' ' : ''), goal: goal.trim(), sample, ...(dir.trim() ? { dir: dir.trim() } : {}) })
       .then(onCreated)
       .catch((e) => setError(errorText(e)));
   return (
@@ -1407,10 +1429,14 @@ export function NewResearchDialog({ snapshot, projectId, onClose, onCreated }: {
         <label>{t('Goal')}</label>
         <textarea className="input" rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} placeholder={t('What should improve, and how it is measured end to end')} />
       </div>
+      <div className="field">
+        <label>{t('Folder (optional)')}</label>
+        <input className="input" value={dir} onChange={(e) => setDir(e.target.value)} placeholder={t('A folder of the project, e.g. the repository it is about')} data-testid="research-new-dir" />
+      </div>
       <label className="check">
         <input type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} /> {t('Fill it with an example to look around (no agents)')}
       </label>
-      <div className="muted small">{t('Kept in the project’s repository, in .research/research.json.')}</div>
+      <div className="muted small">{t('Kept in the project’s repository (or that folder of it), in .research/.')}</div>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>

@@ -1,7 +1,7 @@
 // A project's research page, end to end (demo workspace: its example research, mock agents).
 // The page shows the tree; changes are made by talking to the agents (who have the research tools).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
@@ -248,5 +248,44 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-create').click();
     await expect.poll(() => page.locator('.research-title h1').innerText()).toBe('Note quality');
     expect(await page.getByTestId('research-row').count()).toBe(2);
-  }, 180_000);
+
+    // Its row's menu: a new name, a colour; dissolved, the row goes and the files stay (renamed).
+    const noteRow = team.getByTestId('research-row');
+    await noteRow.click({ button: 'right' });
+    await page.getByTestId('menu-rename').click();
+    await page.getByTestId('research-rename-input').fill('Notes, better');
+    await page.getByTestId('research-rename-ok').click();
+    await expect.poll(() => noteRow.innerText()).toMatch(/Notes, better/);
+    await noteRow.click({ button: 'right' });
+    await page.getByTestId('context-swatch').nth(4).click();
+    await expect.poll(async () => (await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId })).color).toBe(4);
+    await noteRow.click({ button: 'right' });
+    await page.getByTestId('menu-dissolve').click();
+    expect(await page.getByTestId('research-dissolve').innerText()).toMatch(/Nothing is deleted/);
+    await page.getByTestId('research-dissolve-ok').click();
+    await expect.poll(() => page.getByTestId('research-row').count()).toBe(1);
+    expect(existsSync(join(other, '.research'))).toBe(false);
+    expect(readdirSync(other).some((f) => f.startsWith('.research.dissolved-'))).toBe(true);
+
+    // Conversations picked in the sidebar (⌘-click) and merged: a research whose lead is asked to read and attach them.
+    await invoke(page, 'task:create', { projectId: p2.projectId, provider: 'mock', title: 'Second look', mockScript: 'work', instruction: 'go', isolate: false });
+    const rows = team.getByTestId('rail-item');
+    await expect.poll(() => rows.count()).toBe(2);
+    await rows.nth(0).click({ modifiers: ['Meta'] });
+    await rows.nth(1).click({ modifiers: ['Meta'] });
+    expect(await team.locator('.agent-row.picked').count()).toBe(2);
+    await rows.nth(1).click({ button: 'right' });
+    expect(await page.getByTestId('menu-merge').innerText()).toMatch(/Merge 2 conversations into a research/);
+    await page.getByTestId('menu-merge').click();
+    await page.getByTestId('research-merge-title').fill('Notes study');
+    await page.getByTestId('research-merge-ok').click();
+    await expect.poll(() => page.locator('.research-title h1').innerText(), { timeout: 20_000 }).toBe('Notes study');
+    const merged = await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId });
+    expect((await invoke<Array<{ role: string; text: string }>>(page, 'transcript:get', { taskId: merged.leadTaskId! })).find((i) => i.role === 'user')!.text).toMatch(/Bring these existing conversations into this research[\s\S]*research_read/);
+    // The lead on the goal node: its menu opens its conversation, or takes it out of the research.
+    await expect.poll(() => page.getByTestId('research-panel').innerText(), { timeout: 10_000 }).toMatch(/research lead/);
+    await page.locator('[data-testid="research-node"][data-kind="goal"]').click({ button: 'right' });
+    await page.getByTestId('node-out').click();
+    await expect.poll(async () => (await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId })).leadTaskId ?? '').toBe('');
+  }, 240_000);
 });

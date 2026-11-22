@@ -43,6 +43,8 @@ export interface ResearchHost {
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
   findTaskById(taskId: string): Task | undefined;
+  /** A conversation as text (its recent items): for the lead bringing conversations into the research. */
+  transcriptText(taskId: string, limit: number): string;
   researchNotes(projectId: string): ResearchNotes;
   /** Resolves when the research can be read as it is now (pending writes done; fetched from an SSH host). */
   researchReady(projectId: string): Promise<void>;
@@ -81,8 +83,8 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
   return [
     zh ? `你是研究「${doc.title}」的负责人。目标：${doc.goal || '（还没写）'}` : `You lead the research "${doc.title}". Goal: ${doc.goal || '(not written yet)'}`,
     zh
-      ? '用户会和你一起把研究的结构一步步展开：有哪些方面会影响结果、每个方面怎么验证、各有哪些方法。用研究工具把谈定的东西落到树上（research_add、research_derive、research_evidence、research_update），用 research_settings 记下用户想要的研究方式。每个方面有自己的 agent，方面内的工作交给它们。研究总结（research_notes，scope "summary"）由你维护。用户也可能让你把已有的对话整理进来：先读（read_agent 不可用时问用户），再 research_attach。'
-      : 'The user lays the research out with you step by step: which aspects may move the result, how each is validated, which methods each has. Put what you agree on into the tree with the research tools (research_add, research_derive, research_evidence, research_update), and record how the user wants the research run with research_settings. Each aspect has its own agent; leave the work within an aspect to it. You keep the research summary (research_notes, scope "summary"). The user may also ask you to bring earlier conversations in: attach them with research_attach.',
+      ? '用户会和你一起把研究的结构一步步展开：有哪些方面会影响结果、每个方面怎么验证、各有哪些方法。用研究工具把谈定的东西落到树上（research_add、research_derive、research_evidence、research_update），用 research_settings 记下用户想要的研究方式。每个方面有自己的 agent，方面内的工作交给它们。研究总结（research_notes，scope "summary"）由你维护。用户也可能让你把已有的对话整理进来：先用 research_read 读，再 research_attach。'
+      : 'The user lays the research out with you step by step: which aspects may move the result, how each is validated, which methods each has. Put what you agree on into the tree with the research tools (research_add, research_derive, research_evidence, research_update), and record how the user wants the research run with research_settings. Each aspect has its own agent; leave the work within an aspect to it. You keep the research summary (research_notes, scope "summary"). The user may also ask you to bring earlier conversations in: read them with research_read, then attach them with research_attach.',
     zh
       ? '树的粒度（用户没有别的要求时）：方面是研究的几个大的维度（比如数据、方法、评估，具体看这个研究本身），通常只有少数几个；同一类的东西放进同一个方面，不要每个子课题开一个方面。方法是一个方面里可以相互替代的做法。实验是一次具体的运行或检查；为某个方法做的前期分析和验证，是这个方法下面的实验，不单独成为方面。'
       : 'The tree’s grain (unless the user wants otherwise): aspects are the research’s few broad dimensions (for example data, method, evaluation, whatever this research’s own are); things of one kind go in one aspect, not an aspect per sub-study. Methods are the alternatives within an aspect. Experiments are single runs or checks; an early analysis or check done for a method is an experiment under that method, not an aspect of its own.',
@@ -555,8 +557,21 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     );
   tools.push(
       {
+        name: 'research_read',
+        description: 'Reads a conversation of this project (an agent’s messages, its tool calls and what the user said to it), to bring what it did into the research: lay out aspects and methods from it, record its results, then research_attach it.',
+        schema: z.object({ ...projectArg, agent: z.string().describe('The agent’s name or role.'), limit: z.number().int().min(1).max(200).optional().describe('How many recent items (default 60).') }),
+        run: async (a) => {
+          const { projectId, doc } = await load(a.project);
+          if (!full(doc)) throw new Error('Reading other conversations is the lead’s.');
+          const agent = host.findAgent(String(a.agent));
+          if (!agent) throw new Error(`No agent named "${String(a.agent)}".`);
+          if (agent.projectId !== parseResearchId(projectId).projectId) throw new Error(`${agent.alias} works in another project.`);
+          return host.transcriptText(agent.taskId, typeof a.limit === 'number' ? a.limit : 60) || `${agent.alias} has no messages yet.`;
+        },
+      },
+      {
         name: 'research_attach',
-        description: 'Puts an existing conversation into the research, keeping it as it is (no new agent): as an aspect’s agent, or as an experiment under a method, with what it found. Use it to turn one or several earlier conversations into a research: read them first (read_agent), lay out a few broad aspects (things of one kind together; an early check for a method goes under that method), then attach each.',
+        description: 'Puts an existing conversation into the research, keeping it as it is (no new agent): as an aspect’s agent, or as an experiment under a method, with what it found. Use it to turn one or several earlier conversations into a research: read them first (research_read), lay out a few broad aspects (things of one kind together; an early check for a method goes under that method), then attach each.',
         schema: z.object({
           project: z.string().optional(),
           agent: z.string().describe('The agent’s name or role.'),

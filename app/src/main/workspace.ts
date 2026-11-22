@@ -728,6 +728,54 @@ export class Workspace {
     return deliver(lead.taskId, `${prefix}${text}`);
   }
 
+  /** Ends a research: its agents are ordinary agents of the project again; its files stay, renamed (ResearchFiles.dissolve). */
+  async researchDissolve(id: string): Promise<{ kept: string }> {
+    await this.researchReady(id);
+    if (!this.researchGet(id)) throw new Error('No research.');
+    const kept = await this.researchFiles.dissolve(id);
+    this.researchIndex.delete(id);
+    this.researchIds.delete(parseResearchId(id).projectId);
+    this.changed();
+    return { kept };
+  }
+
+  /** The conversations as the lead is asked to bring them in: read each, lay out a few broad aspects, attach. */
+  private bringIn(tasks: Task[]): string {
+    const names = tasks.map((t) => `${t.alias}${t.title ? ` (${t.title})` : ''}`).join(', ');
+    return this.language() === 'zh'
+      ? `请把这些已有的对话整理进这个研究：${names}。先用 research_read 读每个对话，按内容定出少数几个大的方面和各自的方法（同类的放在一起；为某个方法做的前期验证放在该方法下面），把得到的数字和结论记到实验上（research_record，含一句话结论），再用 research_attach 把每个对话挂到它对应的节点。最后写一份总结（research_notes，scope "summary"），并用一两句话告诉我整理成了什么样。`
+      : `Bring these existing conversations into this research: ${names}. Read each with research_read; lay out a few broad aspects and their methods from what they did (things of one kind together; an early check for a method goes under that method); record the numbers and conclusions on experiments (research_record, with a one-line takeaway); attach each conversation to its node with research_attach. Then write the summary (research_notes, scope "summary") and tell me in a line or two what it came to.`;
+  }
+
+  /** A research made from conversations the user picked: created, then its lead reads them and builds the tree. */
+  async researchFromTasks(projectId: string, taskIds: string[], title?: string, dir?: string): Promise<{ researchId: string }> {
+    const tasks = taskIds.map((id) => this.findTask(id)).filter((t): t is Task => !!t);
+    if (!tasks.length) throw new Error('Pick at least one conversation.');
+    if (tasks.some((t) => t.projectId !== projectId)) throw new Error('A research holds conversations of one project.');
+    const name = title?.trim() || tasks[0].title || tasks[0].alias;
+    await this.researchCreate(projectId, name, '', false, dir);
+    const d = dir?.trim().replace(/^\.\/+|\/+$/g, '');
+    const id = researchId(projectId, d || undefined);
+    await this.researchStartLead(id, this.bringIn(tasks));
+    return { researchId: id };
+  }
+
+  /** More conversations into a research that exists: its lead is asked (and started if it has none yet). */
+  async researchAddTasks(id: string, taskIds: string[]): Promise<void> {
+    await this.researchReady(id);
+    const doc = this.researchGet(id);
+    if (!doc) throw new Error('No research.');
+    const taken = new Set(taskIdsOf(doc));
+    const tasks = taskIds.map((t) => this.findTask(t)).filter((t): t is Task => !!t && !taken.has(t.taskId) && t.projectId === parseResearchId(id).projectId);
+    if (!tasks.length) throw new Error('Those conversations are already in it, or belong to another project.');
+    const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    if (!lead) await this.researchStartLead(id, this.bringIn(tasks));
+    else {
+      const r = await this.send(lead.taskId, this.bringIn(tasks), 'text');
+      if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
+    }
+  }
+
   /** The page puts a template in place as a node's view (to be edited from there, by an agent or by hand). */
   async researchSetView(id: string, key: string, text: string): Promise<void> {
     await this.researchReady(id);
