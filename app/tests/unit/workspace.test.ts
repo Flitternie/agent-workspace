@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -268,6 +268,71 @@ describe('several researches in a project (one per repository folder)', () => {
     await asLead.research_add.run({ type: 'aspect', title: 'Monitor' });
     expect(ws.researchGet(`${p.projectId}::hotswap`)!.nodes.map((n) => n.title)).toEqual(['Monitor']);
     await expect(ws.researchCreate(p.projectId, 'Bad', '', false, '../x')).rejects.toThrow(/Not a folder/);
+  });
+});
+
+describe('moving a research’s agents into its folder', () => {
+  it('agents started at the project root move with their conversation; the page counts them until then', async () => {
+    const ws = open();
+    const root = repo();
+    mkdirSync(join(root, 'trace'));
+    const p = await ws.addProject(root, 'projects');
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Old one', isolate: false, mockScript: 'work', instruction: 'go' });
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status !== 'running');
+    const rid = `${p.projectId}::trace`;
+    await ws.researchCreate(p.projectId, 'Trace', '', false, 'trace');
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ project: 'projects/trace', type: 'aspect', title: 'Labels' });
+    const aspect = ws.researchGet(rid)!.nodes[0].id;
+    await main.research_attach.run({ project: 'projects/trace', as: 'aspect_agent', node_id: aspect, agent: a.alias });
+    expect(ws.snapshot().research.find((r) => r.id === rid)!.atRoot).toBe(1);
+    expect(await ws.researchMoveAgents(rid)).toEqual({ moved: [a.alias], busy: [] });
+    const t = ws.snapshot().tasks.find((x) => x.taskId === a.taskId)!;
+    expect(t.cwd).toBe(join(p.rootPath, 'trace'));
+    expect(ws.snapshot().research.find((r) => r.id === rid)!.atRoot).toBeUndefined();
+    expect(ws.transcript(a.taskId).some((i) => i.role === 'user' && i.text === 'go')).toBe(true);
+    expect(ws.transcript(a.taskId).at(-1)!.text).toMatch(/research's folder/);
+  });
+
+  it('a Claude session is copied to the new folder without the root memory it was given', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'amw-test-home-'));
+    const base = join(home, '.claude', 'projects');
+    mkdirSync(join(base, '-r-projects'), { recursive: true });
+    const mem = 'Trace agent 小冯 leads the trace research.';
+    const lines = [
+      { type: 'user', uuid: 'u1', cwd: '/r/projects', message: { role: 'user', content: 'hi' } },
+      { type: 'attachment', uuid: 'a1', cwd: '/r/projects', attachment: { type: 'instructions', files: [{ path: '/h/.claude/projects/-r-projects/memory/MEMORY.md', type: 'AutoMem', content: mem }] }, rendered: [{ content: `<system-reminder>Contents of x:\n\n${mem}</system-reminder>` }] },
+      { type: 'api-request-blob', hash: 'h', message: { role: 'user', content: [{ type: 'text', text: `before ${mem} after` }] } },
+    ];
+    writeFileSync(join(base, '-r-projects', 'abc-1.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const { moveClaudeSession } = await import('../../src/main/research-move');
+    const was = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      expect(await moveClaudeSession(undefined, 'abc-1', '/r/projects', '/r/projects/trace')).toBe('moved');
+      expect(await moveClaudeSession(undefined, 'nope', '/r/projects', '/r/projects/trace')).toBe('none');
+    } finally {
+      process.env.HOME = was;
+    }
+    const out = readFileSync(join(base, '-r-projects-trace', 'abc-1.jsonl'), 'utf8');
+    // A folder that is a link: the CLI looks under where it points.
+    const real = mkdtempSync(join(tmpdir(), 'amw-test-real-'));
+    const link = join(home, 'linked');
+    symlinkSync(real, link);
+    process.env.HOME = home;
+    try {
+      expect(await moveClaudeSession(undefined, 'abc-1', '/r/projects', link)).toBe('moved');
+    } finally {
+      process.env.HOME = was;
+    }
+    expect(existsSync(join(base, realpathSync(real).replace(/[^a-zA-Z0-9]/g, '-'), 'abc-1.jsonl'))).toBe(true);
+    expect(out).not.toContain('小冯');
+    expect(out).toContain('Left out: the memory of /r/projects');
+    const parsed = out.trim().split('\n').map((l) => JSON.parse(l));
+    expect(parsed[0].cwd).toBe('/r/projects/trace');
+    expect(parsed[1].attachment.files).toEqual([]);
+    expect(readFileSync(join(base, '-r-projects', 'abc-1.jsonl'), 'utf8')).toContain('小冯');
   });
 });
 

@@ -60,6 +60,7 @@ export interface Outputs {
   'research:view': void;
   'research:html': string;
   'research:dissolve': { kept: string };
+  'research:moveAgents': { moved: string[]; busy: string[] };
   'research:fromTasks': { researchId: string };
   'research:addTasks': void;
   'attachment:save': ImageRef;

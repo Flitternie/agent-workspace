@@ -55,6 +55,7 @@ import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundS
 import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
+import { moveClaudeSession } from './research-move';
 import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -812,6 +813,54 @@ export class Workspace {
     return { kept };
   }
 
+  /** A folder research's agents that still work at the project root (started before its agents ran in its folder). */
+  researchAgentsAtRoot(id: string): Task[] {
+    const { projectId, dir } = parseResearchId(id);
+    const doc = this.researchGet(id);
+    if (!dir || !doc) return [];
+    const root = this.project(projectId).rootPath.replace(/\/+$/, '');
+    return taskIdsOf(doc)
+      .map((t) => this.findTask(t))
+      .filter((t): t is Task => !!t && !t.worktree && t.cwd.replace(/\/+$/, '') === root);
+  }
+
+  /**
+   * Moves them into the research's folder with their conversations: a Claude session is copied to the folder's
+   * place, without the root's memory it was given (research-move.ts); a Codex thread just resumes there. One that is
+   * working, or that a question of its CLI waits on, is left for later.
+   */
+  async researchMoveAgents(id: string): Promise<{ moved: string[]; busy: string[] }> {
+    await this.researchReady(id);
+    const { projectId, dir } = parseResearchId(id);
+    if (!dir) throw new Error('This research is the whole project: its agents already work there.');
+    const project = this.project(projectId);
+    const root = project.rootPath.replace(/\/+$/, '');
+    const target = project.host ? `${root}/${dir}` : join(root, dir);
+    const moved: string[] = [];
+    const busy: string[] = [];
+    for (const task of this.researchAgentsAtRoot(id)) {
+      const live = this.live.get(task.taskId);
+      if (this.connecting.has(task.taskId) || live?.turnActive || ['running', 'starting'].includes(task.status) || this.hasOpenNative(task.taskId)) {
+        busy.push(task.alias);
+        continue;
+      }
+      const native = this.currentSession(task)?.nativeSessionId;
+      if (task.provider === 'claude' && native) await moveClaudeSession(task.host, native, task.cwd, target);
+      if (live) {
+        this.live.delete(task.taskId);
+        await live.session.close().catch(() => {});
+      }
+      task.cwd = target;
+      const s = this.currentSession(task);
+      if (s) s.cwd = target;
+      this.appendSystem(task.taskId, this.language() === 'zh' ? `已移到研究文件夹 ${target}，对话保留；项目根目录的记忆不再带上。` : `Moved into the research's folder ${target} with its conversation; the project root's memory no longer comes with it.`);
+      moved.push(task.alias);
+      if (live) this.warm(task.taskId);
+    }
+    this.changed();
+    return { moved, busy };
+  }
+
   /** The conversations as the lead is asked to bring them in: read each, lay out a few broad aspects, attach. */
   private bringIn(tasks: Task[]): string {
     const names = tasks.map((t) => `${t.alias}${t.title ? ` (${t.title})` : ''}`).join(', ');
@@ -876,7 +925,10 @@ export class Workspace {
     this.stampStatus();
     const d = this.store.data;
     return {
-      research: this.researchSummaries(),
+      research: this.researchSummaries().map((r) => {
+        const atRoot = this.researchAgentsAtRoot(r.id).length;
+        return atRoot ? { ...r, atRoot } : r;
+      }),
       projects: d.projects,
       tasks: d.tasks,
       sessions: d.sessions,

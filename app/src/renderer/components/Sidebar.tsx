@@ -115,6 +115,9 @@ export function Sidebar({
   const researchMenuItems = (r: ResearchSummary): Array<MenuItem | '-'> => [
     { id: 'rename', label: tr('Rename…'), icon: 'pencil', onSelect: () => setDlg({ kind: 'rename', research: r }) },
     { id: 'colour', label: tr('Colour…'), onSelect: () => setDlg({ kind: 'colour', research: r }) },
+    ...(r.atRoot
+      ? [{ id: 'move-agents', label: tr('Move its agents into its folder ({n})', { n: r.atRoot }), onSelect: () => void call('research:moveAgents', { researchId: r.id }).catch(() => {}) } satisfies MenuItem]
+      : []),
     '-',
     { id: 'dissolve', label: tr('Dissolve…'), icon: 'trash', onSelect: () => setDlg({ kind: 'dissolve', research: r }) },
   ];

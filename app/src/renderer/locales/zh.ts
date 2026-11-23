@@ -1223,6 +1223,7 @@ export const zh: Record<string, string> = {
   'Its own view': '专属视图',
   'This research’s memory': '研究约定',
   '{n} entries': '{n} 条',
+  'Move its agents into its folder ({n})': '把 agent 移进研究文件夹（{n} 个）',
   'Node view': '视图',
   'Chat · {alias}': '对话 · {alias}',
   'Chat': '对话',

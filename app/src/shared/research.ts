@@ -194,6 +194,8 @@ export interface ResearchSummary {
   projectId: string;
   /** The folder it is kept in, for one not at the project's root. */
   dir?: string;
+  /** How many of its agents still work at the project root (started before its agents ran in its folder). */
+  atRoot?: number;
   title: string;
   taskIds: string[];
   /** Changes when the tree does (an agent's tool call, an edit): the page reads it again. */

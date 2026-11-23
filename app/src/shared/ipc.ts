@@ -60,6 +60,7 @@ export const ipcSchemas = {
     .object({ researchId: id, nodeIds: z.array(id).max(200), text, images: z.array(imageRef).max(10).optional() })
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
   'research:dissolve': z.object({ researchId: id }),
+  'research:moveAgents': z.object({ researchId: id }),
   'research:fromTasks': z.object({ projectId: id, taskIds: z.array(id).min(1).max(50), title: z.string().max(300).optional(), dir: z.string().max(200).optional() }),
   'research:addTasks': z.object({ researchId: id, taskIds: z.array(id).min(1).max(50) }),
   'research:html': z.object({ html: z.string().min(1).max(500_000) }),

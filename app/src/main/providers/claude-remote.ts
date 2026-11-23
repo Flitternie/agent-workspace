@@ -134,11 +134,15 @@ export function remoteExitError(host: string, exit: RemoteExit, fallback: string
   return why ? `Claude Code on ${host} ${how}: ${why}` : fallback.replace(/^Claude Code process/, `Claude Code on ${host}`);
 }
 
-/** Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. */
-export async function checkRemoteStart(host: string, cwd: string): Promise<void> {
-  const r = await sshRun(host, `cd ${shq(cwd)} 2>/dev/null || exit 3; command -v claude >/dev/null || exit 4`);
+/**
+ * Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. Returns the folder's
+ * real path: the CLI keeps its sessions under it (a folder that is a link: where it points).
+ */
+export async function checkRemoteStart(host: string, cwd: string): Promise<string> {
+  const r = await sshRun(host, `cd ${shq(cwd)} 2>/dev/null || exit 3; command -v claude >/dev/null || exit 4; pwd -P`);
   if (r.code === 255) throw new Error(sshError(host, r.stderr));
   if (r.code === 3) throw new Error(`The folder ${cwd} does not exist on ${host}.`);
   if (r.code === 4) throw new Error(`Claude Code is not installed on ${host} (not on its login shell's PATH).`);
   if (r.code !== 0) throw new Error(r.stderr.trim().split('\n').pop() || `Could not reach ${host}.`);
+  return r.stdout.trim().split('\n').pop() || cwd;
 }
