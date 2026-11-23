@@ -712,7 +712,7 @@ export class Workspace {
   private researchWhere(id: string): string {
     const { dir } = parseResearchId(id);
     if (!dir) return '';
-    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的。\n\n` : `This research is about the folder ${dir}/ of the project.\n\n`;
+    return this.language() === 'zh' ? `这个研究是关于项目里的 ${dir}/ 目录的，你就在这个目录里工作（项目根目录是上一级）。\n\n` : `This research is about the folder ${dir}/ of the project, and you work in it (the project's root is one level up).\n\n`;
   }
 
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
@@ -731,6 +731,7 @@ export class Workspace {
       instruction: `${this.researchWhere(projectId)}${researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId))}`,
       isolate: opts.isolate,
       ...(node.type === 'aspect' ? { researchManager: true } : {}),
+      ...(parseResearchId(projectId).dir ? { subdir: parseResearchId(projectId).dir } : {}),
       ...(provider === 'mock' ? { mockScript: 'work' } : {}),
     });
     // Linked on the freshest copy: the tree may have changed while the agent started.
@@ -753,6 +754,7 @@ export class Workspace {
       instruction: `${this.researchWhere(projectId)}${leadBrief(doc, this.language(), message, this.researchNotes(projectId))}`,
       isolate: false,
       researchManager: true,
+      ...(parseResearchId(projectId).dir ? { subdir: parseResearchId(projectId).dir } : {}),
       ...(leadProvider === 'mock' ? { mockScript: 'work' } : {}),
     });
     this.researchSave(projectId, { ...this.researchGet(projectId)!, leadTaskId: task.taskId, updatedAt: new Date().toISOString() });
@@ -1071,6 +1073,8 @@ export class Workspace {
     mockScript?: string;
     /** A research's lead or an aspect's agent (Task.researchManager). */
     researchManager?: boolean;
+    /** A folder of the project to work in (a research kept in a folder: its agents work there, with their own CLI memory). */
+    subdir?: string;
     /** Images that go with the first instruction (the main agent passing on the user's). */
     images?: ImageRef[];
   }): Promise<Task> {
@@ -1091,6 +1095,10 @@ export class Workspace {
       } catch (error) {
         sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
       }
+    }
+    if (args.subdir) {
+      if (!isResearchDir(args.subdir)) throw new Error(`Not a folder of the project: ${args.subdir}`);
+      cwd = project.host ? `${cwd.replace(/\/+$/, '')}/${args.subdir}` : join(cwd, args.subdir);
     }
     const title = (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80);
     const task = this.addTask(ids, {

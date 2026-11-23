@@ -115,6 +115,9 @@ function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
       ? `· 要把工作分出去并行做，用 research_try${role === 'lead' ? '（或让对应方面的 agent 去做）' : ''}：每个变体是研究里的一个 agent，会出现在页面上，用户能看到、能和它对话。你没有内置的子 agent 工具，也不要用别的办法在后台偷偷分工。`
       : `· To hand work out in parallel, use research_try${role === 'lead' ? ' (or have that aspect’s agent do it)' : ''}: each variant is an agent of the research, shown on the page, that the user can see and talk to. You have no built-in sub-agent tool; do not hand work out behind the page some other way.`,
     zh
+      ? '· 这个研究的决定、规则和进展记在研究里（笔记、总结、一句话结论），不要写进 Claude Code 或 Codex 自己的记忆：那份记忆按目录共享，同一目录下别的研究和用户自己的会话也会读到。'
+      : '· Keep this research’s decisions, rules and progress in the research (notes, summary, takeaways), never in Claude Code’s or Codex’s own memory: that memory is shared by folder, so other researches and the user’s own sessions there would read it.',
+    zh
       ? '· agent 之间用 research_tell 通信：把别的部分需要知道的事告诉它的 agent 或负责人（会改变对方计划的发现、对方在等的结果），需要对方做事也用它。实验记录的结果会自动送到所属方面的 agent。'
       : '· Agents talk with research_tell: tell another part’s agent, or the lead, what it needs to know (a finding that changes its plan, a result it waits for), or ask it to do something. Results recorded by experiments reach their aspect’s agent by themselves.',
   ].join('\n');

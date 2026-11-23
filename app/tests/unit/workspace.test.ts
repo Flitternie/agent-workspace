@@ -261,6 +261,8 @@ describe('several researches in a project (one per repository folder)', () => {
     // The lead of one: started in the project, told the folder; its tools work on its own research.
     const lead = await ws.researchMessage(`${p.projectId}::hotswap`, [], 'Lay it out with me.');
     expect(ws.transcript(lead.taskId).find((i) => i.role === 'user')!.text).toMatch(/folder hotswap\/ of the project/);
+    // It works in that folder (its CLI's memory is that folder's, not shared with the project's other researches).
+    expect(ws.snapshot().tasks.find((t) => t.taskId === lead.taskId)!.cwd).toBe(join(p.rootPath, 'hotswap'));
     expect(ws.snapshot().tasks.find((t) => t.taskId === lead.taskId)!.projectId).toBe(p.projectId);
     const asLead = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: lead.taskId }).map((t) => [t.name, t]));
     await asLead.research_add.run({ type: 'aspect', title: 'Monitor' });
