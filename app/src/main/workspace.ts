@@ -54,7 +54,7 @@ import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes,
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from './research';
 import { ResearchFiles } from './research-files';
-import { aboutPrefix, leadBrief, researchBrief, researchTools } from './research-tools';
+import { aboutPrefix, leadBrief, researchBrief, researchTools, roleInstructions } from './research-tools';
 import { moveClaudeSession } from './research-move';
 import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -85,6 +85,8 @@ interface LiveSession {
   warm?: { status: AgentStatus };
   /** The "Resumed native session" note of a background connect, held back until the session is used. */
   resumeNote?: string;
+  /** Its place in a research when it connected (research:role); a new place means connecting again (roleInstructions). */
+  role?: string;
 }
 
 /** A `!command` the user typed is stopped after this long. */
@@ -701,6 +703,16 @@ export class Workspace {
     if (doc.leadTaskId === taskId) return 'lead';
     const n = doc.nodes.find((x) => x.taskId === taskId);
     return n ? (n.type === 'aspect' ? 'aspect' : 'experiment') : 'none';
+  }
+
+  /** The agent's place in its project's research, if it has one: which research, and as what. */
+  private researchPlace(task: Task): { id: string; role: 'lead' | 'aspect' | 'experiment' } | undefined {
+    for (const r of this.researchSummaries()) {
+      if (r.projectId !== task.projectId) continue;
+      const role = this.researchRole(r.id, task.taskId);
+      if (role !== 'none') return { id: r.id, role };
+    }
+    return undefined;
   }
 
   /** One agent of a research tells another something (research_tell): delivered as a message, marked with who sent it. */
@@ -1614,6 +1626,10 @@ export class Workspace {
     // and the user can talk to), so they go without the CLI's own hidden sub-agents.
     // (Known from how it was started, or, for a conversation attached later, from its place in the tree.)
     const manages = inResearch && (!!task.researchManager || this.researchSummaries().some((r) => r.projectId === task.projectId && ['lead', 'aspect'].includes(this.researchRole(r.id, task.taskId))));
+    // Its place in a research and how it works there, with every connect (an attached conversation never had a brief).
+    const place = isMain ? undefined : this.researchPlace(task);
+    const doc = place ? this.researchGet(place.id) : null;
+    const roleText = place && doc ? roleInstructions(doc, place.role, task.taskId, this.language(), this.researchNotes(place.id)) : undefined;
     const history: TranscriptItem[] = [];
     let replaying = true;
     const session = adapter.createSession(
@@ -1623,7 +1639,7 @@ export class Workspace {
         title: task.title,
         resumeNativeSessionId: resumeId,
         // The main agent gets its role and the workspace tools; it never edits code itself.
-        developerInstructions: isMain ? [MAIN_AGENT_PROMPT, instructionsFor(task, injected)].filter(Boolean).join('\n\n') : instructionsFor(task, injected),
+        developerInstructions: isMain ? [MAIN_AGENT_PROMPT, instructionsFor(task, injected)].filter(Boolean).join('\n\n') : [roleText, instructionsFor(task, injected)].filter(Boolean).join('\n\n') || undefined,
         mockScript: task.mockScript,
         model: task.model,
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
@@ -1649,7 +1665,7 @@ export class Workspace {
         this.handleEvent(taskId, record.localId, event);
       },
     );
-    const live: LiveSession = { localId: record.localId, session, turnActive: false, ...(before ? { warm: { status: before.status } } : {}) };
+    const live: LiveSession = { localId: record.localId, session, turnActive: false, ...(before ? { warm: { status: before.status } } : {}), ...(place ? { role: `${place.id}:${place.role}` } : {}) };
     this.live.set(taskId, live);
     try {
       await session.start();
@@ -2214,6 +2230,16 @@ export class Workspace {
     // A new message carries on from a failed turn by itself; no retry on top of it.
     this.cancelRetry(taskId);
     try {
+      // An earlier conversation given a place in a research since it connected (attached): it connects again to be
+      // told it. (One the research started was told in its brief.)
+      const was = this.live.get(taskId);
+      if (was && !was.turnActive && !this.hasOpenNative(taskId) && task !== this.store.data.mainAgent && !task.researchAgent && !task.researchManager) {
+        const place = this.researchPlace(task);
+        if ((place ? `${place.id}:${place.role}` : undefined) !== was.role) {
+          this.live.delete(taskId);
+          await was.session.close().catch(() => {});
+        }
+      }
       const live = await this.connect(taskId);
       const busy = live.turnActive;
       // Memory saved, changed or removed since the session was given its notes reaches it with this message.

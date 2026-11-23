@@ -336,6 +336,30 @@ describe('moving a research’s agents into its folder', () => {
   });
 });
 
+describe('an agent knows its place in a research', () => {
+  it('an earlier conversation attached to the tree is told its role when it next hears from the user; the lead is told to hand work out', async () => {
+    const ws = open();
+    const p = await ws.addProject(repo(), 'shop');
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Old one', isolate: false, mockScript: 'work', instruction: 'go' });
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === a.taskId)!.status !== 'running');
+    const last = () => ws.transcript(a.taskId).filter((i) => i.role === 'assistant').at(-1)?.text ?? '';
+    await ws.send(a.taskId, 'what is your role?', 'text');
+    await until(() => /^Role:/.test(last()));
+    expect(last()).toBe('Role: none');
+    await ws.researchCreate(p.projectId, 'Tuning', 'Raise accuracy', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ type: 'aspect', title: 'Cache' });
+    const aspect = ws.researchGet(p.projectId)!.nodes[0].id;
+    await main.research_attach.run({ as: 'aspect_agent', node_id: aspect, agent: a.alias });
+    await ws.send(a.taskId, 'what is your role now?', 'text');
+    await until(() => /Cache/.test(last()));
+    expect(last()).toMatch(/You own the "Cache" aspect of the research "Tuning"/);
+    const { roleInstructions } = await import('../../src/main/research-tools');
+    expect(roleInstructions(ws.researchGet(p.projectId)!, 'lead', 'x', 'en')).toMatch(/you do not run experiments or change the implementation yourself/);
+  });
+});
+
 describe('starting and ending a research from the sidebar', () => {
   it('conversations picked become a research (its lead is asked to read and attach them); more join later; dissolved, its files stay and the place is free again', async () => {
     const ws = open();

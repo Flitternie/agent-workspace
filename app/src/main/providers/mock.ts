@@ -281,6 +281,12 @@ class MockSession implements ProviderSession {
     const update = /^## Workspace memory update[\s\S]*?\n\n(?=[^-\s])/.exec(text);
     if (update) text = text.slice(update[0].length);
     const noted = update ? `Memory update received: ${update[0].split('\n').filter((l) => l.startsWith('- ')).join(' ')}\n\n` : '';
+    // What it was told of its place in a research (roleInstructions), when asked: tests see what reached it.
+    if (/what is your role/i.test(text)) {
+      const role = /## Your place in a research[^\n]*\n\n([^\n]+)/.exec(this.args.developerInstructions ?? '');
+      this.later(() => this.finish(role ? `Role: ${role[1]}` : 'Role: none'), 1);
+      return;
+    }
     this.later(() => {
       let reply: string;
       const memory = this.args.developerInstructions

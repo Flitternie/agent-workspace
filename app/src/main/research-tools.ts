@@ -111,6 +111,13 @@ function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
     zh
       ? '· 边做边更新，不要攒到最后：要试一个新做法，先 research_add 把它加到树上；有了结果马上 research_record（带一句话结论）；结论变了就 research_update 改 takeaway。'
       : '· Keep it current as you go, not at the end: before trying something new, put it on the tree (research_add); record a result as soon as there is one (research_record, with a one-line takeaway); when a conclusion changes, update its takeaway (research_update).',
+    role === 'lead'
+      ? zh
+        ? '· 你负责规划和协调，不亲自做实验、不亲自改实现：某个方面的工作用 research_tell 交给这个方面的 agent（这个方面还没有 agent 时会自动启动一个），一个方法的几个变体用 research_try 并行开出去。你可以自己读代码、数据和结果来判断下一步。只有用户明确要你亲自动手时才自己做。'
+        : '· You plan and coordinate; you do not run experiments or change the implementation yourself: hand an aspect’s work to that aspect’s agent with research_tell (one is started if the aspect has none), and start a method’s variants in parallel with research_try. You may read code, data and results yourself to decide what comes next. Do the work yourself only when the user explicitly asks you to.'
+      : zh
+        ? '· 一次具体的实验（要跑一段时间的运行、要相互比较的变体、对实现的改动）用 research_try 开出去，这样它在页面上有自己的节点和 agent，用户能看到、能管理；几分钟内的快速检查可以自己做。'
+        : '· A concrete experiment (a run that takes a while, variants to compare, a change to the implementation) goes out with research_try, so it has its own node and agent on the page that the user can see and manage; a quick check of a few minutes you may do yourself.',
     zh
       ? `· 要把工作分出去并行做，用 research_try${role === 'lead' ? '（或让对应方面的 agent 去做）' : ''}：每个变体是研究里的一个 agent，会出现在页面上，用户能看到、能和它对话。你没有内置的子 agent 工具，也不要用别的办法在后台偷偷分工。`
       : `· To hand work out in parallel, use research_try${role === 'lead' ? ' (or have that aspect’s agent do it)' : ''}: each variant is an agent of the research, shown on the page, that the user can see and talk to. You have no built-in sub-agent tool; do not hand work out behind the page some other way.`,
@@ -129,6 +136,36 @@ const memoryIn = (notes: ResearchNotes | undefined, lang: 'en' | 'zh') =>
 
 /** The user reads the agents' replies: in the workspace's language. */
 const replyIn = (lang: 'en' | 'zh') => (lang === 'zh' ? '回复用户和其他 agent 时都用中文。' : '');
+
+/**
+ * What an agent of a research is, and how it works here: given with every connect (in its instructions), so an
+ * earlier conversation attached to the tree knows its place too, and keeps knowing it after a compaction.
+ */
+export function roleInstructions(doc: ResearchDoc, role: 'lead' | 'aspect' | 'experiment', taskId: string, lang: 'en' | 'zh', notes?: ResearchNotes): string {
+  const zh = lang === 'zh';
+  const node = doc.nodes.find((n) => n.taskId === taskId);
+  const who =
+    role === 'lead'
+      ? zh
+        ? `你是研究「${doc.title}」的负责人（目标：${doc.goal || '还没写'}）。每个方面有自己的 agent，方面内的工作交给它们；研究总结由你维护。`
+        : `You lead the research "${doc.title}" (goal: ${doc.goal || 'not written yet'}). Each aspect has its own agent: leave the work within an aspect to it. You keep the research summary.`
+      : role === 'aspect'
+        ? zh
+          ? `你负责研究「${doc.title}」中的「${node?.title ?? ''}」方面。`
+          : `You own the "${node?.title ?? ''}" aspect of the research "${doc.title}".`
+        : zh
+          ? `你是研究「${doc.title}」里的一个实验「${node?.title ?? ''}」。完成后用 research_record 记录结果和一句话结论；需要别人知道或拿主意时用 research_tell。`
+          : `You are an experiment of the research "${doc.title}": "${node?.title ?? ''}". When done, record the result and a one-line takeaway with research_record; tell others what they need to know, or ask for a decision, with research_tell.`;
+  return [
+    zh ? '## 你在研究里的角色（由 Agent Workspace 提供）' : '## Your place in a research (provided by Agent Workspace)',
+    who,
+    role === 'experiment' ? '' : rules(role, lang),
+    memoryIn(notes, lang),
+    replyIn(lang),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string, notes?: ResearchNotes): string {
   const zh = lang === 'zh';
