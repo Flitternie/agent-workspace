@@ -114,7 +114,7 @@ export class ResearchFiles {
     const body = text.endsWith('\n') ? text : `${text}\n`;
     const r = this.remote.get(projectId) ?? { doc: null, notes: { aspects: {} } };
     const note = { text: body, updatedAt: new Date().toISOString() };
-    const notes = scope === 'summary' ? { ...r.notes, summary: note } : scope === 'ui' ? { ...r.notes, ui: note } : scope.startsWith('view:') ? { ...r.notes, views: { ...r.notes.views, [scope.slice(5)]: note } } : { ...r.notes, aspects: { ...r.notes.aspects, [scope]: note } };
+    const notes = scope === 'summary' ? { ...r.notes, summary: note } : scope === 'ui' ? { ...r.notes, ui: note } : scope === 'memory' ? { ...r.notes, memory: note } : scope.startsWith('view:') ? { ...r.notes, views: { ...r.notes.views, [scope.slice(5)]: note } } : { ...r.notes, aspects: { ...r.notes.aspects, [scope]: note } };
     this.remote.set(projectId, { ...r, notes });
     this.enqueue(p, `.research/${noteRel(scope)}`, body);
   }
@@ -180,7 +180,7 @@ export class ResearchFiles {
   private fetch(p: Project): Promise<void> {
     const running = this.fetching.get(p.projectId);
     if (running) return running;
-    const script = `cd ${shq(p.rootPath)}/.research 2>/dev/null || exit 0; for f in research.json summary.md ui.json notes/*.md views/*.md; do [ -f "$f" ] || continue; t=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"); printf '\\n${MARK} %s %s\\n' "$f" "$t"; base64 < "$f"; done`;
+    const script = `cd ${shq(p.rootPath)}/.research 2>/dev/null || exit 0; for f in research.json summary.md ui.json memory.md notes/*.md views/*.md; do [ -f "$f" ] || continue; t=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"); printf '\\n${MARK} %s %s\\n' "$f" "$t"; base64 < "$f"; done`;
     const job = sshRun(p.host!, `sh -c ${shq(script)}`, 60_000)
       .then((r) => {
         if (r.code !== 0) throw new Error(sshError(p.host!, r.stderr));
@@ -230,6 +230,7 @@ export function parseFetch(out: string): Remote {
       }
     } else if (file === 'summary.md') r.notes.summary = { text, updatedAt };
     else if (file === 'ui.json') r.notes.ui = { text, updatedAt };
+    else if (file === 'memory.md') r.notes.memory = { text, updatedAt };
     else if (file.startsWith('notes/')) r.notes.aspects[file.slice(6).replace(/\.md$/, '')] = { text, updatedAt };
     else if (file.startsWith('views/')) (r.notes.views ??= {})[file.slice(6).replace(/\.md$/, '')] = { text, updatedAt };
   }

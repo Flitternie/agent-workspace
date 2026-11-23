@@ -6,8 +6,8 @@
 // A node with no view shows its level's template; a template can be put in place and then edited.
 import { aspectOf, childrenOf, type ResearchDoc, type ResearchNode, type ResearchResult } from './research';
 
-export type ViewBlockKind = 'summary' | 'notes' | 'kpis' | 'children' | 'table' | 'findings' | 'design' | 'result' | 'evidence';
-export const VIEW_BLOCKS: ViewBlockKind[] = ['summary', 'notes', 'kpis', 'children', 'table', 'findings', 'design', 'result', 'evidence'];
+export type ViewBlockKind = 'summary' | 'memory' | 'notes' | 'kpis' | 'children' | 'table' | 'findings' | 'design' | 'result' | 'evidence';
+export const VIEW_BLOCKS: ViewBlockKind[] = ['summary', 'memory', 'notes', 'kpis', 'children', 'table', 'findings', 'design', 'result', 'evidence'];
 
 export type ViewPart = { type: 'md'; text: string } | { type: 'block'; kind: ViewBlockKind; options: Record<string, unknown>; error?: string } | { type: 'html'; html: string; height?: number };
 
@@ -55,7 +55,7 @@ const block = (kind: ViewBlockKind, options?: Record<string, unknown>) => `\`\`\
 
 /** The views a node starts from (the first of its level is what it shows with none of its own). */
 export const VIEW_TEMPLATES: ViewTemplate[] = [
-  { id: 'overview', levels: ['goal'], name: { en: 'Overview', zh: '概览' }, text: [block('summary'), block('children'), block('evidence')].join('\n\n') },
+  { id: 'overview', levels: ['goal'], name: { en: 'Overview', zh: '概览' }, text: [block('summary'), block('memory'), block('children'), block('evidence')].join('\n\n') },
   { id: 'aspect', levels: ['aspect'], name: { en: 'Aspect', zh: '方面' }, text: [block('kpis'), block('notes'), block('children')].join('\n\n') },
   { id: 'method', levels: ['method'], name: { en: 'Method', zh: '方法' }, text: [block('design'), block('kpis'), block('children'), block('findings')].join('\n\n') },
   { id: 'experiment', levels: ['experiment'], name: { en: 'Experiment', zh: '实验' }, text: [block('result'), block('design'), block('findings')].join('\n\n') },

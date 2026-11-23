@@ -115,13 +115,17 @@ function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
       ? `· 要把工作分出去并行做，用 research_try${role === 'lead' ? '（或让对应方面的 agent 去做）' : ''}：每个变体是研究里的一个 agent，会出现在页面上，用户能看到、能和它对话。你没有内置的子 agent 工具，也不要用别的办法在后台偷偷分工。`
       : `· To hand work out in parallel, use research_try${role === 'lead' ? ' (or have that aspect’s agent do it)' : ''}: each variant is an agent of the research, shown on the page, that the user can see and talk to. You have no built-in sub-agent tool; do not hand work out behind the page some other way.`,
     zh
-      ? '· 这个研究的决定、规则和进展记在研究里（笔记、总结、一句话结论），不要写进 Claude Code 或 Codex 自己的记忆：那份记忆按目录共享，同一目录下别的研究和用户自己的会话也会读到。'
-      : '· Keep this research’s decisions, rules and progress in the research (notes, summary, takeaways), never in Claude Code’s or Codex’s own memory: that memory is shared by folder, so other researches and the user’s own sessions there would read it.',
+      ? `· 这个研究的决定、规则和进展记在研究里，不要写进 Claude Code 或 Codex 自己的记忆（那份记忆按目录共享，别的研究和用户自己的会话也会读到，你也写不进去）。用户定下的规则和定义记进研究约定（research_memory）${role === 'lead' ? '' : '：把它告诉负责人，由负责人记'}；进展记在笔记、总结和一句话结论里。`
+      : `· Keep this research’s decisions, rules and progress in the research, never in Claude Code’s or Codex’s own memory (shared by folder, read by other researches and the user’s own sessions; you cannot write it anyway). Rules and definitions the user sets go in the research’s memory (research_memory${role === 'lead' ? '' : ': tell the lead, who keeps it'}); progress goes in notes, the summary and takeaways.`,
     zh
       ? '· agent 之间用 research_tell 通信：把别的部分需要知道的事告诉它的 agent 或负责人（会改变对方计划的发现、对方在等的结果），需要对方做事也用它。实验记录的结果会自动送到所属方面的 agent。'
       : '· Agents talk with research_tell: tell another part’s agent, or the lead, what it needs to know (a finding that changes its plan, a result it waits for), or ask it to do something. Results recorded by experiments reach their aspect’s agent by themselves.',
   ].join('\n');
 }
+
+/** The research's own memory (rules, definitions, decisions that hold here): in every brief, whole. */
+const memoryIn = (notes: ResearchNotes | undefined, lang: 'en' | 'zh') =>
+  notes?.memory?.text.trim() ? (lang === 'zh' ? `这个研究的约定（照此执行）：\n${notes.memory.text.trim()}` : `This research's own memory (follow it):\n${notes.memory.text.trim()}`) : '';
 
 /** The user reads the agents' replies: in the workspace's language. */
 const replyIn = (lang: 'en' | 'zh') => (lang === 'zh' ? '回复用户和其他 agent 时都用中文。' : '');
@@ -144,6 +148,7 @@ export function leadBrief(doc: ResearchDoc, lang: 'en' | 'zh', message?: string,
     zh ? '具体怎么做研究由用户决定，按用户的要求来；回复保持简短，研究页面上能看到整棵树。' : 'How the research is done is the user’s call: follow what they ask. Keep replies short; the research page shows the tree.',
     modeText(doc.policy?.mode, lang),
     empty ? (zh ? '现在树还是空的。' : 'The tree is empty so far.') : '',
+    memoryIn(notes, lang),
     notes?.summary ? (zh ? `目前的总结：\n${excerpt(notes.summary.text)}` : `The summary so far:\n${excerpt(notes.summary.text)}`) : '',
     replyIn(lang),
     message ?? '',
@@ -191,7 +196,7 @@ export function researchBrief(doc: ResearchDoc, node: ResearchNode, lang: 'en' |
   const tail = node.type === 'experiment'
     ? L('Others may record results while you work: before saying how yours compares, look at the latest (research_overview).', '你工作期间别人也可能记录结果：说自己的结果和别人比怎么样之前，先看最新的（research_overview）。')
     : '';
-  return [...parts, tail, replyIn(lang), message ?? ''].filter(Boolean).join('\n\n');
+  return [...parts, memoryIn(notes, lang), tail, replyIn(lang), message ?? ''].filter(Boolean).join('\n\n');
 }
 
 /** The prefix that tells an agent which nodes a message is about. */
@@ -305,6 +310,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         const { projectId, doc } = await load(a.project);
         const notes = host.researchNotes(projectId);
         const parts = [treeText(doc, name)];
+        if (notes.memory?.text.trim()) parts.push(`--- memory.md (this research's own rules and definitions)\n${notes.memory.text.trim()}`);
         if (notes.summary) parts.push(`--- summary.md (${resultsSince(doc, notes.summary.updatedAt)} results since it was written)\n${excerpt(notes.summary.text, 4000)}`);
         for (const a2 of childrenOf(doc, null)) {
           const n = notes.aspects[a2.id];
@@ -467,6 +473,20 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       },
     },
     {
+      name: 'research_memory',
+      description: 'The research’s own memory (memory.md in .research/): rules, definitions and decisions the user set that hold for this research only (e.g. how a label is defined, what not to do, where things go). Every agent of the research is given it whole. The lead keeps it: add one entry, or rewrite it whole (markdown). With nothing given it returns it.',
+      schema: z.object({ ...projectArg, add: z.string().max(2000).optional().describe('One entry to add (a line, with why if it matters).'), markdown: z.string().max(20_000).optional().describe('The whole memory, replacing it.') }),
+      run: async (a) => {
+        const { projectId, doc } = await load(a.project);
+        const now = host.researchNotes(projectId).memory?.text ?? '';
+        if (!a.add && a.markdown === undefined) return now.trim() || 'This research has no memory yet.';
+        if (!full(doc)) throw new Error('The research’s memory is kept by its lead: tell the lead (research_tell to "lead").');
+        const text = a.markdown !== undefined ? String(a.markdown) : `${now.trim() ? `${now.trimEnd()}\n` : ''}- ${String(a.add).trim()}`;
+        host.researchWriteNote(projectId, 'memory', text);
+        return `The research’s memory is updated (${text.split('\n').filter((l) => l.trim()).length} lines); new agents get it in their brief.`;
+      },
+    },
+    {
       name: 'research_notes',
       description: 'Writes a note, in markdown, kept in the repository next to the tree: an aspect’s notes (what was tried, what works and what does not, findings that matter, what to try next) or, for the main agent, the research summary (where things stand, which aspects matter, what one aspect taught another, next steps). The whole note: it replaces the last version (git keeps them). New agents start from these notes.',
       schema: z.object({ ...projectArg, scope: z.string().optional().describe('"summary" (the lead’s), or an aspect id (an aspect’s agent: its own, the default).'), markdown: z.string().min(1).max(40_000) }),
@@ -491,7 +511,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         'Writes what the research page shows for a node (its side panel): markdown, with live blocks in it. The user may ask for what they want to see (a table of the core metrics, a comparison, a chart); write it here, and rewrite it when they ask for something else. The whole view: it replaces the last one. Leave markdown out and give template to start from one.',
         'Blocks are fenced code blocks, ```research:<kind> with JSON options inside:',
         'table: a live table of recorded results that follows the tree (new methods add rows, new datasets add columns); options {"rows":"methods"|"experiments"|"aspects","under":"<node id, default this one>","metrics":["auc12",...] or "*","datasets":"*" (a column per dataset, new ones added) or a list (left out: one column per metric over all its results),"cell":"best"|"latest"|"mean"|"sum","sum":["metrics added up, e.g. what was spent"],"lower":["metrics where lower is better"],"title":"..."}. Whatever this research tracks goes in as a metric, resources included (cost, GPU hours, tokens: record them as results, show them summed).',
-        'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
+        'children (the nodes under it, with status and best value), kpis (start → best, experiments, how many work), findings (the findings under it), notes (the aspect’s notes, or the summary on the goal), summary, memory (the research’s own rules and definitions), design, result (an experiment’s numbers), evidence (end-to-end runs and ablations).',
         'html: ```html <height> with your own HTML (inline SVG and scripts allowed, isolated, no network; it is styled like the page: plain tables and text look like the rest). Put script code inside a function: top-level names like top, name or parent are the page’s own and break the script.',
         'Results for tables are recorded with research_record (results: metric, dataset, value).',
       ].join(' '),

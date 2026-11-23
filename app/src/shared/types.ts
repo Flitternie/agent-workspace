@@ -86,6 +86,8 @@ export interface Task {
   mockScript?: string;
   /** Started as a research's lead or an aspect's agent: it hands work out through the research (no hidden sub-agents). */
   researchManager?: boolean;
+  /** Started by a research (its lead, an aspect's or an experiment's agent): it does not write the CLI's own memory. */
+  researchAgent?: boolean;
   /** Overrides settings.permissionMode for this agent. */
   permissionMode?: PermissionMode;
   /** The agent whose conversation this one was forked from (alias at the time). */

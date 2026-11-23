@@ -540,7 +540,7 @@ export class Workspace {
   private summarize(id: string, doc: ResearchDoc | null): ResearchSummary | null {
     if (!doc) return null;
     const n = this.researchFiles.notes(id);
-    const notesAt = [n.summary?.updatedAt, n.ui?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
+    const notesAt = [n.summary?.updatedAt, n.ui?.updatedAt, n.memory?.updatedAt, ...Object.values(n.aspects).map((x) => x.updatedAt), ...Object.values(n.views ?? {}).map((x) => x.updatedAt)].filter((x): x is string => !!x).sort().at(-1);
     const { projectId, dir } = parseResearchId(id);
     return { id, projectId, ...(dir ? { dir } : {}), ...(doc.color != null ? { color: doc.color } : {}), title: doc.title, taskIds: taskIdsOf(doc), updatedAt: doc.updatedAt, notesAt };
   }
@@ -648,7 +648,7 @@ export class Workspace {
     this.researchFiles.saveNote(projectId, scope, text);
     const doc = this.researchFiles.doc(projectId);
     this.indexResearch(projectId, doc);
-    if (scope === 'summary' || scope === 'ui' || scope.startsWith('view:') || !doc) return;
+    if (scope === 'summary' || scope === 'ui' || scope === 'memory' || scope.startsWith('view:') || !doc) return;
     // An aspect's notes moved: the lead folds them into the summary, as often as the policy allows.
     const every = (doc.policy?.summaryEvery ?? 30) * 60_000;
     const lead = doc.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
@@ -686,6 +686,11 @@ export class Workspace {
     const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
     if (!p) throw new Error('No signed-in Claude Code or Codex to start an agent.');
     return p;
+  }
+
+  /** Whether an agent is one of a research's (its lead, an aspect's or an experiment's agent). */
+  private inAnyResearch(taskId: string): boolean {
+    return this.researchSummaries().some((r) => r.taskIds.includes(taskId));
   }
 
   /** An agent's place in a research: its lead, an aspect's agent, an experiment's, or none. */
@@ -730,6 +735,7 @@ export class Workspace {
       title: node.type === 'aspect' ? (zh ? `${node.title}（研究）` : `${node.title} (research)`) : `${aspect?.title ?? ''} · ${node.title}`,
       instruction: `${this.researchWhere(projectId)}${researchBrief(doc, node, this.language(), opts.message, this.researchNotes(projectId))}`,
       isolate: opts.isolate,
+      researchAgent: true,
       ...(node.type === 'aspect' ? { researchManager: true } : {}),
       ...(parseResearchId(projectId).dir ? { subdir: parseResearchId(projectId).dir } : {}),
       ...(provider === 'mock' ? { mockScript: 'work' } : {}),
@@ -1075,6 +1081,8 @@ export class Workspace {
     researchManager?: boolean;
     /** A folder of the project to work in (a research kept in a folder: its agents work there, with their own CLI memory). */
     subdir?: string;
+    /** Started by a research (Task.researchAgent). */
+    researchAgent?: boolean;
     /** Images that go with the first instruction (the main agent passing on the user's). */
     images?: ImageRef[];
   }): Promise<Task> {
@@ -1117,6 +1125,7 @@ export class Workspace {
       mockScript: args.mockScript,
     });
     if (args.researchManager) task.researchManager = true;
+    if (args.researchAgent || args.researchManager) task.researchAgent = true;
     this.changed();
     if (args.instruction?.trim()) {
       const r = await this.send(taskId, args.instruction, 'initial', { images: args.images });
@@ -1570,8 +1579,10 @@ export class Workspace {
         // In a project with a research, any agent may read the tree; what it may change is decided per call (its place in it).
         extraTools: inResearch ? researchTools(this, { kind: 'agent', taskId: task.taskId }) : undefined,
         ...(manages ? { disallowedTools: ['Agent', 'Task'] } : {}),
-        // The tree, notes and views are changed through the research tools, never by editing the files.
-        ...(inResearch ? { denyEdit: ['**/.research/**'] } : {}),
+        // The tree, notes and views are changed through the research tools, never by editing the files; and a
+        // research's agents never write the CLI's own memory (kept by folder, read by every session there):
+        // what holds for the research goes in its memory (research_memory).
+        ...(inResearch ? { denyEdit: ['**/.research/**', ...(task.researchAgent || manages || this.inAnyResearch(task.taskId) ? ['~/.claude/projects/**/memory/**', '~/.claude/**/CLAUDE.md', '~/.codex/**'] : [])] } : {}),
         skills,
       },
       (event) => {

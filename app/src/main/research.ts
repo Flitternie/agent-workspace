@@ -49,9 +49,9 @@ export function writeResearch(project: Project, doc: ResearchDoc): void {
 
 // .research/views/<node id>.md: what the page shows for a node ("goal" for the goal), scope "view:<id>".
 const NOTE_ID = /^[A-Za-z0-9_-]{1,80}$/;
-export const isNoteScope = (scope: string) => scope === 'summary' || scope === 'ui' || NOTE_ID.test(scope) || (scope.startsWith('view:') && NOTE_ID.test(scope.slice(5)));
+export const isNoteScope = (scope: string) => scope === 'summary' || scope === 'ui' || scope === 'memory' || NOTE_ID.test(scope) || (scope.startsWith('view:') && NOTE_ID.test(scope.slice(5)));
 /** Where a note is, relative to the research's folder. */
-export const noteRel = (scope: string) => (scope === 'summary' ? 'summary.md' : scope === 'ui' ? 'ui.json' : scope.startsWith('view:') ? `views/${scope.slice(5)}.md` : `notes/${scope}.md`);
+export const noteRel = (scope: string) => (scope === 'summary' ? 'summary.md' : scope === 'ui' ? 'ui.json' : scope === 'memory' ? 'memory.md' : scope.startsWith('view:') ? `views/${scope.slice(5)}.md` : `notes/${scope}.md`);
 export const noteFile = (project: Project, scope: string) => join(project.rootPath, DIR, noteRel(scope));
 
 export function readNotes(project: Project): ResearchNotes {
@@ -60,6 +60,7 @@ export function readNotes(project: Project): ResearchNotes {
   const read = (file: string) => (existsSync(file) ? { text: readFileSync(file, 'utf8'), updatedAt: statSync(file).mtime.toISOString() } : undefined);
   out.summary = read(noteFile(project, 'summary'));
   out.ui = read(noteFile(project, 'ui'));
+  out.memory = read(noteFile(project, 'memory'));
   out.views = {};
   for (const [sub, into] of [['notes', out.aspects], ['views', out.views]] as Array<[string, Record<string, ResearchNote>]>) {
     const dir = join(project.rootPath, DIR, sub);

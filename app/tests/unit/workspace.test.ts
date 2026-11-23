@@ -334,7 +334,8 @@ describe('a research’s agents work through the research', () => {
       const s0 = started.find((x) => x.title === title)!;
       expect(s0.tools).toEqual(expect.arrayContaining(['research_overview', 'research_try', 'research_record', 'research_tell']));
       expect(s0.disallowed).toEqual(['Agent', 'Task']);
-      expect(s0.denyEdit).toEqual(['**/.research/**']);
+      // .research/ only through the tools; the CLI's own memory (shared by folder) not at all.
+      expect(s0.denyEdit).toEqual(['**/.research/**', '~/.claude/projects/**/memory/**', '~/.claude/**/CLAUDE.md', '~/.codex/**']);
     }
     expect(said(aspect.taskId)[0]).toMatch(/research_try[\s\S]*no built-in sub-agent tool[\s\S]*research_tell/);
     await idle(lead.taskId);
@@ -348,6 +349,8 @@ describe('a research’s agents work through the research', () => {
     const exp = started.find((x) => x.title.endsWith('v1'))!;
     expect(exp.tools).toContain('research_record');
     expect(exp.disallowed).toBeUndefined();
+    // An experiment's agent, too, never writes the CLI's own memory (it is one of the research's from its start).
+    expect(exp.denyEdit).toContain('~/.claude/projects/**/memory/**');
     expect(said(v1.taskId!)[0]).toMatch(/research_record[\s\S]*research_tell/);
     await idle(v1.taskId!);
     await idle(aspect.taskId);
@@ -478,6 +481,16 @@ describe('research managed by talking', () => {
     expect(node('Data').takeaway).toBe('Cleaning matters more than size');
     await expect(data.research_update.run({ node_id: node('Data').id, title: 'Renamed' })).rejects.toThrow(/lead/);
     await expect(data.research_update.run({ node_id: node('Model').id, takeaway: 'x' })).rejects.toThrow();
+    // The research's own memory: the lead keeps it; every new agent of the research is given it; others only read it.
+    expect(await main.research_memory.run({})).toMatch(/no memory yet/);
+    await main.research_memory.run({ add: 'E2 means a different line of reasoning, not a different edit count.' });
+    expect(readFileSync(join(p.rootPath, '.research', 'memory.md'), 'utf8')).toMatch(/^- E2 means a different line of reasoning/);
+    await expect(data.research_memory.run({ add: 'x' })).rejects.toThrow(/kept by its lead/);
+    expect(await data.research_memory.run({})).toMatch(/E2 means/);
+    await main.research_add.run({ type: 'aspect', title: 'Fresh' });
+    const fresh = await ws.researchMessage(p.projectId, [node('Fresh').id], 'Start.');
+    expect(ws.transcript(fresh.taskId).find((i) => i.role === 'user')!.text).toMatch(/This research's own memory \(follow it\):\n- E2 means a different line of reasoning/);
+    await until(() => ws.snapshot().tasks.find((t) => t.taskId === fresh.taskId)!.status !== 'running');
     // The page's own settings: the lead's, kept in .research/ui.json, each change undoable; what is not understood is said.
     expect(await main.research_ui.run({ set: { labels: { aspect: 'Question' }, header: [{ label: 'Spent', metric: 'cost', how: 'sum', unit: '$' }] } })).toMatch(/Applied[\s\S]*Question/);
     expect(JSON.parse(readFileSync(join(p.rootPath, '.research', 'ui.json'), 'utf8'))).toMatchObject({ labels: { aspect: 'Question' }, history: [{ ui: {} }] });

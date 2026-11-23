@@ -932,6 +932,10 @@ function renderBlock(ctx: Ctx, node: ResearchNode | undefined, kind: ViewBlockKi
   switch (kind) {
     case 'summary':
       return <SummaryNote ctx={ctx} />;
+    case 'memory':
+      return ctx.notes.memory?.text.trim() ? (
+        <NoteCard title={t('This research’s memory')} note={ctx.notes.memory} behind={0} empty="" testId="research-memory" />
+      ) : null;
     case 'notes':
       return !aspect ? <SummaryNote ctx={ctx} /> : aspect.combos ? null : (
         <NoteCard title={t('Notes')} of={aspect.title} note={ctx.notes.aspects[aspect.id]} behind={resultsSince(doc, ctx.notes.aspects[aspect.id]?.updatedAt, aspect.id)} empty={t('No notes yet. Its agent writes them when a batch of experiments has its results.')} testId="research-notes" />
