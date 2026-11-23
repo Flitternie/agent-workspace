@@ -873,6 +873,8 @@ function NodeView({ ctx, node }: { ctx: Ctx; node?: ResearchNode }) {
         </div>
       ) : null}
       <AgentLine ctx={ctx} task={who.task} role={who.role} none={who.none} />
+      {/* What holds for this research, whatever its view shows: on the goal, folded to a line. */}
+      {!node && ctx.notes.memory?.text.trim() ? <MemoryCard text={ctx.notes.memory.text} /> : null}
       <ViewBar ctx={ctx} level={level} viewKey={key} text={text} own={!!own} />
       <div className="rs-view" data-testid="research-view">
         {parseView(text).map((part, i) =>
@@ -892,6 +894,29 @@ function NodeView({ ctx, node }: { ctx: Ctx; node?: ResearchNode }) {
         )}
       </div>
     </>
+  );
+}
+
+/** The research's own memory (memory.md): its rules and definitions, every agent's brief; folded to a count. */
+function MemoryCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const entries = text.split('\n').filter((l) => /^\s*[-*]\s/.test(l)).length || text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
+  return (
+    <div className="rs-memory" data-testid="research-memory">
+      <button className="rs-memory-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Icon name="remember" size={13} />
+        <span>{t('This research’s memory')}</span>
+        <span className="muted small">{t('{n} entries', { n: entries })}</span>
+        <span className={`rs-memory-chevron${open ? ' open' : ''}`} aria-hidden>
+          <Icon name="chevron" size={11} />
+        </span>
+      </button>
+      {open ? (
+        <div className="rs-memory-body">
+          <Markdown text={text.replace(/^\s*# [^\n]*\n+/, '')} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

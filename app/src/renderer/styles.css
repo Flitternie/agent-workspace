@@ -8726,3 +8726,41 @@ button.subtask-row:hover {
 .rs-view .md code {
   overflow-wrap: anywhere;
 }
+/* The research's memory on the goal: a line that unfolds. */
+.rs-memory {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.rs-memory-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.rs-memory-head .muted {
+  font-weight: 400;
+}
+.rs-memory-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  transition: transform 0.15s;
+}
+.rs-memory-chevron.open {
+  transform: rotate(90deg);
+}
+.rs-memory-body {
+  padding: 0 12px 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  border-top: 1px solid var(--border);
+}

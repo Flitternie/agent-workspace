@@ -55,7 +55,7 @@ const block = (kind: ViewBlockKind, options?: Record<string, unknown>) => `\`\`\
 
 /** The views a node starts from (the first of its level is what it shows with none of its own). */
 export const VIEW_TEMPLATES: ViewTemplate[] = [
-  { id: 'overview', levels: ['goal'], name: { en: 'Overview', zh: '概览' }, text: [block('summary'), block('memory'), block('children'), block('evidence')].join('\n\n') },
+  { id: 'overview', levels: ['goal'], name: { en: 'Overview', zh: '概览' }, text: [block('summary'), block('children'), block('evidence')].join('\n\n') },
   { id: 'aspect', levels: ['aspect'], name: { en: 'Aspect', zh: '方面' }, text: [block('kpis'), block('notes'), block('children')].join('\n\n') },
   { id: 'method', levels: ['method'], name: { en: 'Method', zh: '方法' }, text: [block('design'), block('kpis'), block('children'), block('findings')].join('\n\n') },
   { id: 'experiment', levels: ['experiment'], name: { en: 'Experiment', zh: '实验' }, text: [block('result'), block('design'), block('findings')].join('\n\n') },
