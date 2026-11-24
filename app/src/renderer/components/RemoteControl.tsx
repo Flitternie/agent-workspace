@@ -6,7 +6,7 @@ import { Icon } from './bits';
 
 /**
  * Remote Control (Claude Code): drive this agent from the Claude app on a phone, or claude.ai/code,
- * while it keeps running on this Mac. On: the session's link and where to find it; a click turns it off.
+ * while it keeps running on this computer. On: the session's link and where to find it; a click turns it off.
  */
 export function RemoteControlButton({ task, url }: { task: Task; url?: string }) {
   const [open, setOpen] = useState(false);
@@ -70,7 +70,7 @@ export function RemoteControlButton({ task, url }: { task: Task; url?: string })
               <div className="remote-pop-title">
                 <span className="remote-dot" aria-hidden /> {t('Remote Control on')}
               </div>
-              <p className="muted small">{t('Open the Claude app on your phone, go to Code, and pick “{name}”. It keeps running on this Mac.', { name: task.name })}</p>
+              <p className="muted small">{t('Open the Claude app on your phone, go to Code, and pick “{name}”. It keeps running on this computer.', { name: task.name })}</p>
               <div className="remote-link mono" title={url}>
                 {url}
               </div>

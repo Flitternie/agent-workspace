@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
+import { fillSlots, IDLE_AFTER_MS, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { savePreview } from './preview-store';
@@ -17,6 +17,7 @@ import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
 import { useTeamExpansion } from './teams';
 import { pruneDrafts } from './drafts';
+import { ToolsOpenContext } from './components/Content';
 
 interface Toast {
   id: number;
@@ -195,7 +196,8 @@ export function App() {
   const [galleryEl, setGalleryEl] = useState<HTMLDivElement | null>(null);
   const galleryW = useElementWidth(galleryEl);
   const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
-  const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now) : [];
+  const idleDays = snapshot?.settings.idleAfterDays;
+  const teamList = snapshot ? teams(snapshot.tasks, snapshot.projects, openAll, now, idleDays === undefined ? IDLE_AFTER_MS : idleDays === 0 ? Infinity : idleDays * 86_400_000) : [];
   const order = visibleOrder(teamList, expanded);
   // Overview: busy or recently busy agents, by priority, in as many tiles as the layout has.
   const layout = snapshot?.settings.overviewSlots ?? 0;
@@ -312,6 +314,7 @@ export function App() {
       .catch((e) => setError(errorText(e)));
 
   return (
+    <ToolsOpenContext.Provider value={snapshot?.settings.toolsOpen ?? 'folded'}>
     <div className="app" style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
       <SidebarResizer width={sidebarW} min={sidebarMin} onChange={setSidebarW} />
       <Sidebar
@@ -508,5 +511,6 @@ export function App() {
       {dialog === 'new' ? <NewTaskDialog snapshot={snapshot} onClose={() => setDialog(null)} onCreated={(id) => { toast(t('Agent created'), id); setPendingFocus(id); }} onContinue={() => setDialog('import')} /> : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
     </div>
+    </ToolsOpenContext.Provider>
   );
 }

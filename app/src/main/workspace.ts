@@ -53,6 +53,7 @@ import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
+import { settleStops } from './util/detached';
 
 /** Words that clearly approve (zh / en). */
 const APPROVAL = /(批准|允许|同意|可以|行|好的|确认|执行吧|跑吧|\b(yes|yep|allow|approve|approved|go ahead|ok|okay|sure|do it|confirm)\b)/i;
@@ -83,6 +84,7 @@ interface LiveSession {
 }
 
 /** A `!command` the user typed is stopped after this long. */
+/** A command run with `!`: stopped after this long unless Settings › Advanced says otherwise. */
 const SHELL_TIMEOUT_MS = 10 * 60_000;
 /** How much of a command's output goes to the agent with the next message. */
 const SHELL_CONTEXT_CHARS = 20_000;
@@ -109,7 +111,7 @@ export interface WorkspaceOptions {
   hiddenSessionDirs?: string[];
   /** Automatic retries of turns that failed because the model was busy (tests use short waits). */
   retry?: Partial<RetryPolicy>;
-  /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
+  /** Home folder whose native memory files this computer's scan reads (tests); default $HOME. */
   home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
@@ -332,7 +334,7 @@ export class Workspace {
   }
 
   /**
-   * Looks at the CLIs on this Mac again, and (unless `localOnly`) at the SSH hosts, quietly: their
+   * Looks at the CLIs on this computer again, and (unless `localOnly`) at the SSH hosts, quietly: their
    * rows keep the last result meanwhile. The first-run guide polls with `localOnly` while the user
    * installs or signs in here; hosts have their own slower recheck.
    */
@@ -453,6 +455,8 @@ export class Workspace {
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
+    // CLIs on hosts run detached from their connection: their stops have to reach the host before we go.
+    await settleStops();
     this.store.flush();
   }
 
@@ -1334,7 +1338,7 @@ export class Workspace {
    * Claude and ChatGPT desktop apps created there through their SSH connections).
    */
   /**
-   * The folders inside `dir` on this Mac or on `host` (for typing a path with completion). `~` is the
+   * The folders inside `dir` on this computer or on `host` (for typing a path with completion). `~` is the
    * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
    * the caller decides). A path that is not a folder gives no names.
    */
@@ -1367,12 +1371,12 @@ export class Workspace {
   /**
    * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
    * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
-   * on an SSH host (the files are on this Mac) refuses. The main agent gets full paths, to pass on.
+   * on an SSH host (the files are on this computer) refuses. The main agent gets full paths, to pass on.
    */
   droppedFiles(taskId: string, paths: string[]): FileMatch[] {
     const task = this.task(taskId);
     const main = task === this.store.data.mainAgent;
-    if (task.host) throw new Error(`These files are on this Mac; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
+    if (task.host) throw new Error(`These files are on this computer; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
     const home = homedir();
     return paths.map((p) => {
       const abs = resolve(p);
@@ -1501,7 +1505,7 @@ export class Workspace {
    * newest first, minus ones already imported and the app's own scratch dirs.
    */
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
-    // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
+    // Tests read a fixture (a JSON list) instead of this computer's real Claude Code / Codex sessions.
     if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => !s.host);
     const known = this.attachedSessionIds();
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
@@ -1730,7 +1734,7 @@ export class Workspace {
   /**
    * Images in a user message read back from a CLI's history, kept in the app's store so the
    * conversation shows them. A file on an SSH host is not fetched (it shows as an image that
-   * could not be kept); bytes from history and files on this Mac are.
+   * could not be kept); bytes from history and files on this computer are.
    */
   private historyImages(images: HistoryImage[] | undefined, host: string | undefined): ImageRef[] | undefined {
     if (!images?.length) return undefined;
@@ -1829,7 +1833,7 @@ export class Workspace {
       try {
         const live = await this.connect(taskId);
         if (live.session.shell) {
-          await live.session.shell(command);
+          await live.session.shell(command, this.commandTimeoutMs());
           return { ok: true };
         }
       } catch (error) {
@@ -1842,11 +1846,12 @@ export class Workspace {
     const tool: ToolCallInfo = { name: 'Bash', kind: 'execute', title: `! ${first}`, locations: [], content: [terminal], byUser: true };
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: 'running', tool, createdAt: now() });
     this.changed();
+    const timeoutMs = this.commandTimeoutMs();
     const r = task.host
-      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, SHELL_TIMEOUT_MS)
+      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, timeoutMs)
       : process.platform === 'win32'
-        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS })
-        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS });
+        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs })
+        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs });
     const output = [r.stdout, r.stderr].filter((s) => s.trim()).join('\n');
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: r.code === 0 ? 'completed' : 'failed', createdAt: now() }, { content: [{ ...terminal, output: clipOutput(output), exitCode: r.code }] });
     const pending = this.shellOutput.get(taskId) ?? [];
@@ -1884,7 +1889,7 @@ export class Workspace {
    */
   async setRemoteControl(taskId: string, on: boolean): Promise<string | undefined> {
     const task = this.task(taskId);
-    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this Mac.');
+    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this computer.');
     let live = this.live.get(taskId);
     if (!live) {
       if (!on) return undefined;
@@ -1908,7 +1913,7 @@ export class Workspace {
     this.changed();
   }
 
-  /** The library for an agent on this Mac, or its copy on the agent's host (copied when it changed). */
+  /** The library for an agent on this computer, or its copy on the agent's host (copied when it changed). */
   private async skillsFor(task: Task): Promise<{ pluginDir: string; root: string } | undefined> {
     try {
       return task.host ? await this.skills.ensureOnHost(task.host) : this.skills.localLoad();
@@ -1922,7 +1927,7 @@ export class Workspace {
   /** Last scan's results, so an import names a found skill by key rather than by path. */
   private foundSkills = new Map<string, FoundSkill>();
 
-  /** Skills in the CLIs' own folders on this Mac and on every reachable enabled host. */
+  /** Skills in the CLIs' own folders on this computer and on every reachable enabled host. */
   async scanSkills(): Promise<{ found: FoundSkill[]; errors: Array<{ host: string; error: string }> }> {
     const errors: Array<{ host: string; error: string }> = [];
     const found: FoundSkill[] = [...scanLocal()];
@@ -2607,7 +2612,7 @@ export class Workspace {
     return candidatesFrom(host, out.home, out.files, this.store.data.projects, out.shared);
   }
 
-  /** This Mac and every reachable enabled host; hosts that are not connected are reported, not waited for. */
+  /** This computer and every reachable enabled host; hosts that are not connected are reported, not waited for. */
   async scanMemoryImports(): Promise<{ candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> }> {
     const errors: Array<{ host: string; error: string }> = [];
     const ready: Array<string | undefined> = [undefined];
@@ -2963,6 +2968,16 @@ export class Workspace {
     ].join('\n');
   }
 
+  private commandTimeoutMs(): number {
+    const min = this.store.data.settings.commandTimeoutMin;
+    return min ? min * 60_000 : SHELL_TIMEOUT_MS;
+  }
+
+  mainLimits(): { calls?: number; forks?: number } {
+    const s = this.store.data.settings;
+    return { calls: s.mainCallsPerTurn, forks: s.mainForksPerTurn };
+  }
+
   mainTurn(): number {
     return this.mainTurns;
   }
@@ -3170,7 +3185,7 @@ export class Workspace {
 
   /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
   private previewRoots(t: Task): string[] {
-    // The main agent talks about every agent's files: any project or agent folder on this Mac.
+    // The main agent talks about every agent's files: any project or agent folder on this computer.
     if (t === this.store.data.mainAgent)
       return [t.cwd, ...this.store.data.projects.filter((p) => !p.host).map((p) => p.rootPath), ...this.store.data.tasks.filter((x) => !x.host).flatMap((x) => [x.cwd, x.worktree?.path])].filter((r): r is string => !!r);
     const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
@@ -3188,8 +3203,8 @@ export class Workspace {
     return t.host ? readRemote(t.host, path, where) : readLocal(path, where);
   }
 
-  /** The checked local path to hand to the default app (this Mac only). */
-  /** The folder "Open with…" opens for an agent: its worktree or folder (the main agent's own too). On this Mac only. */
+  /** The checked local path to hand to the default app (this computer only). */
+  /** The folder "Open with…" opens for an agent: its worktree or folder (the main agent's own too). On this computer only. */
   agentFolder(taskId: string): string {
     const t = this.task(taskId);
     if (t.host) throw new Error(`${t.alias} works on ${t.host}; its folder is there.`);

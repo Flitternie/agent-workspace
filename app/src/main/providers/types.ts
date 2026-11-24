@@ -19,7 +19,7 @@ import type {
 } from '../../shared/types';
 import type { WorkspaceTool } from '../main-agent';
 
-/** An image sent with a message: a file on this Mac (the app's stored copy) and its format. */
+/** An image sent with a message: a file on this computer (the app's stored copy) and its format. */
 export interface ImageInput {
   path: string;
   mediaType: string;
@@ -103,7 +103,7 @@ export type ProviderEvent =
 
 export interface StartArgs {
   cwd: string;
-  /** SSH alias to run the CLI on; unset = this Mac. */
+  /** SSH alias to run the CLI on; unset = this computer. */
   host?: string;
   /** Resume this provider-native session instead of creating one. */
   resumeNativeSessionId?: string;
@@ -150,7 +150,7 @@ export interface ProviderSession {
    * its conversation (Codex). Without it, the workspace runs the command and hands the output
    * over with the next message.
    */
-  shell?(command: string): Promise<void>;
+  shell?(command: string, timeoutMs?: number): Promise<void>;
   /** Runs the following turns on `model` (unset: the CLI's default). */
   setModel?(model: string | undefined): Promise<void>;
   /** The skill library changed (same paths, new contents): pick it up without a restart. */

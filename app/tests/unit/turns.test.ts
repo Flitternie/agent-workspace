@@ -29,6 +29,10 @@ describe('turns', () => {
     expect(foldsTurn({ ...done, live: true }, 0, OPEN_TURNS + 1)).toBe(false);
     expect(foldsTurn({ ...done, steps: [tool('read', 'a')] }, 0, OPEN_TURNS + 1)).toBe(false);
     expect(splitTurns([user('go'), tool('execute', 'npm test', 0, 'running')])[0].live).toBe(true);
+    // Settings › Advanced: the latest 3 open, or every turn (0).
+    expect(foldsTurn(done, 1, 4, 3)).toBe(false);
+    expect(foldsTurn(done, 0, 4, 3)).toBe(true);
+    expect(foldsTurn(done, 0, 9, 0)).toBe(false);
   });
 
   it('sums a folded turn up: steps, files edited, commands, failures, time', () => {

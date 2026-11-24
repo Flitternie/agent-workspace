@@ -72,7 +72,7 @@ describe('images to the CLIs', () => {
     ]);
   });
 
-  it('Codex gets a file on this Mac and a data URL over SSH', async () => {
+  it('Codex gets a file on this computer and a data URL over SSH', async () => {
     const path = file();
     expect(await codexInput('Look', [{ path, mediaType: 'image/png' }], false)).toEqual([
       { type: 'text', text: 'Look', text_elements: [] },

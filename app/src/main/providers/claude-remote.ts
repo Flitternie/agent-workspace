@@ -1,5 +1,6 @@
 import type { SessionStore, SessionStoreEntry, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
+import { shq, sshError, sshRun, sshRunner, sshSpawn } from '../util/ssh';
+import { detachedSpawn } from '../util/detached';
 
 // Claude Code on an SSH host: the SDK runs the `claude` installed there through
 // `spawnClaudeCodeProcess` (its login, settings and transcripts stay on the host), and
@@ -96,13 +97,15 @@ export interface RemoteExit {
 }
 
 /** Runs the SDK's CLI command line with the host's own `claude`, in `cwd` there. */
-export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>, onExit?: (exit: RemoteExit) => void): (o: SpawnOptions) => SpawnedProcess {
+export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>, onExit?: (exit: RemoteExit) => void, opts: { detached?: boolean } = {}): (o: SpawnOptions) => SpawnedProcess {
   return (o) => {
     // Only what the SDK itself adds for the CLI crosses over; the user's environment stays here.
     const added = Object.entries(o.env).filter(([k, v]) => typeof v === 'string' && localEnv[k] !== v && /^CLAUDE_[A-Z0-9_]+$/.test(k));
     const exports = added.map(([k, v]) => `export ${k}=${shq(v!)}; `).join('');
     const command = `cd ${shq(cwd)} || exit 3; ${exports}exec claude ${o.args.map(shq).join(' ')}`;
-    const proc = sshSpawn(host, command);
+    // A session's CLI outlives its connection (the laptop asleep, a network change) and is picked up again;
+    // a quick one-off query just uses the connection.
+    const proc = opts.detached === false ? sshSpawn(host, command) : detachedSpawn(sshRunner(host), command, { onLink: (s) => console.warn(`[ssh] ${host}: connection ${s}`) });
     // Only the tail is kept, and only to explain an exit (as the SDK does for a local CLI).
     let stderr = '';
     proc.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString()).slice(-STDERR_TAIL)));

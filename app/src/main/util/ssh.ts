@@ -90,6 +90,11 @@ function sshArgs(host: string, command: string, interactive = false): string[] {
   return ['-T', ...baseOptions(interactive), '--', host, remote];
 }
 
+/** Commands on `host` over ssh, for a CLI run detached from its connection (util/detached). */
+export function sshRunner(host: string): import('./detached').RemoteRunner {
+  return { spawn: (command) => sshSpawn(host, command), run: (command, timeoutMs) => sshRun(host, command, timeoutMs) };
+}
+
 /** A long-lived remote process whose stdio is the SSH channel. */
 export function sshSpawn(host: string, command: string): ChildProcessWithoutNullStreams {
   return spawn('ssh', sshArgs(host, command), { env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32' });

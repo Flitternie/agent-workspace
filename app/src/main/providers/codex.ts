@@ -7,7 +7,8 @@ import { createInterface } from 'node:readline';
 import type { ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
-import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
+import { shq, sshError, sshRun, sshRunner } from '../util/ssh';
+import { detachedSpawn } from '../util/detached';
 import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
@@ -66,7 +67,8 @@ class AppServer {
   }
 
   static spawn(cwd: string, host?: string): AppServer {
-    if (host) return new AppServer(sshSpawn(host, `cd ${cwd === '~' ? '' : shq(cwd)} 2>/dev/null; exec codex app-server`), host);
+    // Detached from the connection: the app-server (and the turn it runs) outlives the laptop sleeping.
+    if (host) return new AppServer(detachedSpawn(sshRunner(host), `cd ${cwd === '~' ? '' : shq(cwd)} 2>/dev/null; exec codex app-server`, { onLink: (s) => console.warn(`[ssh] ${host}: connection ${s}`) }), host);
     const exe = findExecutable('codex');
     if (!exe) throw new Error('Codex CLI not found on PATH.');
     const proc = spawn(needsShell(exe) ? `"${exe}"` : exe, ['app-server'], { cwd, env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32', shell: needsShell(exe) });
@@ -127,6 +129,8 @@ class AppServer {
 
   kill(): void {
     const pid = this.proc.pid;
+    // On a host (detached, no local pid): stopped there.
+    if (!pid && this.host) this.proc.kill('SIGTERM');
     try {
       if (pid) process.kill(-pid, 'SIGTERM'); // own process group: includes commands it launched
     } catch {
@@ -215,7 +219,7 @@ function codexPolicy(mode: PermissionMode): { approvalPolicy: string; approvalsR
 
 /** Codex features the main agent does without (thread-level config overrides). */
 /**
- * A user message as app-server input. Images on this Mac go as files (`localImage`: Codex reads,
+ * A user message as app-server input. Images on this computer go as files (`localImage`: Codex reads,
  * shrinks and records the path, so its history keeps them). Over SSH the file is not on the host,
  * so the image goes inline as a data URL, as Codex's own client does with a remote workspace.
  */
@@ -246,7 +250,7 @@ const MAIN_AGENT_CONFIG = {
 };
 
 /**
- * Write access to the workspace, as `sandbox: 'workspace-write'`. On this Mac it is a
+ * Write access to the workspace, as `sandbox: 'workspace-write'`. On this computer it is a
  * permissions profile on top of `:workspace` that also keeps the private folders unreadable
  * (an explicit `sandbox` would override the profile).
  */
@@ -663,10 +667,10 @@ class CodexSession implements ProviderSession {
     await this.server.rpc('skills/extraRoots/set', { extraRoots: [this.args.skills.root] }).catch((e: Error) => console.warn('[codex] skills', e.message));
   }
 
-  async shell(command: string): Promise<void> {
+  async shell(command: string, timeoutMs = SHELL_TIMEOUT_MS): Promise<void> {
     if (!this.server || this.server.closed || !this.threadId) throw new Error('Codex session is not connected.');
     // Codex's own `!`: runs in the thread's shell and is recorded in its history (source userShell).
-    await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs: SHELL_TIMEOUT_MS });
+    await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs });
   }
 
   async close(): Promise<void> {

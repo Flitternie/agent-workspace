@@ -8,7 +8,7 @@ import type { FoundSkill, LibrarySkill, SkillInfo, SkillSource, SkillsLoad } fro
 
 export type { FoundSkill, LibrarySkill, SkillsLoad } from '../shared/skills';
 
-// One skill library for every agent the app starts: Claude Code and Codex, on this Mac
+// One skill library for every agent the app starts: Claude Code and Codex, on this computer
 // and on SSH hosts. Skills are folders with a SKILL.md (the same format works for both).
 // The library is the app's own; ~/.claude/skills and ~/.codex/skills are only read, to
 // import from, and never written.
@@ -96,7 +96,7 @@ function readSkill(dir: string, fallbackName: string): SkillInfo | null {
   return { name: fm.name && NAME_RE.test(fm.name) ? fm.name : fallbackName, description: fm.description ?? '', hash: folderHash(dir) };
 }
 
-/** Skills in the CLIs' own folders on this Mac. */
+/** Skills in the CLIs' own folders on this computer. */
 export function scanLocal(home = homedir()): FoundSkill[] {
   const out: FoundSkill[] = [];
   for (const { source, dir } of NATIVE_SKILL_DIRS) {
@@ -251,7 +251,7 @@ export class SkillLibrary {
     this.saveManifest(m);
   }
 
-  /** Where agents on this Mac load the library from. */
+  /** Where agents on this computer load the library from. */
   localLoad(): SkillsLoad | undefined {
     return this.hasEnabled() ? { pluginDir: this.pluginDir, root: this.root } : undefined;
   }

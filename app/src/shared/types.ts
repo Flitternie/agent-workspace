@@ -21,7 +21,7 @@ export interface Project {
   projectId: string;
   name: string;
   rootPath: string;
-  /** SSH alias (from ~/.ssh/config) when the folder is on another machine; unset = this Mac. */
+  /** SSH alias (from ~/.ssh/config) when the folder is on another machine; unset = this computer. */
   host?: string;
   isGitRepo: boolean;
   createdAt: string;
@@ -63,7 +63,7 @@ export interface Task {
   /** Debounced, human-readable progress line for the Overview card. */
   summary: string;
   cwd: string;
-  /** SSH alias the agent runs on (its project's host); unset = this Mac. */
+  /** SSH alias the agent runs on (its project's host); unset = this computer. */
   host?: string;
   worktree?: WorktreeInfo;
   /** Set when another task shares this writable directory, or when the task has no worktree (cwdNote). */
@@ -139,7 +139,7 @@ export interface LimitWindow {
 
 /** A provider account's usage limits as last seen, and when. */
 export interface ProviderLimits {
-  /** Whose limits: the provider, and the machine its CLI runs on (unset: this Mac). One account each. */
+  /** Whose limits: the provider, and the machine its CLI runs on (unset: this computer). One account each. */
   provider?: AgentProvider;
   host?: string;
   windows: LimitWindow[];
@@ -317,7 +317,7 @@ export interface MemoryRecord {
 export interface MemoryCandidate {
   key: string;
   source: 'claude-memory' | 'instructions';
-  /** SSH alias; unset = this Mac. */
+  /** SSH alias; unset = this computer. */
   host?: string;
   /** Path as found, `~/`-relative when under the home folder. */
   file: string;
@@ -355,7 +355,7 @@ export interface MemorySyncStatus {
   added: number;
   updated: number;
   removed: number;
-  /** Machines scanned ('local' = this Mac). */
+  /** Machines scanned ('local' = this computer). */
   hosts: string[];
   errors: Array<{ host: string; error: string }>;
 }
@@ -372,7 +372,7 @@ export interface ProviderCapabilities {
   readOnlyMonitor: boolean;
   structuredApprovals: boolean;
   structuredQuestions: boolean;
-  /** Saved conversations on this Mac can be forked (the adapter implements forkPoints / forkSession). */
+  /** Saved conversations on this computer can be forked (the adapter implements forkPoints / forkSession). */
   fork?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */
   auth?: { loggedIn: boolean; method?: string };
@@ -382,7 +382,7 @@ export interface NativeSessionInfo {
   provider: AgentProvider;
   nativeSessionId: string;
   cwd: string;
-  /** SSH alias the session lives on; unset = this Mac. */
+  /** SSH alias the session lives on; unset = this computer. */
   host?: string;
   title: string;
   updatedAt?: string;
@@ -459,11 +459,28 @@ export interface Settings {
   /** Keep user memory in sync with the CLIs' native user-level memory; unset = on. */
   memorySync?: boolean;
   /**
-   * Machines whose CLIs share user memory ('local' = this Mac), linked once (files backed
+   * Machines whose CLIs share user memory ('local' = this computer), linked once (files backed
    * up, notes merged); from then on the shared user memory is kept in sync there.
    */
   memoryLinks?: Record<string, { linkedAt: string; /** Unlinked while offline: cleaned up when it connects. */ unlinking?: boolean }>;
+  // Advanced; unset = the defaults below.
+  /** Latest turns shown in full (1–5); 0 = every turn. Default 1. */
+  openTurns?: number;
+  /** Tool calls on opening a conversation: folded, only the failed ones open, or all open. Default folded. */
+  toolsOpen?: ToolsOpen;
+  /** Days without activity before an agent folds into its team's idle row; 0 = never. Default 3. */
+  idleAfterDays?: number;
+  /** The main agent's tool calls per message from the user. Default 30. */
+  mainCallsPerTurn?: number;
+  /** Agents the main agent may fork per message from the user. Default 3. */
+  mainForksPerTurn?: number;
+  /** Minutes before a command run with `!` is stopped. Default 10. */
+  commandTimeoutMin?: number;
+  /** Keep the computer from sleeping on its own while an agent works. Default on. */
+  keepAwake?: boolean;
 }
+
+export type ToolsOpen = 'folded' | 'failed' | 'all';
 
 /**
  * An enabled SSH host. `ssh`: whether a background (no-prompt) connection works —
@@ -588,5 +605,5 @@ export interface BtwEntry {
   answeredAt?: string;
 }
 
-/** One provider account: a provider's CLI on one machine ("claude" on this Mac, "codex@neptune"). */
+/** One provider account: a provider's CLI on one machine ("claude" on this computer, "codex@neptune"). */
 export const accountKey = (t: { provider: AgentProvider; host?: string }) => (t.host ? `${t.provider}@${t.host}` : t.provider);

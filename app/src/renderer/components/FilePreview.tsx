@@ -89,7 +89,7 @@ export function FilePreviewPanel({
     setScripts(false);
   }, [path]);
   // Changed on disk by anything (a command, the user's editor), not only by the agent's file tools:
-  // read again. A cheap stat every two seconds, on this Mac.
+  // read again. A cheap stat every two seconds, on this computer.
   useEffect(() => {
     if (task.host || !file) return;
     let seen: string | null = null;

@@ -12,7 +12,7 @@ const DOCS: Record<Provider, string> = { claude: 'https://docs.claude.com/en/doc
 /**
  * First run, step by step, in the main area (skippable, nothing modal): connect a coding agent
  * (the only required step: sign-in happens from here), bring in the user's existing sessions on
- * this Mac, then on their SSH machines, and optionally set up voice. Steps tick themselves off.
+ * this computer, then on their SSH machines, and optionally set up voice. Steps tick themselves off.
  */
 export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceSnapshot; onSettings: () => void; now: number }) {
   const ob = snapshot.settings.onboarding ?? {};
@@ -20,13 +20,13 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const cap = (p: Provider) => snapshot.capabilities.find((c) => c.provider === p);
   const ready = (['claude', 'codex'] as const).filter((p) => readiness(cap(p)) === 'ready');
   const [signingIn, setSigningIn] = useState<Partial<Record<Provider, boolean>>>({});
-  // This Mac's agents; another machine's count just as well (one of the two is enough).
+  // This computer's agents; another machine's count just as well (one of the two is enough).
   const local = ready.length > 0;
   const broughtIn = snapshot.projects.length > 0;
 
   // Machines connected and with an agent signed in: their sessions can be listed.
   const remoteReady = snapshot.remoteHosts.filter((h) => h.ssh === 'ok' && h.capabilities.some((c) => readiness(c) === 'ready')).map((h) => h.host);
-  // Other machines come before bringing work in, so their sessions are picked with this Mac's.
+  // Other machines come before bringing work in, so their sessions are picked with this computer's.
   const remote = remoteReady.length > 0;
   const connected = local || remote;
   // Steps 1 and 2 are one requirement: an agent here or on another machine.
@@ -38,7 +38,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const waiting = !local || Object.values(signingIn).some(Boolean);
   useEffect(() => {
     if (!waiting) return;
-    // This Mac only: SSH hosts are not probed every few seconds (they have their own quiet recheck).
+    // This computer only: SSH hosts are not probed every few seconds (they have their own quiet recheck).
     const id = setInterval(() => void call('capabilities:refresh', { localOnly: true }).catch(() => {}), 3000);
     return () => clearInterval(id);
   }, [waiting]);
@@ -69,8 +69,8 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           </div>
         </Step>
 
-        <Step n={2} title={t('Connect a coding agent on this Mac')} done={local} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} tag={either(local)}>
-          <p className="muted small">{t('Uses Claude Code or Codex signed in on this Mac; usage counts against that account.')}</p>
+        <Step n={2} title={t('Connect a coding agent on this computer')} done={local} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} tag={either(local)}>
+          <p className="muted small">{t('Uses Claude Code or Codex signed in on this computer; usage counts against that account.')}</p>
           {(['claude', 'codex'] as const).map((p) => (
             <ProviderRow key={p} provider={p} cap={cap(p)} signingIn={!!signingIn[p]} onSigningIn={(v) => setSigningIn((s) => ({ ...s, [p]: v }))} />
           ))}
@@ -361,7 +361,7 @@ function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: nu
   return (
     <div className="ob-bring" data-testid="onboarding-bring">
       {sessions === null ? (
-        <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your Claude Code and Codex sessions on this Mac…')}</p>
+        <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your Claude Code and Codex sessions on this computer…')}</p>
       ) : folders.length ? (
         <>
           <p className="muted small">{t('Pick the conversations to continue here.')}</p>
