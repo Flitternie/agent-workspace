@@ -772,6 +772,7 @@ function ShortcutField({ value, onChange }: { value: string; onChange: (shortcut
 const SECTIONS: Array<{ id: string; group: string; title: string; keywords: string[] }> = [
   { id: 'language', group: 'General', title: 'Language', keywords: ['English', '中文', 'locale'] },
   { id: 'guide', group: 'General', title: 'Setup guide', keywords: ['guide', 'onboarding', 'first run', 'setup', 'Open the guide'] },
+  { id: 'sleep', group: 'General', title: 'Sleep', keywords: ['Keep the computer awake while agents work', 'sleep', 'awake', 'caffeinate', 'lid'] },
   { id: 'data', group: 'General', title: 'Data', keywords: ['Workspace data is stored in', 'demo', 'folder'] },
   { id: 'agents', group: 'Connect', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'remote', group: 'Connect', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
@@ -893,6 +894,15 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           </div>
         </Section>
       )}
+      <Section id="sleep" query={query}>
+        <label className="check">
+          <input type="checkbox" checked={s.keepAwake !== false} onChange={(e) => update({ keepAwake: e.target.checked })} data-testid="keep-awake" />
+          <span>
+            {t('Keep the computer awake while agents work')}
+            <span className="muted small"> — {t('closing the lid still sleeps')}</span>
+          </span>
+        </label>
+      </Section>
       <Section id="data" query={query}>
         <div className="small">
           {t('Workspace data is stored in')} <code>{snapshot.dataDir}</code>

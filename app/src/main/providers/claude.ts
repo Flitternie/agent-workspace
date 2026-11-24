@@ -177,7 +177,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     const env = childEnv();
     const q = sdk.query({
       prompt: idle(),
-      options: { cwd: host ? '.' : tmpdir(), env, pathToClaudeCodeExecutable: executable, settingSources: ['user'], ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, '.', env) } : {}), stderr: () => {} },
+      options: { cwd: host ? '.' : tmpdir(), env, pathToClaudeCodeExecutable: executable, settingSources: ['user'], ...(host ? { spawnClaudeCodeProcess: remoteSpawn(host, '.', env, undefined, { detached: false }) } : {}), stderr: () => {} },
     });
     try {
       const models = await q.supportedModels();

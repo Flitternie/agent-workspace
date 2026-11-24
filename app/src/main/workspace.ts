@@ -53,6 +53,7 @@ import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
+import { settleStops } from './util/detached';
 
 /** Words that clearly approve (zh / en). */
 const APPROVAL = /(批准|允许|同意|可以|行|好的|确认|执行吧|跑吧|\b(yes|yep|allow|approve|approved|go ahead|ok|okay|sure|do it|confirm)\b)/i;
@@ -454,6 +455,8 @@ export class Workspace {
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
+    // CLIs on hosts run detached from their connection: their stops have to reach the host before we go.
+    await settleStops();
     this.store.flush();
   }
 

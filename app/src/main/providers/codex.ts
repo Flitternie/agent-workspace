@@ -7,7 +7,8 @@ import { createInterface } from 'node:readline';
 import type { ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
-import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
+import { shq, sshError, sshRun, sshRunner } from '../util/ssh';
+import { detachedSpawn } from '../util/detached';
 import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
@@ -66,7 +67,8 @@ class AppServer {
   }
 
   static spawn(cwd: string, host?: string): AppServer {
-    if (host) return new AppServer(sshSpawn(host, `cd ${cwd === '~' ? '' : shq(cwd)} 2>/dev/null; exec codex app-server`), host);
+    // Detached from the connection: the app-server (and the turn it runs) outlives the laptop sleeping.
+    if (host) return new AppServer(detachedSpawn(sshRunner(host), `cd ${cwd === '~' ? '' : shq(cwd)} 2>/dev/null; exec codex app-server`, { onLink: (s) => console.warn(`[ssh] ${host}: connection ${s}`) }), host);
     const exe = findExecutable('codex');
     if (!exe) throw new Error('Codex CLI not found on PATH.');
     const proc = spawn(needsShell(exe) ? `"${exe}"` : exe, ['app-server'], { cwd, env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32', shell: needsShell(exe) });
@@ -127,6 +129,8 @@ class AppServer {
 
   kill(): void {
     const pid = this.proc.pid;
+    // On a host (detached, no local pid): stopped there.
+    if (!pid && this.host) this.proc.kill('SIGTERM');
     try {
       if (pid) process.kill(-pid, 'SIGTERM'); // own process group: includes commands it launched
     } catch {

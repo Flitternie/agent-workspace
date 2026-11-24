@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
 import type { ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
@@ -327,13 +327,29 @@ function registerIpc(): void {
   }
 }
 
+/**
+ * While an agent works (here or on a host), the computer does not go to sleep on its own: asleep, a
+ * local CLI stops and an SSH connection drops. The screen may still dim and lock; closing the lid
+ * still sleeps (macOS decides that).
+ */
+let awakeId: number | null = null;
+function keepAwake(on: boolean): void {
+  if (on && awakeId === null) awakeId = powerSaveBlocker.start('prevent-app-suspension');
+  else if (!on && awakeId !== null) {
+    powerSaveBlocker.stop(awakeId);
+    awakeId = null;
+  }
+}
+
 function wireEvents(): void {
   let snapshotTimer: NodeJS.Timeout | undefined;
   workspace.onChange(() => {
     if (snapshotTimer) return;
     snapshotTimer = setTimeout(() => {
       snapshotTimer = undefined;
-      win?.webContents.send(EVENT_WORKSPACE, workspace.snapshot());
+      const snap = workspace.snapshot();
+      win?.webContents.send(EVENT_WORKSPACE, snap);
+      keepAwake(snap.settings.keepAwake !== false && snap.tasks.some((t) => t.status === 'running' || t.status === 'starting'));
     }, 30);
   });
   // Batch transcript updates so a noisy stream cannot flood the renderer.

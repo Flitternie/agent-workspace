@@ -476,6 +476,8 @@ export interface Settings {
   mainForksPerTurn?: number;
   /** Minutes before a command run with `!` is stopped. Default 10. */
   commandTimeoutMin?: number;
+  /** Keep the computer from sleeping on its own while an agent works. Default on. */
+  keepAwake?: boolean;
 }
 
 export type ToolsOpen = 'folded' | 'failed' | 'all';

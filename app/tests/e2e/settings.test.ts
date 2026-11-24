@@ -24,6 +24,9 @@ async function launch(): Promise<Page> {
   return page;
 }
 
+const invoke = <T,>(page: Page, channel: string, payload: unknown) =>
+  page.evaluate(([c, p]) => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke(c as string, p), [channel, payload] as const) as Promise<T>;
+
 afterAll(async () => {
   await app?.close().catch(() => {});
 });
@@ -112,6 +115,13 @@ describe('real entry: first run, settings, language', () => {
     expect(await value('openTurns')).toBe('3');
     expect(await value('toolsOpen')).toBe('failed');
     expect(await value('idleAfterDays')).toBe('0');
+    // Sleep, in General: on unless turned off, and kept.
+    expect(await page.getByTestId('keep-awake').isChecked()).toBe(true);
+    // Controlled by the saved setting: it flips once saved.
+    await page.getByTestId('keep-awake').click();
+    await expect.poll(() => invoke<{ settings: { keepAwake?: boolean } }>(page, 'workspace:snapshot', {}).then((x) => x.settings.keepAwake)).toBe(false);
+    await page.getByTestId('keep-awake').click();
+    await expect.poll(() => page.getByTestId('keep-awake').isChecked()).toBe(true);
     await page.getByTestId('advanced-reset').click();
     await expect.poll(() => value('openTurns')).toBe('1');
     expect(await value('idleAfterDays')).toBe('3');
