@@ -250,6 +250,10 @@ export interface AttentionItem {
   retryable?: boolean;
   /** It failed because the model was busy (at capacity, overloaded, rate limited). */
   transient?: TransientKind;
+  /** The connection to this host was lost while agents there worked: one item for all of them (lostOn). */
+  host?: string;
+  /** Those agents (taskIds); they carry on when the host can be reached again. */
+  lostTaskIds?: string[];
   createdAt: string;
   resolvedAt?: string;
   resolution?: string;

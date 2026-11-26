@@ -56,6 +56,7 @@ import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from '.
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools, roleInstructions } from './research-tools';
 import { moveClaudeSession } from './research-move';
+import { connectionLost } from './providers/claude-remote';
 import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 
@@ -466,6 +467,8 @@ export class Workspace {
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
+    for (const t of this.lostHosts.values()) clearTimeout(t);
+    this.lostHosts.clear();
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
@@ -2718,10 +2721,47 @@ export class Workspace {
       }
       case 'sessionFailed':
       case 'sessionDisconnected': {
+        const reason = event.type === 'sessionFailed' ? event.error : event.reason;
+        // Waiting on the user's answer to its question is not working: the question stays, answered in a message
+        // the resumed session reads (as after a restart).
+        const natives = this.store.data.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.providerRequestId);
+        const asking = task.status === 'waiting_for_user' && natives.length > 0 && natives.every((a) => a.kind === 'question');
+        if (asking)
+          for (const a of natives) {
+            a.providerRequestId = undefined;
+            a.sessionLocalId = undefined;
+            a.questions = undefined;
+            a.options = undefined;
+          }
+        const working = !asking && (live.turnActive || ['running', 'starting'].includes(task.status) || !!task.retry);
+        // Its session ended while it had nothing to do (the connection dropped, the Mac slept): nothing for the
+        // user to handle; the next message connects it again.
+        if (!working && !this.hasOpenNative(taskId)) {
+          this.endSubtasks(task, 'The agent disconnected.');
+          this.live.delete(taskId);
+          this.cancelRetry(taskId);
+          task.lastError = reason;
+          if (task.status === 'idle') task.status = 'disconnected';
+          this.log('idle session ended', taskId, reason);
+          break;
+        }
+        // The connection to its host was lost while it worked: one item for every agent there, and they carry on
+        // by themselves once the host can be reached again.
+        if (task.host && connectionLost(reason)) {
+          this.endSubtasks(task, 'The agent disconnected.');
+          this.live.delete(taskId);
+          this.cancelRetry(taskId);
+          task.retry = undefined;
+          task.status = 'disconnected';
+          task.lastError = reason;
+          task.summary = `Lost the connection to ${task.host}; carries on when it is back.`;
+          this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
+          this.lostOn(task.host, taskId, reason);
+          break;
+        }
         this.endSubtasks(task, 'The agent disconnected.');
         this.live.delete(taskId);
         this.handBackRetry(task);
-        const reason = event.type === 'sessionFailed' ? event.error : event.reason;
         task.status = event.type === 'sessionFailed' ? 'failed' : 'disconnected';
         task.lastError = reason;
         task.summary = `${event.type === 'sessionFailed' ? 'Session failed' : 'Disconnected'}: ${clip(reason, 140)}`;
@@ -2811,6 +2851,40 @@ export class Workspace {
   }
 
   // ---------------------------------------------------------------- attention
+
+  /** Hosts whose connection was lost while agents worked there, being checked until it is back. */
+  private lostHosts = new Map<string, NodeJS.Timeout>();
+
+  /** An agent on `host` was cut off mid-work: added to the host's one item, and the host is checked until it answers. */
+  private lostOn(host: string, taskId: string, reason: string): void {
+    let item = this.store.data.attention.find((a) => a.state === 'open' && a.host === host && a.lostTaskIds);
+    if (!item) item = this.addAttention({ taskId, kind: 'error', host, lostTaskIds: [], headline: '', details: reason });
+    if (!item.lostTaskIds!.includes(taskId)) item.lostTaskIds!.push(taskId);
+    const names = item.lostTaskIds!.map((id) => this.findTask(id)?.alias).filter(Boolean).join(', ');
+    item.headline = `Lost the connection to ${host}: ${names} ${item.lostTaskIds!.length > 1 ? 'were' : 'was'} working and will carry on when it is back.`;
+    if (this.lostHosts.has(host)) return;
+    const started = Date.now();
+    const check = async () => {
+      this.lostHosts.delete(host);
+      const open = this.store.data.attention.find((a) => a.state === 'open' && a.host === host && a.lostTaskIds);
+      if (!open) return;
+      const ok = (await sshProbe(host).catch(() => ({ state: 'unreachable' as const }))).state === 'ok';
+      if (!ok) {
+        // Checked for a day at most; then it stays for the user (each agent can be told to go on).
+        if (Date.now() - started < 24 * 3600_000) this.lostHosts.set(host, setTimeout(() => void check(), 20_000));
+        return;
+      }
+      this.closeAttention(open, 'resolved', `${host} is back; the agents carried on.`);
+      for (const id of open.lostTaskIds!) {
+        const t = this.findTask(id);
+        if (!t || this.live.get(id)?.turnActive || t.status !== 'disconnected') continue;
+        this.appendSystem(id, `The connection to ${host} is back; carrying on.`);
+        await this.retry(id).catch((error) => this.log('carry on after reconnect failed', id, error));
+      }
+      this.changed();
+    };
+    this.lostHosts.set(host, setTimeout(() => void check(), 20_000));
+  }
 
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };

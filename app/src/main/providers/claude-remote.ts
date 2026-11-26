@@ -134,6 +134,10 @@ export function remoteExitError(host: string, exit: RemoteExit, fallback: string
   return why ? `Claude Code on ${host} ${how}: ${why}` : fallback.replace(/^Claude Code process/, `Claude Code on ${host}`);
 }
 
+/** Whether a session ended because the connection to its host was lost (not the CLI's own failure). */
+export const connectionLost = (reason: string) =>
+  /SSH connection closed|ended unexpectedly|Lost the SSH connection|Connection (closed|reset|refused|timed out)|Broken pipe|closed by remote host|not responding|Could not resolve hostname|Network is unreachable|No route to host|Operation timed out/i.test(reason);
+
 /**
  * Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. Returns the folder's
  * real path: the CLI keeps its sessions under it (a folder that is a link: where it points).

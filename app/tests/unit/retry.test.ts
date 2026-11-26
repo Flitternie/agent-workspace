@@ -299,3 +299,36 @@ describe('automatic retry of a turn the model was too busy for', () => {
     expect(errors().at(-1)!.details).toBe(long);
   });
 });
+
+describe('a session that ends when the connection drops', () => {
+  it('ends quietly when the agent had nothing to do: no error, and the next message connects it again', async () => {
+    const ws = open({});
+    const { t, task, errors, finished } = await start(ws, 'work');
+    await until(finished);
+    const was = task().status;
+    ws.handleEvent(t.taskId, task().sessionLocalId!, { type: 'sessionFailed', error: 'Claude Code on neptune ended unexpectedly: it was stopped on neptune, or the SSH connection closed.' });
+    expect(errors()).toEqual([]);
+    expect(task().status).toBe(was);
+    expect(ws.snapshot().connectedTaskIds).not.toContain(t.taskId);
+    await ws.send(t.taskId, 'go on', 'text');
+    await until(() => ws.transcript(t.taskId).filter((i) => i.role === 'assistant').length >= 2);
+  });
+
+  it('agents cut off mid-work on one host share one item, which names them', async () => {
+    const ws = open({});
+    const a = await start(ws, 'work');
+    const b = await start(ws, 'work');
+    await until(() => a.finished() && b.finished());
+    const lost = 'Claude Code on neptune ended unexpectedly: it was stopped on neptune, or the SSH connection closed.';
+    for (const x of [a, b]) {
+      const task = (ws as unknown as { task(id: string): { host?: string; status: string } }).task(x.t.taskId);
+      task.host = 'neptune';
+      task.status = 'running';
+      ws.handleEvent(x.t.taskId, x.task().sessionLocalId!, { type: 'sessionFailed', error: lost });
+    }
+    const items = ws.snapshot().attention.filter((i) => i.state === 'open' && i.kind === 'error');
+    expect(items).toHaveLength(1);
+    expect(items[0].headline).toBe(`Lost the connection to neptune: ${a.t.alias}, ${b.t.alias} were working and will carry on when it is back.`);
+    expect(a.task().status).toBe('disconnected');
+  });
+});
