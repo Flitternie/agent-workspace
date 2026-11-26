@@ -328,7 +328,35 @@ describe('a session that ends when the connection drops', () => {
     }
     const items = ws.snapshot().attention.filter((i) => i.state === 'open' && i.kind === 'error');
     expect(items).toHaveLength(1);
-    expect(items[0].headline).toBe(`Lost the connection to neptune: ${a.t.alias}, ${b.t.alias} were working and will carry on when it is back.`);
+    expect(items[0].headline).toBe(`Lost the connection to neptune; ${a.t.alias}, ${b.t.alias} will carry on when it is back`);
     expect(a.task().status).toBe('disconnected');
+  });
+});
+
+describe('a research reports its agents’ session troubles once', () => {
+  it('its agents are not each in the sidebar: their failures share one item, which goes when they are going again', async () => {
+    const ws = open({});
+    const project = await ws.addProject(repo());
+    await ws.researchCreate(project.projectId, 'Tuning', 'Raise accuracy', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ type: 'aspect', title: 'Data' });
+    await main.research_add.run({ type: 'aspect', title: 'Model' });
+    const [d, m] = ws.researchGet(project.projectId)!.nodes;
+    const a = await ws.researchStartAgent(project.projectId, d.id, { isolate: false });
+    const b = await ws.researchStartAgent(project.projectId, m.id, { isolate: false });
+    const status = (id: string) => ws.snapshot().tasks.find((t) => t.taskId === id)!;
+    await until(() => !['running', 'starting'].includes(status(a.taskId).status) && !['running', 'starting'].includes(status(b.taskId).status));
+    for (const t of [a, b]) {
+      (ws as unknown as { task(id: string): { status: string } }).task(t.taskId).status = 'running';
+      ws.handleEvent(t.taskId, status(t.taskId).sessionLocalId!, { type: 'sessionFailed', error: 'Claude Code process exited with code 1' });
+    }
+    const open_ = () => ws.snapshot().attention.filter((i) => i.state === 'open' && i.kind === 'error');
+    expect(open_()).toHaveLength(1);
+    expect(open_()[0].headline).toBe(`Research "Tuning": ${a.alias}, ${b.alias}: session failed`);
+    await ws.send(a.taskId, 'go on', 'text');
+    expect(open_()[0].headline).toBe(`Research "Tuning": ${b.alias}: session failed`);
+    await ws.send(b.taskId, 'go on', 'text');
+    expect(open_()).toEqual([]);
   });
 });

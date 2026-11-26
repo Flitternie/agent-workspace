@@ -467,7 +467,7 @@ export class Workspace {
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
-    for (const t of this.lostHosts.values()) clearTimeout(t);
+    for (const w of this.lostHosts.values()) clearTimeout(w.timer);
     this.lostHosts.clear();
     const sessions = [...this.live.values()];
     this.live.clear();
@@ -726,7 +726,7 @@ export class Workspace {
     const zh = this.language() === 'zh';
     const r = await this.send(to.taskId, `${from ? (zh ? `【来自 ${from}】` : `[From ${from}] `) : ''}${text}`, 'text', { keepAsks: true });
     if (!r.ok) throw new Error(r.error ?? 'Not delivered.');
-    return to.alias;
+    return r.queued ? `${to.alias} (its machine cannot be reached right now; the message goes out when it can)` : to.alias;
   }
 
   /** For a research kept in a folder of its project: which folder its agents work on. */
@@ -1683,10 +1683,18 @@ export class Workspace {
         throw error;
       }
       const message = (error as Error).message;
+      // Its host cannot be reached: not this agent's failure. It connects again when the host answers.
+      if (task.host && connectionLost(message)) {
+        task.status = prev ? 'disconnected' : 'failed';
+        task.lastError = message;
+        this.watchHost(task.host, taskId);
+        this.changed();
+        throw error;
+      }
       task.status = 'failed';
       task.lastError = message;
       task.summary = `Could not ${resumeId ? 'resume' : 'start'} ${task.provider} session: ${clip(message, 140)}`;
-      this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
+      if (!this.trouble(task, 'failed', message)) this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
       this.changed();
       throw error;
     } finally {
@@ -2276,8 +2284,10 @@ export class Workspace {
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.
       for (const a of this.store.data.attention)
-        if (!opts.keepAsks && a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
+        if (!opts.keepAsks && a.taskId === taskId && a.state === 'open' && !a.providerRequestId && !a.members && (a.kind !== 'error' || a.retryable))
           this.closeAttention(a, 'resolved', `Replied: ${clip(about, 80)}`);
+      // Going again: no longer among its group's troubles.
+      this.untrouble(taskId);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
       // Steering adds to the work in progress; the summary keeps describing it.
@@ -2296,6 +2306,14 @@ export class Workspace {
       return { ok: true, taskId, delivery };
     } catch (error) {
       const message = (error as Error).message;
+      // A research's own message (a result reported up, research_tell) to an agent whose host cannot be reached:
+      // it waits, and goes out when the host answers.
+      if (opts.keepAsks && task.host && connectionLost(message)) {
+        this.queued.set(taskId, [...(this.queued.get(taskId) ?? []), text]);
+        this.watchHost(task.host, taskId);
+        this.changed();
+        return { ok: true, taskId, queued: true };
+      }
       this.appendSystem(taskId, `Message not delivered: ${message}`);
       this.changed();
       return { ok: false, taskId, error: message };
@@ -2743,6 +2761,8 @@ export class Workspace {
           task.lastError = reason;
           if (task.status === 'idle') task.status = 'disconnected';
           this.log('idle session ended', taskId, reason);
+          // Cut off from its host: connected again by itself once the host answers.
+          if (task.host && connectionLost(reason)) this.watchHost(task.host, taskId);
           break;
         }
         // The connection to its host was lost while it worked: one item for every agent there, and they carry on
@@ -2756,7 +2776,7 @@ export class Workspace {
           task.lastError = reason;
           task.summary = `Lost the connection to ${task.host}; carries on when it is back.`;
           this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
-          this.lostOn(task.host, taskId, reason);
+          if (!this.trouble(task, 'lost', reason)) this.addAttention({ taskId, kind: 'error', headline: task.summary, details: reason });
           break;
         }
         this.endSubtasks(task, 'The agent disconnected.');
@@ -2766,7 +2786,7 @@ export class Workspace {
         task.lastError = reason;
         task.summary = `${event.type === 'sessionFailed' ? 'Session failed' : 'Disconnected'}: ${clip(reason, 140)}`;
         this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
-        if (event.type === 'sessionFailed') this.addAttention({ taskId, kind: 'error', headline: task.summary, details: reason });
+        if (event.type === 'sessionFailed' && !this.trouble(task, 'failed', reason)) this.addAttention({ taskId, kind: 'error', headline: task.summary, details: reason });
         break;
       }
     }
@@ -2852,38 +2872,105 @@ export class Workspace {
 
   // ---------------------------------------------------------------- attention
 
-  /** Hosts whose connection was lost while agents worked there, being checked until it is back. */
-  private lostHosts = new Map<string, NodeJS.Timeout>();
+  /** Hosts whose connection was lost, checked until they answer; and what waits for each: agents to reconnect. */
+  private lostHosts = new Map<string, { timer?: NodeJS.Timeout; started: number; reconnect: Set<string> }>();
+  /** Research messages (results reported up, research_tell) to agents whose host could not be reached: sent when it is back. */
+  private queued = new Map<string, string[]>();
 
-  /** An agent on `host` was cut off mid-work: added to the host's one item, and the host is checked until it answers. */
-  private lostOn(host: string, taskId: string, reason: string): void {
-    let item = this.store.data.attention.find((a) => a.state === 'open' && a.host === host && a.lostTaskIds);
-    if (!item) item = this.addAttention({ taskId, kind: 'error', host, lostTaskIds: [], headline: '', details: reason });
-    if (!item.lostTaskIds!.includes(taskId)) item.lostTaskIds!.push(taskId);
-    const names = item.lostTaskIds!.map((id) => this.findTask(id)?.alias).filter(Boolean).join(', ');
-    item.headline = `Lost the connection to ${host}: ${names} ${item.lostTaskIds!.length > 1 ? 'were' : 'was'} working and will carry on when it is back.`;
-    if (this.lostHosts.has(host)) return;
-    const started = Date.now();
+  /** Where an agent's session troubles are reported: its research's one item, its host's (connection lost), or its own. */
+  private troubleGroup(task: Task, lost: boolean): string | undefined {
+    const place = this.researchPlace(task);
+    if (place) return `research:${place.id}`;
+    if (task.researchAgent || task.researchManager) return `research:${task.projectId}`;
+    return lost && task.host ? `host:${task.host}` : undefined;
+  }
+
+  /**
+   * An agent's session trouble, into its group's one item (made if there is none): lost (cut off from its host while it
+   * worked: it carries on when the host is back) or failed. Returns false when it has no group (reported on its own).
+   */
+  private trouble(task: Task, why: 'lost' | 'failed', reason: string): boolean {
+    const group = this.troubleGroup(task, why === 'lost');
+    if (!group) return false;
+    let item = this.store.data.attention.find((a) => a.state === 'open' && a.group === group);
+    if (!item) item = this.addAttention({ taskId: task.taskId, kind: 'error', group, members: [], headline: '', details: '' });
+    item.members = [...(item.members ?? []).filter((m) => m.taskId !== task.taskId), { taskId: task.taskId, why, reason, ...(task.host ? { host: task.host } : {}) }];
+    this.retitle(item);
+    if (why === 'lost' && task.host) this.watchHost(task.host);
+    return true;
+  }
+
+  /** A group item's headline and details from who is in it. */
+  private retitle(item: AttentionItem): void {
+    const zh = this.language() === 'zh';
+    const members = item.members ?? [];
+    const names = (why: 'lost' | 'failed') => members.filter((m) => m.why === why).map((m) => this.findTask(m.taskId)?.alias ?? m.taskId).join(zh ? '、' : ', ');
+    const research = item.group?.startsWith('research:') ? this.researchGet(item.group.slice('research:'.length))?.title : undefined;
+    const host = members.find((m) => m.why === 'lost')?.host ?? (item.group?.startsWith('host:') ? item.group.slice(5) : '');
+    const parts: string[] = [];
+    if (names('lost')) parts.push(zh ? `与 ${host} 的连接断开，${names('lost')} 的工作被打断，恢复后自动继续` : `lost the connection to ${host}; ${names('lost')} will carry on when it is back`);
+    if (names('failed')) parts.push(zh ? `${names('failed')} 的会话出错` : `${names('failed')}: session failed`);
+    const what = parts.join(zh ? '；' : '; ');
+    item.headline = research ? (zh ? `研究「${research}」：${what}` : `Research "${research}": ${what}`) : zh ? what : what.charAt(0).toUpperCase() + what.slice(1);
+    item.details = members.map((m) => `${this.findTask(m.taskId)?.alias ?? m.taskId}: ${m.reason}`).join('\n');
+    if (!members.some((m) => m.taskId === item.taskId) && members.length) item.taskId = members[0].taskId;
+  }
+
+  /** Drops an agent from its group's item (it carried on, or the user sent it something); the item closes when empty. */
+  private untrouble(taskId: string, why?: 'lost' | 'failed'): void {
+    for (const a of this.store.data.attention) {
+      if (a.state !== 'open' || !a.members?.some((m) => m.taskId === taskId && (!why || m.why === why))) continue;
+      a.members = a.members.filter((m) => !(m.taskId === taskId && (!why || m.why === why)));
+      if (a.members.length) this.retitle(a);
+      else this.closeAttention(a, 'resolved', 'All carried on.');
+    }
+  }
+
+  /** The connection to `host` is gone: checked every 20 s (a day at most) and, when it answers, everything waiting goes on. */
+  private watchHost(host: string, reconnect?: string): void {
+    let w = this.lostHosts.get(host);
+    if (!w) {
+      w = { started: Date.now(), reconnect: new Set() };
+      this.lostHosts.set(host, w);
+    }
+    if (reconnect) w.reconnect.add(reconnect);
+    if (w.timer) return;
+    const state = w;
     const check = async () => {
-      this.lostHosts.delete(host);
-      const open = this.store.data.attention.find((a) => a.state === 'open' && a.host === host && a.lostTaskIds);
-      if (!open) return;
+      state.timer = undefined;
       const ok = (await sshProbe(host).catch(() => ({ state: 'unreachable' as const }))).state === 'ok';
       if (!ok) {
-        // Checked for a day at most; then it stays for the user (each agent can be told to go on).
-        if (Date.now() - started < 24 * 3600_000) this.lostHosts.set(host, setTimeout(() => void check(), 20_000));
+        if (Date.now() - state.started < 24 * 3600_000) state.timer = setTimeout(() => void check(), 20_000);
         return;
       }
-      this.closeAttention(open, 'resolved', `${host} is back; the agents carried on.`);
-      for (const id of open.lostTaskIds!) {
-        const t = this.findTask(id);
-        if (!t || this.live.get(id)?.turnActive || t.status !== 'disconnected') continue;
-        this.appendSystem(id, `The connection to ${host} is back; carrying on.`);
-        await this.retry(id).catch((error) => this.log('carry on after reconnect failed', id, error));
-      }
-      this.changed();
+      this.lostHosts.delete(host);
+      await this.hostBack(host, state.reconnect);
     };
-    this.lostHosts.set(host, setTimeout(() => void check(), 20_000));
+    w.timer = setTimeout(() => void check(), 20_000);
+  }
+
+  /** `host` answers again: agents cut off mid-work carry on, idle ones connect again quietly, queued research messages go out. */
+  private async hostBack(host: string, reconnect: Set<string>): Promise<void> {
+    const lost = this.store.data.attention.filter((a) => a.state === 'open' && a.members?.some((m) => m.why === 'lost' && m.host === host)).flatMap((a) => a.members!.filter((m) => m.why === 'lost' && m.host === host).map((m) => m.taskId));
+    for (const id of lost) {
+      this.untrouble(id, 'lost');
+      const t = this.findTask(id);
+      if (!t || this.live.get(id)?.turnActive) continue;
+      this.appendSystem(id, this.language() === 'zh' ? `与 ${host} 的连接已恢复，继续。` : `The connection to ${host} is back; carrying on.`);
+      await this.retry(id).catch((error) => this.log('carry on after reconnect failed', id, error));
+    }
+    for (const id of reconnect) {
+      if (lost.includes(id) || this.live.has(id) || !this.findTask(id)) continue;
+      const msgs = this.queued.get(id);
+      if (msgs?.length) continue; // connects with its first message below
+      await this.connect(id, true).catch((error) => this.log('reconnect failed', id, error));
+    }
+    for (const [id, msgs] of [...this.queued]) {
+      if (this.findTask(id)?.host !== host) continue;
+      this.queued.delete(id);
+      for (const text of msgs) await this.send(id, text, 'text', { keepAsks: true }).catch(() => {});
+    }
+    this.changed();
   }
 
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {

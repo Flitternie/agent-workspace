@@ -250,10 +250,13 @@ export interface AttentionItem {
   retryable?: boolean;
   /** It failed because the model was busy (at capacity, overloaded, rate limited). */
   transient?: TransientKind;
-  /** The connection to this host was lost while agents there worked: one item for all of them (lostOn). */
-  host?: string;
-  /** Those agents (taskIds); they carry on when the host can be reached again. */
-  lostTaskIds?: string[];
+  /**
+   * One item for several agents' session troubles (Workspace.trouble): a research's agents (one item per research,
+   * as they are not each in the sidebar), or the agents on a host whose connection was lost.
+   */
+  group?: string;
+  /** Who is in it, and what happened to each (lost: its host's connection, it carries on when it is back). */
+  members?: Array<{ taskId: string; why: 'lost' | 'failed'; reason: string; host?: string }>;
   createdAt: string;
   resolvedAt?: string;
   resolution?: string;
@@ -572,6 +575,8 @@ export interface DispatchResult {
   error?: string;
   /** turn: started work; steer: added to the running turn; interrupt: stopped it and started over. */
   delivery?: 'turn' | 'steer' | 'interrupt';
+  /** Its host could not be reached: a research message waits and goes out when it answers. */
+  queued?: boolean;
 }
 
 /** A model an agent's CLI offers (Claude Code's supportedModels, Codex's model/list). */

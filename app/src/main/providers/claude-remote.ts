@@ -136,7 +136,7 @@ export function remoteExitError(host: string, exit: RemoteExit, fallback: string
 
 /** Whether a session ended because the connection to its host was lost (not the CLI's own failure). */
 export const connectionLost = (reason: string) =>
-  /SSH connection closed|ended unexpectedly|Lost the SSH connection|Connection (closed|reset|refused|timed out)|Broken pipe|closed by remote host|not responding|Could not resolve hostname|Network is unreachable|No route to host|Operation timed out/i.test(reason);
+  /SSH connection closed|ended unexpectedly|Lost the SSH connection|Connection (closed|reset|refused|timed out)|Broken pipe|closed by remote host|not responding|Could not resolve hostname|Network is unreachable|No route to host|Operation timed out|Could not reach|port 22|kex_exchange_identification|Connection timed out/i.test(reason);
 
 /**
  * Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. Returns the folder's
