@@ -133,6 +133,9 @@ export function Sidebar({
   // Running sub-agents show their elapsed time.
   const now = useTick(snapshot.tasks.some((t) => t.subtasks?.some((x) => x.status === 'running')) ? 1000 : 30_000);
   const waiting = needsYou(snapshot.tasks, openAll);
+  const inResearch = new Set(snapshot.research.flatMap((r) => r.taskIds));
+  const waitingAgents = waiting.filter((t) => !inResearch.has(t.taskId));
+  const waitingResearch = snapshot.research.filter((r) => waiting.some((t) => r.taskIds.includes(t.taskId)));
   const projectName = (id: string) => snapshot.projects.find((p) => p.projectId === id)?.name ?? '';
   // ⌘1–9 numbers, as App assigns them.
   const number = new Map(visibleOrder(teamList, expanded).slice(0, 9).map((t, i) => [t.taskId, i + 1]));
@@ -373,10 +376,12 @@ export function Sidebar({
         <div className="needs-strip" data-testid="needs-strip">
           <div className="sidebar-section needs-head">
             <span>
-              {tr('Needs you')} <span className="count">{waiting.length}</span>
+              {tr('Needs you')} <span className="count">{waitingAgents.length + waitingResearch.length}</span>
             </span>
           </div>
-          {waiting.map((t) => row(t, { project: projectName(t.projectId), needs: true }))}
+          {/* A research's agents are on its page, not each in the list: one row for the research. */}
+          {waitingResearch.map(researchRow)}
+          {waitingAgents.map((t) => row(t, { project: projectName(t.projectId), needs: true }))}
         </div>
       ) : null}
 

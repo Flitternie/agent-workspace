@@ -334,6 +334,16 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
+    // A session that ended because the connection dropped is nothing to handle after a restart (nothing is
+    // connected now; the next message connects it): such items, from before this was quiet, go.
+    for (const a of d.attention)
+      if (a.state === 'open' && a.kind === 'error' && !a.retryable && !a.members && connectionLost(a.details || a.headline)) {
+        a.state = 'expired';
+        a.resolvedAt = now();
+        a.resolution = 'The connection dropped; the agent connects again when it is used.';
+        const t = d.tasks.find((x) => x.taskId === a.taskId);
+        if (t && t.status === 'failed') t.status = 'disconnected';
+      }
     // A side question still unanswered when the app quit will not be answered now.
     for (const list of Object.values(d.btw ?? {}))
       for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';

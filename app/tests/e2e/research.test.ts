@@ -273,7 +273,7 @@ describe('research page (demo)', () => {
     await page.getByTestId('research-new').locator('input').fill('Note quality');
     await page.getByTestId('research-create').click();
     await expect.poll(() => page.locator('.research-title h1').innerText()).toBe('Note quality');
-    expect(await page.getByTestId('research-row').count()).toBe(2);
+    expect(await page.getByTestId('agent-list').getByTestId('research-row').count()).toBe(2);
 
     // Its row's menu: a new name, a colour; dissolved, the row goes and the files stay (renamed).
     const noteRow = team.getByTestId('research-row');
@@ -290,7 +290,7 @@ describe('research page (demo)', () => {
     await page.getByTestId('menu-dissolve').click();
     expect(await page.getByTestId('research-dissolve').innerText()).toMatch(/Nothing is deleted/);
     await page.getByTestId('research-dissolve-ok').click();
-    await expect.poll(() => page.getByTestId('research-row').count()).toBe(1);
+    await expect.poll(() => page.getByTestId('agent-list').getByTestId('research-row').count()).toBe(1);
     expect(existsSync(join(other, '.research'))).toBe(false);
     expect(readdirSync(other).some((f) => f.startsWith('.research.dissolved-'))).toBe(true);
 
