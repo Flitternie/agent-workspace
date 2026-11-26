@@ -895,13 +895,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
         </Section>
       )}
       <Section id="sleep" query={query}>
-        <label className="check">
-          <input type="checkbox" checked={s.keepAwake !== false} onChange={(e) => update({ keepAwake: e.target.checked })} data-testid="keep-awake" />
-          <span>
-            {t('Keep the computer awake while agents work')}
-            <span className="muted small"> — {t('closing the lid still sleeps')}</span>
-          </span>
-        </label>
+        <SettingSwitch checked={s.keepAwake !== false} onChange={(on) => update({ keepAwake: on })} label={t('Keep the computer awake while agents work')} hint={t('closing the lid still sleeps')} testId="keep-awake" />
       </Section>
       <Section id="data" query={query}>
         <div className="small">
@@ -973,13 +967,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
             : t('Off: messages are routed by name and the routing model instead.')}
         </div>
         {snapshot.main ? (
-          <label className="check">
-            <input type="checkbox" checked={s.mainChapters !== 'off'} onChange={(e) => update({ mainChapters: e.target.checked ? 'auto' : 'off' })} data-testid="setting-main-chapters" />
-            <span>
-              {t('Start a new chapter by itself')}
-              <span className="muted small"> — {t('after a night away, or a long stretch')}</span>
-            </span>
-          </label>
+          <SettingSwitch checked={s.mainChapters !== 'off'} onChange={(on) => update({ mainChapters: on ? 'auto' : 'off' })} label={t('Start a new chapter by itself')} hint={t('after a night away, or a long stretch')} testId="setting-main-chapters" />
         ) : null}
       </Section>
       <Section id="permissions" query={query}>
@@ -1020,12 +1008,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
         </div>
         <ModelPickers snapshot={snapshot} onChange={update} />
         {micMode === 'open' ? (
-          <label className="check">
-            <input type="checkbox" checked={s.autoListen} onChange={(e) => update({ autoListen: e.target.checked })} data-testid="setting-autolisten" />
-            <span>
-              {t('Open the microphone when the app starts')}
-            </span>
-          </label>
+          <SettingSwitch checked={s.autoListen} onChange={(on) => update({ autoListen: on })} label={t('Open the microphone when the app starts')} testId="setting-autolisten" />
         ) : null}
         {micMode === 'open' ? (
         <div className="settings-inline">
@@ -1045,13 +1028,7 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           </div>
         </div>
         ) : null}
-        <label className="check">
-          <input type="checkbox" checked={s.alwaysConfirmVoice} onChange={(e) => update({ alwaysConfirmVoice: e.target.checked })} />
-          <span>
-            {t('Confirm every voice send')}
-            <span className="muted small"> — {t('off: messages that name an agent go right away')}</span>
-          </span>
-        </label>
+        <SettingSwitch checked={s.alwaysConfirmVoice} onChange={(on) => update({ alwaysConfirmVoice: on })} label={t('Confirm every voice send')} hint={t('off: messages that name an agent go right away')} />
       </Section>
       <Section id="openai" query={query}>
         <OpenAiKey snapshot={snapshot} />
@@ -1088,5 +1065,18 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
         </div>
       </div>
     </div>
+  );
+}
+
+/** An on/off setting: what it is (and a line on what it means), the switch on the right. */
+function SettingSwitch({ checked, onChange, label, hint, testId }: { checked: boolean; onChange: (on: boolean) => void; label: string; hint?: string; testId?: string }) {
+  return (
+    <label className="setting-switch">
+      <span className="setting-switch-text">
+        <span>{label}</span>
+        {hint ? <span className="setting-switch-hint">{hint}</span> : null}
+      </span>
+      <input type="checkbox" role="switch" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} data-testid={testId} />
+    </label>
   );
 }

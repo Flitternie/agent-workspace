@@ -67,6 +67,14 @@ it('pastes images into an agent’s box and a tile’s box, and sends them with 
   await expect.poll(() => page.locator('.composer-box .attach-thumb img').count(), { timeout: 8000 }).toBe(2);
   const widths = await page.locator('.composer-box .attach-thumb img').evaluateAll((imgs) => imgs.map((i) => (i as HTMLImageElement).naturalWidth));
   expect(widths).toEqual([2000, 600]);
+  // The remove button's × sits in the middle of its circle.
+  await page.locator('.composer-box .attach-thumb').first().hover();
+  const centre = await page.locator('.composer-box .attach-remove').first().evaluate((b) => {
+    const r = b.getBoundingClientRect();
+    const i = b.querySelector('svg')!.getBoundingClientRect();
+    return [r.x + r.width / 2 - (i.x + i.width / 2), r.y + r.height / 2 - (i.y + i.height / 2)].map((d) => Math.abs(Math.round(d)));
+  });
+  expect(centre).toEqual([0, 0]);
   await page.screenshot({ path: join(appDir, 'test-results', 'images-2-composer.png') });
   await page.getByTestId('composer-input').press('Enter');
   await expect.poll(() => page.locator('[data-testid="msg-images"] img').count(), { timeout: 8000 }).toBe(3);

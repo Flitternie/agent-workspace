@@ -135,6 +135,9 @@ describe('sub-agents (mock agents)', () => {
     await expect.poll(() => page.getByTestId('subtask-view').isVisible()).toBe(true);
     await expect.poll(() => page.getByTestId('subtask-steps').locator('li').count()).toBe(2);
     await expect.poll(() => page.getByTestId('subtask-result').innerText()).toContain('cursor');
+    // The page scrolls as a whole: its scroll area spans the view (scrollbar at the edge, not mid-page).
+    const [view, body] = await Promise.all([page.getByTestId('subtask-view').boundingBox(), page.locator('.subtask-view-body').boundingBox()]);
+    expect(Math.round(body!.x + body!.width)).toBe(Math.round(view!.x + view!.width));
     await page.mouse.move(800, 30);
     await page.screenshot({ path: join(shots, 'subtasks-05-view.png') });
     // Back goes to the agent it belongs to.

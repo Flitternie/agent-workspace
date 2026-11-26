@@ -231,6 +231,32 @@ export async function codexInput(text: string, images: ImageInput[], remote: boo
   return input;
 }
 
+/**
+ * An MCP elicitation that only asks yes or no (a form with no fields), as an approval: its message,
+ * what the tool would do, and whether the server lets the answer stand for the session. Forms that
+ * ask for details, and links to open, are not approvals (undefined).
+ */
+export function elicitationApproval(p: Record<string, unknown>): { headline: string; details: string; options: Array<{ id: string; label: string; kind: 'allow_once' | 'allow_always' | 'reject_once' }>; highRisk: boolean } | undefined {
+  const schema = rec(p.requestedSchema);
+  if (str(p.mode) === 'url' || Object.keys(rec(schema.properties)).length) return undefined;
+  const meta = rec(p._meta);
+  const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const params = arr(meta.tool_params_display)
+    .map((x) => rec(x))
+    .map((x) => `${str(x.display_name) || str(x.name)}: ${typeof x.value === 'string' ? x.value : JSON.stringify(x.value)}`);
+  const persist = arr(meta.persist).map(str);
+  return {
+    headline: str(p.message) || `${str(p.serverName) || 'An MCP server'} asks to continue`,
+    details: [str(meta.subtitle), str(meta.connector_name) && str(meta.tool_name) && `${str(meta.connector_name)} → ${str(meta.tool_name)}`, ...params].filter(Boolean).join('\n'),
+    options: [
+      { id: 'accept', label: 'Allow once', kind: 'allow_once' },
+      ...(persist.includes('session') ? [{ id: 'acceptForSession', label: 'Allow for this session', kind: 'allow_always' as const }] : []),
+      { id: 'decline', label: 'Deny', kind: 'reject_once' },
+    ],
+    highRisk: str(meta.riskLevel) === 'high',
+  };
+}
+
 const MAIN_AGENT_CONFIG = {
   features: {
     shell_tool: false,
@@ -646,6 +672,10 @@ class CodexSession implements ProviderSession {
         (r.questionIds ?? []).map((q) => [q, { answers: [response.answers?.[q] ?? ''] }]),
       );
       this.server.reply(r.rpcId, { answers });
+    } else if (r.method === 'mcpServer/elicitation/request') {
+      // Accepted for the session: the server is told to keep the answer (its `persist` choices).
+      const d = response.decision;
+      this.server.reply(r.rpcId, d === 'accept' || d === 'acceptForSession' ? { action: 'accept', content: {}, _meta: d === 'acceptForSession' ? { persist: 'session' } : null } : { action: 'decline', content: null, _meta: null });
     } else {
       const allowed = ['accept', 'acceptForSession', 'decline', 'cancel'];
       const decision = allowed.includes(response.decision ?? '') ? response.decision : 'decline';
@@ -747,8 +777,16 @@ class CodexSession implements ProviderSession {
       return;
     }
     if (method === 'mcpServer/elicitation/request') {
+      const approval = elicitationApproval(p);
+      if (approval) {
+        // A yes/no question from an MCP server: most often whether a tool may run (Codex's browser and
+        // computer use ask before using an app such as Chrome). An approval on the card, like a command's.
+        this.requests.set(requestId, { rpcId, method });
+        this.emit({ type: 'approvalRequested', requestId, ...approval, toolCallId: str(rec(p._meta).callId) || undefined });
+        return;
+      }
       this.server?.reply(rpcId, { action: 'cancel', content: null, _meta: null });
-      this.emit({ type: 'progress', text: `Cancelled an MCP elicitation from ${str(p.serverName) || 'an MCP server'} (not supported in this MVP).` });
+      this.emit({ type: 'progress', text: `Cancelled a form from ${str(p.serverName) || 'an MCP server'} that asks for details (not supported yet).` });
       return;
     }
     // Never leave an unsupported request hanging, and never silently approve it.

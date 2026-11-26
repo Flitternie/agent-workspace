@@ -215,6 +215,17 @@ class MockSession implements ProviderSession {
       }, 400);
       return;
     }
+    // One sub-agent with a long run (50 steps and a long report): its page scrolls.
+    if (script === 'subagent-long') {
+      const zh = this.zh;
+      this.later(() => this.emit({ type: 'subtask', id: 'l1', description: zh ? '逐个检查订单模块的调用方' : 'Check every caller of the orders module', step: zh ? '列出 src/ 下的文件' : 'Listing files in src/', status: 'running' }), 0.5);
+      for (let i = 1; i < 50; i++)
+        this.later(() => this.emit({ type: 'subtask', id: 'l1', step: zh ? `读 src/orders/caller-${i}.ts，第 ${i * 7} 行调用了 /v1/orders` : `Reading src/orders/caller-${i}.ts: line ${i * 7} calls /v1/orders` }), 0.5 + i * 0.03);
+      const report = (zh ? '共检查 49 个文件，其中 31 处调用需要迁移到 v2。' : 'Checked 49 files; 31 calls need moving to v2. ').repeat(12);
+      this.later(() => this.emit({ type: 'subtask', id: 'l1', status: 'done', step: '', result: report }), 2.5);
+      this.later(() => this.finish(zh ? '子 agent 检查完了，结果见它的页面。' : 'The sub-agent is done; see its page.'), 3);
+      return;
+    }
     // Sub-agents: three helpers, one finishes, two keep working (a long turn, to look at).
     if (script === 'subagents') {
       const zh = this.zh;

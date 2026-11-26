@@ -20,28 +20,30 @@ export function SubtaskView({ task, subtask, now, onBack }: { task: Task; subtas
         </div>
       ) : (
         <div className="subtask-view-body">
-          <div className="subtask-view-title">
-            <span className={`sdot sdot-${subtask.status}`} />
-            <h2>{subtask.description}</h2>
-            <span className={`subtask-view-status st-${subtask.status}`}>
-              {subtask.status === 'running' ? t('Working · {time}', { time: elapsed(subtask, now) }) : subtask.status === 'done' ? t('Done in {time}', { time: elapsed(subtask, now) }) : t('Failed')}
-            </span>
-          </div>
-          <ol className="subtask-steps" data-testid="subtask-steps">
-            {(subtask.steps ?? []).map((step, i, all) => (
-              <li key={`${step.at}-${i}`} className={subtask.status === 'running' && i === all.length - 1 ? 'current' : ''}>
-                <span className="subtask-step-time">{clock(subtask.startedAt, Date.parse(step.at))}</span>
-                <span>{step.text}</span>
-              </li>
-            ))}
-            {!subtask.steps?.length ? <li className="muted">{t('No steps yet.')}</li> : null}
-          </ol>
-          {subtask.result ? (
-            <div className="subtask-result" data-testid="subtask-result">
-              <div className="section-label">{t('Reported back to {name}', { name: task.alias })}</div>
-              <p>{subtask.result}</p>
+          <div className="subtask-view-inner">
+            <div className="subtask-view-title">
+              <span className={`sdot sdot-${subtask.status}`} />
+              <h2>{subtask.description}</h2>
+              <span className={`subtask-view-status st-${subtask.status}`}>
+                {subtask.status === 'running' ? t('Working · {time}', { time: elapsed(subtask, now) }) : subtask.status === 'done' ? t('Done in {time}', { time: elapsed(subtask, now) }) : t('Failed')}
+              </span>
             </div>
-          ) : null}
+            <ol className="subtask-steps" data-testid="subtask-steps">
+              {(subtask.steps ?? []).map((step, i, all) => (
+                <li key={`${step.at}-${i}`} className={subtask.status === 'running' && i === all.length - 1 ? 'current' : ''}>
+                  <span className="subtask-step-time">{clock(subtask.startedAt, Date.parse(step.at))}</span>
+                  <span>{step.text}</span>
+                </li>
+              ))}
+              {!subtask.steps?.length ? <li className="muted">{t('No steps yet.')}</li> : null}
+            </ol>
+            {subtask.result ? (
+              <div className="subtask-result" data-testid="subtask-result">
+                <div className="section-label">{t('Reported back to {name}', { name: task.alias })}</div>
+                <p>{subtask.result}</p>
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
     </div>
