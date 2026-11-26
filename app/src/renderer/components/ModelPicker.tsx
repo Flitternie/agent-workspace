@@ -21,7 +21,8 @@ const matches = (o: ModelOption, id?: string) => !!id && (o.id === id || o.resol
 
 /**
  * In the agent's header: the model it runs on; a click lists the models its CLI offers
- * (here or on its host) and switches from the next turn. The list is asked for on first
+ * (here or on its host) and switches: Claude Code from its next request (as /model does, the running
+ * turn included), Codex from its next turn. The list is asked for on first
  * open, not on every view.
  */
 export function ModelPicker({ task }: { task: Task }) {
@@ -61,8 +62,9 @@ export function ModelPicker({ task }: { task: Task }) {
   // One tick: the pick, else the default entry (when it is what runs), else what runs.
   const onId = task.model ?? (models?.find((o) => o.isDefault && (matches(o, current) || !current)) ?? models?.find((o) => matches(o, current)))?.id;
   const label = listed?.label ?? (current ? modelName(current) : t('Default model'));
-  // Picked while a turn runs: the running turn keeps its model.
-  const pending = !!task.model && !!task.activeModel && task.model !== task.activeModel && !models?.find((o) => o.id === task.model && o.resolves === task.activeModel) && (task.status === 'running' || task.status === 'starting');
+  // Only Codex keeps a running turn on its model: picked meanwhile, it applies from the next turn.
+  const nextTurn = task.provider === 'codex';
+  const pending = nextTurn && !!task.model && !!task.activeModel && task.model !== task.activeModel && !models?.find((o) => o.id === task.model && o.resolves === task.activeModel) && (task.status === 'running' || task.status === 'starting');
   const pick = (model: string | null) => {
     setOpen(false);
     setError('');
@@ -77,7 +79,7 @@ export function ModelPicker({ task }: { task: Task }) {
       </button>
       {open ? (
         <div className="model-menu" data-testid="model-menu">
-          <div className="model-menu-head">{t('Model for this agent · from its next turn')}</div>
+          <div className="model-menu-head">{nextTurn ? t('Model for this agent · from its next turn') : t('Model for this agent')}</div>
           {error ? <div className="error-text small">{error}</div> : null}
           {!models && !error ? <div className="muted small">{t('Asking {name} for its models…', { name: PROVIDER_LABEL[task.provider] })}</div> : null}
           {models?.map((o) => {

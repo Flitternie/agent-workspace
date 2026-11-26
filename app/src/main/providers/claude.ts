@@ -528,7 +528,7 @@ class ClaudeSession implements ProviderSession {
     await this.query?.setPermissionMode(CLAUDE_MODE[mode]);
   }
 
-  /** From the next request on (the running turn keeps its model). */
+  /** From the next request on, as /model does (the running turn's next step included). */
   async setModel(model: string | undefined): Promise<void> {
     this.args.model = model;
     await this.query?.setModel(model);
