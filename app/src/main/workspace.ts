@@ -119,6 +119,8 @@ export interface WorkspaceOptions {
   labelRefreshMs?: number;
   /** Waits between attempts to reach a host again after its connection went (ms; the last repeats). */
   reconnectMs?: number[];
+  /** Stops trying (quietly) after this long without reaching the host; waking up or a message starts again. */
+  reconnectGiveUpMs?: number;
 }
 
 /**
@@ -149,7 +151,7 @@ export class Workspace {
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
   /** Hosts whose connection went, with their agents to connect again (true: it was working, carry on). */
-  private reconnects = new Map<string, { attempt: number; timer?: NodeJS.Timeout; tasks: Map<string, boolean> }>();
+  private reconnects = new Map<string, { attempt: number; since: number; timer?: NodeJS.Timeout; tasks: Map<string, boolean> }>();
 
   /** The skill library loaded into every agent the app starts (see skills.ts). */
   readonly skills: SkillLibrary;
@@ -321,6 +323,23 @@ export class Workspace {
       if (['running', 'starting'].includes(t.status) || (t.status === 'waiting_for_user' && this.hasOpenNative(t.taskId))) {
         t.status = 'disconnected';
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
+      }
+    }
+    // A lost connection to a host is no error to keep (they reconnect when used): earlier ones, from
+    // before agents reconnected by themselves, leave the waiting list.
+    for (const t of d.tasks) {
+      if (!t.host) continue;
+      let cleared = false;
+      for (const a of d.attention)
+        if (a.taskId === t.taskId && a.state === 'open' && a.kind === 'error' && this.connectionLost(t, `${a.headline} ${a.details ?? ''}`)) {
+          a.state = 'resolved';
+          a.resolvedAt = now();
+          a.resolution = 'Connection errors are not kept; the agent reconnects when used.';
+          cleared = true;
+        }
+      if (t.status === 'failed' && (cleared || this.connectionLost(t, t.lastError))) {
+        t.status = 'disconnected';
+        t.summary = `Not connected to ${t.host}. Reconnects when you send a message.`;
       }
     }
     // A side question still unanswered when the app quit will not be answered now.
@@ -2304,7 +2323,7 @@ export class Workspace {
 
   private scheduleReconnect(task: Task, working: boolean): void {
     const host = task.host!;
-    const r = this.reconnects.get(host) ?? { attempt: 0, tasks: new Map<string, boolean>() };
+    const r = this.reconnects.get(host) ?? { attempt: 0, since: Date.now(), tasks: new Map<string, boolean>() };
     r.tasks.set(task.taskId, (r.tasks.get(task.taskId) ?? false) || working);
     this.reconnects.set(host, r);
     task.status = 'disconnected';
@@ -2316,7 +2335,8 @@ export class Workspace {
     const r = this.reconnects.get(host);
     if (!r) return;
     if (r.timer) clearTimeout(r.timer);
-    const waits = this.opts.reconnectMs ?? [5_000, 15_000, 30_000, 60_000, 120_000];
+    // Soon at first (a blip), then further apart (a machine that is off): every 10 minutes at most.
+    const waits = this.opts.reconnectMs ?? [5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
     r.timer = setTimeout(() => void this.runReconnect(host), delayMs ?? waits[Math.min(r.attempt, waits.length - 1)]);
   }
 
@@ -2324,9 +2344,23 @@ export class Workspace {
   reconnectNow(): void {
     for (const [host, r] of this.reconnects) {
       r.attempt = 0;
+      r.since = Date.now();
       this.armReconnect(host, 3000);
     }
+    // Those that stopped trying start again too.
+    for (const [host, ids] of this.givenUp) {
+      this.givenUp.delete(host);
+      for (const id of ids) {
+        const task = this.findTask(id);
+        if (task && task.status === 'disconnected' && !this.live.has(id)) this.scheduleReconnect(task, false);
+      }
+      const r = this.reconnects.get(host);
+      if (r) this.armReconnect(host, 3000);
+    }
   }
+
+  /** Hosts tried for a day without an answer: their agents wait, quietly, for a wake-up or a message. */
+  private givenUp = new Map<string, Set<string>>();
 
   private async runReconnect(host: string): Promise<void> {
     const r = this.reconnects.get(host);
@@ -2374,12 +2408,21 @@ export class Workspace {
       }
     }
     if (!r.tasks.size) this.reconnects.delete(host);
-    else this.armReconnect(host);
+    else if (Date.now() - r.since > (this.opts.reconnectGiveUpMs ?? 24 * 3600_000)) {
+      // A day without an answer (the machine is off): stop trying; the agent says so, no error.
+      this.reconnects.delete(host);
+      this.givenUp.set(host, new Set(r.tasks.keys()));
+      for (const id of r.tasks.keys()) {
+        const task = this.findTask(id);
+        if (task) task.summary = `Cannot reach ${host}. Reconnects when you send a message, or when the computer wakes.`;
+      }
+    } else this.armReconnect(host);
     this.changed();
   }
 
   /** No longer waiting to be reconnected (stopped, removed, or connected by the user). */
   private dropReconnect(taskId: string): void {
+    for (const ids of this.givenUp.values()) ids.delete(taskId);
     for (const [host, r] of this.reconnects) {
       if (!r.tasks.delete(taskId) || r.tasks.size) continue;
       clearTimeout(r.timer);

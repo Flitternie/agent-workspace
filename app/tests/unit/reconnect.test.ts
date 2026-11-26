@@ -37,9 +37,9 @@ function repo(): string {
 }
 const LOST = 'Claude Code on devbox ended unexpectedly: it was stopped on devbox, or the SSH connection closed.';
 
-async function setup(delay = 5) {
+async function setup(delay = 5, giveUpMs?: number) {
   const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
-  const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), delay) }, reconnectMs: [80] });
+  const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), delay) }, reconnectMs: [80], reconnectGiveUpMs: giveUpMs });
   opened.push(ws);
   ws.updateSettings({ remoteHosts: ['devbox'] });
   const project = await ws.addProject(repo(), 'shop');
@@ -103,6 +103,43 @@ describe('reconnecting agents on a host', () => {
     expect(errors()[0].headline).toMatch(/Cannot reconnect to devbox/);
     expect(task().status).toBe('disconnected');
     void ws;
+  });
+
+  it('stops trying after a while without an answer, quietly; waking up starts again', async () => {
+    probe = { state: 'unreachable' };
+    const { ws, task, errors, drop } = await setup(5, 250);
+    drop();
+    await until(() => /Cannot reach devbox/.test(task().summary));
+    expect(task().status).toBe('disconnected');
+    expect(errors()).toEqual([]);
+    // No more tries meanwhile: the summary stays.
+    await wait(300);
+    expect(task().summary).toMatch(/Cannot reach devbox/);
+    // The computer wakes and the machine is back: reconnected.
+    probe = { state: 'ok' };
+    ws.reconnectNow();
+    await until(() => task().summary === 'Reconnected.', 8000);
+  }, 15_000);
+
+  it('after a restart, earlier connection errors leave the waiting list', async () => {
+    probe = { state: 'unreachable' };
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws1 = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), 5) } });
+    ws1.updateSettings({ remoteHosts: ['devbox'] });
+    const project = await ws1.addProject(repo(), 'shop');
+    const t = await ws1.createTask({ projectId: project.projectId, provider: 'mock', title: 'remote', isolate: false, mockScript: 'work', instruction: 'Start.' });
+    await until(() => ws1.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status === 'done');
+    // As an older version left it: failed, with an error about the connection waiting on the user.
+    const data = (ws1 as unknown as { store: { data: { tasks: Array<Record<string, unknown>>; attention: Array<Record<string, unknown>> } } }).store.data;
+    Object.assign(data.tasks.find((x) => x.taskId === t.taskId)!, { host: 'devbox', status: 'failed', lastError: LOST, summary: `Session failed: ${LOST}` });
+    data.attention.push({ id: 'a-old', taskId: t.taskId, kind: 'error', state: 'open', headline: `Session failed: ${LOST}`, details: LOST, createdAt: new Date().toISOString() });
+    await ws1.shutdown();
+    const ws2 = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), 5) } });
+    opened.push(ws2);
+    const after = ws2.snapshot();
+    // (Its report from the first turn may stay; that is not waiting on anyone.)
+    expect(after.attention.filter((a) => a.taskId === t.taskId && a.state === 'open' && a.kind !== 'completion')).toEqual([]);
+    expect(after.tasks.find((x) => x.taskId === t.taskId)!.status).toBe('disconnected');
   });
 
   it('stopping an agent ends its waiting', async () => {
