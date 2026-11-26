@@ -1209,9 +1209,10 @@ export class Workspace {
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
         skills,
-        // The browser is the user's own Chrome, on this Mac; the main agent only coordinates.
-        chrome: !isMain && !task.host && this.store.data.settings.claudeChrome !== false,
-        artifacts: !isMain && this.store.data.settings.claudeArtifacts !== false,
+        // As the interactive CLI has them (each use still asks first). The browser is the user's own
+        // Chrome, on this Mac; the main agent only coordinates.
+        chrome: !isMain && !task.host,
+        artifacts: !isMain,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {

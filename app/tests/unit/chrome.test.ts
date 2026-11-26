@@ -7,7 +7,7 @@ import { MockAdapter } from '../../src/main/providers/mock';
 import { Workspace } from '../../src/main/workspace';
 
 describe('Claude in Chrome', () => {
-  it('agents on this Mac start with Chrome unless it is turned off in Settings', async () => {
+  it('agents start with Chrome and Artifacts, as in the CLI; the main agent does not', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'amw-chrome-'));
     const adapter = new MockAdapter(join(dataDir, 'mock'), 5);
     const spy = vi.spyOn(adapter, 'createSession');
@@ -20,9 +20,9 @@ describe('Claude in Chrome', () => {
       const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });
       await ws.send(a.taskId, 'hi', 'text');
       expect(spy.mock.calls.at(-1)![0]).toMatchObject({ chrome: true, artifacts: true });
-      ws.updateSettings({ claudeChrome: false, claudeArtifacts: false });
-      const b = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });
-      await ws.send(b.taskId, 'hi', 'text');
+      // Not the main agent, which only coordinates.
+      (ws as unknown as { store: { data: { mainAgent?: unknown } } }).store.data.mainAgent = { taskId: 't-main-c', alias: 'Main', name: 'Main', projectId: '', title: 'Main agent', provider: 'mock', status: 'idle', summary: '', cwd: repo, createdAt: '', updatedAt: '' };
+      await ws.send('t-main-c', 'hi', 'text');
       expect(spy.mock.calls.at(-1)![0]).toMatchObject({ chrome: false, artifacts: false });
     } finally {
       await ws.shutdown();

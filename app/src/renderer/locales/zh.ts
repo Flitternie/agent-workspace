@@ -1078,8 +1078,4 @@ export const zh: Record<string, string> = {
   'Another agent already has this name.': '已有别的 Agent 叫这个名字。',
   'This word already means something to the workspace; pick another name.': '这个词在工作区里已有用途，换一个名字吧。',
   'A project name cannot be empty.': '项目名称不能为空。',
-  'Claude Code agents can use Chrome': 'Claude Code agent 可以使用 Chrome',
-  'through the Claude in Chrome extension, on this Mac; from their next start': '通过 Claude in Chrome 扩展，仅限本机；agent 下次启动时生效',
-  'Claude Code agents can publish Artifacts': 'Claude Code agent 可以发布 Artifact',
-  'private pages on claude.ai, each publish asks first; needs a claude.ai login': 'claude.ai 上的私有网页，每次发布前会先问你；需要用 claude.ai 账号登录',
 };
