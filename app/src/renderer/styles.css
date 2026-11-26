@@ -3957,9 +3957,14 @@ button.subtask-row:hover {
 .subtask-view .btn-ghost .icon {
   transform: rotate(180deg);
 }
+/* The whole width scrolls (its scrollbar at the window's edge); the run itself stays a readable width. */
 .subtask-view-body {
-  padding: 18px 28px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 18px 28px;
+}
+.subtask-view-inner {
   max-width: 820px;
 }
 .subtask-view-title {
@@ -7284,8 +7289,10 @@ button.subtask-row:hover {
   place-items: center;
   width: 18px;
   height: 18px;
+  padding: 0;
   border: none;
   border-radius: 50%;
+  line-height: 0;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   cursor: pointer;
