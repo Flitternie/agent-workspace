@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerMonitor, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
 import type { ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
@@ -342,6 +342,9 @@ function keepAwake(on: boolean): void {
 }
 
 function wireEvents(): void {
+  // Awake again: agents whose host connection went try again now rather than at their next wait.
+  powerMonitor.on('resume', () => workspace.reconnectNow());
+  powerMonitor.on('unlock-screen', () => workspace.reconnectNow());
   let snapshotTimer: NodeJS.Timeout | undefined;
   workspace.onChange(() => {
     if (snapshotTimer) return;
