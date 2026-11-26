@@ -1078,4 +1078,10 @@ export const zh: Record<string, string> = {
   'Another agent already has this name.': '已有别的 Agent 叫这个名字。',
   'This word already means something to the workspace; pick another name.': '这个词在工作区里已有用途，换一个名字吧。',
   'A project name cannot be empty.': '项目名称不能为空。',
+  // Browser sign-ins a command waits on
+  'Sign-in needed': '需要登录',
+  'Sign-in': '登录',
+  'Sign in at {host}': '在 {host} 登录',
+  'Code': '验证码',
+  'Copy code': '复制验证码',
 };

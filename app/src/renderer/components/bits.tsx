@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../../shared/types';
+import type { AgentProvider, AgentStatus, AttentionItem, AttentionKind, SubtaskInfo } from '../../shared/types';
 import { digestSubtasks, orderSubtasks, type SubtaskDigest } from '../../shared/subtasks';
 import { t, t as tr } from '../i18n';
 
@@ -76,7 +76,20 @@ export const KIND_LABEL: Record<AttentionKind, string> = {
   review: 'Review',
   completion: 'Report',
   error: 'Error',
+  signin: 'Sign-in needed',
 };
+
+/** A request's one-line headline; a sign-in's is worded here, in the user's language. */
+export function attentionHeadline(a: AttentionItem): string {
+  if (a.kind !== 'signin' || !a.signIn) return a.headline;
+  let host = a.signIn.url;
+  try {
+    host = new URL(a.signIn.url).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep the URL */
+  }
+  return t('Sign in at {host}', { host });
+}
 
 export function Alias({ alias, size = 'md' }: { alias: string; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   const hue = ([...alias].reduce((n, c) => n + c.charCodeAt(0), 0) * 67) % 360;

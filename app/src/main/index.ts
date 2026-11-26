@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
@@ -219,6 +219,12 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'attention:respond': (i: { attentionId: string; decision?: string; answers?: Record<string, string> }) =>
     workspace.respondAttention(i.attentionId, i.decision, i.answers),
   'attention:dismiss': (i: { attentionId: string }) => workspace.dismissAttention(i.attentionId),
+  'attention:openLink': async (i: { attentionId: string }) => {
+    const url = workspace.signInUrl(i.attentionId);
+    // Tests record the link instead of opening a browser.
+    if (process.env.AMW_OPEN_LINKS_LOG) appendFileSync(process.env.AMW_OPEN_LINKS_LOG, `${url}\n`);
+    else await shell.openExternal(url);
+  },
   'voice:ensureMic': async () => {
     if (process.platform !== 'darwin') return true;
     if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true;

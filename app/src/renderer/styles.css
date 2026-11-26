@@ -1017,6 +1017,24 @@ body.resizing .sidebar-resizer {
 .attention > .link {
   align-self: flex-start;
 }
+/* A browser sign-in a command waits on: its link (as Remote Control shows one) and the code to enter. */
+.attention-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.signin-code {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.signin-code code {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
 .attention-resolution {
   font-size: 12px;
   color: var(--text-2);

@@ -30,6 +30,7 @@ import { accountKey } from '../shared/types';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
+import { detectSignIn, signInHost } from './signin';
 import { deltaSize, instructionsFor, memoryDelta, memoryForTask, memoryUpdateText, seenOf } from './memory';
 import { bodyHash, candidatesFrom, importCandidates, LOCAL, markCandidates, MEMORY_SCAN_SCRIPT, parseScanOutput, syncUserMemory, tombstone } from './memory-import';
 import type { OpenAiClient } from './openai';
@@ -325,6 +326,8 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
+    // A sign-in a command was waiting on went with its session.
+    for (const a of d.attention) if (a.state === 'open' && a.kind === 'signin') Object.assign(a, { state: 'expired', resolvedAt: now(), resolution: 'The app restarted.' });
     // A lost connection to a host is no error to keep (they reconnect when used): earlier ones, from
     // before agents reconnected by themselves, leave the waiting list.
     for (const t of d.tasks) {
@@ -1829,7 +1832,7 @@ export class Workspace {
       // A delivered reply answers this task's heuristic asks (not native approvals, which need their own decision),
       // and takes the place of retrying a failed turn.
       for (const a of this.store.data.attention)
-        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable))
+        if (a.taskId === taskId && a.state === 'open' && !a.providerRequestId && (a.kind !== 'error' || a.retryable) && !a.signIn?.running)
           this.closeAttention(a, 'resolved', `Replied: ${clip(about, 80)}`);
       live.turnActive = true;
       if (!this.hasOpenNative(taskId)) task.status = 'running';
@@ -2120,6 +2123,7 @@ export class Workspace {
           event.tool,
         );
         if (event.role === 'assistant' && !event.history) task.summary = summaryFor(event.text);
+        if (event.role === 'tool' && !event.history && this.watchSignIn(taskId, event.itemId)) break;
         return this.changedThrottled();
       }
       case 'outputDelta': {
@@ -2134,6 +2138,8 @@ export class Workspace {
         else item.text += event.delta;
         this.store.touchTranscript(taskId);
         this.emitTranscript(taskId, item);
+        // Looked at as lines (or a link) arrive, not on every character.
+        if (event.role === 'tool' && /\n|https?:|code/i.test(event.delta) && this.watchSignIn(taskId, event.itemId)) break;
         return;
       }
       case 'model':
@@ -2229,6 +2235,7 @@ export class Workspace {
       }
       case 'turnCompleted': {
         live.turnActive = false;
+        this.endSignIns(taskId, true, 'The command ended with the turn.');
         // Stopped or failed turns take their sub-agents with them (background ones that outlive a finished turn report their own end).
         if (event.status !== 'completed') this.endSubtasks(task, event.status === 'interrupted' ? 'Stopped with the turn.' : 'Ended with the failed turn.');
         if (task !== this.store.data.mainAgent) this.maybeRefreshLabel(task);
@@ -2276,6 +2283,7 @@ export class Workspace {
       case 'sessionFailed':
       case 'sessionDisconnected': {
         this.endSubtasks(task, 'The agent disconnected.');
+        this.endSignIns(taskId, false, 'The agent disconnected.');
         this.live.delete(taskId);
         const reason = event.type === 'sessionFailed' ? event.error : event.reason;
         if (event.type === 'sessionFailed' && this.connectionLost(task, reason)) {
@@ -2519,8 +2527,8 @@ export class Workspace {
     // The main agent's conversation lists what workers need from the user (a note, not a model turn).
     const main = this.store.data.mainAgent;
     const worker = this.store.data.tasks.find((t) => t.taskId === a.taskId);
-    if (main && worker && (a.kind === 'question' || a.kind === 'approval'))
-      this.appendSystem(main.taskId, `${worker.alias} is waiting on you (${a.kind === 'approval' ? 'permission' : 'question'}): ${clip(a.headline, 200)}`);
+    if (main && worker && (a.kind === 'question' || a.kind === 'approval' || a.kind === 'signin'))
+      this.appendSystem(main.taskId, `${worker.alias} is waiting on you (${a.kind === 'approval' ? 'permission' : a.kind === 'signin' ? 'browser sign-in' : 'question'}): ${clip(a.headline, 200)}`);
     return item;
   }
 
@@ -2592,6 +2600,71 @@ export class Workspace {
     if (task.status === 'waiting_for_user' && !this.store.data.attention.some((x) => x.taskId === a.taskId && x.state === 'open' && x.kind === 'question'))
       task.status = 'done';
     this.changed();
+  }
+
+  // ---------------------------------------------------------------- sign-in links
+
+  /** Tool calls that already raised a sign-in (taskId \0 tool item id): one request per call. */
+  private signInSeen = new Set<string>();
+
+  /**
+   * A command waiting on a browser sign-in (an auth URL, a one-time code in its output) becomes a
+   * request for the user, with the link to open. One per tool call; it resolves when that call ends.
+   * A finished read of another process's output (a backgrounded login) keeps it open until the user
+   * replies, dismisses it or the session ends. Returns whether attention changed.
+   */
+  private watchSignIn(taskId: string, itemId: string): boolean {
+    const item = this.store.transcript(taskId).find((i) => i.id === itemId && i.role === 'tool');
+    if (!item) return false;
+    const tool = item.tool;
+    // Commands and their output (and MCP tools); not files read or searched, which may only mention a login.
+    if (tool && !(tool.kind === 'execute' || tool.name === 'commandExecution' || /^(?:BashOutput|TaskOutput)$/.test(tool.name) || tool.name.startsWith('mcp__'))) return false;
+    const term = tool?.content.find((c) => c.type === 'terminal');
+    const ended = item.toolStatus === 'completed' || item.toolStatus === 'failed' || item.toolStatus === 'declined' || item.toolStatus === 'interrupted';
+    const open = this.store.data.attention.filter((a) => a.taskId === taskId && a.state === 'open' && a.kind === 'signin');
+    const mine = open.find((a) => a.toolCallId === itemId);
+    if (ended && mine?.signIn?.running) {
+      this.closeAttention(mine, 'resolved', 'The command finished.');
+      return true;
+    }
+    const key = `${taskId}\0${itemId}`;
+    if (ended && (this.signInSeen.has(key) || mine)) return false;
+    // A command that ended without success took its sign-in with it.
+    if (ended && (item.toolStatus !== 'completed' || (term?.type === 'terminal' && (term.interrupted || (term.exitCode ?? 0) !== 0)))) return false;
+    const found = detectSignIn(term?.type === 'terminal' ? term.output : item.text, { streaming: !ended });
+    if (!found) return false;
+    const headline = `Sign in at ${signInHost(found.url)}${tool?.title ? ` (${clip(tool.title, 80)})` : ''}`;
+    if (mine) {
+      // Still streaming: the code (or the rest of the link) may come after the first part.
+      if (mine.signIn?.url === found.url && mine.signIn?.code === found.code) return false;
+      mine.signIn = { ...found, running: mine.signIn?.running };
+      mine.headline = headline;
+      return true;
+    }
+    if (this.signInSeen.has(key)) return false;
+    this.signInSeen.add(key);
+    // The same link and code read again (an agent checking a background login's output): already shown.
+    if (open.some((a) => a.signIn?.url === found.url && a.signIn?.code === found.code)) return false;
+    for (const a of open) if (!a.signIn?.running) this.closeAttention(a, 'resolved', 'Superseded by a newer sign-in.');
+    this.addAttention({ taskId, kind: 'signin', headline, details: '', toolCallId: itemId, signIn: { ...found, ...(ended ? {} : { running: true }) } });
+    this.log('sign-in requested', taskId, signInHost(found.url));
+    return true;
+  }
+
+  /** The tool calls are gone (turn over, session ended): so are the sign-ins they waited on. */
+  private endSignIns(taskId: string, runningOnly: boolean, why: string): void {
+    for (const a of this.store.data.attention)
+      if (a.taskId === taskId && a.state === 'open' && a.kind === 'signin' && (!runningOnly || a.signIn?.running)) this.closeAttention(a, 'expired', why);
+  }
+
+  /** The link of an open sign-in request, for the main process to open in the browser. */
+  signInUrl(attentionId: string): string {
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    const url = a?.kind === 'signin' && a.state === 'open' ? a.signIn?.url : undefined;
+    if (!url || !/^https?:\/\//i.test(url)) throw new Error('This sign-in request is no longer open.');
+    const task = this.findTask(a!.taskId);
+    if (task) this.touched(task);
+    return url;
   }
 
   // ---------------------------------------------------------------- transcript
