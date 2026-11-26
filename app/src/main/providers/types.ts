@@ -113,6 +113,8 @@ export interface StartArgs {
   mockScript?: string;
   /** The model to run on; unset = the CLI's default. */
   model?: string;
+  /** Claude Code: drive the user's Chrome through the Claude in Chrome extension (--chrome). */
+  chrome?: boolean;
   /** The workspace skill library, as paths on the machine the CLI runs on. */
   skills?: { pluginDir: string; root: string };
   permissionMode?: PermissionMode;

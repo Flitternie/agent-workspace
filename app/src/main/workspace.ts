@@ -1209,6 +1209,8 @@ export class Workspace {
         permissionMode: isMain ? 'ask' : this.permissionModeOf(task),
         tools: isMain ? workspaceTools(this) : undefined,
         skills,
+        // The browser is the user's own Chrome, on this Mac; the main agent only coordinates.
+        chrome: !isMain && !task.host && this.store.data.settings.claudeChrome !== false,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
