@@ -95,8 +95,11 @@ function attachScript(id: string, offset: number, input: boolean): string {
     `tail -c +${offset + 1} -f out & t=$!`,
     // With input: forwarded into the pipe. Without (the caller ended it): only the rest of the output.
     input ? 'cat <&3 > in & c=$!; echo "$t $c" > conn' : 'c=$t; echo "$t" > conn',
-    // Until the CLI ends, or our side goes (its stdin closes: cat ends; or tail cannot write).
-    'while [ ! -f exit ] && kill -0 $c 2>/dev/null; do sleep 1; touch alive; done',
+    // Until the CLI ends, or our side goes (its stdin closes: cat ends; or tail cannot write), or the CLI is
+    // gone without a word (killed outright, the host restarted): nothing will write its exit code then.
+    'alive() { [ ! -f pid ] || kill -0 "$(cat pid)" 2>/dev/null; }',
+    'while [ ! -f exit ] && kill -0 $c 2>/dev/null && alive; do sleep 1; touch alive; done',
+    `if [ ! -f exit ] && ! alive; then sleep 1; [ -f exit ] || { kill $t $c 2>/dev/null; cd /; rm -rf "$D"; exit ${GONE}; }; fi`,
     // The CLI ended: its last words and its exit code (whatever it is: 255 or 75 too), as a marker. The
     // rest of its output is fetched by byte count after this, and the folder removed then.
     'if [ -f exit ]; then',

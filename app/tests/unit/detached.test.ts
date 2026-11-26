@@ -99,6 +99,18 @@ describe('detached remote process', () => {
     expect(await collect(detachedSpawn(runner, 'exit 75', { backoff: [100] })).exit).toEqual([75, null]);
   }, 15_000);
 
+  it('ends with 255 when the CLI is gone without a word (killed outright, the host restarted)', async () => {
+    const before = runs();
+    const p = detachedSpawn(runner, 'sleep 30');
+    const c = collect(p);
+    await new Promise((r) => setTimeout(r, 1500));
+    const [dir] = runs().filter((d) => !before.includes(d));
+    // No exit code will come: run.sh and the CLI both gone.
+    await runner.run(`cd "$HOME/.cache/agent-workspace/run/${dir}" && kill -9 $(cat pid) $(pgrep -f "run.sh.*${dir}") 2>/dev/null; true`);
+    expect(await c.exit).toEqual([255, null]);
+    expect(runs()).not.toContain(dir);
+  }, 15_000);
+
   it('gives up with 255 when the host cannot be reached at all', async () => {
     const failing: RemoteRunner = { spawn: runner.spawn, run: async () => ({ code: 255, stdout: '', stderr: 'ssh: connect to host x: Connection refused' }) };
     const p = detachedSpawn(failing, 'true');

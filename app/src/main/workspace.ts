@@ -37,7 +37,7 @@ import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { HistoryImage, ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
 import { AttachmentStore, MAX_IMAGES } from './attachments';
-import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
+import { CONTINUE_PROMPT, DEFAULT_RETRY, RECONNECT_PROMPT, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { ALIAS_PROBLEM_TEXT, aliasProblem, normalizeAlias } from '../shared/agent-name';
@@ -117,6 +117,10 @@ export interface WorkspaceOptions {
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
   /** How long a label stands before new work may rewrite it (tests use 0). */
   labelRefreshMs?: number;
+  /** Waits between attempts to reach a host again after its connection went (ms; the last repeats). */
+  reconnectMs?: number[];
+  /** Stops trying (quietly) after this long without reaching the host; waking up or a message starts again. */
+  reconnectGiveUpMs?: number;
 }
 
 /**
@@ -146,6 +150,8 @@ export class Workspace {
   private retryPolicy: RetryPolicy;
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
+  /** Hosts whose connection went, with their agents to connect again (true: it was working, carry on). */
+  private reconnects = new Map<string, { attempt: number; since: number; timer?: NodeJS.Timeout; tasks: Map<string, boolean> }>();
 
   /** The skill library loaded into every agent the app starts (see skills.ts). */
   readonly skills: SkillLibrary;
@@ -319,6 +325,23 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
+    // A lost connection to a host is no error to keep (they reconnect when used): earlier ones, from
+    // before agents reconnected by themselves, leave the waiting list.
+    for (const t of d.tasks) {
+      if (!t.host) continue;
+      let cleared = false;
+      for (const a of d.attention)
+        if (a.taskId === t.taskId && a.state === 'open' && a.kind === 'error' && this.connectionLost(t, `${a.headline} ${a.details ?? ''}`)) {
+          a.state = 'resolved';
+          a.resolvedAt = now();
+          a.resolution = 'Connection errors are not kept; the agent reconnects when used.';
+          cleared = true;
+        }
+      if (t.status === 'failed' && (cleared || this.connectionLost(t, t.lastError))) {
+        t.status = 'disconnected';
+        t.summary = `Not connected to ${t.host}. Reconnects when you send a message.`;
+      }
+    }
     // A side question still unanswered when the app quit will not be answered now.
     for (const list of Object.values(d.btw ?? {}))
       for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';
@@ -452,6 +475,8 @@ export class Workspace {
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
+    for (const r of this.reconnects.values()) clearTimeout(r.timer);
+    this.reconnects.clear();
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
@@ -1212,8 +1237,14 @@ export class Workspace {
         throw error;
       }
       const message = (error as Error).message;
-      task.status = 'failed';
       task.lastError = message;
+      if (this.connectionLost(task, message)) {
+        // The host is out of reach for now: tried again by itself, no error to dismiss.
+        this.scheduleReconnect(task, false);
+        this.changed();
+        throw error;
+      }
+      task.status = 'failed';
       task.summary = `Could not ${resumeId ? 'resume' : 'start'} ${task.provider} session: ${clip(message, 140)}`;
       this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
       this.changed();
@@ -1237,6 +1268,9 @@ export class Workspace {
       this.changed();
       return live;
     }
+    // Connected by the user's hand: no longer waiting to be reconnected.
+    this.dropReconnect(taskId);
+    this.resolveConnectionErrors(taskId);
     if (task.status === 'starting') task.status = 'idle';
     task.summary = resumeId ? 'Session resumed with its previous conversation.' : task.summary;
     this.changed();
@@ -1269,6 +1303,7 @@ export class Workspace {
 
   async stop(taskId: string): Promise<void> {
     this.cancelRetry(taskId);
+    this.dropReconnect(taskId);
     const l = this.live.get(taskId);
     if (!l) return;
     this.live.delete(taskId);
@@ -2242,8 +2277,18 @@ export class Workspace {
       case 'sessionDisconnected': {
         this.endSubtasks(task, 'The agent disconnected.');
         this.live.delete(taskId);
-        this.handBackRetry(task);
         const reason = event.type === 'sessionFailed' ? event.error : event.reason;
+        if (event.type === 'sessionFailed' && this.connectionLost(task, reason)) {
+          // The connection to its host went (not the agent): reconnected by itself, and a turn it was in
+          // carries on then. No error to dismiss meanwhile.
+          const working = live.turnActive || task.retry?.by === 'app';
+          this.cancelRetry(taskId);
+          task.lastError = reason;
+          this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
+          this.scheduleReconnect(task, working);
+          break;
+        }
+        this.handBackRetry(task);
         task.status = event.type === 'sessionFailed' ? 'failed' : 'disconnected';
         task.lastError = reason;
         task.summary = `${event.type === 'sessionFailed' ? 'Session failed' : 'Disconnected'}: ${clip(reason, 140)}`;
@@ -2262,6 +2307,135 @@ export class Workspace {
       this.throttle = undefined;
       this.changed();
     }, 120);
+  }
+
+  // ---------------------------------------------------------------- reconnecting
+
+  /**
+   * Whether a failure is the connection to the agent's host rather than the agent: it mends itself
+   * once the host answers again. Not when the user has to act (a login, a key, a host key).
+   */
+  private connectionLost(task: Task, reason: string | undefined): boolean {
+    if (!task.host || !reason) return false;
+    if (/needs a login|unlocked key|host key|not signed in|not installed|no longer exists|refused another SSH session/i.test(reason)) return false;
+    return /ssh|ended unexpectedly|connection|could not resolve|unreachable|no route to host|timed out|cannot reach|is not connected|exited \(255\)|code 255/i.test(reason);
+  }
+
+  private scheduleReconnect(task: Task, working: boolean): void {
+    const host = task.host!;
+    const r = this.reconnects.get(host) ?? { attempt: 0, since: Date.now(), tasks: new Map<string, boolean>() };
+    r.tasks.set(task.taskId, (r.tasks.get(task.taskId) ?? false) || working);
+    this.reconnects.set(host, r);
+    task.status = 'disconnected';
+    task.summary = `Lost the connection to ${host}; reconnecting…`;
+    if (!r.timer) this.armReconnect(host);
+  }
+
+  private armReconnect(host: string, delayMs?: number): void {
+    const r = this.reconnects.get(host);
+    if (!r) return;
+    if (r.timer) clearTimeout(r.timer);
+    // Soon at first (a blip), then further apart (a machine that is off): every 10 minutes at most.
+    const waits = this.opts.reconnectMs ?? [5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
+    r.timer = setTimeout(() => void this.runReconnect(host), delayMs ?? waits[Math.min(r.attempt, waits.length - 1)]);
+  }
+
+  /** The computer woke up (or the screen unlocked): try every waiting host again shortly, from the start. */
+  reconnectNow(): void {
+    for (const [host, r] of this.reconnects) {
+      r.attempt = 0;
+      r.since = Date.now();
+      this.armReconnect(host, 3000);
+    }
+    // Those that stopped trying start again too.
+    for (const [host, ids] of this.givenUp) {
+      this.givenUp.delete(host);
+      for (const id of ids) {
+        const task = this.findTask(id);
+        if (task && task.status === 'disconnected' && !this.live.has(id)) this.scheduleReconnect(task, false);
+      }
+      const r = this.reconnects.get(host);
+      if (r) this.armReconnect(host, 3000);
+    }
+  }
+
+  /** Hosts tried for a day without an answer: their agents wait, quietly, for a wake-up or a message. */
+  private givenUp = new Map<string, Set<string>>();
+
+  private async runReconnect(host: string): Promise<void> {
+    const r = this.reconnects.get(host);
+    if (!r) return;
+    r.timer = undefined;
+    r.attempt++;
+    const status = await this.checkHost(host, { quiet: true }).catch(() => undefined);
+    if (status && ['needs_key', 'needs_login', 'unknown_host_key'].includes(status.ssh)) {
+      // Only the user can let it in: one note on the first agent, and the rest wait for them.
+      this.reconnects.delete(host);
+      const first = [...r.tasks.keys()].map((id) => this.findTask(id)).find(Boolean);
+      if (first) this.addAttention({ taskId: first.taskId, kind: 'error', headline: `Cannot reconnect to ${host}: ${clip(status.error ?? 'it needs a login', 140)}`, details: status.error ?? '' });
+      this.changed();
+      return;
+    }
+    if (status?.ssh === 'ok') {
+      for (const [taskId, working] of [...r.tasks]) {
+        const task = this.findTask(taskId);
+        if (!task || this.live.has(taskId)) {
+          r.tasks.delete(taskId);
+          continue;
+        }
+        try {
+          const live = await this.connect(taskId, true);
+          r.tasks.delete(taskId);
+          this.resolveConnectionErrors(taskId);
+          this.appendSystem(taskId, `Reconnected to ${host}.`);
+          if (working) {
+            // Carries on with the turn the connection cut short.
+            this.claim(taskId, live);
+            task.summary = 'Reconnected; carrying on with the turn.';
+            await live.session.send(RECONNECT_PROMPT).catch((error) => this.turnFailed(task, (error as Error).message, undefined, 1));
+          } else task.summary = 'Reconnected.';
+        } catch (error) {
+          const message = (error as Error).message;
+          if (!this.connectionLost(task, message)) {
+            // Reachable, but the agent itself cannot start: that is for the user.
+            r.tasks.delete(taskId);
+            task.status = 'failed';
+            task.lastError = message;
+            task.summary = `Could not reconnect: ${clip(message, 140)}`;
+            this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
+          }
+        }
+      }
+    }
+    if (!r.tasks.size) this.reconnects.delete(host);
+    else if (Date.now() - r.since > (this.opts.reconnectGiveUpMs ?? 24 * 3600_000)) {
+      // A day without an answer (the machine is off): stop trying; the agent says so, no error.
+      this.reconnects.delete(host);
+      this.givenUp.set(host, new Set(r.tasks.keys()));
+      for (const id of r.tasks.keys()) {
+        const task = this.findTask(id);
+        if (task) task.summary = `Cannot reach ${host}. Reconnects when you send a message, or when the computer wakes.`;
+      }
+    } else this.armReconnect(host);
+    this.changed();
+  }
+
+  /** No longer waiting to be reconnected (stopped, removed, or connected by the user). */
+  private dropReconnect(taskId: string): void {
+    for (const ids of this.givenUp.values()) ids.delete(taskId);
+    for (const [host, r] of this.reconnects) {
+      if (!r.tasks.delete(taskId) || r.tasks.size) continue;
+      clearTimeout(r.timer);
+      this.reconnects.delete(host);
+    }
+  }
+
+  /** Errors about a connection that is back are over. */
+  private resolveConnectionErrors(taskId: string): void {
+    const task = this.findTask(taskId);
+    if (!task) return;
+    for (const a of this.store.data.attention)
+      if (a.taskId === taskId && a.state === 'open' && a.kind === 'error' && this.connectionLost(task, `${a.headline} ${a.details ?? ''}`)) this.closeAttention(a, 'resolved', 'Reconnected.');
   }
 
   // ---------------------------------------------------------------- retries
@@ -2335,6 +2509,8 @@ export class Workspace {
   // ---------------------------------------------------------------- attention
 
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
+    // One error per agent: the latest says what is wrong now.
+    if (a.kind === 'error') for (const o of this.store.data.attention) if (o.taskId === a.taskId && o.state === 'open' && o.kind === 'error') this.closeAttention(o, 'resolved', 'Superseded by a newer error.');
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
     this.store.data.attention.push(item);
     // Anything but a finished report needs the user: an agent they set aside comes back.
