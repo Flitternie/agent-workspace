@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../../shared/types';
 import { digestSubtasks, orderSubtasks, type SubtaskDigest } from '../../shared/subtasks';
 import { t, t as tr } from '../i18n';
+import { ACP_AGENTS, acpAgent } from '../../shared/acp-agents';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: 'Idle',
@@ -33,7 +34,7 @@ export function StatusDot({ status, connected, label = true }: { status: AgentSt
   );
 }
 
-export const PROVIDER_LABEL: Record<AgentProvider, string> = { claude: 'Claude Code', codex: 'Codex', mock: 'Mock' };
+export const PROVIDER_LABEL = { claude: 'Claude Code', codex: 'Codex', mock: 'Mock', ...Object.fromEntries(ACP_AGENTS.map((a) => [a.id, a.label])) } as Record<AgentProvider, string>;
 
 /** "2.1.310 (Claude Code)" / "codex-cli 0.162.1" → the version number. */
 export function shortVersion(v: string): string {
@@ -59,6 +60,14 @@ export function ProviderIcon({ provider, size = 14 }: { provider: AgentProvider;
         <path d={CLAUDE_MARK} fill="currentColor" />
       ) : provider === 'codex' ? (
         <path d={OPENAI_MARK} fill="currentColor" />
+      ) : acpAgent(provider) ? (
+        // An ACP agent: a neutral badge with its letter (not the product's logo).
+        <g>
+          <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <text x="12" y="16.5" textAnchor="middle" fontSize="12" fontWeight="700" fill="currentColor" fontFamily="system-ui, sans-serif">
+            {acpAgent(provider)!.mark}
+          </text>
+        </g>
       ) : (
         // The mock agent (demo and tests): a small terminal, a rounded box with a prompt.
         <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

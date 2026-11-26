@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import type { AgentProvider, RouteDecision, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import { CODING_PROVIDERS, type AgentProvider, type RouteDecision, type Task, type TranscriptItem, type WorkspaceSnapshot } from '../../shared/types';
+import { isAcpProvider } from '../../shared/acp-agents';
 import { Markdown } from './Markdown';
 import { groupTranscript, mainActions } from './Content';
 import { WaitingOnYou } from './FocusView';
@@ -10,6 +11,7 @@ import { holdMs, joinSpeech, stopIntent } from '../voice/compose';
 import { ContinuousListener, isLikelyNoise } from '../voice/listener';
 import { defaultShortcut, matches, PressGesture, recording, released, shortcutLabel, type PressAction } from '../voice/shortcut';
 import { AgentName, Alias, displayName, Icon, Kbd, labelOf, PROVIDER_LABEL, systemText } from './bits';
+import { providerTooltip } from './ProviderPicker';
 import { t as tr } from '../i18n';
 
 type MicState = 'off' | 'starting' | 'listening' | 'speaking' | 'denied' | 'unavailable';
@@ -1077,9 +1079,9 @@ function RoutePreview({
           </div>
           <div className="route-actions">
             <select className="input select" value={newProvider} onChange={(e) => setNewProvider(e.target.value as AgentProvider)}>
-              {(snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const)).map((p) => (
-                <option key={p} value={p} disabled={!snapshot.capabilities.find((c) => c.provider === p)?.available}>
-                  {PROVIDER_LABEL[p]}
+              {[...CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || snapshot.capabilities.find((c) => c.provider === p)?.available), ...(snapshot.demo ? (['mock'] as const) : [])].map((p) => (
+                <option key={p} value={p} disabled={!snapshot.capabilities.find((c) => c.provider === p)?.available} title={providerTooltip(p, snapshot.capabilities.find((c) => c.provider === p))}>
+                  {snapshot.capabilities.find((c) => c.provider === p)?.available ? PROVIDER_LABEL[p] : `${PROVIDER_LABEL[p]} — ${tr('not installed')}`}
                 </option>
               ))}
             </select>

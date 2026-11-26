@@ -22,7 +22,7 @@ export function RetryNotice({ retry }: { retry: RetryState }) {
 /** Under a turn that failed because the model was busy: what else the user can do besides Retry. */
 export function SwitchModelHint({ provider }: { provider: AgentProvider }) {
   const text =
-    provider === 'codex' || provider === 'claude'
+    provider !== 'mock'
       ? t('The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name.')
       : t('The model is busy or rate limited. Retry in a moment.');
   return (

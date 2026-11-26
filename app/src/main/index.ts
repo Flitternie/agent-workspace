@@ -5,11 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
-import type { ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
+import type { CodingProvider, ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
+import { AcpAdapter } from './providers/acp';
+import { ACP_AGENTS } from '../shared/acp-agents';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
@@ -64,6 +66,8 @@ const workspace = new Workspace({
     claude: new ClaudeAdapter(),
     codex: new CodexAdapter(),
     mock: new MockAdapter(join(dataDir, 'mock-sessions')),
+    // OpenCode, Antigravity…: one shared ACP adapter per registry entry (tests about Claude Code and Codex alone turn them off).
+    ...(process.env.AMW_ACP_OFF === '1' ? {} : Object.fromEntries(ACP_AGENTS.map((spec) => [spec.id, new AcpAdapter(spec)]))),
   },
   openai,
   localStt,
@@ -177,7 +181,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:linkPreview': (i: { host: string }) => workspace.linkPreview(i.host),
   'memory:link': (i: { host: string }) => workspace.linkMachine(i.host),
   'memory:unlink': (i: { host: string }) => workspace.unlinkMachine(i.host),
-  'memory:resolveShare': (i: { host: string; kind: 'claude-md' | 'claude-user' | 'codex-md'; how: 'resume' | 'adopt' }) => workspace.resolveShare(i.host, i.kind, i.how),
+  'memory:resolveShare': (i: { host: string; kind: 'claude-md' | 'claude-user' | 'codex-md' | 'opencode-md' | 'gemini-md'; how: 'resume' | 'adopt' }) => workspace.resolveShare(i.host, i.kind, i.how),
   'memory:resolveConflict': (i: { id: string; take: 'source' | 'mine' }) => workspace.resolveConflict(i.id, i.take),
   'memory:restoreNote': (i: { id: string }) => workspace.restoreNote(i.id),
   'memory:backups': (i: { host?: string }) => workspace.memoryBackups(i.host),
@@ -202,7 +206,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),
   'task:setPermissionMode': (i: { taskId: string; mode: PermissionMode }) => workspace.setPermissionMode(i.taskId, i.mode),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
-  'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
+  'sessions:discover': (i: { projectId: string; provider: CodingProvider }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
   // Side questions ("btw"): never part of the agent's conversation.
   // The session map: an agent's turns grouped into tasks by a model (null: group by structure).

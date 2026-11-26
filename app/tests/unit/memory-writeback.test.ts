@@ -9,7 +9,7 @@ import type { MemoryRecord } from '../../src/shared/types';
 // "SSH" runs the same scripts in a local shell, with HOME set to a fake host home and a login banner.
 let remoteHome = '';
 const sh = (command: string, input?: Buffer) => {
-  const r = spawnSync('/bin/sh', ['-c', command], { env: { ...process.env, HOME: remoteHome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '' }, input });
+  const r = spawnSync('/bin/sh', ['-c', command], { env: { ...process.env, HOME: remoteHome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', XDG_CONFIG_HOME: '' }, input });
   return { code: r.status ?? 1, stdout: `Last login: yesterday\n${r.stdout.toString()}`, stderr: r.stderr.toString() };
 };
 vi.mock('../../src/main/util/ssh', async (orig) => ({
@@ -249,6 +249,38 @@ describe('on this computer: nothing is deleted or overwritten', () => {
   });
 });
 
+describe('OpenCode and Antigravity', () => {
+  it('keep the same marked section in their rules files, only where the CLI is set up, and give it back on unlink', async () => {
+    const h = home({ '.gemini/GEMINI.md': MINE }, ['.claude', '.config/opencode', '.gemini']);
+    const w = new MemoryWriteback(data(), h);
+    const r = await w.write('local', [note('Reply in Chinese.')], 'link');
+    expect(r.errors).toEqual([]);
+    const oc = read(h, '.config/opencode/AGENTS.md');
+    expect(oc).toBe(withSection('', [{ body: 'Reply in Chinese.' }], w.owner));
+    expect(read(h, '.gemini/GEMINI.md')).toBe(withSection(MINE, [{ body: 'Reply in Chinese.' }], w.owner));
+    expect(existsSync(join(h, '.codex'))).toBe(false); // no Codex here: nothing written for it
+    expect(w.targets('local').filter((t) => t.added).map((t) => t.kind).sort()).toEqual(['claude-md', 'claude-user', 'gemini-md', 'opencode-md']);
+    // A note that came from OpenCode's own file is not written back into it (it reads it there), but Antigravity gets it.
+    const own = note('From OpenCode.', { importKeys: ['instructions|local|~/.config/opencode/AGENTS.md|'], importedHash: undefined });
+    await w.write('local', [note('Reply in Chinese.'), own], 'sync');
+    expect(read(h, '.config/opencode/AGENTS.md')).not.toContain('From OpenCode.');
+    expect(read(h, '.gemini/GEMINI.md')).toContain('From OpenCode.');
+    await w.unlink('local');
+    expect(read(h, '.gemini/GEMINI.md')).toBe(MINE);
+  });
+
+  it('their files are imported from like the others', () => {
+    const c = candidatesFrom(undefined, '/h', [
+      { path: '/h/.config/opencode/AGENTS.md', content: '# Style\n\nTabs.' },
+      { path: '/h/.gemini/GEMINI.md', content: '# Tone\n\nBrief.' },
+    ], []);
+    expect(c.map((x) => [x.file, x.title, x.source])).toEqual([
+      ['~/.config/opencode/AGENTS.md', 'Style', 'instructions'],
+      ['~/.gemini/GEMINI.md', 'Tone', 'instructions'],
+    ]);
+  });
+});
+
 describe('on an SSH host', () => {
   it('reads (through symlinks), links and unlinks through the same scripts, banner and all', async () => {
     remoteHome = home({}, ['.claude']); // no Codex there
@@ -261,6 +293,8 @@ describe('on an SSH host', () => {
       ['claude-md', '~/.claude/CLAUDE.md', true, true],
       ['claude-user', '~/.agent-workspace/memory/user.md', true, false],
       ['codex-md', '~/.codex/AGENTS.md', false, false],
+      ['opencode-md', '~/.config/opencode/AGENTS.md', false, false],
+      ['gemini-md', '~/.gemini/GEMINI.md', false, false],
     ]);
     expect(files[0].path).toBe(realpathSync(join(dot, 'CLAUDE.md')));
     const r = await w.write('neptune', [note('Reply in Chinese.')], 'link');
@@ -276,6 +310,25 @@ describe('on an SSH host', () => {
 });
 
 describe('linking a machine from the workspace', () => {
+  it('OpenCode and Antigravity agents get user memory from their file where the app writes one, else from the app', async () => {
+    const { Workspace } = await import('../../src/main/workspace');
+    const h = home({}, ['.claude', '.gemini']); // Antigravity set up here, OpenCode not
+    const ws = new Workspace({ dataDir: data(), adapters: {}, home: h });
+    try {
+      await ws.linkMachine('local');
+      ws.importMemory([]);
+      (ws as unknown as { store: { data: { memory: MemoryRecord[] } } }).store.data.memory.push(note('Reply in Chinese.', { id: 'm-zh' }));
+      await ws.pushMemory();
+      expect(read(h, '.gemini/GEMINI.md')).toContain('Reply in Chinese.');
+      expect(existsSync(join(h, '.config/opencode/AGENTS.md'))).toBe(false);
+      const given = (provider: string) => (ws as unknown as { memoryGiven(t: unknown): MemoryRecord[] }).memoryGiven({ taskId: `t-${provider}`, projectId: 'p', provider }).map((m) => m.id);
+      expect(given('antigravity')).toEqual([]); // it reads ~/.gemini/GEMINI.md itself
+      expect(given('opencode')).toEqual(['m-zh']); // no file of its own here: the app gives it
+    } finally {
+      await ws.shutdown();
+    }
+  });
+
   it('brings its user-level notes in (not Claude Code’s project memory), gives app agents user memory once, follows an imported Claude note, never deletes', async () => {
     const { Workspace } = await import('../../src/main/workspace');
     const { memoryForTask } = await import('../../src/main/memory');

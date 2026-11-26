@@ -11,6 +11,8 @@ import { shq, sshError, sshRun, sshRunInput } from './util/ssh';
 //   Claude Code: one marked import line in ~/.claude/CLAUDE.md, added once, pointing at
 //                ~/.agent-workspace/memory/user.md, which the app owns.
 //   Codex:       a marked section at the end of ~/.codex/AGENTS.md (it has no imports).
+//   OpenCode:    the same section in ~/.config/opencode/AGENTS.md (its global rules file).
+//   Antigravity: the same section in ~/.gemini/GEMINI.md (its global rules file).
 //
 // The rule above all: nothing the app does may delete or overwrite memory on either side.
 // - The user's own text in those files is never changed; only the app's line and section
@@ -35,8 +37,11 @@ export const MAX_NOTES_CHARS = 16_000;
 const KEEP_BACKUPS = 20;
 const LOCAL = 'local';
 
-/** claude-md: the user's CLAUDE.md (import line); claude-user: the app's own user.md; codex-md: AGENTS.md (section). */
-export type TargetKind = 'claude-md' | 'claude-user' | 'codex-md';
+/** claude-md: the user's CLAUDE.md (import line); claude-user: the app's own user.md; the others: a CLI's rules file (section). */
+export type TargetKind = 'claude-md' | 'claude-user' | 'codex-md' | 'opencode-md' | 'gemini-md';
+export const TARGET_KINDS: TargetKind[] = ['claude-md', 'claude-user', 'codex-md', 'opencode-md', 'gemini-md'];
+/** Files the app keeps a marked section in (Codex, OpenCode, Antigravity: they have no imports). */
+export const SECTION_KINDS: TargetKind[] = ['codex-md', 'opencode-md', 'gemini-md'];
 
 export interface FileState {
   host: string; // LOCAL or an SSH alias
@@ -81,7 +86,7 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 /** The app's own text in a file (import comment + line, section, or all of user.md), or null. */
 export function appText(kind: TargetKind, content: string): string | null {
   if (kind === 'claude-user') return content || null;
-  if (kind === 'codex-md') return SECTION_RE.exec(content)?.[0] ?? null;
+  if (SECTION_KINDS.includes(kind)) return SECTION_RE.exec(content)?.[0] ?? null;
   return IMPORT_LINE_RE.test(content) ? [IMPORT_COMMENT_RE.exec(content)?.[0] ?? '', IMPORT_LINE].join('\n') : null;
 }
 
@@ -220,7 +225,7 @@ export function plan(files: FileState[], records: MemoryRecord[], owner: string,
     if (f.dirExists) {
       if (f.kind === 'claude-md') next = withImport(f.content, owner);
       if (f.kind === 'claude-user') next = userFile(notesFor(f.host, claudeMd?.file ?? '', records).notes, owner, label);
-      if (f.kind === 'codex-md') next = withSection(f.content, notesFor(f.host, f.file, records).notes, owner);
+      if (SECTION_KINDS.includes(f.kind)) next = withSection(f.content, notesFor(f.host, f.file, records).notes, owner);
     }
     return { file: f, next: next === null || (f.exists && next === f.content) ? null : next };
   });
@@ -231,11 +236,11 @@ export function plan(files: FileState[], records: MemoryRecord[], owner: string,
 const WB = '__AMW_WB__';
 
 /**
- * The three files on a machine in one round trip, symlinks resolved; base64 so any
- * content survives banners and quoting.
+ * The files on a machine in one round trip, symlinks resolved; base64 so any content
+ * survives banners and quoting.
  */
-export const READ_SCRIPT = `h="$HOME"; c="\${CLAUDE_CONFIG_DIR:-$h/.claude}"; x="\${CODEX_HOME:-$h/.codex}"
-for t in "claude-md:$c:$c/CLAUDE.md" "claude-user:$c:$h/.agent-workspace/memory/user.md" "codex-md:$x:$x/AGENTS.md"; do
+export const READ_SCRIPT = `h="$HOME"; c="\${CLAUDE_CONFIG_DIR:-$h/.claude}"; x="\${CODEX_HOME:-$h/.codex}"; o="\${XDG_CONFIG_HOME:-$h/.config}/opencode"; g="$h/.gemini"
+for t in "claude-md:$c:$c/CLAUDE.md" "claude-user:$c:$h/.agent-workspace/memory/user.md" "codex-md:$x:$x/AGENTS.md" "opencode-md:$o:$o/AGENTS.md" "gemini-md:$g:$g/GEMINI.md"; do
   k="\${t%%:*}"; r="\${t#*:}"; d="\${r%%:*}"; f="\${r#*:}"; shown="$f"
   [ -L "$f" ] && f=$(readlink -f "$f" 2>/dev/null || echo "$f")
   de=0; [ -d "$d" ] && de=1; fe=0; [ -f "$f" ] && fe=1
@@ -344,15 +349,20 @@ export class MemoryWriteback {
 
   // -------------------------------------------------- files
 
-  /** A machine's three files as they are now (symlinks resolved). */
+  /** A machine's files as they are now (symlinks resolved). */
   async read(host: string): Promise<FileState[]> {
     if (host === LOCAL) {
       const c = process.env.CLAUDE_CONFIG_DIR || join(this.home, '.claude');
       const x = process.env.CODEX_HOME || join(this.home, '.codex');
+      // (XDG_CONFIG_HOME only for the real home: a test's home keeps everything inside it.)
+      const o = join((this.home === homedir() && process.env.XDG_CONFIG_HOME) || join(this.home, '.config'), 'opencode');
+      const g = join(this.home, '.gemini');
       const rows: Array<[TargetKind, string, string]> = [
         ['claude-md', c, join(c, 'CLAUDE.md')],
         ['claude-user', c, join(this.home, '.agent-workspace/memory/user.md')],
         ['codex-md', x, join(x, 'AGENTS.md')],
+        ['opencode-md', o, join(o, 'AGENTS.md')],
+        ['gemini-md', g, join(g, 'GEMINI.md')],
       ];
       return rows.map(([kind, d, shown]) => {
         let path = shown;
@@ -462,7 +472,7 @@ export class MemoryWriteback {
     }
     this.store(i);
     // Over the limit: say which notes the CLIs' files leave out (the app's agents still get them).
-    const over = notesFor(host, files.find((f) => f.kind === 'codex-md')?.file ?? '', records).dropped;
+    const over = notesFor(host, files.find((f) => SECTION_KINDS.includes(f.kind))?.file ?? '', records).dropped;
     if (over) res.notices.push(`${over} note(s) are not in the CLIs' files on ${host === LOCAL ? 'this computer' : host}: user memory is over ${MAX_NOTES_CHARS.toLocaleString('en-US')} characters. Agents started by the app still get them; terminal sessions do not.`);
     return res;
   }

@@ -12,8 +12,16 @@ const FILE_ROLE: Record<string, string> = {
   'claude-md': 'Claude Code reads it: one line is added at the end that imports the file below',
   'claude-user': 'The shared user memory for Claude Code (the app’s own file)',
   'codex-md': 'Codex reads it: a marked section at the end holds the shared user memory',
+  'opencode-md': 'OpenCode reads it: a marked section at the end holds the shared user memory',
+  'gemini-md': 'Antigravity reads it: a marked section at the end holds the shared user memory',
 };
-const FILE_NAME: Record<string, string> = { 'claude-md': '~/.claude/CLAUDE.md', 'claude-user': '~/.agent-workspace/memory/user.md', 'codex-md': '~/.codex/AGENTS.md' };
+const FILE_NAME: Record<string, string> = {
+  'claude-md': '~/.claude/CLAUDE.md',
+  'claude-user': '~/.agent-workspace/memory/user.md',
+  'codex-md': '~/.codex/AGENTS.md',
+  'opencode-md': '~/.config/opencode/AGENTS.md',
+  'gemini-md': '~/.gemini/GEMINI.md',
+};
 
 const PAUSED: Record<string, string> = {
   edited: 'The Agent Workspace part was changed outside the app. It is left as it is until you choose.',
@@ -23,7 +31,7 @@ const PAUSED: Record<string, string> = {
 };
 
 /**
- * Which machines share user memory with their CLIs (terminal Claude Code and Codex).
+ * Which machines share user memory with their CLIs (terminal Claude Code, Codex, OpenCode, Antigravity).
  * A machine is linked once, after a preview; then the shared user memory is kept in sync
  * there. Nothing on either side is deleted or overwritten: the user's own text is never
  * changed, the app's own text is left alone once someone else changed it, and every
@@ -69,7 +77,7 @@ export function MemoryShare({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   return (
     <div className="memory-share" data-testid="memory-share">
       <div className="section-label">{t('Share with the CLIs on each machine')}</div>
-      <p className="muted small">{t('Also write user memory into Claude Code’s and Codex’s files on each machine, for terminal sessions too. Always backed up, never overwritten.')}</p>
+      <p className="muted small">{t('Also write user memory into the coding CLIs’ own files on each machine (Claude Code, Codex, OpenCode, Antigravity), for terminal sessions too. Always backed up, never overwritten.')}</p>
       <details className="ms-details">
         <summary className="small">{t('How it works')}</summary>
         <p className="muted small">{t('Linking backs up those files and brings in the user-level notes there: CLAUDE.md, ~/.claude/rules, AGENTS.md, and a shared auto-memory folder. A project’s own Claude Code memory stays with that project. Your own text in those files is never changed.')}</p>

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { CODING_PROVIDERS } from '../shared/types';
+import { isAcpProvider } from '../shared/acp-agents';
 import { fillSlots, IDLE_AFTER_MS, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
@@ -409,18 +411,18 @@ export function App() {
                   </div>
                   <h2>{t('Your agents meet here')}</h2>
                   <div className="setup-check" data-testid="setup-check">
-                    {(['claude', 'codex'] as const).map((p) => {
+                    {CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || snapshot.capabilities.find((x) => x.provider === p)?.available).map((p) => {
                       const c = snapshot.capabilities.find((x) => x.provider === p);
                       return (
                         <div key={p} className="setup-row">
-                          <span>{PROVIDER_LABEL[p]}</span>
-                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} />
+                          <span className="truncate">{PROVIDER_LABEL[p]}</span>
+                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} compact installedOnly={isAcpProvider(p)} />
                         </div>
                       );
                     })}
                     <div className="setup-row">
                       <span>{t('Voice')}</span>
-                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
+                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" compact />
                     </div>
                     <button className="link small" onClick={() => setSettingsOpen(true)}>
                       {t('Settings')}

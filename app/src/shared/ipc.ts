@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CODING_PROVIDERS, type AgentProvider, type CodingProvider } from './types';
 
 // Every renderer -> main call goes through one of these named channels. The main
 // process validates the payload with the schema before acting on it; the preload
@@ -9,6 +10,8 @@ const id = z.string().min(1).max(200);
 const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
 /** A stored image (main/attachments.ts names them by their content). */
+/** Any provider an agent can be created on (the ACP CLIs included). */
+const agentProvider = z.enum(['mock', ...CODING_PROVIDERS] as [AgentProvider, ...AgentProvider[]]);
 const imageRef = z.object({ id: z.string().regex(/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/), mediaType: z.string().max(50), name: z.string().max(200).optional() });
 
 export const ipcSchemas = {
@@ -28,7 +31,7 @@ export const ipcSchemas = {
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({
     projectId: id,
-    provider: z.enum(['claude', 'codex', 'mock']),
+    provider: agentProvider,
     /** Optional: without one (and no instruction), the first message the user sends describes the task. */
     title: z.string().max(500).optional(),
     name: z.string().max(100).optional(),
@@ -48,7 +51,7 @@ export const ipcSchemas = {
   'memory:linkPreview': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
   'memory:link': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
   'memory:unlink': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
-  'memory:resolveShare': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]), kind: z.enum(['claude-md', 'claude-user', 'codex-md']), how: z.enum(['resume', 'adopt']) }),
+  'memory:resolveShare': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]), kind: z.enum(['claude-md', 'claude-user', 'codex-md', 'opencode-md', 'gemini-md']), how: z.enum(['resume', 'adopt']) }),
   'memory:resolveConflict': z.object({ id, take: z.enum(['source', 'mine']) }),
   'memory:restoreNote': z.object({ id }),
   'memory:backups': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]).optional() }),
@@ -71,7 +74,7 @@ export const ipcSchemas = {
   'task:viewed': z.object({ taskId: id }),
   'task:setPermissionMode': z.object({ taskId: id, mode: z.enum(['auto', 'edits', 'ask']) }),
   'task:remove': z.object({ taskId: id }),
-  'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
+  'sessions:discover': z.object({ projectId: id, provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]) }),
   'sessions:discoverAll': z.object({}),
   'session:map': z.object({ taskId: z.string() }),
   'btw:list': z.object({ taskId: z.string() }),
@@ -85,7 +88,7 @@ export const ipcSchemas = {
   'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({
     projectId: id.optional(),
-    provider: z.enum(['claude', 'codex']),
+    provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]),
     nativeSessionId: id,
     cwd: z.string().min(1).max(4096),
     host: host.optional(),
@@ -110,7 +113,7 @@ export const ipcSchemas = {
       z.object({
         kind: z.literal('create'),
         projectId: id,
-        provider: z.enum(['claude', 'codex', 'mock']),
+        provider: agentProvider,
         title: z.string().min(1).max(500),
       }),
     ]),
@@ -150,7 +153,7 @@ export const ipcSchemas = {
   'memory:scanImports': z.object({}),
   'memory:import': z.object({ items: z.array(z.object({ key: z.string().min(1).max(5000), scope: z.enum(['global', 'project']), projectId: id.optional() })).min(1).max(1000) }),
   'memory:syncNow': z.object({}),
-  'settings:update': z.object({ onboarding: z.object({ started: z.boolean().optional(), dismissed: z.boolean().optional(), voiceSkipped: z.boolean().optional(), remoteSkipped: z.boolean().optional(), languageChosen: z.boolean().optional() }).optional(), overviewSlots: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4), z.literal(6), z.literal(9)]).optional(), alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional(), mainChapters: z.enum(['auto', 'off']).optional(), memorySync: z.boolean().optional(), openTurns: z.number().int().min(0).max(5).optional(), toolsOpen: z.enum(['folded', 'failed', 'all']).optional(), idleAfterDays: z.number().int().min(0).max(30).optional(), mainCallsPerTurn: z.number().int().min(5).max(100).optional(), mainForksPerTurn: z.number().int().min(1).max(5).optional(), commandTimeoutMin: z.number().int().min(1).max(120).optional(), keepAwake: z.boolean().optional() }),
+  'settings:update': z.object({ onboarding: z.object({ started: z.boolean().optional(), dismissed: z.boolean().optional(), voiceSkipped: z.boolean().optional(), remoteSkipped: z.boolean().optional(), languageChosen: z.boolean().optional() }).optional(), overviewSlots: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4), z.literal(6), z.literal(9)]).optional(), alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['off', ...CODING_PROVIDERS] as ['off', ...CodingProvider[]]).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional(), mainChapters: z.enum(['auto', 'off']).optional(), memorySync: z.boolean().optional(), openTurns: z.number().int().min(0).max(5).optional(), toolsOpen: z.enum(['folded', 'failed', 'all']).optional(), idleAfterDays: z.number().int().min(0).max(30).optional(), mainCallsPerTurn: z.number().int().min(5).max(100).optional(), mainForksPerTurn: z.number().int().min(1).max(5).optional(), commandTimeoutMin: z.number().int().min(1).max(120).optional(), keepAwake: z.boolean().optional() }),
   'capabilities:refresh': z.object({ localOnly: z.boolean().optional() }),
   'provider:login': z.object({ provider: z.enum(['claude', 'codex']), method: z.enum(['claudeai', 'console', 'chatgpt', 'device']).optional() }),
   'provider:loginCancel': z.object({ provider: z.enum(['claude', 'codex']) }),

@@ -29,7 +29,8 @@ export interface DetachedOptions {
   backoff?: number[];
   /** Gives up (exit 255) after trying to connect again for this long. */
   giveUpMs?: number;
-  /** Minutes without a connection after which the host stops the CLI itself. */
+  /** Minutes without a connection after which the host stops the CLI itself. Shorter than giving up (24 h by
+   *  default): a run given up on is gone from the host before a new one starts in its place. */
   leaseMin?: number;
   /** Told when the connection goes and comes back (for a status line). */
   onLink?: (state: 'lost' | 'back') => void;
@@ -248,7 +249,7 @@ export function detachedSpawn(runner: RemoteRunner, command: string, opts: Detac
   };
 
   void runner
-    .run(startScript(id, command, opts.leaseMin ?? 24 * 60), 60_000)
+    .run(startScript(id, command, opts.leaseMin ?? 23 * 60), 60_000)
     .then((r) => {
       if (ended) return;
       if (r.code !== 0 || !r.stdout.includes('started')) {

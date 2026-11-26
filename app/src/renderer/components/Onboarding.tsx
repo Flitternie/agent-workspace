@@ -4,7 +4,8 @@ import { call, errorText } from '../api';
 import { t } from '../i18n';
 import { timeAgo } from '../state';
 import { Icon, PROVIDER_LABEL } from './bits';
-import { CopyCommand, INSTALL_COMMAND, LANGUAGES, readiness, RemoteHosts } from './Settings';
+import { AcpAgentRow, CopyCommand, INSTALL_COMMAND, LANGUAGES, readiness, RemoteHosts } from './Settings';
+import { ACP_AGENTS } from '../../shared/acp-agents';
 
 type Provider = 'claude' | 'codex';
 const DOCS: Record<Provider, string> = { claude: 'https://docs.claude.com/en/docs/claude-code/setup', codex: 'https://developers.openai.com/codex/cli' };
@@ -21,7 +22,9 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   const ready = (['claude', 'codex'] as const).filter((p) => readiness(cap(p)) === 'ready');
   const [signingIn, setSigningIn] = useState<Partial<Record<Provider, boolean>>>({});
   // This computer's agents; another machine's count just as well (one of the two is enough).
-  const local = ready.length > 0;
+  // CLIs reached through ACP count too, once installed (they sign in on their own).
+  const acpReady = ACP_AGENTS.filter((a) => readiness(snapshot.capabilities.find((c) => c.provider === a.id)) === 'ready');
+  const local = ready.length > 0 || acpReady.length > 0;
   const broughtIn = snapshot.projects.length > 0;
 
   // Machines connected and with an agent signed in: their sessions can be listed.
@@ -69,10 +72,13 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           </div>
         </Step>
 
-        <Step n={2} title={t('Connect a coding agent on this computer')} done={local} summary={ready.map((p) => PROVIDER_LABEL[p]).join(' · ')} tag={either(local)}>
-          <p className="muted small">{t('Uses Claude Code or Codex signed in on this computer; usage counts against that account.')}</p>
+        <Step n={2} title={t('Connect a coding agent on this computer')} done={local} summary={[...ready.map((p) => PROVIDER_LABEL[p]), ...acpReady.map((a) => a.label)].join(' · ')} tag={either(local)}>
+          <p className="muted small">{t('Uses a coding agent signed in on this computer; usage counts against that account.')}</p>
           {(['claude', 'codex'] as const).map((p) => (
             <ProviderRow key={p} provider={p} cap={cap(p)} signingIn={!!signingIn[p]} onSigningIn={(v) => setSigningIn((s) => ({ ...s, [p]: v }))} />
+          ))}
+          {acpReady.map((a) => (
+            <AcpAgentRow key={a.id} spec={a} cap={snapshot.capabilities.find((c) => c.provider === a.id)} testId={`onboarding-${a.id}`} />
           ))}
           {ready.length === 2 ? <MainAgentChoice snapshot={snapshot} /> : null}
         </Step>
@@ -361,7 +367,7 @@ function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: nu
   return (
     <div className="ob-bring" data-testid="onboarding-bring">
       {sessions === null ? (
-        <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your Claude Code and Codex sessions on this computer…')}</p>
+        <p className="muted small">{host ? t('Looking for sessions on {host}…', { host }) : t('Looking for your coding agent sessions on this computer…')}</p>
       ) : folders.length ? (
         <>
           <p className="muted small">{t('Pick the conversations to continue here.')}</p>
@@ -384,7 +390,7 @@ function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: nu
                   />
                   <strong>{f.cwd.split('/').filter(Boolean).pop()}</strong>
                   <span className="muted small truncate">{f.cwd}</span>
-                  <span className="muted small">{t('{n} conversations', { n: f.list.length })}</span>
+                  <span className="muted small">{f.list.length === 1 ? t('1 conversation') : t('{n} conversations', { n: f.list.length })}</span>
                 </label>
                 {shown.map((s) => (
                   <label key={key(s)} className="ob-session" data-testid="onboarding-session">
@@ -405,7 +411,7 @@ function BringIn({ snapshot, now, host }: { snapshot: WorkspaceSnapshot; now: nu
           })}
           <div className="row">
             <button className="btn btn-primary" disabled={!picked.size || !!busy} onClick={() => void bringIn()} data-testid="onboarding-bring-in">
-              {busy || t('Bring in {n} conversations', { n: picked.size })}
+              {busy || (picked.size === 1 ? t('Bring in 1 conversation') : t('Bring in {n} conversations', { n: picked.size }))}
             </button>
             {host ? null : (
               <button className="link small" onClick={() => void addFolder()}>

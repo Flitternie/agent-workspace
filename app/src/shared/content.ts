@@ -130,6 +130,73 @@ export function snippetHunks(oldText: string, newText: string): DiffHunk[] {
 }
 
 /**
+ * A file's old and new text → hunks with real line numbers and `context` lines around each change
+ * (ACP diffs carry whole texts). Lines diffed by LCS between the shared head and tail; a middle
+ * too large for that shows as replaced.
+ */
+export function lineDiffHunks(oldText: string, newText: string, context = 3): DiffHunk[] {
+  const split = (s: string) => (s ? s.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') : []);
+  const a = split(oldText);
+  const b = split(newText);
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let post = 0;
+  while (post < a.length - pre && post < b.length - pre && a[a.length - 1 - post] === b[b.length - 1 - post]) post++;
+  const am = a.slice(pre, a.length - post);
+  const bm = b.slice(pre, b.length - post);
+  const ops: string[] = a.slice(0, pre).map((l) => ` ${l}`);
+  if (am.length && bm.length && am.length * bm.length <= 4_000_000) {
+    const n = am.length;
+    const m = bm.length;
+    const w = m + 1;
+    // lcs[i][j]: common lines of am[i..] and bm[j..].
+    const lcs = new Uint32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--) lcs[i * w + j] = am[i] === bm[j] ? lcs[(i + 1) * w + j + 1] + 1 : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (am[i] === bm[j]) {
+        ops.push(` ${am[i++]}`);
+        j++;
+      } else if (lcs[(i + 1) * w + j] >= lcs[i * w + j + 1]) ops.push(`-${am[i++]}`);
+      else ops.push(`+${bm[j++]}`);
+    }
+    while (i < n) ops.push(`-${am[i++]}`);
+    while (j < m) ops.push(`+${bm[j++]}`);
+  } else ops.push(...am.map((l) => `-${l}`), ...bm.map((l) => `+${l}`));
+  ops.push(...a.slice(a.length - post).map((l) => ` ${l}`));
+  // Changed positions, widened by the context and merged where they touch.
+  const ranges: Array<[number, number]> = [];
+  ops.forEach((op, k) => {
+    if (op[0] === ' ') return;
+    const lo = Math.max(0, k - context);
+    const hi = Math.min(ops.length, k + context + 1);
+    const last = ranges.at(-1);
+    if (last && lo <= last[1]) last[1] = Math.max(last[1], hi);
+    else ranges.push([lo, hi]);
+  });
+  const hunks: DiffHunk[] = [];
+  let k = 0;
+  let oldLine = 1;
+  let newLine = 1;
+  const step = () => {
+    if (ops[k][0] !== '+') oldLine++;
+    if (ops[k][0] !== '-') newLine++;
+    k++;
+  };
+  for (const [lo, hi] of ranges) {
+    while (k < lo) step();
+    const lines = ops.slice(lo, hi);
+    const oldLines = lines.filter((l) => l[0] !== '+').length;
+    const newLines = lines.filter((l) => l[0] !== '-').length;
+    hunks.push({ oldStart: oldLines ? oldLine : oldLine - 1, oldLines, newStart: newLines ? newLine : newLine - 1, newLines, lines });
+    while (k < hi) step();
+  }
+  return hunks;
+}
+
+/**
  * Parses a unified diff body (with or without ---/+++ headers) into hunks.
  * Text without any @@ header is not a patch; callers decide what it means.
  */

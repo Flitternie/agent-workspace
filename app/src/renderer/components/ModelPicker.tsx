@@ -5,7 +5,24 @@ import { t } from '../i18n';
 import { Icon, PROVIDER_LABEL } from './bits';
 
 /** Display names already learnt from a CLI's model list (shared by every agent view). */
-const known = new Map<string, string>();
+// Kept across restarts: the header names the model before its list is asked for again.
+const KNOWN_KEY = 'amw.modelLabels';
+const known = new Map<string, string>(((): Array<[string, string]> => {
+  try {
+    return Object.entries(JSON.parse(localStorage.getItem(KNOWN_KEY) ?? '{}') as Record<string, string>);
+  } catch {
+    return [];
+  }
+})());
+function remember(id: string, label: string): void {
+  if (known.get(id) === label) return;
+  known.set(id, label);
+  try {
+    localStorage.setItem(KNOWN_KEY, JSON.stringify(Object.fromEntries([...known].slice(-300))));
+  } catch {
+    /* storage full: the label is still known this session */
+  }
+}
 
 /** A readable name before the list is in: "claude-opus-5-5" → "Opus 5.5", "gpt-6.1-sol" → "GPT-6.1-Sol". */
 export function modelName(id: string): string {
@@ -14,6 +31,9 @@ export function modelName(id: string): string {
   const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/.exec(id);
   if (c) return `${c[1][0].toUpperCase()}${c[1].slice(1)} ${c[2]}${c[3] ? `.${c[3]}` : ''}`;
   if (/^gpt-/i.test(id)) return id.split('-').map((p, i) => (i === 0 ? 'GPT' : p[0] ? p[0].toUpperCase() + p.slice(1) : p)).join('-');
+  // "provider/model-name" (OpenCode and the like): as the CLIs' own lists write it, "provider/Model Name".
+  const slash = /^([\w.-]+)\/([\w.:-]+)$/.exec(id);
+  if (slash) return `${slash[1]}/${slash[2].split(/[-_]/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ')}`;
   return id;
 }
 
@@ -35,7 +55,7 @@ export function ModelPicker({ task }: { task: Task }) {
     if (!models)
       call('task:models', { taskId: task.taskId }).then(
         (list) => {
-          for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) known.set(id, o.label);
+          for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) remember(id, o.label);
           setModels(list);
         },
         (e) => setError(errorText(e)),

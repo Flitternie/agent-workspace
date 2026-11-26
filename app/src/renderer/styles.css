@@ -1306,6 +1306,8 @@ body.resizing .sidebar-resizer {
   overflow: auto;
 }
 .empty-card {
+  /* A set width (its checklist is as wide as it), narrower only in a narrow window. */
+  width: min(460px, calc(100vw - 48px));
   max-width: 520px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -2870,7 +2872,7 @@ details[open] > summary .tool-more {
   gap: 6px;
   margin: 4px auto 14px;
   padding: 10px 12px;
-  width: min(360px, 100%);
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-2);
@@ -2880,7 +2882,12 @@ details[open] > summary .tool-more {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  min-height: 26px;
   font-size: 13px;
+}
+.setup-row > .badge {
+  flex: none;
 }
 .setup-check .link {
   align-self: flex-start;
@@ -3506,11 +3513,18 @@ details[open] > summary .tool-more {
 }
 .host-actions {
   margin-left: auto;
+  flex: none;
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 6px;
+}
+.host-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
 .host-addr {
   overflow: hidden;
@@ -7709,4 +7723,44 @@ button.subtask-row:hover {
   .switch::after {
     transition: none;
   }
+}
+/* Choosing a coding agent (ProviderPicker): equal one-line options; the column count comes from choice-layout.ts. */
+.provider-grid {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+.provider-grid .radio {
+  min-width: 0;
+  white-space: nowrap;
+}
+.provider-grid .radio input {
+  flex: none;
+  margin: 0;
+}
+.provider-grid .radio-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* As wide as the grid it replaces; the version is in its tooltip, like the grid's. */
+.provider-select .select {
+  flex: 1;
+  min-width: 0;
+}
+.settings-section .main-agent-select {
+  align-self: flex-start;
+  min-width: 200px;
+  max-width: 100%;
+}
+
+/* A command that must not break mid-word. */
+code.nowrap {
+  white-space: nowrap;
 }
