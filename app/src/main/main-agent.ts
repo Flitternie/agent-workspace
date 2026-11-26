@@ -218,7 +218,8 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         return all
           .map(({ item: a, agent }) =>
             [
-              `- request_id ${a.id} · ${agent} · ${a.kind === 'approval' ? 'PERMISSION REQUEST' : 'question'}: ${a.headline}`,
+              `- request_id ${a.id} · ${agent} · ${a.kind === 'approval' ? 'PERMISSION REQUEST' : a.kind === 'signin' ? 'BROWSER SIGN-IN (only the user can do it: open the link in their browser from the request)' : 'question'}: ${a.headline}`,
+              ...(a.signIn ? [`  link: ${a.signIn.url}${a.signIn.code ? ` · code: ${a.signIn.code}` : ''}`] : []),
               ...(a.details && a.details !== a.headline ? [`  details: ${a.details.slice(0, 600)}`] : []),
               ...(a.options?.length ? [`  decisions: ${a.options.map((o) => `${o.id} = "${o.label}"`).join(', ')}`] : []),
               ...(a.questions ?? []).map((q) => `  question: ${q.question}${q.options.length ? ` — options: ${q.options.map((o) => o.label).join(' / ')}` : ''}`),

@@ -17,6 +17,8 @@ import type { Delivery, ApprovalResponse, ForkSessionOpts, ImageInput, ProviderA
  *   choice:<question>    first turn raises a structured question with options
  *   work                 first turn reports progress and finishes
  *   capacity:<n>         the first <n> turns fail with "model at capacity", then it works
+ *   signin[:<n>]         first turn runs a login that prints a device code and link, waits <n> delays (60), then succeeds
+ *   signin-read          first turn backgrounds a login and reads its prompt from the output (as Claude Code does)
  */
 interface MockHistory {
   id: string;
@@ -199,6 +201,9 @@ class MockSession implements ProviderSession {
       }, 1);
       return;
     }
+    const signin = /^signin(?::(\d+))?$/.exec(script);
+    if (first && signin) return this.signInTurn(Math.max(2, Number(signin[1] ?? 60)), userTurns);
+    if (first && script === 'signin-read') return this.signInReadTurn(userTurns);
     // Many sub-agents ("swarm:30"): every fourth finishes, one fails, the rest keep working (a long turn).
     const swarm = /^swarm:(\d+)$/.exec(script);
     if (swarm) {
@@ -508,6 +513,36 @@ class MockSession implements ProviderSession {
         content: [{ type: 'terminal', command: 'npm test -- orders', output: ' ✓ listOrders returns v2 items (4 ms)\n ✓ listOrders paginates (2 ms)\n\nTests: 2 passed, 2 total', exitCode: 0 }],
       },
     });
+  }
+
+  /** Like Codex running `gh auth login`: the prompt streams in, the command waits, then signs in. */
+  private signInTurn(hold: number, turn: number): void {
+    const id = `signin-${turn}`;
+    const command = 'gh auth login --web';
+    const prompt = ['! First copy your one-time code: ', '1A2B-3C4D\n', 'Open this URL to continue in your web browser: https://github.com/lo', 'gin/device\n'];
+    this.later(() => this.emit({ type: 'transcriptItem', itemId: id, role: 'tool', text: '', toolStatus: 'running', tool: { name: 'Bash', kind: 'execute', title: `$ ${command}`, locations: [], content: [{ type: 'terminal', command, output: '' }] } }), 0.5);
+    prompt.forEach((delta, i) => this.later(() => this.emit({ type: 'outputDelta', itemId: id, role: 'tool', delta }), 0.8 + i * 0.1));
+    this.later(() => {
+      const output = `${prompt.join('')}✓ Authentication complete.\n✓ Logged in as mock-user\n`;
+      this.emit({ type: 'transcriptItem', itemId: id, role: 'tool', text: '', toolStatus: 'completed', tool: { content: [{ type: 'terminal', command, output, exitCode: 0 }] } });
+      this.finish('Signed in to GitHub as mock-user.');
+    }, hold);
+  }
+
+  /** Like Claude Code: the login runs in the background and its prompt comes from reading its output. */
+  private signInReadTurn(turn: number): void {
+    const command = 'gcloud auth login --no-browser';
+    const url = 'https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=mock.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2Fauthcode.html';
+    this.later(
+      () =>
+        this.emit({ type: 'transcriptItem', itemId: `bg-${turn}`, role: 'tool', text: 'Command running in background with ID: b1', toolStatus: 'completed', tool: { name: 'Bash', kind: 'execute', title: `$ ${command}`, locations: [], content: [{ type: 'terminal', command, output: 'Command running in background with ID: b1', background: true }] } }),
+      0.5,
+    );
+    this.later(() => {
+      const output = `Go to the following link in your browser, and complete the sign-in prompts:\n\n    ${url}\n\n`;
+      this.emit({ type: 'transcriptItem', itemId: `read-${turn}`, role: 'tool', text: output, toolStatus: 'completed', tool: { name: 'BashOutput', kind: 'execute', title: 'BashOutput', locations: [], content: [] } });
+      this.finish('The login is waiting for you: open the link to sign in, then tell me.');
+    }, 1);
   }
 
   private finish(reply: string): void {

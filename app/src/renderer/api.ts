@@ -95,6 +95,7 @@ export interface Outputs {
   'task:importSession': Task;
   'attention:respond': void;
   'attention:dismiss': void;
+  'attention:openLink': void;
   'voice:ensureMic': boolean;
   'voice:transcribe': { text: string };
   'route:decide': RouteDecision;

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { AttentionItem, Task } from '../../shared/types';
 import { call, errorText } from '../api';
 import { timeAgo } from '../state';
-import { Icon, KIND_LABEL, PROVIDER_LABEL } from './bits';
+import { attentionHeadline, Icon, KIND_LABEL, PROVIDER_LABEL } from './bits';
 import { Markdown } from './Markdown';
 import { ToolContentView } from './Content';
 import { SwitchModelHint } from './Retry';
@@ -39,6 +39,7 @@ export function AttentionView({
   const [error, setError] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const native = !!item.providerRequestId;
   const openState = item.state === 'open';
 
@@ -64,13 +65,28 @@ export function AttentionView({
     >
       {flat ? null : <div className="attention-head">
         <span className="attention-kind">
-          <Icon name={item.kind === 'approval' || item.kind === 'error' ? 'alert' : 'reply'} size={12} />
+          <Icon name={item.kind === 'approval' || item.kind === 'error' ? 'alert' : item.kind === 'signin' ? 'external' : 'reply'} size={12} />
           {label}
           {item.highRisk ? <span className="risk-tag">{t('high risk')}</span> : null}
         </span>
         <span className="attention-time">{openState ? timeAgo(item.createdAt, now) : `${t(item.state)} ${item.resolvedAt ? timeAgo(item.resolvedAt, now) : ''}`}</span>
       </div>}
-      {shown || flat ? null : <div className="attention-headline">{item.headline}</div>}
+      {shown || flat ? null : <div className="attention-headline">{attentionHeadline(item)}</div>}
+      {item.signIn && openState ? (
+        <div className="attention-signin" data-testid="signin">
+          <div className="remote-link mono" title={item.signIn.url} data-testid="signin-url">
+            {item.signIn.url}
+          </div>
+          {item.signIn.code ? (
+            <div className="signin-code">
+              <span className="muted small">{t('Code')}</span>
+              <code className="mono" data-testid="signin-code">
+                {item.signIn.code}
+              </code>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {item.preview?.length ? <ToolContentView content={item.preview} compact={compact && !expanded} /> : null}
       {details && !shown ? (
         <div className={`attention-details${compact && !expanded ? ' clamp' : ''}`}>
@@ -172,12 +188,33 @@ export function AttentionView({
 
       {openState && !native ? (
         <div className="attention-actions">
+          {item.signIn ? (
+            <>
+              <button className="btn btn-primary" disabled={busy} data-testid="signin-open" onClick={() => act(() => call('attention:openLink', { attentionId: item.id }))}>
+                <Icon name="external" size={12} /> {t('Open in browser')}
+              </button>
+              {item.signIn.code ? (
+                <button
+                  className="btn"
+                  data-testid="signin-copy"
+                  onClick={() =>
+                    void navigator.clipboard.writeText(item.signIn!.code!).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1200);
+                    })
+                  }
+                >
+                  <Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy code')}
+                </button>
+              ) : null}
+            </>
+          ) : null}
           {item.retryable ? (
             <button className="btn btn-primary" disabled={busy} data-testid="retry-turn" onClick={() => act(() => call('task:retry', { taskId: task.taskId }))}>
               <Icon name="history" size={12} /> {t('Retry')}
             </button>
           ) : null}
-          {onReply && item.kind !== 'error' ? (
+          {onReply && item.kind !== 'error' && item.kind !== 'signin' ? (
             <button className="btn btn-primary" onClick={onReply}>
               {t('Reply to {alias}', { alias: task.alias })}
             </button>

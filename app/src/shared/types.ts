@@ -13,7 +13,7 @@ export type AgentStatus =
   | 'done'
   | 'failed'
   | 'disconnected';
-export type AttentionKind = 'question' | 'approval' | 'review' | 'completion' | 'error';
+export type AttentionKind = 'question' | 'approval' | 'review' | 'completion' | 'error' | 'signin';
 export type AttentionState = 'open' | 'resolved' | 'dismissed' | 'expired';
 export type IntegrationMode = 'managed' | 'resumed' | 'external_readonly' | 'live_attached';
 
@@ -245,9 +245,19 @@ export interface AttentionItem {
   retryable?: boolean;
   /** It failed because the model was busy (at capacity, overloaded, rate limited). */
   transient?: TransientKind;
+  /** kind 'signin': a command waits on a browser sign-in (link, one-time code). */
+  signIn?: SignInLink;
   createdAt: string;
   resolvedAt?: string;
   resolution?: string;
+}
+
+export interface SignInLink {
+  /** http(s) only; opened in the user's browser by the main process. */
+  url: string;
+  code?: string;
+  /** Seen while its tool call was running: resolved when that call ends. Else from a finished read of another process's output. */
+  running?: boolean;
 }
 
 export type TranscriptRole = 'user' | 'assistant' | 'tool' | 'system' | 'thought' | 'plan';

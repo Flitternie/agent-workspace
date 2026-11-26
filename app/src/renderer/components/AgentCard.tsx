@@ -57,7 +57,7 @@ export function AgentCard({
   const input = useRef<HTMLTextAreaElement>(null);
   const urgent = items.filter((i) => i.kind !== 'completion');
   const report = items.find((i) => i.kind === 'completion');
-  const needs = urgent.some((i) => i.kind === 'approval' || i.kind === 'question');
+  const needs = urgent.some((i) => i.kind === 'approval' || i.kind === 'question' || i.kind === 'signin');
   const highRisk = items.some((i) => i.highRisk);
 
   // Images pasted or dropped on the tile's box go with the message, as on the agent's page.

@@ -97,6 +97,8 @@ export const ipcSchemas = {
     answers: z.record(z.string(), z.string().max(10_000)).optional(),
   }),
   'attention:dismiss': z.object({ attentionId: id }),
+  // Opens the sign-in link the main process found (the renderer never passes a URL).
+  'attention:openLink': z.object({ attentionId: id }),
   'voice:ensureMic': z.object({}),
   // One utterance; 16 kHz mono WAV caps at ~1 MB per 30 s.
   'voice:transcribe': z.object({ audio: z.instanceof(Uint8Array).refine((a) => a.byteLength <= 8_000_000, 'Audio clip too large'), mimeType: z.string().max(100) }),

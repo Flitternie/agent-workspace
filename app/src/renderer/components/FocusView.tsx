@@ -8,7 +8,7 @@ import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
 import { foldsTurn, OPEN_TURNS, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
 import { FilePreviewPanel } from './FilePreview';
-import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
+import { AgentName, Alias, attentionHeadline, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog } from './SessionMemory';
@@ -687,7 +687,7 @@ export function WaitingOnYou({
             <span className="waiting-row-name">
               <AgentName task={worker} />
             </span>
-            <span className="waiting-row-text">{a.headline}</span>
+            <span className="waiting-row-text">{attentionHeadline(a)}</span>
           </button>
           {onOpen ? (
             <button className="link small" onClick={() => onOpen(worker.taskId)}>
@@ -742,7 +742,7 @@ export function WaitingOnYou({
                 <Alias key={w.taskId} alias={w.alias} size="sm" />
               ))}
             </span>
-            {!unfolded ? <span className="waiting-bar-peek">{open[0].headline}</span> : <span className="waiting-bar-peek" />}
+            {!unfolded ? <span className="waiting-bar-peek">{attentionHeadline(open[0])}</span> : <span className="waiting-bar-peek" />}
             <span className="waiting-bar-chevron" aria-hidden>
               <Icon name="chevron" size={12} />
             </span>
@@ -775,7 +775,7 @@ export function WaitingOnYou({
 }
 
 /** Short kind tags for the bar's rows. */
-const KIND_TAG: Record<AttentionItem['kind'], string> = { approval: 'Permission', question: 'Question', error: 'Error', review: 'Review', completion: 'Report' };
+const KIND_TAG: Record<AttentionItem['kind'], string> = { approval: 'Permission', question: 'Question', error: 'Error', review: 'Review', completion: 'Report', signin: 'Sign-in' };
 
 /** The decisions a permission request can take right on its row: allow (once, if offered) and deny. */
 function quickOptions(item: AttentionItem): NonNullable<AttentionItem['options']> {
@@ -817,13 +817,18 @@ function WaitingBarRow({ item, task, now, open, onToggle, onOpen }: { item: Atte
           </span>
           <span className="wb-kind">{t(KIND_TAG[item.kind])}</span>
           {item.highRisk ? <span className="wb-risk">{t('high risk')}</span> : null}
-          <span className="wb-text">{item.headline}</span>
+          <span className="wb-text">{attentionHeadline(item)}</span>
         </button>
         {quick.map((o) => (
           <button key={o.id} className={`btn btn-sm${rejects(o) ? '' : ' btn-primary'}`} disabled={busy} title={o.description} onClick={() => respond(o.id)}>
             {t(o.label)}
           </button>
         ))}
+        {item.kind === 'signin' && item.signIn ? (
+          <button className="btn btn-sm btn-primary" disabled={busy} data-testid="signin-open-quick" onClick={() => void call('attention:openLink', { attentionId: item.id }).catch((e) => setError(errorText(e)))}>
+            {t('Open in browser')}
+          </button>
+        ) : null}
         {!quick.length && item.kind === 'question' && item.providerRequestId && !open ? (
           <button className="btn btn-sm btn-primary" onClick={onToggle}>
             {t('Answer')}
