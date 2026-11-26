@@ -777,7 +777,7 @@ const SECTIONS: Array<{ id: string; group: string; title: string; keywords: stri
   { id: 'agents', group: 'Connect', title: 'Coding agents', keywords: ['Claude Code', 'Codex', 'Signed in', 'login', 'Recheck', 'CLI'] },
   { id: 'remote', group: 'Connect', title: 'Remote machines (SSH)', keywords: ['SSH', 'server', 'remote', 'host', '~/.ssh/config', 'password', 'key', 'Claude Code', 'Codex'] },
   { id: 'main', group: 'How agents work', title: 'Main agent', keywords: ['Claude Code', 'Codex', 'Off', 'coordinator', 'dispatch', 'routing'] },
-  { id: 'permissions', group: 'How agents work', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval', 'Chrome', 'browser'] },
+  { id: 'permissions', group: 'How agents work', title: 'Permissions', keywords: ['Decide automatically', 'Allow file edits', 'Ask every time', 'auto', 'approval', 'Chrome', 'browser', 'Artifact'] },
   { id: 'memory', group: 'Memory and skills', title: 'Memory', keywords: ['User memory', 'Project memory', 'Keep user memory in sync', 'Import…', 'CLAUDE.md', 'AGENTS.md', 'notes'] },
   { id: 'skills', group: 'Memory and skills', title: 'Skills', keywords: ['skill', 'SKILL.md', 'library', 'import', 'Claude Code', 'Codex', '~/.claude/skills', '~/.codex/skills'] },
   { id: 'voice', group: 'Voice and OpenAI', title: 'Voice', keywords: ['Microphone', 'Always on', 'Press to toggle', 'Hold to talk', 'Tap or hold', 'push to talk', 'Shortcut', 'hotkey', 'Speech recognition', 'Speech recognition model', 'Routing model', 'microphone', 'Send after a pause of', 'Confirm every voice send', 'OpenAI', 'On this computer', 'SenseVoice', 'Whisper', 'local', 'offline'] },
@@ -990,6 +990,13 @@ export function SettingsPage({ snapshot, section, onClose }: { snapshot: Workspa
           <span>
             {t('Claude Code agents can use Chrome')}
             <span className="muted small"> — {t('through the Claude in Chrome extension, on this Mac; from their next start')}</span>
+          </span>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={s.claudeArtifacts !== false} onChange={(e) => update({ claudeArtifacts: e.target.checked })} data-testid="setting-claude-artifacts" />
+          <span>
+            {t('Claude Code agents can publish Artifacts')}
+            <span className="muted small"> — {t('private pages on claude.ai, each publish asks first; needs a claude.ai login')}</span>
           </span>
         </label>
       </Section>

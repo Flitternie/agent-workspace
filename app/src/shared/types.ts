@@ -480,6 +480,8 @@ export interface Settings {
   keepAwake?: boolean;
   /** Claude Code agents on this Mac can drive Chrome (Claude in Chrome, the CLI's --chrome); default on. */
   claudeChrome?: boolean;
+  /** Claude Code agents can publish Artifacts (pages on claude.ai; needs a claude.ai login); default on. */
+  claudeArtifacts?: boolean;
 }
 
 export type ToolsOpen = 'folded' | 'failed' | 'all';

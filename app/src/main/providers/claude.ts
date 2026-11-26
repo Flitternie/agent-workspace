@@ -417,7 +417,9 @@ class ClaudeSession implements ProviderSession {
       await this.replayHistory(resumeId);
     }
     this.sessionId = resumeId ?? randomUUID();
-    const env = childEnv();
+    // Artifacts (pages published to claude.ai), as in the interactive CLI: the SDK leaves them off unless asked.
+    // A CLAUDE_ variable, so it reaches a session on an SSH host too.
+    const env = { ...childEnv(), ...(this.args.artifacts ? { CLAUDE_CODE_ARTIFACT: '1' } : {}) };
     const privateDeny = host ? [] : privateFolders(this.args.cwd);
     this.query = sdk.query({
       prompt: this.prompts(),

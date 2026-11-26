@@ -19,11 +19,11 @@ describe('Claude in Chrome', () => {
       const p = await ws.addProject(repo);
       const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });
       await ws.send(a.taskId, 'hi', 'text');
-      expect(spy.mock.calls.at(-1)![0].chrome).toBe(true);
-      ws.updateSettings({ claudeChrome: false });
+      expect(spy.mock.calls.at(-1)![0]).toMatchObject({ chrome: true, artifacts: true });
+      ws.updateSettings({ claudeChrome: false, claudeArtifacts: false });
       const b = await ws.createTask({ projectId: p.projectId, provider: 'mock', isolate: false });
       await ws.send(b.taskId, 'hi', 'text');
-      expect(spy.mock.calls.at(-1)![0].chrome).toBe(false);
+      expect(spy.mock.calls.at(-1)![0]).toMatchObject({ chrome: false, artifacts: false });
     } finally {
       await ws.shutdown();
     }

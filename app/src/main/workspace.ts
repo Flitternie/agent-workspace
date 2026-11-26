@@ -1211,6 +1211,7 @@ export class Workspace {
         skills,
         // The browser is the user's own Chrome, on this Mac; the main agent only coordinates.
         chrome: !isMain && !task.host && this.store.data.settings.claudeChrome !== false,
+        artifacts: !isMain && this.store.data.settings.claudeArtifacts !== false,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
