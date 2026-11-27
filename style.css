@@ -1556,9 +1556,10 @@ html[data-lang] .hero .prompt { max-width: calc(100vw - 32px); }
   .works { margin-top: 48px; gap: 14px; }
   .works-group { gap: 6px 14px; }
   .works-item { font-size: 14px; }
-  /* Phone: each group's caption on its own line above its items; the four agents fit one line without their (identical) marks. */
+  /* Phone: each group's caption on its own line above its items; the four agents in two even rows of two. */
   .works-cap { flex-basis: 100%; text-align: center; }
-  .works > .works-group .works-item svg { display: none; }
+  .works > .works-group { display: grid; grid-template-columns: repeat(2, auto); justify-content: center; gap: 8px 24px; }
+  .works > .works-group .works-cap { grid-column: 1 / -1; }
   .foot { flex-direction: column; align-items: flex-start; gap: 14px; padding: 24px 20px 36px; }
   .foot-links { gap: 18px; }
   .foot-links a { white-space: nowrap; }
