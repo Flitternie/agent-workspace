@@ -217,6 +217,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:sync': (i: { taskId: string }) => workspace.sync(i.taskId),
   'task:setAside': (i: { taskId: string; on: boolean }) => workspace.setAside(i.taskId, i.on),
   'task:remoteControl': (i: { taskId: string; on: boolean }) => workspace.setRemoteControl(i.taskId, i.on),
+  'task:remoteControlRevoke': (i: { taskId: string; clientId: string }) => workspace.revokeRemoteDevice(i.taskId, i.clientId),
   'task:stop': (i: { taskId: string }) => workspace.stop(i.taskId),
   'task:rename': (i: { taskId: string; name: string }) => workspace.rename(i.taskId, i.name),
   'task:renameAgent': (i: { taskId: string; alias: string }) => workspace.renameAgent(i.taskId, i.alias),

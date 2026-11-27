@@ -451,8 +451,10 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="branch" />
               </button>
             ) : null}
-            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
-            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
+            {/* Remote Control: this agent on a phone, still running here (Claude Code: the Claude app; Codex: the ChatGPT app, with a ChatGPT login). */}
+            {(task.provider === 'claude' || task.provider === 'mock' || (task.provider === 'codex' && snapshot.capabilities.find((c) => c.provider === 'codex')?.remoteControl)) && !task.host && !isMainAgent(task) ? (
+              <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} codex={snapshot.codexRemote?.[task.taskId]} />
+            ) : null}
             {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
             {isMainAgent(task) ? (
               <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>

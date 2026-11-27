@@ -385,6 +385,28 @@ export interface ProviderCapabilities {
   sideQuestions?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */
   auth?: { loggedIn: boolean; method?: string };
+  /** Codex: Remote Control (pairing with the ChatGPT app) can be offered here (signed in with ChatGPT). */
+  remoteControl?: boolean;
+}
+
+/**
+ * Codex Remote Control for one live agent: its app-server paired (or pairing) with the ChatGPT app.
+ * `code` is the short-lived manual pairing code, shown until a device claims it or it expires.
+ */
+export interface CodexRemoteControl {
+  /** The app-server's link to the ChatGPT service (Codex's RemoteControlConnectionStatus). */
+  status: 'connecting' | 'connected' | 'errored' | 'disabled';
+  /** A device claimed the current code. */
+  paired: boolean;
+  code?: string;
+  /** What the QR code carries (scanned in the ChatGPT app instead of typing `code`). */
+  qr?: string;
+  /** When `code` stops working (ISO). */
+  expiresAt?: string;
+  /** This computer, as the ChatGPT app lists it. */
+  serverName?: string;
+  /** Devices paired with this computer (Codex's remote-control clients). */
+  devices?: Array<{ id: string; name: string; lastSeenAt?: string }>;
 }
 
 export interface NativeSessionInfo {
@@ -572,6 +594,8 @@ export interface WorkspaceSnapshot {
   connectedTaskIds: string[];
   /** Live Claude sessions with Remote Control on: taskId → the session's link (claude.ai/code, the Claude app). */
   remoteControl: Record<string, string>;
+  /** Live Codex agents with Remote Control on: taskId → pairing and connection state (the ChatGPT app). */
+  codexRemote: Record<string, CodexRemoteControl>;
   /**
    * Per agent: the title of the last task on its session map (the model's grouping, as cached). What an
    * agent is on, for the sidebar row and the agent's header; absent until a map has been made.
