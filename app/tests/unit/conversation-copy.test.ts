@@ -36,3 +36,30 @@ describe('forkCut', () => {
     expect(forkCut(items, points, 'nope')).toBeUndefined();
   });
 });
+
+describe('carriedTool', () => {
+  it('keeps a failed command’s error, a diff’s lines, and only the start of a file read', async () => {
+    const { carriedTool } = await import('../../src/main/workspace');
+    const noise = 'x'.repeat(10_000);
+    const failed = carriedTool({
+      text: '',
+      toolStatus: 'failed',
+      tool: { name: 'Bash', kind: 'execute', title: '$ npm test', locations: [], content: [{ type: 'terminal', command: 'npm test', output: `${noise}\nTypeError: total is undefined at checkout.ts:42`, exitCode: 1 }] },
+    });
+    expect(failed).toMatch(/^\$ npm test \(failed\)\nexit code 1\n/);
+    expect(failed).toContain('TypeError: total is undefined at checkout.ts:42');
+    expect(failed.length).toBeLessThan(3_200);
+
+    const edit = carriedTool({
+      text: '',
+      toolStatus: 'completed',
+      tool: { name: 'Edit', kind: 'edit', title: 'Edit src/a.ts', locations: [], content: [{ type: 'diff', diff: { path: 'src/a.ts', operation: 'modify', phase: 'applied', hunks: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-a = 1', '+a = 2'] }], added: 1, removed: 1 } }] },
+    });
+    expect(edit).toBe('Edit src/a.ts\nmodify src/a.ts (+1 -1)\n@@ -3,1 +3,1 @@\n-a = 1\n+a = 2');
+
+    const read = carriedTool({ text: '', toolStatus: 'completed', tool: { name: 'Read', kind: 'read', title: 'Read src/big.ts', locations: [], content: [{ type: 'text', text: `start ${noise} end` }] } });
+    expect(read.startsWith('Read src/big.ts\nstart ')).toBe(true);
+    expect(read).not.toContain(' end');
+    expect(read.length).toBeLessThan(400);
+  });
+});
