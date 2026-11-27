@@ -12,8 +12,13 @@ export interface MenuItem {
   id: string;
   label: string;
   icon?: IconName;
-  onSelect: () => void;
+  /** Chosen (an item with `items` opens them instead). */
+  onSelect?: () => void;
   disabled?: boolean;
+  /** A submenu: opens beside the item (hover, → or Enter), closes with ← or by moving to another item. */
+  items?: MenuItem[];
+  /** The current choice among its siblings: shown with a tick. */
+  checked?: boolean;
 }
 
 /** Where a menu opens and what is in it; `null` entries are dropped, `'-'` is a divider. */
@@ -58,6 +63,30 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
   const [active, setActive] = useState(menu.keyboard ? (enabled[0] ?? -1) : -1);
   const close = useRef(onClose);
   close.current = onClose;
+  // The open submenu: which item's, where that item is, and its highlight (-1: the pointer or keys are still on the menu).
+  const [sub, setSub] = useState<{ index: number; rect: DOMRect } | null>(null);
+  const [subActive, setSubActive] = useState(-1);
+  const subRef = useRef<HTMLDivElement>(null);
+  const [subPos, setSubPos] = useState<{ left: number; top: number } | null>(null);
+  const subItems = sub ? ((items[sub.index] as MenuItem).items ?? []) : [];
+  const subEnabled = subItems.map((it, i) => (!it.disabled ? i : -1)).filter((i) => i >= 0);
+  const openSub = (i: number, keyboard: boolean) => {
+    const el = ref.current?.querySelector<HTMLElement>(`[data-index="${i}"]`);
+    if (!el) return;
+    setSub({ index: i, rect: el.getBoundingClientRect() });
+    setSubActive(keyboard ? (((items[i] as MenuItem).items ?? []).findIndex((x) => !x.disabled)) : -1);
+  };
+  // Beside its item, on whichever side has room, inside the window.
+  useLayoutEffect(() => {
+    const el = subRef.current;
+    if (!sub || !el) return setSubPos(null);
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 6;
+    let left = sub.rect.right + 2;
+    if (left + width > window.innerWidth - pad) left = Math.max(pad, sub.rect.left - width - 2);
+    const top = Math.max(pad, Math.min(sub.rect.top - 4, window.innerHeight - pad - height));
+    setSubPos({ left, top });
+  }, [sub]);
 
   // Inside the window: flipped to the pointer's other side when it would run off an edge.
   useLayoutEffect(() => {
@@ -111,8 +140,15 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
   const choose = (i: number) => {
     const it = items[i];
     if (!it || it === '-' || it.disabled) return;
+    if (it.items) return openSub(i, true);
     onClose();
-    it.onSelect();
+    it.onSelect?.();
+  };
+  const chooseSub = (j: number) => {
+    const it = subItems[j];
+    if (!it || it.disabled) return;
+    onClose();
+    it.onSelect?.();
   };
   const step = (by: number) => {
     if (!enabled.length) return;
@@ -137,15 +173,37 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        const keys: Record<string, () => void> = {
-          ArrowDown: () => step(1),
-          ArrowUp: () => step(-1),
-          Home: () => setActive(enabled[0] ?? -1),
-          End: () => setActive(enabled.at(-1) ?? -1),
-          Enter: () => choose(active),
-          ' ': () => choose(active),
-          Tab: () => onClose(),
+        const inSub = !!sub && subActive >= 0;
+        const subStep = (by: number) => {
+          if (!subEnabled.length) return;
+          const at = subEnabled.indexOf(subActive);
+          setSubActive(subEnabled[(at + by + subEnabled.length) % subEnabled.length]);
         };
+        const keys: Record<string, () => void> = inSub
+          ? {
+              ArrowDown: () => subStep(1),
+              ArrowUp: () => subStep(-1),
+              ArrowLeft: () => {
+                setSub(null);
+                setSubActive(-1);
+              },
+              Enter: () => chooseSub(subActive),
+              ' ': () => chooseSub(subActive),
+              Tab: () => onClose(),
+            }
+          : {
+              ArrowDown: () => step(1),
+              ArrowUp: () => step(-1),
+              ArrowRight: () => {
+                const it = items[active];
+                if (it && it !== '-' && it.items && !it.disabled) openSub(active, true);
+              },
+              Home: () => setActive(enabled[0] ?? -1),
+              End: () => setActive(enabled.at(-1) ?? -1),
+              Enter: () => choose(active),
+              ' ': () => choose(active),
+              Tab: () => onClose(),
+            };
         const fn = keys[e.key];
         if (!fn) return;
         e.preventDefault();
@@ -162,17 +220,46 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
             role="menuitem"
             tabIndex={-1}
             disabled={it.disabled}
-            className={i === active ? 'active' : undefined}
+            className={i === active || sub?.index === i ? 'active' : undefined}
             data-testid={`menu-${it.id}`}
-            onMouseEnter={() => !it.disabled && setActive(i)}
-            onMouseLeave={() => setActive(-1)}
+            data-index={i}
+            aria-haspopup={it.items ? 'menu' : undefined}
+            aria-expanded={it.items ? sub?.index === i : undefined}
+            onMouseEnter={() => {
+              if (it.disabled) return;
+              setActive(i);
+              if (it.items) openSub(i, false);
+              else setSub(null);
+            }}
+            onMouseLeave={() => !it.items && setActive(-1)}
             onClick={() => choose(i)}
           >
-            {it.icon ? <Icon name={it.icon} size={13} /> : <span className="context-menu-gap" aria-hidden />}
-            {it.label}
+            {it.checked ? <Icon name="check" size={13} /> : it.icon ? <Icon name={it.icon} size={13} /> : <span className="context-menu-gap" aria-hidden />}
+            <span className="context-menu-label">{it.label}</span>
+            {it.items ? <Icon name="chevron" size={11} /> : null}
           </button>
         ),
       )}
+      {sub ? (
+        <div className="context-menu context-submenu" ref={subRef} role="menu" style={subPos ?? { left: sub.rect.right + 2, top: sub.rect.top - 4, visibility: 'hidden' }} data-testid={`menu-${(items[sub.index] as MenuItem).id}-items`}>
+          {subItems.map((it, j) => (
+            <button
+              key={it.id}
+              role="menuitem"
+              tabIndex={-1}
+              disabled={it.disabled}
+              className={j === subActive ? 'active' : undefined}
+              data-testid={`menu-${it.id}`}
+              onMouseEnter={() => !it.disabled && setSubActive(j)}
+              onMouseLeave={() => setSubActive(-1)}
+              onClick={() => chooseSub(j)}
+            >
+              {it.checked ? <Icon name="check" size={13} /> : it.icon ? <Icon name={it.icon} size={13} /> : <span className="context-menu-gap" aria-hidden />}
+              <span className="context-menu-label">{it.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>,
     document.body,
   );

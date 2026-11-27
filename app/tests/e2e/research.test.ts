@@ -312,6 +312,11 @@ describe('research page (demo)', () => {
     // The lead on the goal node: its menu opens its conversation, or takes it out of the research.
     await expect.poll(() => page.getByTestId('research-panel').innerText(), { timeout: 10_000 }).toMatch(/research lead/);
     await page.locator('[data-testid="research-node"][data-kind="goal"]').click({ button: 'right' });
+    // Which CLI new agents start on: one item, its choices in a submenu beside it (the current one ticked).
+    await page.getByTestId('menu-cli').hover();
+    await expect.poll(() => page.getByTestId('menu-cli-items').isVisible()).toBe(true);
+    await page.getByTestId('menu-node-out').hover();
+    await expect.poll(() => page.getByTestId('menu-cli-items').count()).toBe(0);
     await page.getByTestId('menu-node-out').click();
     await expect.poll(async () => (await invoke<ResearchDoc>(page, 'research:get', { researchId: p2.projectId })).leadTaskId ?? '').toBe('');
   }, 240_000);
