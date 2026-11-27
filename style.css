@@ -1750,7 +1750,4 @@ body { overflow-x: clip !important; }
 .compat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .compat-scroll table { min-width: 520px; }
 .compat td.no { color: var(--text-3); }
-.compat sup { font-size: 11px; line-height: 0; }
-.compat td sup { position: absolute; margin-left: 2px; margin-top: 4px; }
-.compat-note { margin: 12px 0 0; color: var(--text-3); font-size: 13px; }
 .mm-targets { grid-template-columns: repeat(3, 1fr); }
