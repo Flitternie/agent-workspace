@@ -68,7 +68,7 @@ git config commit.template .gitmessage
 
 Releases are cut by [release-please](https://github.com/googleapis/release-please-action):
 
-1. Every merge to `main` updates a release PR, **chore: release vX.Y.Z**. It holds the next version (from the `feat`, `fix` and breaking changes merged since the last release), the version bump in `app/package.json` and `package-lock.json`, and the new section of `CHANGELOG.md`.
+1. Every merge to `main` updates a release PR, **chore: release vX.Y.Z**. It holds the next version (from the `feat`, `fix` and breaking changes merged since the last release), the version bump in `app/package.json` and `package-lock.json`, and the new section of `app/CHANGELOG.md`.
 2. Merging that PR tags `vX.Y.Z` and creates the GitHub release with the changelog as its notes.
 3. The same workflow builds the macOS DMG and the Windows installer and attaches them to the release.
 

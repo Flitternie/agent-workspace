@@ -1,7 +1,7 @@
 # Releases are cut by release-please (https://github.com/googleapis/release-please-action).
 # - Every push to main updates a release PR ("chore: release vX.Y.Z") from the Conventional
 #   Commit titles merged since the last release: the next version (feat → minor, fix → patch,
-#   `!` or BREAKING CHANGE → major), app/package.json and package-lock.json, and CHANGELOG.md.
+#   `!` or BREAKING CHANGE → major), app/package.json and package-lock.json, and app/CHANGELOG.md.
 # - Merging that PR tags vX.Y.Z and creates the GitHub release with the changelog as its notes;
 #   this run then builds the macOS DMG and the Windows installer and attaches them.
 # - Pushing a tag like v0.6.0 by hand builds and attaches installers to that tag's release.
