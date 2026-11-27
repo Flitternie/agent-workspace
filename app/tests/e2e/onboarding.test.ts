@@ -101,7 +101,7 @@ describe('first-run guide', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_ACP_OFF: '1' },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 });
@@ -220,7 +220,7 @@ describe('first-run guide', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_ACP_OFF: '1' },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 });

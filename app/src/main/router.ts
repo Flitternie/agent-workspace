@@ -1,4 +1,5 @@
 import type { RouteDecision } from '../shared/types';
+import { ACP_AGENTS } from '../shared/acp-agents';
 
 // Voice / coordinator routing. Deterministic rules first (spec 05 §1 "Routing order
 // for MVP"); an optional LLM classifier only for what the rules cannot decide, and
@@ -150,7 +151,7 @@ export function decideDeterministic(ctx: RouteContext): RouteDecision | null {
 
   // 2. Explicit new-task instruction.
   if (NEW_TASK.test(u)) {
-    const provider = /codex/i.test(u) ? 'codex' : /claude/i.test(u) ? 'claude' : undefined;
+    const provider = /codex/i.test(u) ? 'codex' : /claude/i.test(u) ? 'claude' : ACP_AGENTS.find((a) => new RegExp(`\\b(${a.id}|${a.label}|${a.command})\\b`, 'i').test(u))?.id;
     const utter = tokens(u);
     const projectHits = ctx.projects.filter((p) => [...tokens(p.name)].some((t) => utter.has(t)) || u.toLowerCase().includes(p.name.toLowerCase()));
     const projectId =

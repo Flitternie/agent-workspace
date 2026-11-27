@@ -49,6 +49,10 @@ export interface Outputs {
   'ssh:loginCancel': void;
   'ssh:connect': RemoteHostStatus;
   'ssh:terminal': void;
+  'acp:login': { terminal?: boolean; browser?: boolean; url?: string };
+  'acp:loginCode': void;
+  'acp:loginWait': { ok: boolean; error?: string };
+  'acp:loginCancel': void;
   'task:create': Task;
   'task:send': DispatchResult;
   'attachment:save': ImageRef;

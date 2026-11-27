@@ -5,7 +5,7 @@
 // dispatching and monitoring. It cannot answer another agent's permission requests on
 // its own — that stays with the user.
 import { z } from 'zod';
-import type { AgentProvider, AttentionItem, Task } from '../shared/types';
+import { CODING_PROVIDERS, type AgentProvider, type AttentionItem, type CodingProvider, type Task } from '../shared/types';
 
 export interface WorkspaceTool {
   name: string;
@@ -136,7 +136,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
         project: z.string().describe('Project id or name from list_projects.'),
         title: z.string().min(1).describe('Short task title.'),
         instruction: z.string().min(1).describe('The first instruction for the new agent.'),
-        provider: z.enum(['claude', 'codex']).optional().describe('Defaults to the first available.'),
+        provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]).optional().describe('Defaults to the first available.'),
         label: z.string().optional().describe('Optional short label for the work, e.g. "Order API migration"; otherwise one is written from the instruction.'),
         images: imagesArg,
       }),
@@ -308,8 +308,9 @@ The user may also give files by their path (@~/Downloads/spec.pdf, @/Users/…):
 Reply in the user's language, concisely.`;
 
 /** Main-agent provider to use: the setting, else the first installed and signed-in CLI. */
-export function pickMainProvider(setting: 'claude' | 'codex' | 'off' | undefined, ready: (p: 'claude' | 'codex') => boolean): 'claude' | 'codex' | undefined {
+export function pickMainProvider(setting: CodingProvider | 'off' | undefined, ready: (p: CodingProvider) => boolean): CodingProvider | undefined {
   if (setting === 'off') return undefined;
   if (setting) return ready(setting) ? setting : undefined;
+  // Unset: Claude Code or Codex, as before; an ACP CLI only when chosen.
   return (['claude', 'codex'] as const).find(ready);
 }

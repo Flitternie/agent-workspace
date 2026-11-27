@@ -8,6 +8,7 @@ import { stripAppText } from './memory-writeback';
 //    note per file with YAML frontmatter (name, description, type or metadata.type).
 //    Always project memory (Claude Code loads it only in its folder).
 //  - User instruction files: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/AGENTS.md,
+//    ~/.config/opencode/AGENTS.md (OpenCode), ~/.gemini/GEMINI.md and AGENTS.md (Antigravity),
 //    split into one note per top-level section so the user can pick; and Claude Code's
 //    user rules, ~/.claude/rules/*.md (one subfolder deep), one note per file.
 // Each note has a stable key `source|host|file|section` (host 'local' = this computer).
@@ -169,7 +170,8 @@ emit() {
   s=$(wc -c < "$1" | tr -d ' '); [ "$s" -le ${MAX_FILE_BYTES} ] || return 0
   printf '__AMW_MEM_FILE__\\t%s\\t%s\\n' "$1" "$(base64 < "$1" | tr -d '\\n')"
 }
-for f in "$c/CLAUDE.md" "$c"/rules/*.md "$c"/rules/*/*.md "$x/AGENTS.md" "$h/AGENTS.md" "$c"/projects/*/memory/*.md; do emit "$f"; done
+o="\${XDG_CONFIG_HOME:-$h/.config}/opencode"
+for f in "$c/CLAUDE.md" "$c"/rules/*.md "$c"/rules/*/*.md "$x/AGENTS.md" "$h/AGENTS.md" "$o/AGENTS.md" "$h/.gemini/GEMINI.md" "$h/.gemini/AGENTS.md" "$c"/projects/*/memory/*.md; do emit "$f"; done
 if [ -n "$amd" ]; then for f in "$amd"/*.md; do emit "$f"; done; fi
 printf '__AMW_MEM_DONE__\\n'`;
 

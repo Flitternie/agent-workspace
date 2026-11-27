@@ -5,11 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
-import type { ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
+import type { CodingProvider, ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
+import { AcpAdapter } from './providers/acp';
+import { AcpLogins } from './providers/acp-login';
+import { ACP_AGENTS } from '../shared/acp-agents';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
 import { Workspace } from './workspace';
@@ -58,12 +61,20 @@ const key = loadOpenAiKey(appRoot);
 let notifyModels = () => {};
 const localStt = new LocalStt(process.env.AMW_MODELS_DIR ?? join(userBase, app.isPackaged ? 'Models' : '.models'), () => notifyModels());
 const openai = key ? new OpenAiClient(key) : undefined;
+// OpenCode, Antigravity…: one shared ACP adapter per registry entry (tests about Claude Code and Codex alone turn them off).
+const acpAdapters: Record<string, AcpAdapter> = process.env.AMW_ACP_OFF === '1' ? {} : Object.fromEntries(ACP_AGENTS.map((spec) => [spec.id, new AcpAdapter(spec)]));
+const acpOf = (provider: string): AcpAdapter => {
+  const a = acpAdapters[provider];
+  if (!a) throw new Error(`${provider} is not a coding agent reached through ACP.`);
+  return a;
+};
 const workspace = new Workspace({
   dataDir,
   adapters: {
     claude: new ClaudeAdapter(),
     codex: new CodexAdapter(),
     mock: new MockAdapter(join(dataDir, 'mock-sessions')),
+    ...acpAdapters,
   },
   openai,
   localStt,
@@ -74,6 +85,8 @@ const workspace = new Workspace({
   ...(process.env.AMW_BACKGROUND_ANSWER ? { backgroundModel: async () => readFileSync(process.env.AMW_BACKGROUND_ANSWER!, 'utf8') } : {}),
 });
 notifyModels = () => workspace.notifyChanged();
+// Signing in to an ACP CLI, its own way (providers/acp-login.ts); the machine is rechecked when it ends.
+const acpLogins = new AcpLogins((_provider, host) => void (host ? workspace.checkHost(host, { quiet: true }) : workspace.refreshCapabilities({ localOnly: true })).catch(() => {}));
 const keySource = (): 'env' | 'file' | null => (envOpenAiKey() ? 'env' : key ? 'file' : null);
 if (key) workspace.setOpenAi(openai, { source: keySource(), last4: key.slice(-4) });
 
@@ -166,6 +179,14 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'ssh:loginCode': (i: { host: string; provider: 'claude' | 'codex'; code: string }) => sendHostLoginCode(i.host, i.provider, i.code),
   'ssh:loginCancel': (i: { host: string; provider: 'claude' | 'codex' }) => cancelHostLogin(i.host, i.provider),
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
+  // OpenCode, Antigravity…: here, or on an enabled host.
+  'acp:login': (i: { provider: string; host?: string; mode?: 'code' }) => {
+    if (i.host) workspace.requireHost(i.host);
+    return acpLogins.start(acpOf(i.provider), i.host, i.mode);
+  },
+  'acp:loginCode': (i: { provider: string; host?: string; code: string }) => acpLogins.sendCode(acpOf(i.provider), i.host, i.code),
+  'acp:loginWait': (i: { provider: string; host?: string }) => acpLogins.wait(acpOf(i.provider), i.host),
+  'acp:loginCancel': (i: { provider: string; host?: string }) => acpLogins.cancel(acpOf(i.provider), i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[]; about?: string }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images, openRequest: i.about }),
@@ -177,7 +198,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'memory:linkPreview': (i: { host: string }) => workspace.linkPreview(i.host),
   'memory:link': (i: { host: string }) => workspace.linkMachine(i.host),
   'memory:unlink': (i: { host: string }) => workspace.unlinkMachine(i.host),
-  'memory:resolveShare': (i: { host: string; kind: 'claude-md' | 'claude-user' | 'codex-md'; how: 'resume' | 'adopt' }) => workspace.resolveShare(i.host, i.kind, i.how),
+  'memory:resolveShare': (i: { host: string; kind: 'claude-md' | 'claude-user' | 'codex-md' | 'opencode-md' | 'gemini-md'; how: 'resume' | 'adopt' }) => workspace.resolveShare(i.host, i.kind, i.how),
   'memory:resolveConflict': (i: { id: string; take: 'source' | 'mine' }) => workspace.resolveConflict(i.id, i.take),
   'memory:restoreNote': (i: { id: string }) => workspace.restoreNote(i.id),
   'memory:backups': (i: { host?: string }) => workspace.memoryBackups(i.host),
@@ -202,7 +223,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:viewed': (i: { taskId: string }) => workspace.markViewed(i.taskId),
   'task:setPermissionMode': (i: { taskId: string; mode: PermissionMode }) => workspace.setPermissionMode(i.taskId, i.mode),
   'task:remove': (i: { taskId: string }) => workspace.remove(i.taskId),
-  'sessions:discover': (i: { projectId: string; provider: 'claude' | 'codex' }) => workspace.discoverSessions(i.projectId, i.provider),
+  'sessions:discover': (i: { projectId: string; provider: CodingProvider }) => workspace.discoverSessions(i.projectId, i.provider),
   'sessions:discoverAll': () => workspace.discoverAllSessions(),
   // Side questions ("btw"): never part of the agent's conversation.
   // The session map: an agent's turns grouped into tasks by a model (null: group by structure).

@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-d97757" alt="Works with Claude Code and Codex">
-  <img src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Windows-111" alt="macOS and Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>
+  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/release/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
+  <img src="https://badgen.net/badge/works%20with/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode%20%C2%B7%20Antigravity/d97757" alt="Works with Claude Code, Codex, OpenCode and Antigravity">
+  <img src="https://badgen.net/badge/platform/macOS%20%C2%B7%20Windows/111" alt="macOS and Windows">
+  <a href="LICENSE"><img src="https://badgen.net/badge/license/AGPL-3.0/16a34a" alt="AGPL-3.0"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
   <img src="docs/assets/en/demo.webp" alt="A run through the app: agents at work, one asks a question and moves to the top, you answer it on its page beside its Session Map, then the main agent passes an instruction to everyone" width="900">
 </p>
 
-If you run several Claude Code or Codex sessions at once, you know how it goes: a dozen terminals, an agent that has been waiting on you for twenty minutes, and no easy way to see what each one already tried. Agent Workspace puts them all in one window.
+If you run several coding agents at once (Claude Code, Codex, OpenCode, Antigravity), you know how it goes: a dozen terminals, an agent that has been waiting on you for twenty minutes, and no easy way to see what each one already tried. Agent Workspace puts them all in one window.
 
 ## Overview
 
@@ -75,7 +75,7 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 **Teach one agent. All of them know.**
 
 - Click **Remember** on something you said. It is turned into a note about how you want things done, not a copy of your words, for this project or for everything.
-- The note reaches every agent: Claude Code and Codex, on this machine and on your servers. Running agents get it with their next message.
+- The note reaches every agent, whichever CLI it runs on, on this machine and on your servers. Running agents get it with their next message.
 - Your own memory files stay yours. The app writes only its own marked section, after a backup.
 
 ## Also built in
@@ -86,24 +86,31 @@ If you run several Claude Code or Codex sessions at once, you know how it goes: 
 - **Images and files:** paste a screenshot, `@`-mention a file, or drop one in
 - **`!` commands:** run a command in the agent's folder; it sees the output
 - **Model per agent:** switch an agent's model from its next turn
-- **Pick up a session:** continue any existing Claude Code or Codex session
+- **Pick up a session:** continue any existing session from any of the four CLIs
 
-Every feature works the same with both CLIs:
+Every feature works the same with each CLI:
 
-| | Claude Code | Codex |
-|---|:---:|:---:|
-| Overview cards, permissions on the card | ✓ | ✓ |
-| Runs the main agent | ✓ | ✓ |
-| Session Map and Team Map | ✓ | ✓ |
-| Fork | ✓ | ✓ |
-| Side questions | ✓ | ✓ |
-| Images and `@` files | ✓ | ✓ |
-| Agents on SSH hosts | ✓ | ✓ |
-| Continue existing sessions | ✓ | ✓ |
+| | Claude Code | Codex | OpenCode | Antigravity |
+|---|:---:|:---:|:---:|:---:|
+| Overview cards, permissions on the card | ✓ | ✓ | ✓ | ✓ |
+| Runs the main agent | ✓ | ✓ | ✓ | ✓ |
+| Session Map and Team Map | ✓ | ✓ | ✓ | ✓ |
+| Fork | ✓ | ✓ | ✓ | ✓¹ |
+| Side questions | ✓ | ✓ | ✓ | ✓ |
+| Images and `@` files | ✓ | ✓ | ✓ | ✓ |
+| Agents on SSH hosts | ✓ | ✓ | ✓ | ✓ |
+| Continue existing sessions | ✓ | ✓ | ✓ | ✓ |
+| Sub-agents shown | ✓ | ✓ | ✓ | ✓ |
+| Remote Control from your phone | ✓ | ✓² | | |
+
+¹ Antigravity has no session fork of its own: a fork carries the conversation over as text.
+² In the ChatGPT app, by QR code; needs Codex signed in with ChatGPT.
+
+OpenCode and Antigravity are reached through the [Agent Client Protocol](https://agentclientprotocol.com) (`opencode acp`, `agy acp`), with each CLI's own commands for the rest (sign-in, limits, forks).
 
 ## Get started
 
-1. **Install Claude Code and/or Codex** and sign in. Agent Workspace uses them, with your existing plan: no extra account or API key.
+1. **Install a coding agent** (Claude Code, Codex, OpenCode or Antigravity) and sign in. Agent Workspace uses it with your existing plan: no extra account or API key. OpenCode also works with its free models, no sign-in needed.
 2. **Download** the [latest release](https://github.com/Flitternie/agent-workspace/releases/latest): the `.dmg` for macOS (Apple Silicon), or the `.exe` for Windows (x64, experimental).
 3. **Open it**, add a project folder and start an agent, or just tell the main agent what you need.
 
@@ -115,7 +122,7 @@ Every feature works the same with both CLIs:
 <details>
 <summary><b>Do I need another subscription or an API key?</b></summary>
 
-No. Agents run through the Claude Code and Codex you already have, on your existing plan. An OpenAI key is only needed if you choose OpenAI for speech recognition.
+No. Agents run through the coding agents you already have (Claude Code, Codex, OpenCode, Antigravity), on your existing plan. An OpenAI key is only needed if you choose OpenAI for speech recognition.
 </details>
 
 <details>
@@ -127,7 +134,7 @@ You see every agent on one screen, and whichever one is waiting on you moves to 
 <details>
 <summary><b>Does my code or conversation go through your servers?</b></summary>
 
-No. There is no server of ours. Agents run through the `claude` and `codex` CLIs on your machine, or on your own server over SSH, and the workspace data stays on your disk.
+No. There is no server of ours. Agents run through the `claude`, `codex`, `opencode` and `agy` CLIs on your machine, or on your own server over SSH, and the workspace data stays on your disk.
 </details>
 
 <details>
@@ -159,7 +166,7 @@ macOS on Apple Silicon is the main platform. There is a Windows x64 build, still
 <details>
 <summary><b>Build from source</b></summary>
 
-Requirements: macOS (Apple Silicon tested), Node 22, and the `claude` and/or `codex` CLI.
+Requirements: macOS (Apple Silicon tested), Node 22, and at least one of the `claude`, `codex`, `opencode` or `agy` CLIs.
 
 ```bash
 npm run setup   # installs into app/node_modules

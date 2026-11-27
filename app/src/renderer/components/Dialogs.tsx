@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AgentProvider, ForkPoint, NativeSessionInfo, Task, WorkspaceSnapshot } from '../../shared/types';
+import { CODING_PROVIDERS, type AgentProvider, type CodingProvider, type ForkPoint, type NativeSessionInfo, type Task, type WorkspaceSnapshot } from '../../shared/types';
+import { ACP_IDS, isAcpProvider } from '../../shared/acp-agents';
 import { call, errorText } from '../api';
 import { setDraftText } from '../drafts';
 import { timeAgo } from '../state';
-import { Icon, PROVIDER_LABEL, ProviderTag, shortVersion } from './bits';
+import { Icon, PROVIDER_LABEL, ProviderTag } from './bits';
+import { ProviderPicker } from './ProviderPicker';
+import { choiceControl } from '../choice-layout';
 import { t } from '../i18n';
 import { defaultProject, ProjectChooser } from './ProjectChooser';
 
@@ -90,11 +93,9 @@ export function ConfirmDialog({
 
 /** `onContinue`: switch to Continue a session… instead, for someone who meant to pick up an existing conversation. */
 export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { snapshot: WorkspaceSnapshot; onClose: () => void; onCreated: (taskId: string) => void; onContinue?: () => void }) {
-  const providers = snapshot.demo ? (['claude', 'codex', 'mock'] as const) : (['claude', 'codex'] as const);
-  const firstAvailable = providers.find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? providers[0];
   // The project used most recently (most of the time the right one); the chooser lists the rest.
   const [projectId, setProjectId] = useState(() => defaultProject(snapshot));
-  const [provider, setProvider] = useState<AgentProvider>(firstAvailable);
+  const [provider, setProvider] = useState<AgentProvider>(() => (['claude', 'codex', ...ACP_IDS] as AgentProvider[]).find((p) => snapshot.capabilities.find((c) => c.provider === p)?.available) ?? 'claude');
   // No title, name or instruction here: the agent opens with its reply box focused, and its first message says what it is for.
   const [isolate, setIsolate] = useState(true);
   const [mockScript, setMockScript] = useState('ask:Should I keep backwards compatibility?');
@@ -105,6 +106,8 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
   // On a remote folder, what counts is the CLI installed on that machine.
   const capOf = (p: AgentProvider) => (project?.host ? remote?.capabilities.find((c) => c.provider === p) : snapshot.capabilities.find((c) => c.provider === p));
   const usable = (p: AgentProvider) => !!capOf(p)?.available && (!project?.host || remote?.ssh === 'ok');
+  // Claude Code and Codex always; an ACP CLI (OpenCode, Antigravity…) once it is installed where the agent would run.
+  const providers: AgentProvider[] = [...CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || !!capOf(p)?.available), ...(snapshot.demo ? (['mock'] as const) : [])];
   const cap = capOf(provider);
   useEffect(() => {
     if (!usable(provider)) {
@@ -138,7 +141,7 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
       {/* For people who meant to pick up a conversation they already have: first, before choosing anything. */}
       {onContinue ? (
         <div className="hint new-continue" data-testid="new-continue-hint">
-          {t('Continuing a conversation from Claude Code or Codex?')}{' '}
+          {t('Continuing an earlier conversation?')}{' '}
           <button className="link" onClick={onContinue} data-testid="new-continue-session">
             {t('Continue a session…')}
           </button>
@@ -147,17 +150,14 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
       <ProjectChooser snapshot={snapshot} value={projectId} onChange={setProjectId} />
       <div className="field">
         <label>{t('Agent')}</label>
-        <div className="row">
-          {providers.map((p) => {
-            const c = capOf(p);
-            return (
-              <label key={p} className={`radio${usable(p) ? '' : ' disabled'}${provider === p ? ' selected' : ''}`} title={c?.detail}>
-                <input type="radio" name="provider" checked={provider === p} disabled={!usable(p)} onChange={() => setProvider(p)} /> {PROVIDER_LABEL[p]}
-                {c?.version ? <span className="muted small"> {shortVersion(c.version)}</span> : null}
-              </label>
-            );
-          })}
-        </div>
+        <ProviderPicker
+          providers={providers}
+          value={provider}
+          onChange={setProvider}
+          capOf={capOf}
+          usable={usable}
+          note={(p) => (project?.host && remote?.ssh !== 'ok' ? t('not connected') : capOf(p)?.available ? t('unavailable') : t('not installed'))}
+        />
         {project?.host && remote?.ssh !== 'ok' ? (
           <div className="warn-text small">{t('{host} is not connected. Check it in Settings › Remote machines.', { host: project.host })}</div>
         ) : cap && !(cap.available && cap.auth?.loggedIn !== false) ? (
@@ -201,11 +201,13 @@ export function NewTaskDialog({ snapshot, onClose, onCreated, onContinue }: { sn
   );
 }
 
-/** Recent Claude Code / Codex sessions from any folder on this computer (or one SSH host), newest first. */
+/** Recent sessions of the coding agents (Claude Code, Codex, the ACP CLIs) from any folder on this computer (or one SSH host), newest first. */
 export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: WorkspaceSnapshot; onClose: () => void; onImported: (taskId: string) => void }) {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [provider, setProvider] = useState<'all' | 'claude' | 'codex'>('all');
+  const [provider, setProvider] = useState<'all' | CodingProvider>('all');
+  // The CLIs installed here (Claude Code and Codex always offered, as before).
+  const offered = CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || snapshot.capabilities.find((c) => c.provider === p)?.available);
   const [importing, setImporting] = useState('');
   const [showAutomated, setShowAutomated] = useState(() => readPref(AUTOMATED_KEY) === '1');
   // Sources: this computer plus the machines turned on in Settings › Remote machines.
@@ -251,7 +253,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
   const add = (s: NativeSessionInfo) => {
     setImporting(s.nativeSessionId);
     setError('');
-    call('task:importSession', { provider: s.provider as 'claude' | 'codex', nativeSessionId: s.nativeSessionId, cwd: s.cwd, host: s.host, title: s.title.slice(0, 500) || s.nativeSessionId })
+    call('task:importSession', { provider: s.provider as CodingProvider, nativeSessionId: s.nativeSessionId, cwd: s.cwd, host: s.host, title: s.title.slice(0, 500) || s.nativeSessionId })
       .then((t) => {
         onImported(t.taskId);
         onClose();
@@ -262,7 +264,7 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
 
   return (
     <Modal title={t('Continue an existing session')} onClose={onClose}>
-      <p className="muted small">{t('Continues a Claude Code or Codex conversation here, with its history. Close it in the terminal first.')}</p>
+      <p className="muted small">{t('Continues a conversation from one of your coding agents here, with its history. Close it in the terminal first.')}</p>
       <div className="row">
         {hosts.length ? (
           <select className="input select" value={source} onChange={(e) => setSource(e.target.value)} title={t('Where the sessions are')} data-testid="session-host">
@@ -276,13 +278,24 @@ export function ImportDialog({ snapshot, onClose, onImported }: { snapshot: Work
           </select>
         ) : null}
         <input className="input grow" autoFocus placeholder={t('Search by title or folder')} value={query} onChange={(e) => setQuery(e.target.value)} data-testid="session-search" />
-        <div className="segmented">
-          {(['all', 'claude', 'codex'] as const).map((p) => (
-            <button key={p} className={provider === p ? 'on' : ''} onClick={() => setProvider(p)}>
-              {p === 'all' ? t('All') : PROVIDER_LABEL[p]}
-            </button>
-          ))}
-        </div>
+        {choiceControl(offered.length + 1) === 'grid' ? (
+          <div className="segmented">
+            {(['all', ...offered] as const).map((p) => (
+              <button key={p} className={provider === p ? 'on' : ''} onClick={() => setProvider(p)}>
+                {p === 'all' ? t('All') : PROVIDER_LABEL[p]}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <select className="input select" value={provider} onChange={(e) => setProvider(e.target.value as 'all' | CodingProvider)} title={t('Coding agent')} data-testid="session-provider">
+            <option value="all">{t('All agents')}</option>
+            {offered.map((p) => (
+              <option key={p} value={p}>
+                {PROVIDER_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {automatedCount || showAutomated ? (
         <label className="check small muted" title={t('Started by an agent for itself: claude -p, codex exec, Codex sub-agents.')}>

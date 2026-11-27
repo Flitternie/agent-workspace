@@ -9,5 +9,8 @@ describe('model names before the list is in', () => {
     expect(modelName('gpt-6.1-sol')).toBe('GPT-6.1-Sol');
     expect(modelName('gpt-5.5')).toBe('GPT-5.5');
     expect(modelName('something-else')).toBe('something-else');
+    // OpenCode-style "provider/model": as its own list writes it.
+    expect(modelName('opencode/seaglass-alpha-free')).toBe('opencode/Seaglass Alpha Free');
+    expect(modelName('openrouter/deepseek-v4.1-flash')).toBe('openrouter/Deepseek V4.1 Flash');
   });
 });

@@ -1,10 +1,15 @@
 // Normalized application types shared by the main process and the renderer.
 // These are NOT provider wire formats; provider ids are carried alongside.
 import type { PermissionKind, PlanInfo, ToolCallInfo, ToolContent } from './content';
+import { ACP_IDS, type AcpProvider } from './acp-agents';
 
 export type { DiffHunk, FileDiff, PermissionKind, PlanEntry, PlanInfo, ToolCallInfo, ToolContent, ToolKind } from './content';
 
-export type AgentProvider = 'claude' | 'codex' | 'mock';
+/** The real coding agents: Claude Code and Codex natively, and the CLIs reached through ACP (shared/acp-agents.ts). */
+export type CodingProvider = 'claude' | 'codex' | AcpProvider;
+export type AgentProvider = CodingProvider | 'mock';
+/** Every real coding agent, in the order they are offered. */
+export const CODING_PROVIDERS: CodingProvider[] = ['claude', 'codex', ...ACP_IDS];
 export type AgentStatus =
   | 'idle'
   | 'starting'
@@ -135,6 +140,8 @@ export interface LimitWindow {
   usedPercent: number;
   /** When it resets, ms since the epoch. */
   resetsAt?: number;
+  /** Which models it covers, when an account has windows per group of models (Antigravity: "Gemini", "Claude and GPT"). */
+  label?: string;
 }
 
 /** A provider account's usage limits as last seen, and when. */
@@ -278,7 +285,7 @@ export interface TranscriptItem {
   /** Structured tool call (role 'tool'). */
   tool?: ToolCallInfo;
   /** A decision the user made here (role 'system'): an approval given or a question answered. */
-  decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
+  decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** An approval refused (the option chosen is a reject / deny / decline). */ declined?: boolean; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
   streaming?: boolean;
   /** A system item that starts a new chapter of the main agent's conversation (and why). */
   chapter?: { reason: 'manual' | 'idle' | 'long' };
@@ -374,6 +381,8 @@ export interface ProviderCapabilities {
   structuredQuestions: boolean;
   /** Saved conversations on this computer can be forked (the adapter implements forkPoints / forkSession). */
   fork?: boolean;
+  /** Answers side questions ("btw") without entering the conversation; unset = yes. */
+  sideQuestions?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */
   auth?: { loggedIn: boolean; method?: string };
 }
@@ -399,7 +408,7 @@ export type RouteDecision =
       kind: 'create';
       proposedTitle: string;
       projectId?: string;
-      provider?: 'claude' | 'codex';
+      provider?: CodingProvider;
       reason: string;
     }
   | { kind: 'coordinator'; reason: string }
@@ -439,7 +448,8 @@ export interface Settings {
   /** Default permission mode for new agents. */
   permissionMode?: PermissionMode;
   /** Which CLI runs the main agent; unset = the first one installed and signed in. */
-  mainAgent?: 'claude' | 'codex' | 'off';
+  /** The main agent's CLI (any coding provider), or off. */
+  mainAgent?: CodingProvider | 'off';
   /** Start a new chapter of the main agent's conversation by itself after a long pause or a long chapter (default on). */
   mainChapters?: 'auto' | 'off';
   /** Speech-to-text model (OpenAI id). */

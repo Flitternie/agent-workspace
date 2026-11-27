@@ -56,7 +56,7 @@ describe('new agent', () => {
       ]),
     );
     // The demo entry offers mock agents in the dialog.
-    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture, HOME: home, PATH: `${bin}:${env.PATH}` } });
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture, AMW_ACP_OFF: '1', HOME: home, PATH: `${bin}:${env.PATH}` } });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForSelector('.app');
@@ -176,7 +176,7 @@ describe('new agent', () => {
     expect(await dialog.locator('textarea').count()).toBe(0);
     expect(await page.getByTestId('new-instruction').count()).toBe(0);
     // A quiet line for someone who meant to continue an existing conversation.
-    expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing a conversation from Claude Code or Codex?');
+    expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing an earlier conversation?');
     // At the top of the dialog, before the project and provider choices.
     const hintTop = (await page.getByTestId('new-continue-hint').boundingBox())!.y;
     expect(hintTop).toBeLessThan((await page.locator('.modal .field').first().boundingBox())!.y);

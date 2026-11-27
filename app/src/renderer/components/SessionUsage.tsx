@@ -39,9 +39,11 @@ const EXTRA_LABELS: Record<string, string> = {
 
 export function windowLabel(w: LimitWindow, short = false): string {
   if (EXTRA_LABELS[w.key]) return t(EXTRA_LABELS[w.key]);
-  if (!w.mins) return '';
+  if (!w.mins) return short ? '' : (w.label ?? '');
   // Short (the sidebar's narrow column): a week as "7d" beside "5h"; Chinese "周" is short already.
-  return w.mins === 10080 ? (short && language() !== 'zh' ? '7d' : t('week')) : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
+  const length = w.mins === 10080 ? (short && language() !== 'zh' ? '7d' : t('week')) : w.mins % 1440 === 0 ? `${w.mins / 1440}d` : w.mins % 60 === 0 ? `${w.mins / 60}h` : `${w.mins}m`;
+  // Windows per group of models (Antigravity): the group's name in the card ("Gemini · 5h").
+  return !short && w.label ? `${w.label} · ${length}` : length;
 }
 
 /** The plan's own windows (5 hours, a week): what a one-line summary shows. */
@@ -51,7 +53,7 @@ export function mainWindows(windows: LimitWindow[]): LimitWindow[] {
 
 /** Every window with a name to show: the plan's own first, then the known others. */
 export function shownWindows(windows: LimitWindow[]): LimitWindow[] {
-  return [...mainWindows(windows), ...windows.filter((w) => EXTRA_LABELS[w.key])];
+  return [...mainWindows(windows), ...windows.filter((w) => EXTRA_LABELS[w.key] || (w.label && !mainWindows([w]).length))];
 }
 
 /** Highlighted from this share used. */

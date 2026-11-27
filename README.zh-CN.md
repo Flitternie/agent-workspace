@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://img.shields.io/github/v/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
-  <img src="https://img.shields.io/badge/%E6%94%AF%E6%8C%81-Claude%20Code%20%C2%B7%20Codex-d97757" alt="支持 Claude Code 和 Codex">
-  <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Windows-111" alt="macOS 和 Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-16a34a" alt="AGPL-3.0"></a>
+  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
+  <img src="https://badgen.net/badge/%E6%94%AF%E6%8C%81/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode%20%C2%B7%20Antigravity/d97757" alt="支持 Claude Code、Codex、OpenCode 和 Antigravity">
+  <img src="https://badgen.net/badge/%E5%B9%B3%E5%8F%B0/macOS%20%C2%B7%20Windows/111" alt="macOS 和 Windows">
+  <a href="LICENSE"><img src="https://badgen.net/badge/license/AGPL-3.0/16a34a" alt="AGPL-3.0"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
   <img src="docs/assets/zh/demo.webp" alt="应用演示：几个 Agent 在工作，其中一个提问后排到最前；点进去在它的会话地图旁边回答；最后主 Agent 把一条指令转给所有人" width="900">
 </p>
 
-同时开过几个 Claude Code 或 Codex 的人都有体会：终端开了一堆，某个 Agent 等了你二十分钟你都没发现，想回头看它们之前试过什么也很费劲。Agent Workspace 把它们都放进一个窗口里。
+同时开过几个编码 Agent（Claude Code、Codex、OpenCode、Antigravity）的人都有体会：终端开了一堆，某个 Agent 等了你二十分钟你都没发现，想回头看它们之前试过什么也很费劲。Agent Workspace 把它们都放进一个窗口里。
 
 ## 总览
 
@@ -75,7 +75,7 @@
 **教会一个 Agent，所有 Agent 都知道。**
 
 - 在你发过的消息上点「记住」，应用会把它提炼成一条笔记。记下的是你的要求，而不是原话；可以只对当前项目生效，也可以对所有项目生效。
-- 笔记会同步给所有 Agent，不管是 Claude Code 还是 Codex，在本机还是在服务器上。正在运行的 Agent 会随下一条消息收到。
+- 笔记会同步给所有 Agent，不管它用的是哪个 CLI，在本机还是在服务器上。正在运行的 Agent 会随下一条消息收到。
 - 你自己写的记忆内容不会被改动：应用只改它自己加了标记的那一段，改之前会先备份。
 
 ## 其他功能
@@ -86,24 +86,31 @@
 - **图片和文件：** 粘贴截图、用 `@` 引用文件，或者直接拖进来
 - **`!` 命令：** 在 Agent 的目录里直接运行命令，它能看到输出
 - **单独选模型：** 给某个 Agent 换模型，从下一轮起生效
-- **接上已有会话：** 之前的 Claude Code 或 Codex 会话都可以接着用
+- **接上已有会话：** 这四个 CLI 之前的会话都可以接着用
 
-以上功能，Claude Code 和 Codex 都支持：
+以上功能，每个 CLI 都支持：
 
-| | Claude Code | Codex |
-|---|:---:|:---:|
-| 总览卡片、在卡片上处理权限请求 | ✓ | ✓ |
-| 作为主 Agent | ✓ | ✓ |
-| 会话地图与团队地图 | ✓ | ✓ |
-| Fork | ✓ | ✓ |
-| 旁支提问 | ✓ | ✓ |
-| 图片与 `@` 文件 | ✓ | ✓ |
-| 在 SSH 服务器上运行 | ✓ | ✓ |
-| 接上已有会话 | ✓ | ✓ |
+| | Claude Code | Codex | OpenCode | Antigravity |
+|---|:---:|:---:|:---:|:---:|
+| 总览卡片、在卡片上处理权限请求 | ✓ | ✓ | ✓ | ✓ |
+| 作为主 Agent | ✓ | ✓ | ✓ | ✓ |
+| 会话地图与团队地图 | ✓ | ✓ | ✓ | ✓ |
+| Fork | ✓ | ✓ | ✓ | ✓¹ |
+| 旁支提问 | ✓ | ✓ | ✓ | ✓ |
+| 图片与 `@` 文件 | ✓ | ✓ | ✓ | ✓ |
+| 在 SSH 服务器上运行 | ✓ | ✓ | ✓ | ✓ |
+| 接上已有会话 | ✓ | ✓ | ✓ | ✓ |
+| 显示子 Agent | ✓ | ✓ | ✓ | ✓ |
+| 用手机远程控制 | ✓ | ✓² | | |
+
+¹ Antigravity 没有自带的会话分叉：分叉时以文字形式带上之前的对话。
+² 在 ChatGPT App 里扫码配对；需要 Codex 用 ChatGPT 账号登录。
+
+OpenCode 和 Antigravity 通过 [Agent Client Protocol](https://agentclientprotocol.com)（`opencode acp`、`agy acp`）接入，其余部分（登录、额度、分叉）用各 CLI 自己的命令。
 
 ## 开始使用
 
-1. **安装并登录 Claude Code 或 Codex**（两个都装也可以）。Agent Workspace 直接使用它们和你现有的订阅，不需要另外注册账号或申请 API key。
+1. **安装并登录一个编码 Agent**（Claude Code、Codex、OpenCode 或 Antigravity，装几个都可以）。Agent Workspace 直接使用它们和你现有的订阅，不需要另外注册账号或申请 API key。OpenCode 用自带的免费模型时，不登录也能用。
 2. **下载**[最新版本](https://github.com/Flitternie/agent-workspace/releases/latest)：macOS（Apple Silicon）用 `.dmg`，Windows（x64，实验性）用 `.exe`。
 3. **打开应用**，添加一个项目文件夹，新建 Agent；也可以直接告诉主 Agent 你要做什么。
 
@@ -115,7 +122,7 @@
 <details>
 <summary><b>需要另外付费或者申请 API key 吗？</b></summary>
 
-不需要。Agent 用的就是你已经装好的 Claude Code 和 Codex，走你现有的订阅。只有语音识别选用 OpenAI 时，才需要一个 OpenAI key。
+不需要。Agent 用的就是你已经装好的编码 Agent（Claude Code、Codex、OpenCode、Antigravity），走你现有的订阅。只有语音识别选用 OpenAI 时，才需要一个 OpenAI key。
 </details>
 
 <details>
@@ -127,7 +134,7 @@
 <details>
 <summary><b>我的代码和对话会经过你们的服务器吗？</b></summary>
 
-不会，我们没有服务器。Agent 通过你电脑上的 `claude` 和 `codex` CLI 运行，也可以通过 SSH 在你自己的服务器上运行，工作区数据都存在你的硬盘上。
+不会，我们没有服务器。Agent 通过你电脑上的 `claude`、`codex`、`opencode` 和 `agy` CLI 运行，也可以通过 SSH 在你自己的服务器上运行，工作区数据都存在你的硬盘上。
 </details>
 
 <details>
@@ -159,7 +166,7 @@
 <details>
 <summary><b>从源码运行</b></summary>
 
-需要：macOS（已在 Apple Silicon 上测试）、Node 22，以及 `claude` 或 `codex` CLI。
+需要：macOS（已在 Apple Silicon 上测试）、Node 22，以及 `claude`、`codex`、`opencode`、`agy` 中至少一个 CLI。
 
 ```bash
 npm run setup   # 依赖装在 app/node_modules

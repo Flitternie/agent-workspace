@@ -321,7 +321,7 @@ export function ProjectChooser({ snapshot, value, onChange }: { snapshot: Worksp
               <div key={keyOf(it)}>
                 {i === 0 && it.kind === 'place' ? <div className="project-group">{t('Where')}</div> : null}
                 {i === 0 && it.kind === 'project' ? <div className="project-group">{t('Recent')}</div> : null}
-                {i === firstFound ? <div className="project-group">{place ? t('Found on {host} (Claude Code / Codex sessions)', { host: place }) : t('Found on this computer (Claude Code / Codex sessions)')}</div> : null}
+                {i === firstFound ? <div className="project-group">{place ? t('Found on {host} (coding agent sessions)', { host: place }) : t('Found on this computer (coding agent sessions)')}</div> : null}
                 {i === firstAction ? <div className="project-group">{t('Other folders')}</div> : null}
                 {i === firstDir ? <div className="project-group">{t('Folders in {dir}', { dir: typed?.parent ?? '' })}</div> : null}
                 <button

@@ -26,7 +26,8 @@ import type { ModelOption,
   TranscriptItem,
   TransientKind,
   WorkspaceSnapshot, BtwEntry, ImageRef, AgentStatus, TaskUsage, ProviderLimits, LimitWindow } from '../shared/types';
-import { accountKey } from '../shared/types';
+import { accountKey, CODING_PROVIDERS, type CodingProvider } from '../shared/types';
+import { acpAgent, isAcpProvider } from '../shared/acp-agents';
 import { clipOutput } from '../shared/content';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
@@ -140,6 +141,7 @@ export class Workspace {
   private warming = new Set<string>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
+  private capsSeq = 0;
   private changeListeners = new Set<() => void>();
   /** item === null means "the whole transcript was replaced; reload it". */
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
@@ -362,6 +364,8 @@ export class Workspace {
    * installs or signs in here; hosts have their own slower recheck.
    */
   async refreshCapabilities(opts: { localOnly?: boolean } = {}): Promise<void> {
+    // Looks overlap (a recheck while the guide polls, a sign-in ending): the latest one started wins, never an older one finishing late.
+    const seq = ++this.capsSeq;
     const caps: ProviderCapabilities[] = [];
     for (const a of Object.values(this.opts.adapters)) {
       if (!a) continue;
@@ -372,6 +376,7 @@ export class Workspace {
         this.log('capabilities failed', a.provider, error);
       }
     }
+    if (seq !== this.capsSeq) return;
     this.capabilities = caps;
     this.syncMainAgent();
     this.changed();
@@ -388,7 +393,7 @@ export class Workspace {
     return (this.store.data.settings.remoteHosts ?? []).filter((h) => known.includes(h));
   }
 
-  private requireHost(host: string): void {
+  requireHost(host: string): void {
     if (!this.enabledHosts().includes(host)) throw new Error(`${host} is not enabled in Settings › Remote machines.`);
   }
 
@@ -466,7 +471,8 @@ export class Workspace {
     const cap = status?.capabilities.find((c) => c.provider === provider);
     if (status && status.ssh !== 'ok' && status.ssh !== 'checking') throw new Error(status.error ?? `Cannot reach ${host}.`);
     if (cap && !cap.available) throw new Error(cap.detail ?? `${provider} is not installed on ${host}.`);
-    if (cap?.auth?.loggedIn === false) throw new Error(`${provider === 'claude' ? 'Claude Code' : 'Codex'} on ${host} is not signed in. Sign in there once (${provider === 'claude' ? 'claude' : 'codex login'}), then recheck.`);
+    const acp = acpAgent(provider);
+    if (cap?.auth?.loggedIn === false) throw new Error(`${acp?.label ?? (provider === 'claude' ? 'Claude Code' : 'Codex')} on ${host} is not signed in. Sign in there once (${acp?.login ?? (provider === 'claude' ? 'claude' : 'codex login')}), then recheck.`);
   }
 
   async shutdown(): Promise<void> {
@@ -775,7 +781,7 @@ export class Workspace {
 
   /** Shows an imported session's past conversation right away, before anything is resumed. */
   /** Shows a saved conversation before it is resumed, and returns it (undefined when it could not be read). */
-  private async previewHistory(task: Task, provider: 'claude' | 'codex', nativeSessionId: string): Promise<TranscriptItem[] | undefined> {
+  private async previewHistory(task: Task, provider: AgentProvider, nativeSessionId: string): Promise<TranscriptItem[] | undefined> {
     const adapter = this.opts.adapters[provider];
     if (!adapter?.readHistory) return undefined;
     try {
@@ -1000,7 +1006,7 @@ export class Workspace {
     this.store.save();
     try {
       const live = this.live.get(taskId) ?? (await this.connect(taskId));
-      if (!live.session.askSide) throw new Error(`${task.provider} does not take side questions.`);
+      if (!live.session.askSide) throw new Error(`${providerName(task.provider)} does not take side questions.`);
       entry.answer = await live.session.askSide(entry.question, history);
     } catch (error) {
       entry.error = (error as Error).message;
@@ -1249,7 +1255,7 @@ export class Workspace {
         throw error;
       }
       task.status = 'failed';
-      task.summary = `Could not ${resumeId ? 'resume' : 'start'} ${task.provider} session: ${clip(message, 140)}`;
+      task.summary = `Could not ${resumeId ? 'resume' : 'start'} the ${providerName(task.provider)} session: ${clip(message, 140)}`;
       this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
       this.changed();
       throw error;
@@ -1362,7 +1368,7 @@ export class Workspace {
     return new Set(this.store.data.sessions.filter((s) => here.has(s.taskId) && s.nativeSessionId).map((s) => s.nativeSessionId));
   }
 
-  async discoverSessions(projectId: string, provider: 'claude' | 'codex'): Promise<NativeSessionInfo[]> {
+  async discoverSessions(projectId: string, provider: CodingProvider): Promise<NativeSessionInfo[]> {
     const adapter = this.opts.adapters[provider];
     if (!adapter) throw new Error(`Provider ${provider} is not available.`);
     const project = this.project(projectId);
@@ -1549,7 +1555,7 @@ export class Workspace {
     const known = this.attachedSessionIds();
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
-      (['claude', 'codex'] as const).map(async (p) => {
+      CODING_PROVIDERS.map(async (p) => {
         const adapter = this.opts.adapters[p];
         if (!adapter || !this.capabilities.find((c) => c.provider === p)?.available) return [];
         try {
@@ -1567,7 +1573,7 @@ export class Workspace {
   }
 
   /** Adopts a provider session created outside the app (historical resume, not live attach). */
-  async importSession(args: { projectId?: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; host?: string; title: string }): Promise<Task> {
+  async importSession(args: { projectId?: string; provider: CodingProvider; nativeSessionId: string; cwd: string; host?: string; title: string }): Promise<Task> {
     if (args.host) this.requireOnHost(args.provider, args.host);
     if (args.projectId) args = { ...args, host: this.project(args.projectId).host };
     else if (args.host) {
@@ -1613,7 +1619,7 @@ export class Workspace {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) throw new Error('The main agent cannot be forked.');
     const adapter = this.opts.adapters[task.provider];
-    if (!adapter?.forkSession || !adapter.forkPoints) throw new Error(`${task.provider} conversations cannot be forked yet.`);
+    if (!adapter?.forkSession || !adapter.forkPoints) throw new Error(`${providerName(task.provider)} conversations cannot be forked yet.`);
     if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
     const nativeSessionId = this.currentSession(task)?.nativeSessionId;
     if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
@@ -1725,12 +1731,18 @@ export class Workspace {
    */
   private memoryGiven(task: Task, covered = new Map<string, Set<string>>()): MemoryRecord[] {
     const machine = task.host ?? LOCAL;
-    const file = task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md';
+    // An ACP CLI reads its own rules file (shared/acp-agents.ts `memory`), if the app writes one there.
+    const acp = acpAgent(task.provider);
+    if (acp && !acp.memory) return memoryForTask(task, this.store.data.memory);
+    const file = acp?.memory?.file ?? (task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md');
     // (Worked out once per machine and file when asked for many agents at once.)
     let inFiles = covered.get(`${machine}|${file}`);
     if (!inFiles) {
       const link = this.store.data.settings.memoryLinks?.[machine];
-      const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+      const targets = this.writeback.targets(machine);
+      // An ACP CLI's file is written only where its folder exists: only then does it hold the notes.
+      const written = !acp?.memory || targets.some((t) => t.kind === acp.memory!.kind && t.added);
+      const viaFiles = !!link && !link.unlinking && !targets.some((t) => t.paused) && written;
       inFiles = viaFiles ? notesFor(machine, file, this.store.data.memory).covered : new Set<string>();
       covered.set(`${machine}|${file}`, inFiles);
     }
@@ -1911,7 +1923,14 @@ export class Workspace {
     const key = `${task.provider}|${task.host ?? ''}`;
     let list = this.modelLists.get(key);
     if (!list) {
-      list = adapter.listModels(task.host);
+      // Some CLIs (ACP) offer their models per session: one not started yet is started quietly for it
+      // (its own session, which its first message then uses; nothing is sent).
+      const ask = adapter.listModels.bind(adapter);
+      list = ask(task.host).catch(async (error) => {
+        if (this.live.has(taskId) || !isAcpProvider(task.provider)) throw error;
+        await this.connect(taskId, true);
+        return ask(task.host);
+      });
       this.modelLists.set(key, list);
       list.catch(() => this.modelLists.delete(key)); // a failure is not cached
     }
@@ -2188,7 +2207,7 @@ export class Workspace {
       }
       case 'retrying':
         task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
-        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;
+        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}${event.maxAttempts ? `/${event.maxAttempts}` : ''})`;
         break;
       case 'approvalRequested':
         if (!this.findOpenByRequest(taskId, event.requestId)) {
@@ -2580,8 +2599,8 @@ export class Workspace {
     const picked = new Set([decision, ...Object.values(answers ?? {}).flatMap((v) => String(v).split(/\s*,\s*/))].filter(Boolean).map(String));
     const offered = a.kind === 'approval' ? (a.options ?? []) : (a.questions ?? []).flatMap((q) => q.options);
     const options = offered.slice(0, 8).map((o) => ({ label: clip(o.label, 60), chosen: picked.has(o.id) || picked.has(o.label) }));
-    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${task.provider}: ${label}`, {
-      decision: { kind: a.kind === 'approval' ? 'approval' : 'answer', label: clip(chosen, 200), about: clip(a.headline, 200), ...(options.length ? { options } : {}) },
+    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${providerName(task.provider)}: ${label}`, {
+      decision: { kind: a.kind === 'approval' ? 'approval' : 'answer', label: clip(chosen, 200), about: clip(a.headline, 200), ...(options.length ? { options } : {}), ...(a.kind === 'approval' && declinedOption(a.options?.find((o) => o.id === decision)) ? { declined: true } : {}) },
     });
     this.changed();
   }
@@ -2786,7 +2805,7 @@ export class Workspace {
   private async scanMachine(host?: string): Promise<MemoryCandidate[]> {
     const r = host
       ? await sshRun(host, `sh -c ${shq(MEMORY_SCAN_SCRIPT)}`, 30_000)
-      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
+      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}; unset XDG_CONFIG_HOME\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
     const out = parseScanOutput(r.stdout);
     if (!out.complete) throw new Error(host ? sshError(host, r.stderr) : r.stderr.trim() || 'Could not read the memory files.');
     return candidatesFrom(host, out.home, out.files, this.store.data.projects, out.shared);
@@ -3358,7 +3377,7 @@ export class Workspace {
   }
 
   availableProviders(): AgentProvider[] {
-    return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
+    return CODING_PROVIDERS.filter((p) => this.providerReady(p));
   }
 
   // ---------------------------------------------------------------- file preview
@@ -3454,4 +3473,15 @@ export function withLimits(all: Record<string, ProviderLimits>, task: Pick<Task,
 export function mergeLimits(prev: ProviderLimits | undefined, windows: LimitWindow[], plan?: string): ProviderLimits {
   const keep = (prev?.windows ?? []).filter((w) => !windows.some((n) => n.key === w.key));
   return { windows: [...windows, ...keep].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity)), at: now(), ...((plan ?? prev?.plan) ? { plan: plan ?? prev?.plan } : {}) };
+}
+
+/** An approval option that refuses (by its kind, or for providers without kinds by its label). */
+export function declinedOption(o: { kind?: string; label: string } | undefined): boolean {
+  if (!o) return false;
+  return o.kind ? o.kind.startsWith('reject') : /^(deny|reject|decline|no\b|don.t)/i.test(o.label.trim());
+}
+
+/** A provider as people know it (Claude Code, Codex, OpenCode…), for messages. */
+export function providerName(provider: string): string {
+  return acpAgent(provider)?.label ?? ({ claude: 'Claude Code', codex: 'Codex', mock: 'Mock' } as Record<string, string>)[provider] ?? provider;
 }

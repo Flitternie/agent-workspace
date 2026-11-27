@@ -14,7 +14,14 @@ export function RetryNotice({ retry }: { retry: RetryState }) {
   return (
     <div className="retry-notice" role="status" data-testid="retry-notice" title={retry.error}>
       <Icon name="history" size={12} />
-      {seconds ? t('{reason}, retrying in {s}s (attempt {n}/{max})', vars) : t('{reason}, retrying now (attempt {n}/{max})', vars)}
+      {/* No maximum: the CLI retries for as long as it decides (OpenCode). */}
+      {retry.maxAttempts
+        ? seconds
+          ? t('{reason}, retrying in {s}s (attempt {n}/{max})', vars)
+          : t('{reason}, retrying now (attempt {n}/{max})', vars)
+        : seconds
+          ? t('{reason}, retrying in {s}s (attempt {n})', vars)
+          : t('{reason}, retrying now (attempt {n})', vars)}
     </div>
   );
 }
@@ -22,7 +29,7 @@ export function RetryNotice({ retry }: { retry: RetryState }) {
 /** Under a turn that failed because the model was busy: what else the user can do besides Retry. */
 export function SwitchModelHint({ provider }: { provider: AgentProvider }) {
   const text =
-    provider === 'codex' || provider === 'claude'
+    provider !== 'mock'
       ? t('The model is busy or rate limited. Retry in a moment, or switch to another model with the model name next to the agent’s name.')
       : t('The model is busy or rate limited. Retry in a moment.');
   return (

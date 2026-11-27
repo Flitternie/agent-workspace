@@ -140,7 +140,7 @@ export function SessionMap({
 }
 
 function Decision({ d, onJump }: { d: MapDecision; onJump: (turnId: string) => void }) {
-  const label = d.kind === 'approval' ? t('Allowed: {x}', { x: d.label }) : d.kind === 'redirect' ? t('Changed course: {x}', { x: d.label }) : d.label;
+  const label = d.kind === 'approval' ? (d.declined ? t('Declined: {x}', { x: d.label }) : t('Allowed: {x}', { x: d.label })) : d.kind === 'redirect' ? t('Changed course: {x}', { x: d.label }) : d.label;
   return (
     <div className={`map-decision kind-${d.kind}`} data-testid="map-decision">
       <span className="map-twig" aria-hidden />
