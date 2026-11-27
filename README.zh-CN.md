@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
-  <img src="https://badgen.net/badge/%E6%94%AF%E6%8C%81/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode%20%C2%B7%20Antigravity/d97757" alt="支持 Claude Code、Codex、OpenCode 和 Antigravity">
+  <img src="https://badgen.net/badge/%E6%94%AF%E6%8C%81/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity%20%C2%B7%20OpenCode/d97757" alt="支持 Claude Code、Codex、Antigravity 和 OpenCode">
   <img src="https://badgen.net/badge/%E5%B9%B3%E5%8F%B0/macOS%20%C2%B7%20Windows/111" alt="macOS 和 Windows">
   <a href="LICENSE"><img src="https://badgen.net/badge/license/AGPL-3.0/16a34a" alt="AGPL-3.0"></a>
 </p>
@@ -31,7 +31,7 @@
   <img src="docs/assets/zh/demo.webp" alt="应用演示：几个 Agent 在工作，其中一个提问后排到最前；点进去在它的会话地图旁边回答；最后主 Agent 把一条指令转给所有人" width="900">
 </p>
 
-同时开过几个编码 Agent（Claude Code、Codex、OpenCode、Antigravity）的人都有体会：终端开了一堆，某个 Agent 等了你二十分钟你都没发现，想回头看它们之前试过什么也很费劲。Agent Workspace 把它们都放进一个窗口里。
+同时开过几个 Agent 的人都有体会：终端开了一堆，某个 Agent 等了你二十分钟你都没发现，想回头看它们之前试过什么也很费劲。Agent Workspace 把它们都放进一个窗口里，不管用的是 Claude Code、Codex、Antigravity 还是 OpenCode。
 
 ## 总览
 
@@ -75,42 +75,40 @@
 **教会一个 Agent，所有 Agent 都知道。**
 
 - 在你发过的消息上点「记住」，应用会把它提炼成一条笔记。记下的是你的要求，而不是原话；可以只对当前项目生效，也可以对所有项目生效。
-- 笔记会同步给所有 Agent，不管它用的是哪个 CLI，在本机还是在服务器上。正在运行的 Agent 会随下一条消息收到。
+- 笔记会同步给本机和服务器上的所有 Agent，不管它们用的是哪个 CLI。正在运行的 Agent 会随下一条消息收到。
 - 你自己写的记忆内容不会被改动：应用只改它自己加了标记的那一段，改之前会先备份。
 
 ## 其他功能
 
-- **对话旁的侧栏：** 预览文件、看这一轮的改动、用 `/btw` 问旁支问题、查 Agent 记住了什么，都不用离开对话
+- **对话旁的侧栏：** 预览文件、用 `/btw` 问旁支问题、查 Agent 记住了什么，都不用离开对话
 - **Fork：** 从之前任意一条消息处分叉，在新的 worktree 里换个方案试
 - **远端服务器：** 通过 SSH 让 Agent 在你的服务器上运行，直接用那里装好的 CLI 和登录状态
+- **手机远程控制：** 在手机上接着管 Agent：Claude Code 用 Claude App，Codex 用 ChatGPT App
 - **图片和文件：** 粘贴截图、用 `@` 引用文件，或者直接拖进来
 - **`!` 命令：** 在 Agent 的目录里直接运行命令，它能看到输出
-- **单独选模型：** 给某个 Agent 换模型，从下一轮起生效
-- **接上已有会话：** 这四个 CLI 之前的会话都可以接着用
+- **单独选模型：** 在 Agent 的标题栏上随时换模型
+- **接上已有会话：** 在终端里开过的会话，可以带着完整历史接着用
 
-以上功能，每个 CLI 都支持：
+各 CLI 支持的功能：
 
-| | Claude Code | Codex | OpenCode | Antigravity |
+| | Claude Code | Codex | Antigravity | OpenCode |
 |---|:---:|:---:|:---:|:---:|
 | 总览卡片、在卡片上处理权限请求 | ✓ | ✓ | ✓ | ✓ |
 | 作为主 Agent | ✓ | ✓ | ✓ | ✓ |
 | 会话地图与团队地图 | ✓ | ✓ | ✓ | ✓ |
-| Fork | ✓ | ✓ | ✓ | ✓¹ |
+| Fork | ✓ | ✓ | ✓ | ✓ |
 | 旁支提问 | ✓ | ✓ | ✓ | ✓ |
 | 图片与 `@` 文件 | ✓ | ✓ | ✓ | ✓ |
 | 在 SSH 服务器上运行 | ✓ | ✓ | ✓ | ✓ |
 | 接上已有会话 | ✓ | ✓ | ✓ | ✓ |
 | 显示子 Agent | ✓ | ✓ | ✓ | ✓ |
-| 用手机远程控制 | ✓ | ✓² | | |
+| 用手机远程控制 | ✓ | ✓ | | |
 
-¹ Antigravity 没有自带的会话分叉：分叉时以文字形式带上之前的对话。
-² 在 ChatGPT App 里扫码配对；需要 Codex 用 ChatGPT 账号登录。
-
-OpenCode 和 Antigravity 通过 [Agent Client Protocol](https://agentclientprotocol.com)（`opencode acp`、`agy acp`）接入，其余部分（登录、额度、分叉）用各 CLI 自己的命令。
+Antigravity 和 OpenCode 通过 [Agent Client Protocol](https://agentclientprotocol.com) 接入，登录、额度、分叉这些由各 CLI 自己的命令补上。
 
 ## 开始使用
 
-1. **安装并登录一个编码 Agent**（Claude Code、Codex、OpenCode 或 Antigravity，装几个都可以）。Agent Workspace 直接使用它们和你现有的订阅，不需要另外注册账号或申请 API key。OpenCode 用自带的免费模型时，不登录也能用。
+1. **安装并登录一个 Agent：** Claude Code、Codex、Antigravity 或 OpenCode，装一个或几个都行。Agent Workspace 直接用你现有的订阅，不需要另外注册账号或申请 API key；OpenCode 的免费模型连登录都不用。
 2. **下载**[最新版本](https://github.com/Flitternie/agent-workspace/releases/latest)：macOS（Apple Silicon）用 `.dmg`，Windows（x64，实验性）用 `.exe`。
 3. **打开应用**，添加一个项目文件夹，新建 Agent；也可以直接告诉主 Agent 你要做什么。
 
@@ -122,7 +120,7 @@ OpenCode 和 Antigravity 通过 [Agent Client Protocol](https://agentclientproto
 <details>
 <summary><b>需要另外付费或者申请 API key 吗？</b></summary>
 
-不需要。Agent 用的就是你已经装好的编码 Agent（Claude Code、Codex、OpenCode、Antigravity），走你现有的订阅。只有语音识别选用 OpenAI 时，才需要一个 OpenAI key。
+不需要。应用用的就是你已经装好的 Agent，走你现有的订阅。只有语音识别选用 OpenAI 时，才需要一个 OpenAI key。
 </details>
 
 <details>
@@ -134,17 +132,17 @@ OpenCode 和 Antigravity 通过 [Agent Client Protocol](https://agentclientproto
 <details>
 <summary><b>我的代码和对话会经过你们的服务器吗？</b></summary>
 
-不会，我们没有服务器。Agent 通过你电脑上的 `claude`、`codex`、`opencode` 和 `agy` CLI 运行，也可以通过 SSH 在你自己的服务器上运行，工作区数据都存在你的硬盘上。
+不会，我们没有服务器。Agent 通过各自的 CLI（`claude`、`codex`、`agy`、`opencode`）在你的电脑上运行，也可以通过 SSH 在你自己的服务器上运行，工作区数据都存在你的硬盘上。
 </details>
 
 <details>
 <summary><b>它会替我批准权限请求吗？</b></summary>
 
-不会。每个 Agent 沿用 CLI 自己的权限模式，你可以单独设置，应用不会绕过。主 Agent 也不能替别的 Agent 批准请求。
+不会。每个 Agent 按你给它设的权限模式运行，由它的 CLI 自己的权限机制执行，应用不会绕过。主 Agent 也不能替别的 Agent 批准请求。
 </details>
 
 <details>
-<summary><b>会改我的 CLAUDE.md 或 AGENTS.md 吗？</b></summary>
+<summary><b>会改我的 CLAUDE.md、AGENTS.md 或 GEMINI.md 吗？</b></summary>
 
 只会改它自己加了标记的那一段，改之前会先备份，你自己写的内容不会动。不想用的话，可以在设置里关掉共享记忆。
 </details>
@@ -166,7 +164,7 @@ OpenCode 和 Antigravity 通过 [Agent Client Protocol](https://agentclientproto
 <details>
 <summary><b>从源码运行</b></summary>
 
-需要：macOS（已在 Apple Silicon 上测试）、Node 22，以及 `claude`、`codex`、`opencode`、`agy` 中至少一个 CLI。
+需要：macOS（已在 Apple Silicon 上测试）、Node 22，以及 `claude`、`codex`、`agy`、`opencode` 中至少一个 CLI。
 
 ```bash
 npm run setup   # 依赖装在 app/node_modules
