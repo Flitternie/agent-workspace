@@ -1984,17 +1984,22 @@ export class Workspace {
     return { ok: true };
   }
 
-  /** Each CLI's model list (per machine), asked once: it changes with the CLI or the account, rarely. */
+  /**
+   * Each CLI's model list (per machine): the last one read, or the read under way. It changes with the
+   * CLI and with the account (a new plan, another sign-in), so the picker asks again each time it opens.
+   */
   private modelLists = new Map<string, Promise<ModelOption[]>>();
+  private modelReads = new Set<string>();
 
-  /** The models this agent's CLI offers, for the picker in its header. */
-  listModels(taskId: string): Promise<ModelOption[]> {
+  /** The models this agent's CLI offers, for the picker in its header: the last list read, or (`fresh`) read again now. */
+  listModels(taskId: string, fresh = false): Promise<ModelOption[]> {
     const task = this.task(taskId);
     const adapter = this.opts.adapters[task.provider];
     if (!adapter?.listModels) return Promise.resolve([]);
     const key = `${task.provider}|${task.host ?? ''}`;
     let list = this.modelLists.get(key);
-    if (!list) {
+    // One read at a time: a fresh ask while one is under way gets that one.
+    if (!list || (fresh && !this.modelReads.has(key))) {
       // Some CLIs (ACP) offer their models per session: one not started yet is started quietly for it
       // (its own session, which its first message then uses; nothing is sent).
       const ask = adapter.listModels.bind(adapter);
@@ -2003,8 +2008,21 @@ export class Workspace {
         await this.connect(taskId, true);
         return ask(task.host);
       });
+      const previous = this.modelLists.get(key);
       this.modelLists.set(key, list);
-      list.catch(() => this.modelLists.delete(key)); // a failure is not cached
+      this.modelReads.add(key);
+      const read = list;
+      // A failure is not kept: the last good list stays.
+      read.then(
+        () => this.modelReads.delete(key),
+        () => {
+          this.modelReads.delete(key);
+          if (this.modelLists.get(key) === read) {
+            if (previous) this.modelLists.set(key, previous);
+            else this.modelLists.delete(key);
+          }
+        },
+      );
     }
     return list;
   }

@@ -51,7 +51,7 @@ export const ipcSchemas = {
   /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
   'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),
   'task:interrupt': z.object({ taskId: id }),
-  'task:models': z.object({ taskId: id }),
+  'task:models': z.object({ taskId: id, fresh: z.boolean().optional() }),
   'task:setModel': z.object({ taskId: id, model: z.string().min(1).max(200).nullable() }),
   'task:shell': z.object({ taskId: id, command: text.min(1) }),
   'memory:linkPreview': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
