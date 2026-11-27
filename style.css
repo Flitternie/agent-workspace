@@ -1774,7 +1774,7 @@ html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weigh
 /* Three groups, close within and apart between: the words, the downloads with what it works with, the app. */
 .hero .prompt { margin-top: 24px; gap: 8px; font-size: clamp(15px, 1.35vw, 18px); }
 .hero .cta { margin-top: 44px; }
-.hero-works { margin-top: 18px; }
+.hero-works { margin-top: 30px; }
 .hero .stage { margin-top: 64px; }
 @media (max-width: 640px) {
   /* Two lines on a phone anyway: as large as they fit. */
@@ -1792,3 +1792,9 @@ html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weigh
    The full stop always ends the line; the comma does on a phone only (mid-line on wider screens). */
 .hero h1 .grad.hang-end { margin-right: -0.62em; }
 @media (max-width: 640px) { .hero h1 .hang-narrow { margin-right: -0.5em; } }
+/* On a phone the nav keeps GitHub as an icon beside the language switch. */
+@media (max-width: 640px) {
+  .nav-actions > .nav-gh { display: inline-flex; width: 34px; padding: 0; justify-content: center; }
+  .nav-gh .gh-label { display: none; }
+  .hero-works { margin-top: 24px; }
+}
