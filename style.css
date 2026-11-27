@@ -1788,3 +1788,7 @@ html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weigh
 /* The Chinese headline on one line, except on a phone. */
 .br-narrow { display: none; }
 @media (max-width: 640px) { .br-narrow { display: inline; } }
+/* Chinese punctuation at a line's end hangs: its blank right half no longer pulls the centred line to the left.
+   The full stop always ends the line; the comma does on a phone only (mid-line on wider screens). */
+.hero h1 .grad.hang-end { margin-right: -0.62em; }
+@media (max-width: 640px) { .hero h1 .hang-narrow { margin-right: -0.5em; } }
