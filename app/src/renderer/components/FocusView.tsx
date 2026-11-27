@@ -263,7 +263,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
   // Conversations on this computer can be forked once saved, when their provider supports it.
-  const canFork = !isMainAgent(task) && !task.host && !!snapshot.capabilities.find((c) => c.provider === task.provider)?.fork && !!session?.nativeSessionId;
+  const canFork = !isMainAgent(task) && !task.host && (() => { const c = snapshot.capabilities.find((x) => x.provider === task.provider); return !!(c?.fork || c?.forkElsewhere); })() && !!session?.nativeSessionId;
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');

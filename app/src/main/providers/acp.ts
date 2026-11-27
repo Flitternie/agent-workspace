@@ -18,6 +18,7 @@ import { authScript, parseAuth, readAuth, splitAuthScript } from './acp-auth';
 import { acpNative, mergeEnv } from './acp-native';
 import { acpApprovalHeadline, acpBlockText, commandOf, readOnlyCommand, acpPlan, acpToolInfo, acpToolStatus, mergeAcpTool, type AcpTool } from './acp-content';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, HistoryImage, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
+import { conversationCopy, COPY_NOTE, parseCopy, type SaidLine } from '../../shared/conversation-copy';
 import { cleanUserText } from './user-text';
 import { AcpSubtasks } from './subtasks';
 
@@ -230,51 +231,7 @@ function modelsOf(result: Rec): { kind: 'config'; configId: string; current: str
   return undefined;
 }
 
-export interface SaidLine {
-  role: 'user' | 'assistant' | 'tool';
-  text: string;
-}
-
-const COPY_OPEN = '<conversation-copy>';
-const COPY_CLOSE = '</conversation-copy>';
-const COPY_LIMIT = 200_000;
-
-/**
- * A conversation carried into a new session as text (a fork or a side question where the CLI cannot
- * copy sessions itself): JSON lines between tags, then what follows. Long ones keep their latest part.
- */
-export function conversationCopy(lines: SaidLine[], after: string): string {
-  const kept: SaidLine[] = [];
-  let size = 0;
-  for (const l of [...lines].reverse()) {
-    const line = { role: l.role, text: l.text.slice(0, 20_000) };
-    size += line.text.length + 40;
-    if (size > COPY_LIMIT) break;
-    kept.unshift(line);
-  }
-  return `${COPY_OPEN}\n${kept.map((l) => JSON.stringify(l)).join('\n')}\n${COPY_CLOSE}\n\n${after}`;
-}
-
-/** The lines of a conversation copy, and the message that came with it (when it is more than the copy's own note). */
-export function parseCopy(text: string): { lines: SaidLine[]; rest?: string } | undefined {
-  const start = text.indexOf(COPY_OPEN);
-  const end = text.indexOf(COPY_CLOSE);
-  if (start === -1 || end < start || text.slice(0, start).trim()) return undefined;
-  const lines: SaidLine[] = [];
-  for (const raw of text.slice(start + COPY_OPEN.length, end).split('\n')) {
-    try {
-      const l = rec(JSON.parse(raw));
-      if ((l.role === 'user' || l.role === 'assistant' || l.role === 'tool') && typeof l.text === 'string') lines.push({ role: l.role, text: l.text });
-    } catch {
-      /* blank */
-    }
-  }
-  const rest = text.slice(end + COPY_CLOSE.length).trim();
-  return { lines, rest: rest && rest !== COPY_NOTE ? rest.replace(/^\(A side question[^)]*\)\s*/, '') : undefined };
-}
-
-/** What goes with a copied conversation that is to be continued (forks): only an acknowledgement is asked for. */
-export const COPY_NOTE = 'The conversation above is a copy of an earlier conversation with you, carried over from another session. Continue from it as if it were this one. For now reply with only: ok';
+export { conversationCopy, COPY_NOTE, parseCopy, type SaidLine };
 
 const SIDE_NOTE =
   '(A side question, asked while you work on the conversation above. Answer it briefly from what you already know of that conversation. Do not use tools or change anything; this answer does not become part of the conversation.)';

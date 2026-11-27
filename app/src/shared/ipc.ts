@@ -69,7 +69,7 @@ export const ipcSchemas = {
   'skills:setEnabled': z.object({ name: z.string().min(1).max(64), enabled: z.boolean() }),
   'skills:remove': z.object({ name: z.string().min(1).max(64) }),
   'task:forkPoints': z.object({ taskId: id }),
-  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
+  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional(), provider: agentProvider.optional() }),
   'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
   'task:warm': z.object({ taskId: id }),

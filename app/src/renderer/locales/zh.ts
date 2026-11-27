@@ -673,6 +673,7 @@ export const zh: Record<string, string> = {
   'Fork {name}': '分叉 {name}',
   'Forking…': '正在分叉…',
   'Fork from': '从哪里分叉',
+  'Continue in': '在哪个 Agent 里继续',
   'Now (the whole conversation)': '现在（完整对话）',
   'Before:': '在这条之前：',
   'Loading…': '加载中…',

@@ -30,6 +30,7 @@ import type { ModelOption,
 import { accountKey, CODING_PROVIDERS, type CodingProvider } from '../shared/types';
 import { acpAgent, isAcpProvider } from '../shared/acp-agents';
 import { clipOutput } from '../shared/content';
+import { CARRY_NOTE, conversationCopy, parseCopy, type SaidLine } from '../shared/conversation-copy';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { deltaSize, instructionsFor, memoryDelta, memoryForTask, memoryUpdateText, seenOf } from './memory';
@@ -373,7 +374,7 @@ export class Workspace {
       if (!a) continue;
       try {
         // Fork support comes from the adapter itself, so the renderer offers it for every provider that has it.
-        caps.push({ ...(await a.capabilities()), fork: !!(a.forkSession && a.forkPoints) });
+        caps.push({ ...(await a.capabilities()), fork: !!(a.forkSession && a.forkPoints), forkElsewhere: !!(a.readHistory && a.forkPoints) });
       } catch (error) {
         this.log('capabilities failed', a.provider, error);
       }
@@ -793,6 +794,11 @@ export class Workspace {
       const items: TranscriptItem[] = [];
       for (const e of events) {
         if (e.type !== 'transcriptItem') continue;
+        const copied = copiedItems(task.taskId, e);
+        if (copied) {
+          items.push(...copied);
+          continue;
+        }
         const i = items.findIndex((h) => h.id === e.itemId);
         const item = mergeItem(i === -1 ? undefined : items[i], { id: e.itemId, taskId: task.taskId, role: e.role, text: e.text, toolLabel: e.toolLabel, toolStatus: e.toolStatus, createdAt: now() }, e.tool);
         if (i === -1) items.push(item);
@@ -1113,6 +1119,7 @@ export class Workspace {
     this.refreshSharedFolders();
     d.attention = d.attention.filter((a) => a.taskId !== taskId);
     d.memory = d.memory.filter((m) => !(m.scope === 'task' && m.scopeId === taskId));
+    if (d.carried) delete d.carried[taskId];
     this.coordinatorSay(note);
     this.changed();
     return note;
@@ -1225,6 +1232,11 @@ export class Workspace {
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
+          const copied = copiedItems(taskId, event);
+          if (copied) {
+            for (const c of copied) if (!history.some((h) => h.id === c.id)) history.push(c);
+            return;
+          }
           const prev = history.findIndex((h) => h.id === event.itemId);
           const images = this.historyImages(event.images, task.host);
           const item = mergeItem(prev === -1 ? undefined : history[prev], { id: event.itemId, taskId, role: event.role, text: event.text, ...(images ? { images } : {}), toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() }, event.tool);
@@ -1617,16 +1629,56 @@ export class Workspace {
 
   // ---------------------------------------------------------------- forking
 
-  /** The task's saved conversation, if its provider can fork it here. */
-  private forkSource(taskId: string) {
+  /** The task's saved conversation, if its provider can fork it here (onto another CLI: if it can read it back). */
+  private forkSource(taskId: string, onto?: AgentProvider) {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) throw new Error('The main agent cannot be forked.');
     const adapter = this.opts.adapters[task.provider];
-    if (!adapter?.forkSession || !adapter.forkPoints) throw new Error(`${providerName(task.provider)} conversations cannot be forked yet.`);
+    const elsewhere = !!onto && onto !== task.provider;
+    if (!adapter?.forkPoints || !(elsewhere ? adapter.readHistory : adapter.forkSession))
+      throw new Error(`${providerName(task.provider)} conversations cannot be forked${elsewhere ? ' onto another CLI' : ''} yet.`);
+    if (elsewhere && !this.opts.adapters[onto]) throw new Error(`${providerName(onto)} is not available here.`);
     if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
     const nativeSessionId = this.currentSession(task)?.nativeSessionId;
     if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
-    return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkSession' | 'forkPoints'>>, nativeSessionId };
+    return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkPoints'>> & typeof adapter, nativeSessionId };
+  }
+
+  /**
+   * A saved conversation as said, for another CLI to continue: the transcript as shown (each message,
+   * tools by their titles) up to just before the fork point's prompt, read back through the provider.
+   */
+  private async carryOver(src: Task, adapter: ProviderAdapter, nativeSessionId: string, upToMessageId?: string): Promise<{ items: TranscriptItem[]; lines: SaidLine[] }> {
+    const events = await adapter.readHistory!(nativeSessionId, src.cwd, src.host);
+    let items: TranscriptItem[] = [];
+    for (const e of events) {
+      if (e.type !== 'transcriptItem') continue;
+      const copied = copiedItems(src.taskId, e);
+      if (copied) {
+        items.push(...copied);
+        continue;
+      }
+      const i = items.findIndex((h) => h.id === e.itemId);
+      const item = mergeItem(i === -1 ? undefined : items[i], { id: e.itemId, taskId: src.taskId, role: e.role, text: e.text, toolLabel: e.toolLabel, toolStatus: e.toolStatus, createdAt: now() }, e.tool);
+      if (i === -1) items.push(item);
+      else items[i] = item;
+    }
+    if (upToMessageId) {
+      const points = await adapter.forkPoints!(nativeSessionId, src.cwd);
+      const cut = forkCut(items, points, upToMessageId);
+      if (cut === undefined) throw new Error('That point of the conversation was not found; fork it as it is now instead.');
+      items = items.slice(0, cut);
+    }
+    const lines = items.flatMap((i): SaidLine[] => {
+      if (i.role === 'user' || i.role === 'assistant') return i.text.trim() ? [{ role: i.role, text: i.text }] : [];
+      if (i.role === 'tool') {
+        const title = i.tool?.title || i.toolLabel || i.text.split('\n')[0];
+        return title?.trim() ? [{ role: 'tool', text: title }] : [];
+      }
+      return [];
+    });
+    if (!lines.length) throw new Error(`There is nothing to fork in ${src.alias}'s conversation yet.`);
+    return { items, lines };
   }
 
   /** Where the task's conversation can be forked: before each of the user's earlier prompts, oldest first. */
@@ -1643,9 +1695,11 @@ export class Workspace {
    */
   async forkTask(
     taskId: string,
-    opts: { upToMessageId?: string; isolate: boolean; instruction?: string; name?: string; permissionMode?: PermissionMode },
+    opts: { upToMessageId?: string; isolate: boolean; instruction?: string; name?: string; permissionMode?: PermissionMode; provider?: AgentProvider },
   ): Promise<Task> {
-    const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
+    const { task: src, adapter, nativeSessionId } = this.forkSource(taskId, opts.provider);
+    // Onto another CLI: a new agent there, given the conversation as text with its first message.
+    const onto = opts.provider && opts.provider !== src.provider ? opts.provider : undefined;
     // Mid-turn, the saved conversation can end on a tool call with no result yet.
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
       throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
@@ -1662,9 +1716,11 @@ export class Workspace {
       const prefix = (await run('git', ['-C', src.cwd, 'rev-parse', '--show-prefix'])).stdout.trim().replace(/\/+$/, '');
       cwd = prefix ? join(worktree.path, prefix) : worktree.path;
     }
-    let forkId: string;
+    let forkId = '';
+    let carried: { items: TranscriptItem[]; lines: SaidLine[] } | undefined;
     try {
-      forkId = await adapter.forkSession(nativeSessionId, { cwd: src.cwd, targetCwd: cwd, upToMessageId: opts.upToMessageId, title });
+      if (onto) carried = await this.carryOver(src, adapter, nativeSessionId, opts.upToMessageId);
+      else forkId = await adapter.forkSession!(nativeSessionId, { cwd: src.cwd, targetCwd: cwd, upToMessageId: opts.upToMessageId, title });
     } catch (error) {
       if (worktree) await this.worktrees.removeIfClean(worktree);
       throw error;
@@ -1675,9 +1731,10 @@ export class Workspace {
     const ids = this.newTaskIds();
     const { taskId: newId, alias } = ids;
     const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';
+    const on = onto ? ` on ${providerName(onto)}` : '';
     const task = this.addTask(ids, {
       projectId: src.projectId,
-      provider: src.provider,
+      provider: onto ?? src.provider,
       host: src.host,
       cwd,
       worktree,
@@ -1685,24 +1742,32 @@ export class Workspace {
       name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name, labelLang(alias))),
       nameSource: 'auto',
       title,
-      status: 'disconnected',
-      summary: `Forked from ${src.alias}'s conversation ${point}. Send a message to continue.`,
-      session: { nativeSessionId: forkId, integrationMode: 'resumed' },
+      status: onto ? 'idle' : 'disconnected',
+      summary: `Forked from ${src.alias}'s conversation ${point}${on}. Send a message to continue.`,
+      session: onto ? undefined : { nativeSessionId: forkId, integrationMode: 'resumed' },
       permissionMode: 'permissionMode' in opts ? opts.permissionMode : src.permissionMode,
       forkedFrom: { taskId: src.taskId, alias: src.alias },
       mockScript: src.mockScript,
     });
     const notes = [
-      `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
+      `${alias} continues ${src.alias}'s conversation ${point}${on}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
       ...(copied?.error
         ? [`${src.alias}'s uncommitted changes were not fully copied (${copied.error}); check ${alias}'s files before relying on them.`]
         : copied?.files
           ? [`${src.alias}'s uncommitted changes were copied too (${copied.files} file${copied.files === 1 ? '' : 's'}).`]
           : []),
     ];
-    this.coordinatorSay(`Forked ${src.alias} as ${alias}. ${notes.join(' ')}`);
+    this.coordinatorSay(`Forked ${src.alias} as ${alias}${on}. ${notes.join(' ')}`);
+    if (carried) {
+      // Shown as it was; the new CLI receives it with the first message.
+      (this.store.data.carried ??= {})[newId] = carried.lines;
+      this.store.setTranscript(newId, carried.items.slice(-400).map((i) => ({ ...i, taskId: newId, streaming: false })));
+      for (const cb of this.transcriptListeners) cb(newId, null);
+      const last = [...carried.items].reverse().find((x) => x.role === 'assistant' && x.text.trim());
+      if (last) task.summary = summaryFor(last.text);
+    }
     this.changed();
-    if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
+    if (!onto && src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
     const instruction = opts.instruction?.trim();
     // A fork with its own instruction is new work: label that work, not the original's.
     if (instruction && !opts.name?.trim()) void this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
@@ -1835,11 +1900,15 @@ export class Workspace {
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
       const openNote = this.openRequestNote(task, opts.openRequest);
-      const delivery = await live.session.send([handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n'), {
+      // An agent continuing a conversation from another CLI gets it with its first message.
+      const carried = this.store.data.carried?.[taskId];
+      const message = [handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n');
+      const delivery = await live.session.send(carried ? conversationCopy(carried, `${CARRY_NOTE}\n\n${message}`) : message, {
         interrupt: opts.interrupt,
         ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
       });
       this.shellOutput.delete(taskId);
+      if (carried) delete this.store.data.carried![taskId];
       if (update) {
         task.memorySeen = seenOf(given);
         task.injectedMemoryIds = given.map((m) => m.id);
@@ -3320,7 +3389,7 @@ export class Workspace {
    * just before an earlier prompt (matched by its start). In its own worktree when the project is a
    * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
-  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean }): Promise<{ task: Task; delivery: DispatchResult }> {
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean; provider?: AgentProvider }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
     // Whitespace as read_agent and the error below show it: collapsed.
@@ -3340,7 +3409,7 @@ export class Workspace {
     const RANK: Record<PermissionMode, number> = { ask: 0, edits: 1, auto: 2 };
     const fallback = this.store.data.settings.permissionMode ?? 'auto';
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
-    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
+    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode, provider: args.provider });
     if (!args.label?.trim()) void this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
     return { task, delivery: await this.send(task.taskId, args.instruction, 'main', { images: args.withImages ? this.userImages() : undefined }) };
   }
@@ -3513,4 +3582,33 @@ export function declinedOption(o: { kind?: string; label: string } | undefined):
 /** A provider as people know it (Claude Code, Codex, OpenCode…), for messages. */
 export function providerName(provider: string): string {
   return acpAgent(provider)?.label ?? ({ claude: 'Claude Code', codex: 'Codex', mock: 'Mock' } as Record<string, string>)[provider] ?? provider;
+}
+
+/**
+ * A saved user message that carries a copied conversation (a fork onto another CLI, or one where the
+ * CLI copies sessions as text) is shown as that conversation, then the message that came with it.
+ */
+function copiedItems(taskId: string, e: Extract<ProviderEvent, { type: 'transcriptItem' }>): TranscriptItem[] | undefined {
+  const copy = e.role === 'user' ? parseCopy(e.text) : undefined;
+  if (!copy) return undefined;
+  const at = now();
+  const items: TranscriptItem[] = copy.lines.flatMap((l, i) =>
+    l.role === 'tool' ? [] : [{ id: `${e.itemId}-copy-${i}`, taskId, role: l.role, text: l.text, createdAt: at }],
+  );
+  if (copy.rest) items.push({ id: e.itemId, taskId, role: 'user', text: copy.rest, createdAt: at });
+  return items;
+}
+
+/**
+ * Where a conversation is cut for a fork onto another CLI: just before the user message that the fork
+ * point names (its prompt; the same text asked again counts in order). Fork points start at the second prompt.
+ */
+export function forkCut(items: Pick<TranscriptItem, 'role' | 'text'>[], points: ForkPoint[], upToMessageId: string): number | undefined {
+  const at = points.findIndex((p) => p.upToMessageId === upToMessageId);
+  if (at === -1) return undefined;
+  const same = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+  const prompt = points[at].prompt;
+  const nth = points.slice(0, at).filter((p) => same(p.prompt, prompt)).length;
+  const users = items.flatMap((i, n) => (i.role === 'user' ? [n] : []));
+  return users.slice(1).filter((n) => same(items[n].text, prompt))[nth];
 }
