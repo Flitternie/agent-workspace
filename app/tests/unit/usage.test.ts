@@ -119,7 +119,7 @@ describe('accumulating usage', () => {
 });
 
 describe('limits per account', () => {
-  it('keeps a provider on another machine apart from the same provider on this Mac', async () => {
+  it('keeps a provider on another machine apart from the same provider on this computer', async () => {
     const { withLimits } = await import('../../src/main/workspace');
     const w = (usedPercent: number) => [{ key: 'five_hour', minutes: 300, usedPercent, resetsAt: 0 }] as never;
     let all = withLimits({}, { provider: 'claude' }, w(34));
@@ -161,6 +161,6 @@ describe('limit windows beyond the plan', () => {
     const { shownWindows } = await import('../../src/renderer/components/SessionUsage');
     expect(shownWindows(windows).map((w) => w.key)).toEqual(['five_hour', 'seven_day', 'seven_day_opus']);
     expect(windowLabel(windows.find((w) => w.key === 'seven_day_opus')!)).toBe('week (Opus only)');
-    expect(shownWindows(windows).map(windowLabel).join(' ')).not.toMatch(/omelette|_/);
+    expect(shownWindows(windows).map((w) => windowLabel(w)).join(' ')).not.toMatch(/omelette|_/);
   });
 });

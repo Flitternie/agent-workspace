@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { CODING_PROVIDERS, type AgentProvider, type CodingProvider } from './types';
+import { ACP_IDS, type AcpProvider } from './acp-agents';
 
 // Every renderer -> main call goes through one of these named channels. The main
 // process validates the payload with the schema before acting on it; the preload
@@ -9,6 +11,9 @@ const id = z.string().min(1).max(200);
 const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
 /** A stored image (main/attachments.ts names them by their content). */
+/** Any provider an agent can be created on (the ACP CLIs included). */
+const acpProvider = z.enum(ACP_IDS as [AcpProvider, ...AcpProvider[]]);
+const agentProvider = z.enum(['mock', ...CODING_PROVIDERS] as [AgentProvider, ...AgentProvider[]]);
 const imageRef = z.object({ id: z.string().regex(/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/), mediaType: z.string().max(50), name: z.string().max(200).optional() });
 
 /** A research tree as the page saves it (shared/research.ts). */
@@ -79,10 +84,14 @@ export const ipcSchemas = {
   'ssh:loginCode': z.object({ host, provider: z.enum(['claude', 'codex']), code: z.string().min(4).max(2000) }),
   'ssh:loginCancel': z.object({ host, provider: z.enum(['claude', 'codex']) }),
   'ssh:connect': z.object({ host }),
+  'acp:login': z.object({ provider: acpProvider, host: host.optional(), mode: z.literal('code').optional() }),
+  'acp:loginCode': z.object({ provider: acpProvider, host: host.optional(), code: z.string().min(4).max(2000) }),
+  'acp:loginWait': z.object({ provider: acpProvider, host: host.optional() }),
+  'acp:loginCancel': z.object({ provider: acpProvider, host: host.optional() }),
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({
     projectId: id,
-    provider: z.enum(['claude', 'codex', 'mock']),
+    provider: agentProvider,
     /** Optional: without one (and no instruction), the first message the user sends describes the task. */
     title: z.string().max(500).optional(),
     name: z.string().max(100).optional(),
@@ -96,13 +105,13 @@ export const ipcSchemas = {
   /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
   'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),
   'task:interrupt': z.object({ taskId: id }),
-  'task:models': z.object({ taskId: id }),
+  'task:models': z.object({ taskId: id, fresh: z.boolean().optional() }),
   'task:setModel': z.object({ taskId: id, model: z.string().min(1).max(200).nullable() }),
   'task:shell': z.object({ taskId: id, command: text.min(1) }),
   'memory:linkPreview': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
   'memory:link': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
   'memory:unlink': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
-  'memory:resolveShare': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]), kind: z.enum(['claude-md', 'claude-user', 'codex-md']), how: z.enum(['resume', 'adopt']) }),
+  'memory:resolveShare': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]), kind: z.enum(['claude-md', 'claude-user', 'codex-md', 'opencode-md', 'gemini-md']), how: z.enum(['resume', 'adopt']) }),
   'memory:resolveConflict': z.object({ id, take: z.enum(['source', 'mine']) }),
   'memory:restoreNote': z.object({ id }),
   'memory:backups': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]).optional() }),
@@ -114,7 +123,7 @@ export const ipcSchemas = {
   'skills:setEnabled': z.object({ name: z.string().min(1).max(64), enabled: z.boolean() }),
   'skills:remove': z.object({ name: z.string().min(1).max(64) }),
   'task:forkPoints': z.object({ taskId: id }),
-  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
+  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional(), provider: agentProvider.optional() }),
   'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
   'task:warm': z.object({ taskId: id }),
@@ -125,7 +134,7 @@ export const ipcSchemas = {
   'task:viewed': z.object({ taskId: id }),
   'task:setPermissionMode': z.object({ taskId: id, mode: z.enum(['auto', 'edits', 'ask']) }),
   'task:remove': z.object({ taskId: id }),
-  'sessions:discover': z.object({ projectId: id, provider: z.enum(['claude', 'codex']) }),
+  'sessions:discover': z.object({ projectId: id, provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]) }),
   'sessions:discoverAll': z.object({}),
   'session:map': z.object({ taskId: z.string() }),
   'btw:list': z.object({ taskId: z.string() }),
@@ -133,13 +142,13 @@ export const ipcSchemas = {
   'btw:clear': z.object({ taskId: z.string() }),
   /** Files in an agent's folder matching what is typed after @ in its message box. */
   'files:search': z.object({ taskId: id, query: z.string().max(500) }),
-  /** Files dropped on an agent's message box (their paths on this Mac): how to mention each. */
+  /** Files dropped on an agent's message box (their paths on this computer): how to mention each. */
   'files:dropped': z.object({ taskId: id, paths: z.array(z.string().min(1).max(4096)).max(20) }),
   'fs:listDirs': z.object({ dir: z.string().min(1).max(2000), host: z.string().max(200).optional() }),
   'sessions:discoverHost': z.object({ host }),
   'task:importSession': z.object({
     projectId: id.optional(),
-    provider: z.enum(['claude', 'codex']),
+    provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]),
     nativeSessionId: id,
     cwd: z.string().min(1).max(4096),
     host: host.optional(),
@@ -164,7 +173,7 @@ export const ipcSchemas = {
       z.object({
         kind: z.literal('create'),
         projectId: id,
-        provider: z.enum(['claude', 'codex', 'mock']),
+        provider: agentProvider,
         title: z.string().min(1).max(500),
       }),
     ]),
@@ -178,6 +187,7 @@ export const ipcSchemas = {
   'file:stat': z.object({ taskId: id, path: z.string().min(1).max(4096), allowOutside: z.boolean().optional() }),
   'task:setAside': z.object({ taskId: z.string(), on: z.boolean() }),
   'task:remoteControl': z.object({ taskId: z.string(), on: z.boolean() }),
+  'task:remoteControlRevoke': z.object({ taskId: z.string(), clientId: z.string().min(1).max(200) }),
   'apps:installed': z.object({}),
   'apps:open': z.object({ appId: z.string().regex(/^[a-z-]{2,40}$/), taskId: id, path: z.string().min(1).max(4096).optional(), line: z.number().int().min(1).max(10_000_000).optional(), allowOutside: z.boolean().optional() }),
   'memory:add': z.object({
@@ -204,7 +214,7 @@ export const ipcSchemas = {
   'memory:scanImports': z.object({}),
   'memory:import': z.object({ items: z.array(z.object({ key: z.string().min(1).max(5000), scope: z.enum(['global', 'project']), projectId: id.optional() })).min(1).max(1000) }),
   'memory:syncNow': z.object({}),
-  'settings:update': z.object({ onboarding: z.object({ started: z.boolean().optional(), dismissed: z.boolean().optional(), voiceSkipped: z.boolean().optional(), remoteSkipped: z.boolean().optional(), languageChosen: z.boolean().optional() }).optional(), overviewSlots: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4), z.literal(6), z.literal(9)]).optional(), alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['claude', 'codex', 'off']).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional(), mainChapters: z.enum(['auto', 'off']).optional(), memorySync: z.boolean().optional() }),
+  'settings:update': z.object({ onboarding: z.object({ started: z.boolean().optional(), dismissed: z.boolean().optional(), voiceSkipped: z.boolean().optional(), remoteSkipped: z.boolean().optional(), languageChosen: z.boolean().optional() }).optional(), overviewSlots: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4), z.literal(6), z.literal(9)]).optional(), alwaysConfirmVoice: z.boolean().optional(), autoListen: z.boolean().optional(), language: z.enum(['en', 'zh']).optional(), permissionMode: z.enum(['auto', 'edits', 'ask']).optional(), mainAgent: z.enum(['off', ...CODING_PROVIDERS] as ['off', ...CodingProvider[]]).optional(), sttModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), routerModel: z.string().regex(/^[\w.:-]{1,80}$/).optional(), voicePauseMs: z.number().int().min(800).max(8000).optional(), micMode: z.enum(['open', 'toggle', 'hold', 'both']).optional(), micShortcut: z.string().regex(/^((Meta|Control|Alt|Shift)\+){0,4}(Space|[A-Z0-9]|F([1-9]|1[0-9])|Up|Down|Left|Right)$/).optional(), mainChapters: z.enum(['auto', 'off']).optional(), memorySync: z.boolean().optional(), openTurns: z.number().int().min(0).max(5).optional(), toolsOpen: z.enum(['folded', 'failed', 'all']).optional(), idleAfterDays: z.number().int().min(0).max(30).optional(), mainCallsPerTurn: z.number().int().min(5).max(100).optional(), mainForksPerTurn: z.number().int().min(1).max(5).optional(), commandTimeoutMin: z.number().int().min(1).max(120).optional(), keepAwake: z.boolean().optional() }),
   'capabilities:refresh': z.object({ localOnly: z.boolean().optional() }),
   'provider:login': z.object({ provider: z.enum(['claude', 'codex']), method: z.enum(['claudeai', 'console', 'chatgpt', 'device']).optional() }),
   'provider:loginCancel': z.object({ provider: z.enum(['claude', 'codex']) }),

@@ -31,7 +31,7 @@ const invoke = <T,>(page: Page, channel: string, payload: unknown) =>
   page.evaluate(([c, p]) => (window as unknown as { amw: { invoke(c: string, p: unknown): Promise<unknown> } }).amw.invoke(c as string, p), [channel, payload] as const) as Promise<T>;
 
 describe.runIf(host)('images to agents on an SSH host', () => {
-  it('Claude Code and Codex there read an image sent from this Mac', async () => {
+  it('Claude Code and Codex there read an image sent from this computer', async () => {
     remote(`mkdir -p ~/${scratch} && cd ~/${scratch} && git init -q && echo hi > README.md`);
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !['ELECTRON_RUN_AS_NODE', 'CLAUDECODE'].includes(k)) env[k] = v;

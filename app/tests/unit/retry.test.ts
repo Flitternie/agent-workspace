@@ -314,7 +314,7 @@ describe('a session that ends when the connection drops', () => {
     await until(() => ws.transcript(t.taskId).filter((i) => i.role === 'assistant').length >= 2);
   });
 
-  it('agents cut off mid-work on one host share one item, which names them', async () => {
+  it('agents cut off mid-work on a host leave no error: they reconnect by themselves', async () => {
     const ws = open({});
     const a = await start(ws, 'work');
     const b = await start(ws, 'work');
@@ -326,10 +326,10 @@ describe('a session that ends when the connection drops', () => {
       task.status = 'running';
       ws.handleEvent(x.t.taskId, x.task().sessionLocalId!, { type: 'sessionFailed', error: lost });
     }
-    const items = ws.snapshot().attention.filter((i) => i.state === 'open' && i.kind === 'error');
-    expect(items).toHaveLength(1);
-    expect(items[0].headline).toBe(`Lost the connection to neptune; ${a.t.alias}, ${b.t.alias} will carry on when it is back`);
+    // A lost connection is no error to handle: both reconnect by themselves.
+    expect(ws.snapshot().attention.filter((i) => i.state === 'open' && i.kind === 'error')).toEqual([]);
     expect(a.task().status).toBe('disconnected');
+    expect(b.task().status).toBe('disconnected');
   });
 });
 

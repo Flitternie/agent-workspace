@@ -206,9 +206,15 @@ describe('session map', () => {
     const bar = (await page.getByTestId('panel-resizer').boundingBox())!;
     await page.mouse.move(bar.x + bar.width / 2, bar.y + 200);
     await page.mouse.down();
-    await page.mouse.move(bar.x + 100, bar.y + 200, { steps: 5 });
+    await page.mouse.move(bar.x - 100, bar.y + 200, { steps: 5 });
     await page.mouse.up();
-    await expect.poll(panelW).toBeLessThan(before - 40);
+    await expect.poll(panelW).toBeGreaterThan(before + 40);
+    // Its width is a share of the room: a wider window widens it too (the conversation alike).
+    const dragged = await panelW();
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await expect.poll(panelW).toBeGreaterThan(dragged + 40);
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await expect.poll(panelW).toBeLessThan(dragged + 5);
     expect(await page.getByTestId('session-map-panel').getByTestId('map-task-title').allInnerTexts()).toEqual(['Clean the build', 'Refund flow']);
     await page.screenshot({ path: join(shots, 'map-03-panel.png') });
     // Opened there, it stays there: in a wider window, dragged as narrow as it goes (room enough now for the

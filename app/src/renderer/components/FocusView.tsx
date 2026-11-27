@@ -1,4 +1,4 @@
-import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { SideSlot } from '../side-slot';
 import { accountKey } from '../../shared/types';
@@ -6,14 +6,14 @@ import type { AttentionItem, MemoryRecord, PermissionMode, Task, TranscriptItem,
 import { PERMISSION_MODES } from './Settings';
 import { call, errorText } from '../api';
 import { AttentionView } from './AttentionView';
-import { foldsTurn, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
+import { foldsTurn, OPEN_TURNS, groupTranscript, PlanChecklist, PreviewContext, splitTurns, ToolCallRow, ToolGroup, turnSummary } from './Content';
 import { FilePreviewPanel } from './FilePreview';
 import { AgentName, Alias, displayName, Icon, isMainAgent, Kbd, PROVIDER_LABEL, ProviderTag, StatusDot, systemText, warningText } from './bits';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog } from './SessionMemory';
 import { menuAt, useContextMenu } from './ContextMenu';
-import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
+import { agentMenuItems, canFork, EditableAgentName, type AgentField } from './AgentMenu';
 import { RetryNotice } from './Retry';
 import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
@@ -220,8 +220,13 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     ro.observe(el);
     return () => ro.disconnect();
   }, [side]);
-  // The preview column's width: dragged by the user, kept for next time.
-  const [previewWidth, setPreviewWidthState] = useState(() => Number(localStorage.getItem('amw.previewWidth')) || PREVIEW_WIDTH);
+  // The side column's width as its share of the room, so it grows and shrinks with the window like the
+  // conversation does; dragged by the user, kept for next time. A width kept by an earlier version becomes
+  // its share of the first room measured.
+  const [previewShare, setPreviewShare] = useState<number | null>(() => Number(localStorage.getItem('amw.previewShare')) || (localStorage.getItem('amw.previewWidth') ? null : PREVIEW_SHARE));
+  useEffect(() => {
+    if (previewShare === null && bodyW > 0) setPreviewShare(Number(localStorage.getItem('amw.previewWidth')) / bodyW || PREVIEW_SHARE);
+  }, [bodyW, previewShare]);
   // Maximized: the preview takes the whole conversation area until restored (Esc) or closed.
   // Maximized: the side panel (any kind) takes the whole conversation area until restored (Esc) or closed.
   const [previewMax, setPreviewMax] = useState(false);
@@ -236,8 +241,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     return () => window.removeEventListener('keydown', esc, true);
   }, [previewMax]);
   const setPreviewWidth = (w: number) => {
-    setPreviewWidthState(w);
-    localStorage.setItem('amw.previewWidth', String(Math.round(w)));
+    if (!bodyW) return;
+    setPreviewShare(w / bodyW);
+    localStorage.setItem('amw.previewShare', (w / bodyW).toFixed(4));
   };
   useEffect(() => setPreviewState(restored(task.taskId)), [task.taskId]);
   // Too narrow for both (the conversation keeps 400px, a side panel 300px): the panel covers it.
@@ -252,18 +258,18 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   // The room the map takes right of the conversation: all of it beside, a strip for the outline, or none
   // while the full map is open in the side column.
   const mapRoom = mapBeside ? MAP_ROOM : miniFits && !(showMap && !preview) ? MINI_ROOM : 0;
-  const shownWidth = Math.min(Math.max(previewWidth, PREVIEW_MIN), previewMaxWidth(bodyW));
+  const shownWidth = Math.min(Math.max(previewShare !== null && bodyW ? previewShare * bodyW : PREVIEW_WIDTH, PREVIEW_MIN), previewMaxWidth(bodyW));
   const [forking, setForking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // Conversations on this Mac can be forked once saved, when their provider supports it.
-  const canFork = !isMainAgent(task) && !task.host && !!snapshot.capabilities.find((c) => c.provider === task.provider)?.fork && !!session?.nativeSessionId;
+  // Conversations on this computer can be forked once saved, when their provider supports it.
+  const forkable = canFork(snapshot, task);
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');
     fn().catch((e) => setError(errorText(e)));
   };
-  // "Open in default app" only for files on this Mac.
+  // "Open in default app" only for files on this computer.
   const openExternal = task.host ? undefined : (path: string) => run(() => call('file:open', { taskId: task.taskId, path }));
 
   // A file previewed while it has changes in the latest turn can show them (File / Changes).
@@ -433,7 +439,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="refresh" />
               </button>
             ) : null}
-            {canFork ? (
+            {forkable ? (
               <button
                 className="btn btn-icon"
                 aria-label={t('Fork')}
@@ -445,8 +451,10 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="branch" />
               </button>
             ) : null}
-            {/* Claude Code's Remote Control: this agent in the Claude app on a phone, still running here. */}
-            {(task.provider === 'claude' || task.provider === 'mock') && !task.host && !isMainAgent(task) ? <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} /> : null}
+            {/* Remote Control: this agent on a phone, still running here (Claude Code: the Claude app; Codex: the ChatGPT app, with a ChatGPT login). */}
+            {(task.provider === 'claude' || task.provider === 'mock' || (task.provider === 'codex' && snapshot.capabilities.find((c) => c.provider === 'codex')?.remoteControl)) && !task.host && !isMainAgent(task) ? (
+              <RemoteControlButton task={task} url={snapshot.remoteControl?.[task.taskId]} codex={snapshot.codexRemote?.[task.taskId]} />
+            ) : null}
             {/* The main agent: start a new chapter (a fresh session, handed over what is going on now). */}
             {isMainAgent(task) ? (
               <button className="btn btn-icon" data-tip={t('New chapter')} aria-label={t('New chapter')} data-testid="new-chapter" onClick={() => run(() => call('main:newChapter', {}))}>
@@ -493,7 +501,9 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             message={
               task.worktree
                 ? t('Stops the agent and removes it from the workspace. Its worktree is deleted if nothing in it is uncommitted, and then its conversation cannot be continued; otherwise the worktree is kept on disk.')
-                : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session… (the history button next to + in the sidebar)', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
+                : snapshot.capabilities.find((c) => c.provider === task.provider)?.importHistory === false
+                  ? t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}.', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
+                  : t('Stops the agent and removes it from the workspace. Its conversation stays in {provider}: bring it back any time with Continue a session… (the history button next to + in the sidebar)', { provider: PROVIDER_LABEL[task.provider] ?? task.provider })
             }
             confirmLabel={t('Remove')}
             danger
@@ -544,7 +554,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <Composer
               key={task.taskId}
               task={task}
-              onBtw={isMainAgent(task) ? undefined : askBtw}
+              onBtw={isMainAgent(task) || snapshot.capabilities.find((c) => c.provider === task.provider)?.sideQuestions === false ? undefined : askBtw}
               btwCount={btw.length}
               inject={inject}
               about={about}
@@ -574,6 +584,8 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   );
 }
 
+/** The side column's default share of the room it and the conversation split (about 460px in a laptop window). */
+const PREVIEW_SHARE = 0.4;
 const PREVIEW_WIDTH = 460;
 /** The preview never narrower than this; the conversation keeps at least CONVERSATION_MIN. */
 const PREVIEW_MIN = 300;
@@ -593,7 +605,7 @@ function restored(taskId: string): ShownPreview | null {
 }
 
 /** The bar between the conversation and the preview: drag to resize, double-click for the default width. Other pages' side columns use it too. */
-export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min = PREVIEW_MIN }: { width: number; room: number; onChange: (w: number) => void; reset?: number; min?: number }) {
+export function PanelResizer({ width, room, onChange, reset, min = PREVIEW_MIN }: { width: number; room: number; onChange: (w: number) => void; reset?: number; min?: number }) {
   // A drag in progress ends with the bar too: if the panel goes while dragging, the pointer is not left as a resize cursor.
   const stop = useRef<(() => void) | null>(null);
   useEffect(() => () => stop.current?.(), []);
@@ -605,7 +617,7 @@ export function PanelResizer({ width, room, onChange, reset = PREVIEW_WIDTH, min
       aria-label={t('Resize the side column')}
       title={t('Drag to resize; double-click to reset')}
       data-testid="panel-resizer"
-      onDoubleClick={() => onChange(reset)}
+      onDoubleClick={() => onChange(reset ?? (room ? room * PREVIEW_SHARE : PREVIEW_WIDTH))}
       onPointerDown={(e) => {
         e.preventDefault();
         const startX = e.clientX;
@@ -868,7 +880,9 @@ function TaskName({ task, tasks }: { task: Task; tasks: Task[] }) {
   );
 }
 
-function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; main?: boolean; task: Task; snapshot: WorkspaceSnapshot }) {
+// Memoized: resizing the window (or the side column) re-renders the view on every frame; the
+// conversation itself only when what it shows changes.
+const Transcript = memo(function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; main?: boolean; task: Task; snapshot: WorkspaceSnapshot }) {
   const ref = useRef<HTMLDivElement>(null);
   // "Keep as memory" on one of the user's messages: the dialog, and the right-click menu that opens it.
   const [remember, setRemember] = useState<string | null>(null);
@@ -1019,7 +1033,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
         {items.length === 0 ? <div className="muted pad">{t('No messages yet.')}</div> : null}
         {turns.map((turn, i) => {
           const entries = (list: TranscriptItem[]) => groupNotices(groupTranscript(list, main), main).map(renderEntry);
-          if (!foldsTurn(turn, i, turns.length)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
+          if (!foldsTurn(turn, i, turns.length, snapshot.settings.openTurns ?? OPEN_TURNS)) return <Fragment key={turn.user?.id ?? `t${i}`}>{entries([...(turn.user ? [turn.user] : []), ...turn.steps, ...(turn.final ? [turn.final] : [])].sort((x, y) => order.get(x.id)! - order.get(y.id)!))}</Fragment>;
           // An earlier turn: the message, what the agent did folded into one line, and its answer.
           return (
             <Fragment key={turn.user?.id ?? `t${i}`}>
@@ -1042,7 +1056,7 @@ function Transcript({ items, main, task, snapshot }: { items: TranscriptItem[]; 
     </div>
     </>
   );
-}
+});
 
 /** A worker's "waiting on you" / "request is settled" note in the main agent's conversation. */
 const NOTICE_RE = /^(.+?)(?: is waiting on you \((?:permission|question)\): |'s request is settled: )/;
@@ -1355,7 +1369,7 @@ export function Composer({
           <span className="to-label" data-testid="composer-target">
             {shell ? (
               <>
-                {t('Command')} · {task.host ?? t('this Mac')}
+                {t('Command')} · {task.host ?? t('Local')}
                 <span className="muted">
                   {' '}
                   — {task.provider === 'codex' ? t('runs in {dir} through Codex, which sees the output', { dir: task.cwd }) : t('runs in {dir}; {alias} sees the output with your next message', { dir: task.cwd, alias: task.alias })}

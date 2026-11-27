@@ -23,7 +23,7 @@ describe('new agent', () => {
   it('creates an agent with nothing filled in; its first message names it', async () => {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
-    // Folders where sessions "ran" (a fixture, never this Mac's real sessions): one to pick, one inside nothing.
+    // Folders where sessions "ran" (a fixture, never this computer's real sessions): one to pick, one inside nothing.
     const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'amw-found-')));
     const shop = join(scratch, 'billing-service');
     mkdirSync(shop);
@@ -56,7 +56,7 @@ describe('new agent', () => {
       ]),
     );
     // The demo entry offers mock agents in the dialog.
-    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture, HOME: home, PATH: `${bin}:${env.PATH}` } });
+    app = await electron.launch({ executablePath: electronPath, args: [appDir], cwd: appDir, env: { ...env, AMW_MODE: 'demo', AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-new-')), AMW_MOCK_DELAY_MS: '50', AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_DISCOVER_FIXTURE: fixture, AMW_ACP_OFF: '1', HOME: home, PATH: `${bin}:${env.PATH}` } });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForSelector('.app');
@@ -82,14 +82,14 @@ describe('new agent', () => {
     const stage = () => page.getByTestId('project-pop').getAttribute('data-stage');
     // The project: the one used last, shown as a button that names its place.
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('demo-shop');
-    expect(await page.getByTestId('project-current').innerText()).toContain('This Mac');
+    expect(await page.getByTestId('project-current').innerText()).toContain('Local');
 
     // Opened with a project chosen: straight to that place's folders (a way back to the places on top).
     await page.getByTestId('project-current').click();
     expect(await stage()).toBe('folder');
-    expect(await page.getByTestId('project-back').innerText()).toContain('This Mac');
+    expect(await page.getByTestId('project-back').innerText()).toContain('Local');
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('project-search');
-    // This Mac: its projects, the folders where sessions ran here (automated ones left out), a folder dialog.
+    // This computer: its projects, the folders where sessions ran here (automated ones left out), a folder dialog.
     await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('found:')).length).toBe(2);
     const listed = await kinds();
     expect(listed[0]).toMatch(/^project:demo-shop/);
@@ -122,7 +122,7 @@ describe('new agent', () => {
     await page.getByTestId('project-current').click();
     await page.keyboard.press('Backspace');
     await expect.poll(stage).toBe('place');
-    expect(await kinds()).toEqual([expect.stringMatching(/^place:This Mac/), expect.stringMatching(/^place:devbox/)]);
+    expect(await kinds()).toEqual([expect.stringMatching(/^place:Local/), expect.stringMatching(/^place:devbox/)]);
     await page.keyboard.type('dev');
     await expect.poll(async () => (await kinds()).length).toBe(1);
     await page.screenshot({ path: join(shots, 'new-agent-00a-places.png') });
@@ -131,7 +131,7 @@ describe('new agent', () => {
     expect(await page.getByTestId('project-back').innerText()).toContain('devbox');
     // The machine: only the folders where sessions ran there.
     await expect.poll(async () => (await kinds()).map((k) => k.slice(0, 11))).toEqual(['found:train']);
-    // ~ is that machine's home (its own, not this Mac's).
+    // ~ is that machine's home (its own, not this computer's).
     await page.keyboard.type('~/');
     await expect.poll(async () => (await kinds()).filter((k) => k.startsWith('dir:'))).toEqual(['dir:models/Tab to open']);
     await page.keyboard.press('Backspace');
@@ -152,12 +152,12 @@ describe('new agent', () => {
     expect(await page.getByTestId('project-current').innerText()).toContain('devbox');
     expect((await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).projects.some((p) => p.host === 'devbox' && p.rootPath === train)).toBe(true);
 
-    // This Mac, by path too: completion from this Mac's folders.
+    // This computer, by path too: completion from this computer's folders.
     await page.getByTestId('project-current').click();
     expect(await page.getByTestId('project-back').innerText()).toContain('devbox');
     await page.getByTestId('project-back').click();
     await page.keyboard.press('Enter');
-    await expect.poll(() => page.getByTestId('project-back').innerText()).toContain('This Mac');
+    await expect.poll(() => page.getByTestId('project-back').innerText()).toContain('Local');
     // A Chinese input method's punctuation (～ and 、) still types a path.
     await page.keyboard.type('～、');
     await expect.poll(() => page.getByTestId('project-search').inputValue()).toBe('~/');
@@ -169,14 +169,14 @@ describe('new agent', () => {
     await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
     await expect.poll(() => page.getByTestId('project-current').innerText()).toContain('local-lib');
-    expect(await page.getByTestId('project-current').innerText()).toContain('This Mac');
+    expect(await page.getByTestId('project-current').innerText()).toContain('Local');
 
     // Nothing to name or write: no label, title or first-instruction box (the first message goes in the agent's reply box).
     expect(await dialog.locator('input.input').count()).toBe(0);
     expect(await dialog.locator('textarea').count()).toBe(0);
     expect(await page.getByTestId('new-instruction').count()).toBe(0);
     // A quiet line for someone who meant to continue an existing conversation.
-    expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing a conversation from Claude Code or Codex?');
+    expect(await page.getByTestId('new-continue-hint').innerText()).toContain('Continuing an earlier conversation?');
     // At the top of the dialog, before the project and provider choices.
     const hintTop = (await page.getByTestId('new-continue-hint').boundingBox())!.y;
     expect(hintTop).toBeLessThan((await page.locator('.modal .field').first().boundingBox())!.y);

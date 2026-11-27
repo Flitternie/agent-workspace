@@ -52,5 +52,7 @@ const retryPrompt = (why: string) => `<agent-workspace-retry>${why} Continue fro
 
 /** Automatic retries, which only follow a busy model. */
 export const RETRY_PROMPT = retryPrompt('Your previous turn stopped because the model was temporarily unavailable.');
+/** After the connection to the agent's host came back by itself. */
+export const RECONNECT_PROMPT = retryPrompt('Your previous turn stopped because the connection to this machine was lost.');
 /** The Retry button, which any failed turn offers. */
 export const CONTINUE_PROMPT = retryPrompt('Your previous turn failed.');

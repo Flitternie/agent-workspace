@@ -93,7 +93,7 @@ function repo(name: string): string {
 }
 
 describe('first-run guide', () => {
-  it('signs in from the app, brings work in from this Mac and other machines, and gets out of the way', async () => {
+  it('signs in from the app, brings work in from this computer and other machines, and gets out of the way', async () => {
     const bin = fakeClis();
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
@@ -101,7 +101,7 @@ describe('first-run guide', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_ACP_OFF: '1' },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 });
@@ -189,7 +189,7 @@ describe('first-run guide', () => {
     await expect.poll(() => remoteState('codex'), { timeout: 30_000 }).toBe('ready');
     await page.screenshot({ path: join(shots, 'onboarding-08-remote-ready.png') });
 
-    // Then bring work in, from this Mac and the machine just connected, in one place
+    // Then bring work in, from this computer and the machine just connected, in one place
     // (the folder picker is native, so the folder comes in through the same IPC).
     await expect.poll(() => page.getByTestId('onboarding-bring').count()).toBe(2);
     await expect.poll(() => page.getByTestId('onboarding-step-4').innerText()).toContain('devbox');
@@ -211,7 +211,7 @@ describe('first-run guide', () => {
     await expect.poll(() => page.getByTestId('onboarding').isVisible()).toBe(true);
   }, 180_000);
 
-  it('another machine is enough: no agent signed in on this Mac, one on the host', async () => {
+  it('another machine is enough: no agent signed in on this computer, one on the host', async () => {
     await app?.close().catch(() => {});
     const bin = fakeClis();
     const env: Record<string, string> = {};
@@ -220,7 +220,7 @@ describe('first-run guide', () => {
       executablePath: electronPath,
       args: [appDir],
       cwd: appDir,
-      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1' },
+      env: { ...env, HOME: fakeHome(), PATH: `${bin}:${env.PATH}`, AMW_MAIN_AGENT: 'off', AMW_DATA_DIR: mkdtempSync(join(tmpdir(), 'amw-ob-data-')), AMW_NO_OPENAI: '1', AMW_NO_AUTOLISTEN: '1', AMW_ACP_OFF: '1' },
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 920 });
@@ -236,7 +236,7 @@ describe('first-run guide', () => {
     // Codex on devbox only: installed and signed in there.
     await invoke('ssh:setEnabled', { host: 'devbox', enabled: true });
     await expect.poll(() => page.getByTestId('host-install').count(), { timeout: 30_000 }).toBe(2);
-    // Nothing signed in here, so the guide keeps looking at this Mac every few seconds: the host's
+    // Nothing signed in here, so the guide keeps looking at this computer every few seconds: the host's
     // row must hold still meanwhile (no "Checking…" flicker).
     for (let i = 0; i < 20; i++) {
       await page.waitForTimeout(250);
@@ -249,7 +249,7 @@ describe('first-run guide', () => {
     await signin.getByTestId('host-signin-start').click();
     await expect.poll(() => done(3), { timeout: 30_000 }).toBe('true');
 
-    // That is enough: this Mac stays optional, work comes in from devbox, the workspace opens.
+    // That is enough: this computer stays optional, work comes in from devbox, the workspace opens.
     expect(await done(2)).toBe('false');
     expect(await page.getByTestId('onboarding-step-2-tag').innerText()).toBe('可选');
     await expect.poll(() => page.getByTestId('onboarding-bring').count()).toBe(1);

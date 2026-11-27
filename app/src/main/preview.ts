@@ -180,7 +180,7 @@ function toPreview(file: string, kind: PreviewKind, data: Buffer): FilePreview {
   return { path: file, kind, size: data.length, text: data.toString('utf8') };
 }
 
-/** Finds `requested` on this Mac (see findLocal), resolves symlinks and checks who may read it. */
+/** Finds `requested` on this computer (see findLocal), resolves symlinks and checks who may read it. */
 export function localPath(requested: string, where: PreviewWhere, home = homedir()): string {
   const found = findLocal(requested, where, home);
   if (!found) throw new Error(`File not found: ${requested}`);
@@ -231,7 +231,7 @@ export async function readRemote(host: string, requested: string, where: Preview
   const { file, home, roots } = parseRemoteFind(r.stdout);
   if (!file) throw new Error(`File not found: ${requested}`);
   checkContained(file, roots, path.posix, { allowOutside: where.allowOutside, home: home || '/nonexistent' });
-  const kind = kindOf(file); // a symlink's target decides, as on this Mac
+  const kind = kindOf(file); // a symlink's target decides, as on this computer
   const max = MAX_BYTES[kind];
   // Size first, so an oversized file is never sent; exit 3 marks "not a regular file".
   const read = await sshRun(host, `f=${shq(file)}; [ -f "$f" ] || exit 3; n=$(wc -c < "$f" | tr -d ' '); printf '${MARK}%s\\n' "$n"; [ "$n" -le ${max} ] && base64 < "$f"`, 60_000);

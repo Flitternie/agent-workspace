@@ -8,7 +8,7 @@ import type { FoundSkill, LibrarySkill, SkillInfo, SkillSource, SkillsLoad } fro
 
 export type { FoundSkill, LibrarySkill, SkillsLoad } from '../shared/skills';
 
-// One skill library for every agent the app starts: Claude Code and Codex, on this Mac
+// One skill library for every agent the app starts: Claude Code and Codex, on this computer
 // and on SSH hosts. Skills are folders with a SKILL.md (the same format works for both).
 // The library is the app's own; ~/.claude/skills and ~/.codex/skills are only read, to
 // import from, and never written.
@@ -17,6 +17,9 @@ export type { FoundSkill, LibrarySkill, SkillsLoad } from '../shared/skills';
 //   <dataDir>/skills/plugin/skills/<name>/SKILL.md        enabled skills (Codex: an extra root)
 //   <dataDir>/skills/disabled/<name>/                     kept, but not loaded
 //   <dataDir>/skills/manifest.json                        where each skill came from
+//   <dataDir>/skills/plugin/.agents/skills/<name>/        a real copy of the enabled skills, for CLIs
+//                                                         that read `<folder>/.agents/skills` and follow
+//                                                         no symbolic links there (Antigravity)
 //
 // On an SSH host the CLI only reads paths there, so the plugin folder is copied to
 // ~/.agent-workspace/skills before an agent starts on it (only when it changed).
@@ -96,7 +99,7 @@ function readSkill(dir: string, fallbackName: string): SkillInfo | null {
   return { name: fm.name && NAME_RE.test(fm.name) ? fm.name : fallbackName, description: fm.description ?? '', hash: folderHash(dir) };
 }
 
-/** Skills in the CLIs' own folders on this Mac. */
+/** Skills in the CLIs' own folders on this computer. */
 export function scanLocal(home = homedir()): FoundSkill[] {
   const out: FoundSkill[] = [];
   for (const { source, dir } of NATIVE_SKILL_DIRS) {
@@ -251,9 +254,33 @@ export class SkillLibrary {
     this.saveManifest(m);
   }
 
-  /** Where agents on this Mac load the library from. */
+  /** Where agents on this computer load the library from. */
   localLoad(): SkillsLoad | undefined {
-    return this.hasEnabled() ? { pluginDir: this.pluginDir, root: this.root } : undefined;
+    if (!this.hasEnabled()) return undefined;
+    this.syncAgentsCopy();
+    return { pluginDir: this.pluginDir, root: this.root };
+  }
+
+  /**
+   * `<plugin>/.agents/skills`: the enabled skills copied (not linked), refreshed when they changed.
+   * Swapped in whole, so a CLI never reads a half-made copy.
+   */
+  syncAgentsCopy(): void {
+    const dir = join(this.pluginDir, '.agents');
+    const stamp = join(dir, '.amw-hash');
+    const hash = this.libraryHash();
+    try {
+      if (readFileSync(stamp, 'utf8') === hash && existsSync(join(dir, 'skills'))) return;
+    } catch {
+      /* not made yet */
+    }
+    const tmp = join(this.base, '.agents-copy.tmp');
+    rmSync(tmp, { recursive: true, force: true });
+    mkdirSync(tmp, { recursive: true });
+    cpSync(this.root, join(tmp, 'skills'), { recursive: true, dereference: true, filter: (src) => !src.slice(this.root.length).split('/').some((p) => p.startsWith('.')) });
+    writeFileSync(join(tmp, '.amw-hash'), hash);
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(tmp, dir);
   }
 
   /**
@@ -262,7 +289,9 @@ export class SkillLibrary {
    */
   async ensureOnHost(host: string): Promise<SkillsLoad | undefined> {
     if (!this.hasEnabled()) return undefined;
-    const hash = this.libraryHash();
+    this.syncAgentsCopy();
+    // (":agents": libraries copied before the `.agents` copy existed are copied once more.)
+    const hash = `${this.libraryHash()}:agents`;
     const cached = this.synced.get(host);
     if (cached?.hash === hash) return cached.load;
     const probe = await sshRun(host, `printf '__AMW_HOME__%s\\n' "$HOME"; printf '__AMW_HASH__%s\\n' "$(cat "$HOME/${REMOTE_DIR}/.amw-hash" 2>/dev/null)"`, 30_000);

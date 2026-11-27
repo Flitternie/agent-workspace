@@ -48,7 +48,7 @@ describe('skill files', () => {
 });
 
 describe('finding skills', () => {
-  it('lists the CLIs’ skill folders on this Mac, skipping hidden ones and folders without SKILL.md', () => {
+  it('lists the CLIs’ skill folders on this computer, skipping hidden ones and folders without SKILL.md', () => {
     const home = mkdtempSync(join(tmpdir(), 'amw-home-'));
     skill(join(home, '.claude/skills/writing'), 'writing-style', 'How I write');
     skill(join(home, '.codex/skills/linkedin'), 'linkedin', 'Profiles');
@@ -84,7 +84,7 @@ describe('the library', () => {
     expect(JSON.parse(readFileSync(join(lib.pluginDir, '.claude-plugin/plugin.json'), 'utf8')).name).toBe('workspace');
   });
 
-  it('imports from this Mac (following symlinks, without hidden files), disables, removes', async () => {
+  it('imports from this computer (following symlinks, without hidden files), disables, removes', async () => {
     const home = mkdtempSync(join(tmpdir(), 'amw-home-'));
     const real = mkdtempSync(join(tmpdir(), 'amw-real-'));
     skill(real, 'writing-style', 'How I write', { 'examples.md': 'e', '.git/HEAD': 'x' });
@@ -117,7 +117,9 @@ describe('the library', () => {
     expect(load).toEqual({ pluginDir: join(remoteHome, '.agent-workspace/skills'), root: join(remoteHome, '.agent-workspace/skills/skills') });
     expect(existsSync(join(load!.root, 'tacc-vista/SKILL.md'))).toBe(true);
     expect(existsSync(join(load!.pluginDir, '.claude-plugin/plugin.json'))).toBe(true);
-    expect(readFileSync(join(load!.pluginDir, '.amw-hash'), 'utf8')).toBe(lib.libraryHash());
+    expect(readFileSync(join(load!.pluginDir, '.amw-hash'), 'utf8')).toBe(`${lib.libraryHash()}:agents`);
+    // The real copy Antigravity reads (.agents/skills) went along.
+    expect(readFileSync(join(load!.pluginDir, '.agents/skills/tacc-vista/scripts/submit.sh'), 'utf8')).toBe('#!/bin/sh\n');
 
     const ssh = await import('../../src/main/util/ssh');
     const copies = () => vi.mocked(ssh.sshRunInput).mock.calls.length;

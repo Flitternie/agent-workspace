@@ -39,6 +39,8 @@ export interface WorkspaceData {
   sessionMaps?: Record<string, import('../shared/session-map').MapGrouping>;
   /** Each provider account's usage limits as last seen, keyed by `accountKey` (provider, or provider@host). */
   limits?: Record<string, import('../shared/types').ProviderLimits>;
+  /** Conversations carried over from another CLI, by agent: they go with the agent's first message. */
+  carried?: Record<string, import('../shared/conversation-copy').SaidLine[]>;
 }
 
 const empty = (): WorkspaceData => ({

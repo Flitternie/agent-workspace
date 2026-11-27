@@ -218,3 +218,135 @@ export class CodexSubtasks {
     return [];
   }
 }
+
+/**
+ * CLIs reached through ACP. The helper tool on the main session starts one: OpenCode's `subagent`
+ * (2.x: launched in the background, its child session id in `rawOutput.metadata.sessionID`) or
+ * `task` (1.x: runs within the call, whose output is its report); Antigravity's `invoke_subagent`
+ * (launched; the turn waits for it, with nothing more said about it, so it ends with the turn).
+ * OpenCode 2.x reports the child sessions themselves when the client asks for it
+ * (`_meta["opencode/child-session-updates"]`): `opencode/session/child_update` notifications with
+ * a status (created, running, completed, failed, interrupted) or one of the child's own session
+ * updates (its tool calls are its steps, its last message its report). A child's own helpers
+ * (depth 2 and more) show as steps of the depth-1 helper they belong to.
+ */
+export class AcpSubtasks {
+  private ledger = new Ledger();
+  /** Child session → the sub-agent it belongs to (itself at depth 1, an ancestor below that). */
+  private lane = new Map<string, string>();
+  /** Sub-agent → its own child session. */
+  private own = new Map<string, string>();
+  /** Started from a tool call whose child session is not known yet. */
+  private unmatched: Array<{ id: string; description: string }> = [];
+  /** Its last message so far (the report). */
+  private text = new Map<string, { messageId: string; text: string }>();
+  private lastStep = new Map<string, string>();
+  /** Ended with the turn (Antigravity). */
+  private withTurn = new Set<string>();
+  private described = new Map<string, string>();
+
+  static isAgentTool(name: string | undefined): boolean {
+    return name === 'subagent' || name === 'task' || name === 'invoke_subagent';
+  }
+
+  /** What a helper tool call says it is for. */
+  static describe(input: unknown): string {
+    const i = rec(input);
+    return oneLine(str(i.description) || str(i.Role) || str(i.prompt) || str(i.Prompt) || str(i.subagent_type));
+  }
+
+  /** A tool call on the main session, as merged so far; `output`: its result text. */
+  tool(t: { id: string; name?: string; status: string; rawInput?: unknown; rawOutput?: unknown }, output = ''): SubtaskEvent[] {
+    if (!AcpSubtasks.isAgentTool(t.name)) return [];
+    const description = AcpSubtasks.describe(t.rawInput);
+    const out = this.start(t.id, description);
+    const waiting = this.unmatched.find((u) => u.id === t.id);
+    if (!this.own.has(t.id)) {
+      if (waiting) waiting.description ||= description;
+      else this.unmatched.push({ id: t.id, description });
+    }
+    if (t.status === 'failed') return [...out, ...this.ledger.end(t.id, 'failed', output || undefined)];
+    if (t.status !== 'completed') return out;
+    const meta = rec(rec(t.rawOutput).metadata);
+    const child = str(meta.sessionID);
+    if (child) this.link(child, t.id);
+    // Launched in the background: its child session reports how it goes.
+    if (meta.status === 'running') return out;
+    if (t.name === 'invoke_subagent') {
+      this.withTurn.add(t.id);
+      return out;
+    }
+    return [...out, ...this.ledger.end(t.id, 'done', output || undefined)];
+  }
+
+  /** Starts it, or names it once its description is known (each update repeats it). */
+  private start(id: string, description: string): SubtaskEvent[] {
+    if (this.ledger.has(id) && (!description || this.described.get(id) === description)) return [];
+    if (description) this.described.set(id, description);
+    return this.ledger.start(id, description);
+  }
+
+  private link(child: string, id: string): void {
+    this.lane.set(child, id);
+    this.own.set(id, child);
+    this.unmatched = this.unmatched.filter((u) => u.id !== id);
+  }
+
+  /** An `opencode/session/child_update` notification. `stepOf` names a tool update the way the transcript does. */
+  child(p: Rec, stepOf: (update: Rec) => string): SubtaskEvent[] {
+    const child = str(p.childSessionId);
+    if (!child) return [];
+    const title = str(p.title);
+    let id = this.lane.get(child);
+    const out: SubtaskEvent[] = [];
+    if (!id) {
+      const parent = this.lane.get(str(p.parentSessionId));
+      if (Number(p.depth) > 1 && parent) {
+        id = parent;
+        this.lane.set(child, id);
+      } else {
+        // Its tool call came first (OpenCode sends the child's creation before the call's result names it).
+        const match = this.unmatched.find((u) => u.description === oneLine(title)) ?? this.unmatched[0];
+        id = match?.id ?? child;
+        this.link(child, id);
+        out.push(...this.start(id, oneLine(title)));
+      }
+    }
+    const mine = this.own.get(id) === child;
+    if (p.type === 'status') {
+      const status = str(p.status);
+      if (!mine) return out;
+      if (status === 'created' || status === 'running') return [...out, ...this.start(id, oneLine(title))];
+      const report = this.text.get(id)?.text.trim();
+      if (status === 'completed' || status === 'idle') return [...out, ...this.ledger.end(id, 'done', report || undefined)];
+      if (status === 'failed') return [...out, ...this.ledger.end(id, 'failed', str(rec(p.error).message) || str(p.error) || report || undefined)];
+      if (status === 'interrupted' || status === 'cancelled') return [...out, ...this.ledger.end(id, 'failed', 'Interrupted.')];
+      return out;
+    }
+    const u = rec(p.update);
+    const kind = str(u.sessionUpdate);
+    if (kind === 'agent_message_chunk' && mine) {
+      const messageId = str(u.messageId);
+      const piece = str(rec(u.content).text);
+      const prev = this.text.get(id);
+      this.text.set(id, { messageId, text: prev && prev.messageId === messageId ? prev.text + piece : piece });
+      return out;
+    }
+    let step = '';
+    if (kind === 'tool_call' || (kind === 'tool_call_update' && (u.status === 'in_progress' || u.status === 'pending'))) step = stepOf(u);
+    else if (kind === 'session_info_update' && rec(rec(u._meta)['opencode/retry']).attempt) step = `Model busy, retrying (attempt ${Number(rec(rec(u._meta)['opencode/retry']).attempt)})`;
+    if (step && step !== this.lastStep.get(id)) {
+      this.lastStep.set(id, step);
+      out.push(...this.ledger.step(id, step));
+    }
+    return out;
+  }
+
+  /** The turn ended: the helpers it waited for (Antigravity) ended with it. */
+  turnEnded(status: 'completed' | 'interrupted' | 'failed'): SubtaskEvent[] {
+    const out: SubtaskEvent[] = [];
+    for (const id of this.withTurn) out.push(...(status === 'completed' ? this.ledger.end(id, 'done') : this.ledger.end(id, 'failed', status === 'interrupted' ? 'Stopped with the turn.' : undefined)));
+    this.withTurn.clear();
+    return out;
+  }
+}

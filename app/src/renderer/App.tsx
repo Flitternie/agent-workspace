@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { fillSlots, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
+import { CODING_PROVIDERS } from '../shared/types';
+import { isAcpProvider } from '../shared/acp-agents';
+import { fillSlots, IDLE_AFTER_MS, OVERVIEW_SLOTS, overviewCandidates, slotsFor, teams, visibleOrder } from '../shared/agent-order';
 import { call, errorText } from './api';
 import { AgentCard } from './components/AgentCard';
 import { savePreview } from './preview-store';
@@ -18,6 +20,7 @@ import { setLanguage, t } from './i18n';
 import { useTick, useTranscripts, useWorkspace } from './state';
 import { useTeamExpansion } from './teams';
 import { pruneDrafts } from './drafts';
+import { ToolsOpenContext } from './components/Content';
 
 interface Toast {
   id: number;
@@ -202,7 +205,8 @@ export function App() {
   const openAll = snapshot?.attention.filter((a) => a.state === 'open') ?? [];
   // A research's agents live on its page (its one row in the sidebar), not one by one in their project's team.
   const researchIds = new Set(snapshot?.research.flatMap((r) => r.taskIds) ?? []);
-  const teamList = snapshot ? teams(snapshot.tasks.filter((t) => !researchIds.has(t.taskId)), snapshot.projects, openAll, now) : [];
+  const idleDays = snapshot?.settings.idleAfterDays;
+  const teamList = snapshot ? teams(snapshot.tasks.filter((t) => !researchIds.has(t.taskId)), snapshot.projects, openAll, now, idleDays === undefined ? IDLE_AFTER_MS : idleDays === 0 ? Infinity : idleDays * 86_400_000) : [];
   const order = visibleOrder(teamList, expanded);
   // Overview: busy or recently busy agents, by priority, in as many tiles as the layout has.
   const layout = snapshot?.settings.overviewSlots ?? 0;
@@ -321,6 +325,7 @@ export function App() {
       .catch((e) => setError(errorText(e)));
 
   return (
+    <ToolsOpenContext.Provider value={snapshot?.settings.toolsOpen ?? 'folded'}>
     <div className={`app${researchOf && !focusTask && !settingsOpen && !subView ? ' research-open' : ''}`} style={{ ['--sidebar-w' as string]: `${sidebarW}px` }}>
       <SidebarResizer width={sidebarW} min={sidebarMin} onChange={setSidebarW} />
       <Sidebar
@@ -427,18 +432,18 @@ export function App() {
                   </div>
                   <h2>{t('Your agents meet here')}</h2>
                   <div className="setup-check" data-testid="setup-check">
-                    {(['claude', 'codex'] as const).map((p) => {
+                    {CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || snapshot.capabilities.find((x) => x.provider === p)?.available).map((p) => {
                       const c = snapshot.capabilities.find((x) => x.provider === p);
                       return (
                         <div key={p} className="setup-row">
-                          <span>{PROVIDER_LABEL[p]}</span>
-                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} />
+                          <span className="truncate">{PROVIDER_LABEL[p]}</span>
+                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} compact installedOnly={isAcpProvider(p) && !c?.auth} />
                         </div>
                       );
                     })}
                     <div className="setup-row">
                       <span>{t('Voice')}</span>
-                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" />
+                      <ReadinessBadge state={snapshot.voice.sttAvailable ? 'ready' : 'missing'} missing="Not configured" compact />
                     </div>
                     <button className="link small" onClick={() => setSettingsOpen(true)}>
                       {t('Settings')}
@@ -542,5 +547,6 @@ export function App() {
       ) : null}
       {dialog === 'import' ? <ImportDialog snapshot={snapshot} onClose={() => setDialog(null)} onImported={(id) => { toast(t('Session imported'), id); setPendingFocus(id); }} /> : null}
     </div>
+    </ToolsOpenContext.Provider>
   );
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -952,6 +952,49 @@ describe('worktrees', () => {
     expect(readFileSync(join(b.cwd, 'new.ts'), 'utf8')).toBe('new');
     expect(readFileSync(join(b.worktree!.path, 'TODO.md'), 'utf8')).toBe('outside the subfolder');
     expect(existsSync(join(b.worktree!.path, 'new.ts'))).toBe(false);
+  });
+
+  it('a fork onto another CLI shows the conversation and carries it to that CLI with the first message', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const other = join(dataDir, 'other-sessions');
+    // A second CLI, played by another mock adapter.
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY), codex: new MockAdapter(other, DELAY) } });
+    opened.push(ws);
+    const p = await ws.addProject(repo());
+    const a = await ws.createTask({ projectId: p.projectId, provider: 'mock', name: 'backend', title: 'API', isolate: false, mockScript: 'work', instruction: 'First request <b>.' });
+    const idle = (id: string) => () => ['done', 'idle', 'waiting_for_user'].includes(ws.snapshot().tasks.find((t) => t.taskId === id)!.status);
+    await until(idle(a.taskId));
+    await ws.send(a.taskId, 'Second request.', 'text');
+    await until(idle(a.taskId));
+    await ws.refreshCapabilities({ localOnly: true });
+    expect(ws.snapshot().capabilities.find((c) => c.provider === 'mock')?.forkElsewhere).toBe(true);
+
+    const points = await ws.forkPoints(a.taskId);
+    const b = await ws.forkTask(a.taskId, { upToMessageId: points[0].upToMessageId, isolate: false, provider: 'codex' });
+    expect(b.provider).toBe('codex');
+    expect(b.forkedFrom).toEqual({ taskId: a.taskId, alias: a.alias });
+    expect(ws.snapshot().sessions.some((x) => x.taskId === b.taskId)).toBe(false);
+    // Shown at once, up to just before the second request.
+    const shown = ws.transcript(b.taskId).filter((i) => i.role === 'user').map((i) => i.text);
+    expect(shown).toEqual(['First request <b>.']);
+    expect(ws.transcript(b.taskId).some((i) => i.role === 'assistant')).toBe(true);
+
+    await ws.send(b.taskId, 'Smaller second request.', 'text');
+    await until(idle(b.taskId));
+    // The other CLI got the conversation with that message; the transcript shows only what was typed.
+    const files = readdirSync(other).filter((f) => f.endsWith('.json'));
+    expect(files).toHaveLength(1);
+    const got = JSON.parse(readFileSync(join(other, files[0]), 'utf8')).messages.find((m: { role: string }) => m.role === 'user').text as string;
+    expect(got.startsWith('<conversation-copy>')).toBe(true);
+    expect(got).toContain('First request \\u003cb>.');
+    expect(got).not.toContain('Second request.');
+    expect(got.trim().endsWith('Smaller second request.')).toBe(true);
+    expect(ws.transcript(b.taskId).filter((i) => i.role === 'user').map((i) => i.text)).toEqual(['First request <b>.', 'Smaller second request.']);
+    // Only the first message carries it.
+    await ws.send(b.taskId, 'Third.', 'text');
+    await until(idle(b.taskId));
+    const third = JSON.parse(readFileSync(join(other, files[0]), 'utf8')).messages.filter((m: { role: string }) => m.role === 'user').at(-1).text as string;
+    expect(third).toBe('Third.');
   });
 
   it('a fork waits for the current turn to end', async () => {

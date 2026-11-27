@@ -1,4 +1,5 @@
 import type {
+  CodexRemoteControl,
   ForkPoint,
   PlanEntry,
   ToolCallInfo,
@@ -19,7 +20,7 @@ import type {
 } from '../../shared/types';
 import type { WorkspaceTool } from '../main-agent';
 
-/** An image sent with a message: a file on this Mac (the app's stored copy) and its format. */
+/** An image sent with a message: a file on this computer (the app's stored copy) and its format. */
 export interface ImageInput {
   path: string;
   mediaType: string;
@@ -98,12 +99,14 @@ export type ProviderEvent =
   | { type: 'usage'; add?: Partial<UsageTokens> & { costUsd?: number }; context?: number; contextWindow?: number }
   /** The account's usage limits (rate-limit windows), as just reported. */
   | { type: 'limits'; windows: LimitWindow[]; plan?: string }
+  /** Codex Remote Control changed (paired, connection status, devices); undefined: off. */
+  | { type: 'remoteControl'; state?: CodexRemoteControl }
   | { type: 'sessionFailed'; error: string }
   | { type: 'sessionDisconnected'; reason: string };
 
 export interface StartArgs {
   cwd: string;
-  /** SSH alias to run the CLI on; unset = this Mac. */
+  /** SSH alias to run the CLI on; unset = this computer. */
   host?: string;
   /** Resume this provider-native session instead of creating one. */
   resumeNativeSessionId?: string;
@@ -113,6 +116,10 @@ export interface StartArgs {
   mockScript?: string;
   /** The model to run on; unset = the CLI's default. */
   model?: string;
+  /** Claude Code: drive the user's Chrome through the Claude in Chrome extension (--chrome). */
+  chrome?: boolean;
+  /** Claude Code: the Artifact tool (publish a page to claude.ai), off by default in the SDK. */
+  artifacts?: boolean;
   /** The workspace skill library, as paths on the machine the CLI runs on. */
   skills?: { pluginDir: string; root: string };
   permissionMode?: PermissionMode;
@@ -156,7 +163,7 @@ export interface ProviderSession {
    * its conversation (Codex). Without it, the workspace runs the command and hands the output
    * over with the next message.
    */
-  shell?(command: string): Promise<void>;
+  shell?(command: string, timeoutMs?: number): Promise<void>;
   /** Runs the following turns on `model` (unset: the CLI's default). */
   setModel?(model: string | undefined): Promise<void>;
   /** The skill library changed (same paths, new contents): pick it up without a restart. */
@@ -164,10 +171,13 @@ export interface ProviderSession {
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
   /**
-   * Remote Control (Claude Code): this live session also shows in the Claude app and at claude.ai/code,
-   * driven from the phone while it keeps running here. Resolves with the session's link when on.
+   * Remote Control: this live session driven from a phone while it keeps running here. Claude Code:
+   * the Claude app and claude.ai/code; resolves with the session's link when on. Codex: the ChatGPT
+   * app; resolves with a pairing code and the connection state, later changes come as `remoteControl` events.
    */
-  setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string }>;
+  setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string; codex?: CodexRemoteControl }>;
+  /** Codex Remote Control: unpairs a device (it can no longer reach this computer until paired again). */
+  revokeRemoteDevice?(clientId: string): Promise<void>;
   /**
    * A side question ("btw"): answered from this conversation without entering it or interrupting a
    * turn under way. `history` holds the earlier side questions and answers, oldest first.

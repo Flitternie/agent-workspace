@@ -5,7 +5,7 @@ import { join, relative, isAbsolute } from 'node:path';
  * Folders under the home directory that macOS guards with a privacy prompt (Photos, Music,
  * Contacts, Calendars, other apps' data…) and that never hold code. An agent searching from
  * a broad folder (`rg` / Grep / Glob over ~) would walk into them, and macOS would ask, once
- * per kind of data, for Agent Workspace to read them. Agents on this Mac are told not to.
+ * per kind of data, for Agent Workspace to read them. Agents on this computer are told not to.
  * Desktop, Documents, Downloads and iCloud Drive are left alone: projects live there.
  */
 const PRIVATE = [

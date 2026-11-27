@@ -2,10 +2,15 @@
 // These are NOT provider wire formats; provider ids are carried alongside.
 import type { PermissionKind, PlanInfo, ToolCallInfo, ToolContent } from './content';
 import type { ResearchSummary } from './research';
+import { ACP_IDS, type AcpProvider } from './acp-agents';
 
 export type { DiffHunk, FileDiff, PermissionKind, PlanEntry, PlanInfo, ToolCallInfo, ToolContent, ToolKind } from './content';
 
-export type AgentProvider = 'claude' | 'codex' | 'mock';
+/** The real coding agents: Claude Code and Codex natively, and the CLIs reached through ACP (shared/acp-agents.ts). */
+export type CodingProvider = 'claude' | 'codex' | AcpProvider;
+export type AgentProvider = CodingProvider | 'mock';
+/** Every real coding agent, in the order they are offered. */
+export const CODING_PROVIDERS: CodingProvider[] = ['claude', 'codex', ...ACP_IDS];
 export type AgentStatus =
   | 'idle'
   | 'starting'
@@ -22,7 +27,7 @@ export interface Project {
   projectId: string;
   name: string;
   rootPath: string;
-  /** SSH alias (from ~/.ssh/config) when the folder is on another machine; unset = this Mac. */
+  /** SSH alias (from ~/.ssh/config) when the folder is on another machine; unset = this computer. */
   host?: string;
   isGitRepo: boolean;
   createdAt: string;
@@ -66,7 +71,7 @@ export interface Task {
   /** Debounced, human-readable progress line for the Overview card. */
   summary: string;
   cwd: string;
-  /** SSH alias the agent runs on (its project's host); unset = this Mac. */
+  /** SSH alias the agent runs on (its project's host); unset = this computer. */
   host?: string;
   worktree?: WorktreeInfo;
   /** Set when another task shares this writable directory, or when the task has no worktree (cwdNote). */
@@ -142,11 +147,13 @@ export interface LimitWindow {
   usedPercent: number;
   /** When it resets, ms since the epoch. */
   resetsAt?: number;
+  /** Which models it covers, when an account has windows per group of models (Antigravity: "Gemini", "Claude and GPT"). */
+  label?: string;
 }
 
 /** A provider account's usage limits as last seen, and when. */
 export interface ProviderLimits {
-  /** Whose limits: the provider, and the machine its CLI runs on (unset: this Mac). One account each. */
+  /** Whose limits: the provider, and the machine its CLI runs on (unset: this computer). One account each. */
   provider?: AgentProvider;
   host?: string;
   windows: LimitWindow[];
@@ -292,7 +299,7 @@ export interface TranscriptItem {
   /** Structured tool call (role 'tool'). */
   tool?: ToolCallInfo;
   /** A decision the user made here (role 'system'): an approval given or a question answered. */
-  decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
+  decision?: { kind: 'approval' | 'answer'; label: string; about?: string; /** An approval refused (the option chosen is a reject / deny / decline). */ declined?: boolean; /** Every option offered, the chosen ones marked: the decision space. */ options?: Array<{ label: string; chosen: boolean }> };
   streaming?: boolean;
   /** A system item that starts a new chapter of the main agent's conversation (and why). */
   chapter?: { reason: 'manual' | 'idle' | 'long' };
@@ -331,7 +338,7 @@ export interface MemoryRecord {
 export interface MemoryCandidate {
   key: string;
   source: 'claude-memory' | 'instructions';
-  /** SSH alias; unset = this Mac. */
+  /** SSH alias; unset = this computer. */
   host?: string;
   /** Path as found, `~/`-relative when under the home folder. */
   file: string;
@@ -369,7 +376,7 @@ export interface MemorySyncStatus {
   added: number;
   updated: number;
   removed: number;
-  /** Machines scanned ('local' = this Mac). */
+  /** Machines scanned ('local' = this computer). */
   hosts: string[];
   errors: Array<{ host: string; error: string }>;
 }
@@ -386,17 +393,43 @@ export interface ProviderCapabilities {
   readOnlyMonitor: boolean;
   structuredApprovals: boolean;
   structuredQuestions: boolean;
-  /** Saved conversations on this Mac can be forked (the adapter implements forkPoints / forkSession). */
+  /** Saved conversations on this computer can be forked (the adapter implements forkPoints / forkSession). */
   fork?: boolean;
+  /** Its saved conversations can be forked onto another CLI (the adapter reads them back: readHistory). */
+  forkElsewhere?: boolean;
+  /** Answers side questions ("btw") without entering the conversation; unset = yes. */
+  sideQuestions?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */
   auth?: { loggedIn: boolean; method?: string };
+  /** Codex: Remote Control (pairing with the ChatGPT app) can be offered here (signed in with ChatGPT). */
+  remoteControl?: boolean;
+}
+
+/**
+ * Codex Remote Control for one live agent: its app-server paired (or pairing) with the ChatGPT app.
+ * `code` is the short-lived manual pairing code, shown until a device claims it or it expires.
+ */
+export interface CodexRemoteControl {
+  /** The app-server's link to the ChatGPT service (Codex's RemoteControlConnectionStatus). */
+  status: 'connecting' | 'connected' | 'errored' | 'disabled';
+  /** A device claimed the current code. */
+  paired: boolean;
+  code?: string;
+  /** What the QR code carries (scanned in the ChatGPT app instead of typing `code`). */
+  qr?: string;
+  /** When `code` stops working (ISO). */
+  expiresAt?: string;
+  /** This computer, as the ChatGPT app lists it. */
+  serverName?: string;
+  /** Devices paired with this computer (Codex's remote-control clients). */
+  devices?: Array<{ id: string; name: string; lastSeenAt?: string }>;
 }
 
 export interface NativeSessionInfo {
   provider: AgentProvider;
   nativeSessionId: string;
   cwd: string;
-  /** SSH alias the session lives on; unset = this Mac. */
+  /** SSH alias the session lives on; unset = this computer. */
   host?: string;
   title: string;
   updatedAt?: string;
@@ -413,7 +446,7 @@ export type RouteDecision =
       kind: 'create';
       proposedTitle: string;
       projectId?: string;
-      provider?: 'claude' | 'codex';
+      provider?: CodingProvider;
       reason: string;
     }
   | { kind: 'coordinator'; reason: string }
@@ -453,7 +486,8 @@ export interface Settings {
   /** Default permission mode for new agents. */
   permissionMode?: PermissionMode;
   /** Which CLI runs the main agent; unset = the first one installed and signed in. */
-  mainAgent?: 'claude' | 'codex' | 'off';
+  /** The main agent's CLI (any coding provider), or off. */
+  mainAgent?: CodingProvider | 'off';
   /** Start a new chapter of the main agent's conversation by itself after a long pause or a long chapter (default on). */
   mainChapters?: 'auto' | 'off';
   /** Speech-to-text model (OpenAI id). */
@@ -473,11 +507,28 @@ export interface Settings {
   /** Keep user memory in sync with the CLIs' native user-level memory; unset = on. */
   memorySync?: boolean;
   /**
-   * Machines whose CLIs share user memory ('local' = this Mac), linked once (files backed
+   * Machines whose CLIs share user memory ('local' = this computer), linked once (files backed
    * up, notes merged); from then on the shared user memory is kept in sync there.
    */
   memoryLinks?: Record<string, { linkedAt: string; /** Unlinked while offline: cleaned up when it connects. */ unlinking?: boolean }>;
+  // Advanced; unset = the defaults below.
+  /** Latest turns shown in full (1–5); 0 = every turn. Default 1. */
+  openTurns?: number;
+  /** Tool calls on opening a conversation: folded, only the failed ones open, or all open. Default folded. */
+  toolsOpen?: ToolsOpen;
+  /** Days without activity before an agent folds into its team's idle row; 0 = never. Default 3. */
+  idleAfterDays?: number;
+  /** The main agent's tool calls per message from the user. Default 30. */
+  mainCallsPerTurn?: number;
+  /** Agents the main agent may fork per message from the user. Default 3. */
+  mainForksPerTurn?: number;
+  /** Minutes before a command run with `!` is stopped. Default 10. */
+  commandTimeoutMin?: number;
+  /** Keep the computer from sleeping on its own while an agent works. Default on. */
+  keepAwake?: boolean;
 }
+
+export type ToolsOpen = 'folded' | 'failed' | 'all';
 
 /**
  * An enabled SSH host. `ssh`: whether a background (no-prompt) connection works —
@@ -561,6 +612,8 @@ export interface WorkspaceSnapshot {
   connectedTaskIds: string[];
   /** Live Claude sessions with Remote Control on: taskId → the session's link (claude.ai/code, the Claude app). */
   remoteControl: Record<string, string>;
+  /** Live Codex agents with Remote Control on: taskId → pairing and connection state (the ChatGPT app). */
+  codexRemote: Record<string, CodexRemoteControl>;
   /**
    * Per agent: the title of the last task on its session map (the model's grouping, as cached). What an
    * agent is on, for the sidebar row and the agent's header; absent until a map has been made.
@@ -606,5 +659,5 @@ export interface BtwEntry {
   answeredAt?: string;
 }
 
-/** One provider account: a provider's CLI on one machine ("claude" on this Mac, "codex@neptune"). */
+/** One provider account: a provider's CLI on one machine ("claude" on this computer, "codex@neptune"). */
 export const accountKey = (t: { provider: AgentProvider; host?: string }) => (t.host ? `${t.provider}@${t.host}` : t.provider);

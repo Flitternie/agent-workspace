@@ -1306,6 +1306,8 @@ body.resizing .sidebar-resizer {
   overflow: auto;
 }
 .empty-card {
+  /* A set width (its checklist is as wide as it), narrower only in a narrow window. */
+  width: min(460px, calc(100vw - 48px));
   max-width: 520px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -2870,7 +2872,7 @@ details[open] > summary .tool-more {
   gap: 6px;
   margin: 4px auto 14px;
   padding: 10px 12px;
-  width: min(360px, 100%);
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-2);
@@ -2880,7 +2882,12 @@ details[open] > summary .tool-more {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  min-height: 26px;
   font-size: 13px;
+}
+.setup-row > .badge {
+  flex: none;
 }
 .setup-check .link {
   align-self: flex-start;
@@ -3021,6 +3028,11 @@ details[open] > summary .tool-more {
 }
 .settings-section .segmented button {
   white-space: nowrap;
+}
+/* Advanced: one width for every dropdown, so the rows line up. */
+.advanced-row .select {
+  flex: none;
+  width: 140px;
 }
 .sidebar-settings.active {
   background: var(--selected);
@@ -3501,11 +3513,18 @@ details[open] > summary .tool-more {
 }
 .host-actions {
   margin-left: auto;
+  flex: none;
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 6px;
+}
+.host-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
 .host-addr {
   overflow: hidden;
@@ -3952,9 +3971,14 @@ button.subtask-row:hover {
 .subtask-view .btn-ghost .icon {
   transform: rotate(180deg);
 }
+/* The whole width scrolls (its scrollbar at the window's edge); the run itself stays a readable width. */
 .subtask-view-body {
-  padding: 18px 28px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 18px 28px;
+}
+.subtask-view-inner {
   max-width: 820px;
 }
 .subtask-view-title {
@@ -4739,6 +4763,36 @@ button.subtask-row:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: all;
+}
+.remote-code {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  user-select: all;
+}
+.remote-dot.remote-dot-err {
+  background: var(--risk);
+}
+.remote-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.remote-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.remote-device-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .remote-actions {
   display: flex;
@@ -7279,8 +7333,10 @@ button.subtask-row:hover {
   place-items: center;
   width: 18px;
   height: 18px;
+  padding: 0;
   border: none;
   border-radius: 50%;
+  line-height: 0;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   cursor: pointer;
@@ -8455,7 +8511,25 @@ button.subtask-row:hover {
   color: var(--needs);
 }
 .account-limits .account-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+}
+.provider-icon {
+  flex: none;
+}
+.provider-icon-claude {
+  color: #d97757;
+}
+.provider-icon-codex,
+.provider-icon-opencode {
+  color: var(--text);
+}
+.provider-icon-mock {
+  color: var(--text-2);
 }
 
 .account-limits-head {
@@ -8489,26 +8563,30 @@ button.subtask-row:hover {
   color: var(--needs);
 }
 
-/* An account's windows: a short bar each, its share used beside it. */
+/* An account's windows: a short bar each, its share used beside it. At the row's right end, each part
+   a fixed width, so the bars of every account line up in columns whatever the labels' lengths. */
 .account-windows {
   display: inline-flex;
-  gap: 10px;
-  /* Never wider than the sidebar: shortened rather than overflowing. */
-  min-width: 0;
-  overflow: hidden;
+  gap: 8px;
+  margin-left: auto;
+  /* Never squeezed: the machine's name on the left is what shortens. */
+  flex: none;
 }
 .lim {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: minmax(16px, max-content) 20px 26px;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 .lim-k {
   color: var(--text-3);
   font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
 }
 .lim-bar {
   position: relative;
-  width: 26px;
+  width: 20px;
   height: 4px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--text-3) 22%, transparent);
@@ -8521,7 +8599,6 @@ button.subtask-row:hover {
   background: color-mix(in srgb, var(--text-2) 70%, transparent);
 }
 .lim-v {
-  min-width: 26px;
   text-align: right;
   font-size: 10.5px;
   color: var(--text-2);
@@ -8549,15 +8626,6 @@ button.subtask-row:hover {
   margin-left: 10px;
 }
 
-.account-metered {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 3px 6px;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
 /* The New agent dialog's pointer to Continue a session, at its top. */
 .hint.new-continue {
   margin: -4px 0 12px;
@@ -8763,4 +8831,138 @@ button.subtask-row:hover {
   font-size: 12.5px;
   line-height: 1.55;
   border-top: 1px solid var(--border);
+}
+
+/* Another machine's account: its name beside the mark, shortened before the bars are. */
+.account-host {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+/* A remote account's card: its host on a line of its own (long names break there, not mid-title). */
+.usage-pop-host {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* An on/off setting: the text on the left (its meaning on a second line), a switch on the right. */
+.setting-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.setting-switch + .setting-switch {
+  border-top: 1px solid var(--border);
+}
+.setting-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.setting-switch-hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.25);
+  transition: transform 0.15s ease;
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(14px);
+}
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}
+/* Choosing a coding agent (ProviderPicker): equal one-line options; the column count comes from choice-layout.ts. */
+.provider-grid {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+.provider-grid .radio {
+  min-width: 0;
+  white-space: nowrap;
+}
+.provider-grid .radio input {
+  flex: none;
+  margin: 0;
+}
+.provider-grid .radio-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* As wide as the grid it replaces; the version is in its tooltip, like the grid's. */
+.provider-select .select {
+  flex: 1;
+  min-width: 0;
+}
+.settings-section .main-agent-select {
+  align-self: flex-start;
+  min-width: 200px;
+  max-width: 100%;
+}
+
+/* A command that must not break mid-word. */
+code.nowrap {
+  white-space: nowrap;
+}
+
+/* Codex pairing QR code: white quiet zone in either theme. */
+.remote-qr {
+  width: 168px;
+  height: 168px;
+  margin: 4px auto 8px;
+  padding: 6px;
+  background: #fff;
+  border-radius: 8px;
+}
+.remote-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }

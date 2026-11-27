@@ -1,5 +1,6 @@
 import type { SessionStore, SessionStoreEntry, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { shq, sshError, sshRun, sshSpawn } from '../util/ssh';
+import { shq, sshError, sshRun, sshRunner, sshSpawn } from '../util/ssh';
+import { detachedSpawn } from '../util/detached';
 
 // Claude Code on an SSH host: the SDK runs the `claude` installed there through
 // `spawnClaudeCodeProcess` (its login, settings and transcripts stay on the host), and
@@ -96,13 +97,15 @@ export interface RemoteExit {
 }
 
 /** Runs the SDK's CLI command line with the host's own `claude`, in `cwd` there. */
-export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>, onExit?: (exit: RemoteExit) => void): (o: SpawnOptions) => SpawnedProcess {
+export function remoteSpawn(host: string, cwd: string, localEnv: Record<string, string>, onExit?: (exit: RemoteExit) => void, opts: { detached?: boolean } = {}): (o: SpawnOptions) => SpawnedProcess {
   return (o) => {
     // Only what the SDK itself adds for the CLI crosses over; the user's environment stays here.
     const added = Object.entries(o.env).filter(([k, v]) => typeof v === 'string' && localEnv[k] !== v && /^CLAUDE_[A-Z0-9_]+$/.test(k));
     const exports = added.map(([k, v]) => `export ${k}=${shq(v!)}; `).join('');
     const command = `cd ${shq(cwd)} || exit 3; ${exports}exec claude ${o.args.map(shq).join(' ')}`;
-    const proc = sshSpawn(host, command);
+    // A session's CLI outlives its connection (the laptop asleep, a network change) and is picked up again;
+    // a quick one-off query just uses the connection.
+    const proc = opts.detached === false ? sshSpawn(host, command) : detachedSpawn(sshRunner(host), command, { onLink: (s) => console.warn(`[ssh] ${host}: connection ${s}`) });
     // Only the tail is kept, and only to explain an exit (as the SDK does for a local CLI).
     let stderr = '';
     proc.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString()).slice(-STDERR_TAIL)));
@@ -133,10 +136,6 @@ export function remoteExitError(host: string, exit: RemoteExit, fallback: string
   const how = exit.signal ? `was stopped (${exit.signal})` : `exited with code ${exit.code}`;
   return why ? `Claude Code on ${host} ${how}: ${why}` : fallback.replace(/^Claude Code process/, `Claude Code on ${host}`);
 }
-
-/** Whether a session ended because the connection to its host was lost (not the CLI's own failure). */
-export const connectionLost = (reason: string) =>
-  /SSH connection closed|ended unexpectedly|Lost the SSH connection|Connection (closed|reset|refused|timed out)|Broken pipe|closed by remote host|not responding|Could not resolve hostname|Network is unreachable|No route to host|Operation timed out|Could not reach|port 22|kex_exchange_identification|Connection timed out/i.test(reason);
 
 /**
  * Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. Returns the folder's

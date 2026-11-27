@@ -5,7 +5,24 @@ import { t } from '../i18n';
 import { Icon, PROVIDER_LABEL } from './bits';
 
 /** Display names already learnt from a CLI's model list (shared by every agent view). */
-const known = new Map<string, string>();
+// Kept across restarts: the header names the model before its list is asked for again.
+const KNOWN_KEY = 'amw.modelLabels';
+const known = new Map<string, string>(((): Array<[string, string]> => {
+  try {
+    return Object.entries(JSON.parse(localStorage.getItem(KNOWN_KEY) ?? '{}') as Record<string, string>);
+  } catch {
+    return [];
+  }
+})());
+function remember(id: string, label: string): void {
+  if (known.get(id) === label) return;
+  known.set(id, label);
+  try {
+    localStorage.setItem(KNOWN_KEY, JSON.stringify(Object.fromEntries([...known].slice(-300))));
+  } catch {
+    /* storage full: the label is still known this session */
+  }
+}
 
 /** A readable name before the list is in: "claude-opus-5-5" → "Opus 5.5", "gpt-6.1-sol" → "GPT-6.1-Sol". */
 export function modelName(id: string): string {
@@ -14,6 +31,9 @@ export function modelName(id: string): string {
   const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/.exec(id);
   if (c) return `${c[1][0].toUpperCase()}${c[1].slice(1)} ${c[2]}${c[3] ? `.${c[3]}` : ''}`;
   if (/^gpt-/i.test(id)) return id.split('-').map((p, i) => (i === 0 ? 'GPT' : p[0] ? p[0].toUpperCase() + p.slice(1) : p)).join('-');
+  // "provider/model-name" (OpenCode and the like): as the CLIs' own lists write it, "provider/Model Name".
+  const slash = /^([\w.-]+)\/([\w.:-]+)$/.exec(id);
+  if (slash) return `${slash[1]}/${slash[2].split(/[-_]/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ')}`;
   return id;
 }
 
@@ -21,8 +41,9 @@ const matches = (o: ModelOption, id?: string) => !!id && (o.id === id || o.resol
 
 /**
  * In the agent's header: the model it runs on; a click lists the models its CLI offers
- * (here or on its host) and switches from the next turn. The list is asked for on first
- * open, not on every view.
+ * (here or on its host) and switches: Claude Code from its next request (as /model does, the running
+ * turn included), Codex from its next turn. The list is read again each time it opens (a new plan or
+ * another sign-in changes it); the last one shows meanwhile.
  */
 export function ModelPicker({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
@@ -31,14 +52,15 @@ export function ModelPicker({ task }: { task: Task }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!open) return;
-    if (!models)
-      call('task:models', { taskId: task.taskId }).then(
-        (list) => {
-          for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) known.set(id, o.label);
-          setModels(list);
-        },
-        (e) => setError(errorText(e)),
-      );
+    call('task:models', { taskId: task.taskId, fresh: true }).then(
+      (list) => {
+        for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) remember(id, o.label);
+        setModels(list);
+        setError('');
+      },
+      // With a list already shown, a failed refresh leaves it as it is.
+      (e) => setError((prev) => (models ? prev : errorText(e))),
+    );
     const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
     // Esc closes just this (before the app's Esc, which leaves the agent view).
     const esc = (e: KeyboardEvent) => {
@@ -61,8 +83,9 @@ export function ModelPicker({ task }: { task: Task }) {
   // One tick: the pick, else the default entry (when it is what runs), else what runs.
   const onId = task.model ?? (models?.find((o) => o.isDefault && (matches(o, current) || !current)) ?? models?.find((o) => matches(o, current)))?.id;
   const label = listed?.label ?? (current ? modelName(current) : t('Default model'));
-  // Picked while a turn runs: the running turn keeps its model.
-  const pending = !!task.model && !!task.activeModel && task.model !== task.activeModel && !models?.find((o) => o.id === task.model && o.resolves === task.activeModel) && (task.status === 'running' || task.status === 'starting');
+  // Only Codex keeps a running turn on its model: picked meanwhile, it applies from the next turn.
+  const nextTurn = task.provider === 'codex';
+  const pending = nextTurn && !!task.model && !!task.activeModel && task.model !== task.activeModel && !models?.find((o) => o.id === task.model && o.resolves === task.activeModel) && (task.status === 'running' || task.status === 'starting');
   const pick = (model: string | null) => {
     setOpen(false);
     setError('');
@@ -77,7 +100,7 @@ export function ModelPicker({ task }: { task: Task }) {
       </button>
       {open ? (
         <div className="model-menu" data-testid="model-menu">
-          <div className="model-menu-head">{t('Model for this agent · from its next turn')}</div>
+          <div className="model-menu-head">{nextTurn ? t('Model for this agent · from its next turn') : t('Model for this agent')}</div>
           {error ? <div className="error-text small">{error}</div> : null}
           {!models && !error ? <div className="muted small">{t('Asking {name} for its models…', { name: PROVIDER_LABEL[task.provider] })}</div> : null}
           {models?.map((o) => {

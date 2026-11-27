@@ -17,6 +17,7 @@ import type { ModelOption,
   PermissionMode,
   Project,
   ProviderCapabilities,
+  CodexRemoteControl,
   RemoteHostStatus,
   RouteDecision,
   SessionRecord,
@@ -26,8 +27,10 @@ import type { ModelOption,
   TranscriptItem,
   TransientKind,
   WorkspaceSnapshot, BtwEntry, ImageRef, AgentStatus, TaskUsage, ProviderLimits, LimitWindow } from '../shared/types';
-import { accountKey } from '../shared/types';
+import { accountKey, CODING_PROVIDERS, type CodingProvider } from '../shared/types';
+import { acpAgent, isAcpProvider } from '../shared/acp-agents';
 import { clipOutput } from '../shared/content';
+import { CARRY_NOTE, conversationCopy, parseCopy, type SaidLine } from '../shared/conversation-copy';
 import { statusGroup, type Group } from '../shared/agent-order';
 import { asksUser, clip, headlineFor, summaryFor } from './attention';
 import { deltaSize, instructionsFor, memoryDelta, memoryForTask, memoryUpdateText, seenOf } from './memory';
@@ -37,7 +40,7 @@ import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { HistoryImage, ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
 import { AttachmentStore, MAX_IMAGES } from './attachments';
-import { CONTINUE_PROMPT, DEFAULT_RETRY, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
+import { CONTINUE_PROMPT, DEFAULT_RETRY, RECONNECT_PROMPT, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
 import { ALIAS_PROBLEM_TEXT, aliasProblem, normalizeAlias } from '../shared/agent-name';
@@ -57,9 +60,9 @@ import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools, roleInstructions } from './research-tools';
 import { moveClaudeSession } from './research-move';
 import { repoOf } from './worktree';
-import { connectionLost } from './providers/claude-remote';
 import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
+import { settleStops } from './util/detached';
 
 /** Words that clearly approve (zh / en). */
 const APPROVAL = /(批准|允许|同意|可以|行|好的|确认|执行吧|跑吧|\b(yes|yep|allow|approve|approved|go ahead|ok|okay|sure|do it|confirm)\b)/i;
@@ -94,6 +97,7 @@ interface LiveSession {
 }
 
 /** A `!command` the user typed is stopped after this long. */
+/** A command run with `!`: stopped after this long unless Settings › Advanced says otherwise. */
 const SHELL_TIMEOUT_MS = 10 * 60_000;
 /** How much of a command's output goes to the agent with the next message. */
 const SHELL_CONTEXT_CHARS = 20_000;
@@ -122,12 +126,16 @@ export interface WorkspaceOptions {
   retry?: Partial<RetryPolicy>;
   /** A research's agent with nothing to do is disconnected after this long (it connects again when used). */
   researchIdleMs?: number;
-  /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
+  /** Home folder whose native memory files this computer's scan reads (tests); default $HOME. */
   home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
   backgroundModel?: (system: string, prompt: string) => Promise<string>;
   /** How long a label stands before new work may rewrite it (tests use 0). */
   labelRefreshMs?: number;
+  /** Waits between attempts to reach a host again after its connection went (ms; the last repeats). */
+  reconnectMs?: number[];
+  /** Stops trying (quietly) after this long without reaching the host; waking up or a message starts again. */
+  reconnectGiveUpMs?: number;
 }
 
 /**
@@ -139,7 +147,8 @@ export class Workspace {
   readonly store: JsonStore;
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
   /** Remote Control links, for the live session that turned it on (gone with that session). */
-  private remote = new Map<string, { localId: string; url: string }>();
+  /** Remote Control per agent while its session lives: a Claude session's link, or a Codex agent's pairing. */
+  private remote = new Map<string, { localId: string; url?: string; codex?: CodexRemoteControl }>();
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
@@ -147,6 +156,7 @@ export class Workspace {
   private warming = new Set<string>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
+  private capsSeq = 0;
   private changeListeners = new Set<() => void>();
   /** item === null means "the whole transcript was replaced; reload it". */
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
@@ -157,6 +167,8 @@ export class Workspace {
   private retryPolicy: RetryPolicy;
   /** taskId → the try in progress or waiting (2 = first retry) of the last instruction, and its timer while waiting. */
   private retries = new Map<string, { attempt: number; timer?: NodeJS.Timeout }>();
+  /** Hosts whose connection went, with their agents to connect again (true: it was working, carry on). */
+  private reconnects = new Map<string, { attempt: number; since: number; timer?: NodeJS.Timeout; tasks: Map<string, boolean> }>();
 
   /** The skill library loaded into every agent the app starts (see skills.ts). */
   readonly skills: SkillLibrary;
@@ -366,16 +378,23 @@ export class Workspace {
         t.summary = t.summary ? `${t.summary} (app restarted — resume to continue)` : 'App restarted — resume to continue';
       }
     }
-    // A session that ended because the connection dropped is nothing to handle after a restart (nothing is
-    // connected now; the next message connects it): such items, from before this was quiet, go.
-    for (const a of d.attention)
-      if (a.state === 'open' && a.kind === 'error' && !a.retryable && !a.members && connectionLost(a.details || a.headline)) {
-        a.state = 'expired';
-        a.resolvedAt = now();
-        a.resolution = 'The connection dropped; the agent connects again when it is used.';
-        const t = d.tasks.find((x) => x.taskId === a.taskId);
-        if (t && t.status === 'failed') t.status = 'disconnected';
+    // A lost connection to a host is no error to keep (they reconnect when used): earlier ones, from
+    // before agents reconnected by themselves, leave the waiting list.
+    for (const t of d.tasks) {
+      if (!t.host) continue;
+      let cleared = false;
+      for (const a of d.attention)
+        if (a.taskId === t.taskId && a.state === 'open' && a.kind === 'error' && this.connectionLost(t, `${a.headline} ${a.details ?? ''}`)) {
+          a.state = 'resolved';
+          a.resolvedAt = now();
+          a.resolution = 'Connection errors are not kept; the agent reconnects when used.';
+          cleared = true;
+        }
+      if (t.status === 'failed' && (cleared || this.connectionLost(t, t.lastError))) {
+        t.status = 'disconnected';
+        t.summary = `Not connected to ${t.host}. Reconnects when you send a message.`;
       }
+    }
     // A side question still unanswered when the app quit will not be answered now.
     for (const list of Object.values(d.btw ?? {}))
       for (const e of list) if (!e.answer && !e.error) e.error = 'The app quit before this was answered.';
@@ -391,21 +410,24 @@ export class Workspace {
   }
 
   /**
-   * Looks at the CLIs on this Mac again, and (unless `localOnly`) at the SSH hosts, quietly: their
+   * Looks at the CLIs on this computer again, and (unless `localOnly`) at the SSH hosts, quietly: their
    * rows keep the last result meanwhile. The first-run guide polls with `localOnly` while the user
    * installs or signs in here; hosts have their own slower recheck.
    */
   async refreshCapabilities(opts: { localOnly?: boolean } = {}): Promise<void> {
+    // Looks overlap (a recheck while the guide polls, a sign-in ending): the latest one started wins, never an older one finishing late.
+    const seq = ++this.capsSeq;
     const caps: ProviderCapabilities[] = [];
     for (const a of Object.values(this.opts.adapters)) {
       if (!a) continue;
       try {
         // Fork support comes from the adapter itself, so the renderer offers it for every provider that has it.
-        caps.push({ ...(await a.capabilities()), fork: !!(a.forkSession && a.forkPoints) });
+        caps.push({ ...(await a.capabilities()), fork: !!(a.forkSession && a.forkPoints), forkElsewhere: !!(a.readHistory && a.forkPoints) });
       } catch (error) {
         this.log('capabilities failed', a.provider, error);
       }
     }
+    if (seq !== this.capsSeq) return;
     this.capabilities = caps;
     this.syncMainAgent();
     this.changed();
@@ -422,7 +444,7 @@ export class Workspace {
     return (this.store.data.settings.remoteHosts ?? []).filter((h) => known.includes(h));
   }
 
-  private requireHost(host: string): void {
+  requireHost(host: string): void {
     if (!this.enabledHosts().includes(host)) throw new Error(`${host} is not enabled in Settings › Remote machines.`);
   }
 
@@ -500,7 +522,8 @@ export class Workspace {
     const cap = status?.capabilities.find((c) => c.provider === provider);
     if (status && status.ssh !== 'ok' && status.ssh !== 'checking') throw new Error(status.error ?? `Cannot reach ${host}.`);
     if (cap && !cap.available) throw new Error(cap.detail ?? `${provider} is not installed on ${host}.`);
-    if (cap?.auth?.loggedIn === false) throw new Error(`${provider === 'claude' ? 'Claude Code' : 'Codex'} on ${host} is not signed in. Sign in there once (${provider === 'claude' ? 'claude' : 'codex login'}), then recheck.`);
+    const acp = acpAgent(provider);
+    if (cap?.auth?.loggedIn === false) throw new Error(`${acp?.label ?? (provider === 'claude' ? 'Claude Code' : 'Codex')} on ${host} is not signed in. Sign in there once (${acp?.login ?? (provider === 'claude' ? 'claude' : 'codex login')}), then recheck.`);
   }
 
   async shutdown(): Promise<void> {
@@ -510,11 +533,13 @@ export class Workspace {
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
     clearInterval(this.idleSweep);
-    for (const w of this.lostHosts.values()) clearTimeout(w.timer);
-    this.lostHosts.clear();
+    for (const r of this.reconnects.values()) clearTimeout(r.timer);
+    this.reconnects.clear();
     const sessions = [...this.live.values()];
     this.live.clear();
     for (const l of sessions) await l.session.close().catch(() => {});
+    // CLIs on hosts run detached from their connection: their stops have to reach the host before we go.
+    await settleStops();
     this.store.flush();
   }
 
@@ -1013,7 +1038,8 @@ export class Workspace {
       main: d.mainAgent,
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
-      remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
+      remoteControl: Object.fromEntries(this.liveRemote().flatMap(([id, r]) => (r.url ? [[id, r.url]] : []))),
+      codexRemote: Object.fromEntries(this.liveRemote().flatMap(([id, r]) => (r.codex ? [[id, r.codex]] : []))),
       // Read from the cached groupings only: nothing is asked of a model to fill it.
       limits: d.limits ?? {},
       workTitles: Object.fromEntries(Object.entries(d.sessionMaps ?? {}).flatMap(([id, g]) => (g.version === GROUPING_VERSION && g.tasks.length ? [[id, g.tasks.at(-1)!.title]] : []))),
@@ -1249,7 +1275,7 @@ export class Workspace {
 
   /** Shows an imported session's past conversation right away, before anything is resumed. */
   /** Shows a saved conversation before it is resumed, and returns it (undefined when it could not be read). */
-  private async previewHistory(task: Task, provider: 'claude' | 'codex', nativeSessionId: string): Promise<TranscriptItem[] | undefined> {
+  private async previewHistory(task: Task, provider: AgentProvider, nativeSessionId: string): Promise<TranscriptItem[] | undefined> {
     const adapter = this.opts.adapters[provider];
     if (!adapter?.readHistory) return undefined;
     try {
@@ -1258,6 +1284,11 @@ export class Workspace {
       const items: TranscriptItem[] = [];
       for (const e of events) {
         if (e.type !== 'transcriptItem') continue;
+        const copied = copiedItems(task.taskId, e);
+        if (copied) {
+          items.push(...copied);
+          continue;
+        }
         const i = items.findIndex((h) => h.id === e.itemId);
         const item = mergeItem(i === -1 ? undefined : items[i], { id: e.itemId, taskId: task.taskId, role: e.role, text: e.text, toolLabel: e.toolLabel, toolStatus: e.toolStatus, createdAt: now() }, e.tool);
         if (i === -1) items.push(item);
@@ -1474,7 +1505,7 @@ export class Workspace {
     this.store.save();
     try {
       const live = this.live.get(taskId) ?? (await this.connect(taskId));
-      if (!live.session.askSide) throw new Error(`${task.provider} does not take side questions.`);
+      if (!live.session.askSide) throw new Error(`${providerName(task.provider)} does not take side questions.`);
       entry.answer = await live.session.askSide(entry.question, history);
     } catch (error) {
       entry.error = (error as Error).message;
@@ -1578,6 +1609,7 @@ export class Workspace {
     this.refreshSharedFolders();
     d.attention = d.attention.filter((a) => a.taskId !== taskId);
     d.memory = d.memory.filter((m) => !(m.scope === 'task' && m.scopeId === taskId));
+    if (d.carried) delete d.carried[taskId];
     this.coordinatorSay(note);
     this.changed();
     return note;
@@ -1701,9 +1733,18 @@ export class Workspace {
         // what holds for the research goes in its memory (research_memory).
         ...(inResearch ? { denyEdit: ['**/.research/**', ...(task.researchAgent || manages || this.inAnyResearch(task.taskId) ? ['~/.claude/projects/**/memory/**', '~/.claude/**/CLAUDE.md', '~/.codex/**'] : [])] } : {}),
         skills,
+        // As the interactive CLI has them (each use still asks first). The browser is the user's own
+        // Chrome, on this Mac; the main agent only coordinates.
+        chrome: !isMain && !task.host,
+        artifacts: !isMain,
       },
       (event) => {
         if (replaying && event.type === 'transcriptItem' && event.history) {
+          const copied = copiedItems(taskId, event);
+          if (copied) {
+            for (const c of copied) if (!history.some((h) => h.id === c.id)) history.push(c);
+            return;
+          }
           const prev = history.findIndex((h) => h.id === event.itemId);
           const images = this.historyImages(event.images, task.host);
           const item = mergeItem(prev === -1 ? undefined : history[prev], { id: event.itemId, taskId, role: event.role, text: event.text, ...(images ? { images } : {}), toolLabel: event.toolLabel, toolStatus: event.toolStatus, createdAt: now() }, event.tool);
@@ -1729,17 +1770,15 @@ export class Workspace {
         throw error;
       }
       const message = (error as Error).message;
-      // Its host cannot be reached: not this agent's failure. It connects again when the host answers.
-      if (task.host && connectionLost(message)) {
-        task.status = prev ? 'disconnected' : 'failed';
-        task.lastError = message;
-        this.watchHost(task.host, taskId);
+      task.lastError = message;
+      if (this.connectionLost(task, message)) {
+        // The host is out of reach for now: tried again by itself, no error to dismiss.
+        this.scheduleReconnect(task, false);
         this.changed();
         throw error;
       }
       task.status = 'failed';
-      task.lastError = message;
-      task.summary = `Could not ${resumeId ? 'resume' : 'start'} ${task.provider} session: ${clip(message, 140)}`;
+      task.summary = `Could not ${resumeId ? 'resume' : 'start'} the ${providerName(task.provider)} session: ${clip(message, 140)}`;
       if (!this.trouble(task, 'failed', message)) this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
       this.changed();
       throw error;
@@ -1762,6 +1801,9 @@ export class Workspace {
       this.changed();
       return live;
     }
+    // Connected by the user's hand: no longer waiting to be reconnected.
+    this.dropReconnect(taskId);
+    this.resolveConnectionErrors(taskId);
     if (task.status === 'starting') task.status = 'idle';
     task.summary = resumeId ? 'Session resumed with its previous conversation.' : task.summary;
     this.changed();
@@ -1794,6 +1836,7 @@ export class Workspace {
 
   async stop(taskId: string): Promise<void> {
     this.cancelRetry(taskId);
+    this.dropReconnect(taskId);
     const l = this.live.get(taskId);
     if (!l) return;
     this.live.delete(taskId);
@@ -1848,7 +1891,7 @@ export class Workspace {
     return new Set(this.store.data.sessions.filter((s) => here.has(s.taskId) && s.nativeSessionId).map((s) => s.nativeSessionId));
   }
 
-  async discoverSessions(projectId: string, provider: 'claude' | 'codex'): Promise<NativeSessionInfo[]> {
+  async discoverSessions(projectId: string, provider: CodingProvider): Promise<NativeSessionInfo[]> {
     const adapter = this.opts.adapters[provider];
     if (!adapter) throw new Error(`Provider ${provider} is not available.`);
     const project = this.project(projectId);
@@ -1863,7 +1906,7 @@ export class Workspace {
    * Claude and ChatGPT desktop apps created there through their SSH connections).
    */
   /**
-   * The folders inside `dir` on this Mac or on `host` (for typing a path with completion). `~` is the
+   * The folders inside `dir` on this computer or on `host` (for typing a path with completion). `~` is the
    * home folder there. Returns the folder as resolved and its subfolders' names (dot-folders included;
    * the caller decides). A path that is not a folder gives no names.
    */
@@ -1896,12 +1939,12 @@ export class Workspace {
   /**
    * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
    * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
-   * on an SSH host (the files are on this Mac) refuses. The main agent gets full paths, to pass on.
+   * on an SSH host (the files are on this computer) refuses. The main agent gets full paths, to pass on.
    */
   droppedFiles(taskId: string, paths: string[]): FileMatch[] {
     const task = this.task(taskId);
     const main = task === this.store.data.mainAgent;
-    if (task.host) throw new Error(`These files are on this Mac; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
+    if (task.host) throw new Error(`These files are on this computer; ${task.alias} runs on ${task.host} and cannot read them. Copy them there, or mention a file on ${task.host} with @.`);
     const home = homedir();
     return paths.map((p) => {
       const abs = resolve(p);
@@ -2030,12 +2073,12 @@ export class Workspace {
    * newest first, minus ones already imported and the app's own scratch dirs.
    */
   async discoverAllSessions(): Promise<NativeSessionInfo[]> {
-    // Tests read a fixture (a JSON list) instead of this Mac's real Claude Code / Codex sessions.
+    // Tests read a fixture (a JSON list) instead of this computer's real Claude Code / Codex sessions.
     if (process.env.AMW_DISCOVER_FIXTURE) return (JSON.parse(readFileSync(process.env.AMW_DISCOVER_FIXTURE, 'utf8')) as NativeSessionInfo[]).filter((s) => !s.host);
     const known = this.attachedSessionIds();
     const own = [this.opts.dataDir, ...(this.opts.hiddenSessionDirs ?? []), tmpdir(), '/var/folders', '/private/var/folders', '/private/tmp', '/tmp'].map((p) => resolve(p));
     const lists = await Promise.all(
-      (['claude', 'codex'] as const).map(async (p) => {
+      CODING_PROVIDERS.map(async (p) => {
         const adapter = this.opts.adapters[p];
         if (!adapter || !this.capabilities.find((c) => c.provider === p)?.available) return [];
         try {
@@ -2053,7 +2096,7 @@ export class Workspace {
   }
 
   /** Adopts a provider session created outside the app (historical resume, not live attach). */
-  async importSession(args: { projectId?: string; provider: 'claude' | 'codex'; nativeSessionId: string; cwd: string; host?: string; title: string }): Promise<Task> {
+  async importSession(args: { projectId?: string; provider: CodingProvider; nativeSessionId: string; cwd: string; host?: string; title: string }): Promise<Task> {
     if (args.host) this.requireOnHost(args.provider, args.host);
     if (args.projectId) args = { ...args, host: this.project(args.projectId).host };
     else if (args.host) {
@@ -2094,16 +2137,56 @@ export class Workspace {
 
   // ---------------------------------------------------------------- forking
 
-  /** The task's saved conversation, if its provider can fork it here. */
-  private forkSource(taskId: string) {
+  /** The task's saved conversation, if its provider can fork it here (onto another CLI: if it can read it back). */
+  private forkSource(taskId: string, onto?: AgentProvider) {
     const task = this.task(taskId);
     if (task === this.store.data.mainAgent) throw new Error('The main agent cannot be forked.');
     const adapter = this.opts.adapters[task.provider];
-    if (!adapter?.forkSession || !adapter.forkPoints) throw new Error(`${task.provider} conversations cannot be forked yet.`);
+    const elsewhere = !!onto && onto !== task.provider;
+    if (!adapter?.forkPoints || !(elsewhere ? adapter.readHistory : adapter.forkSession))
+      throw new Error(`${providerName(task.provider)} conversations cannot be forked${elsewhere ? ' onto another CLI' : ''} yet.`);
+    if (elsewhere && !this.opts.adapters[onto]) throw new Error(`${providerName(onto)} is not available here.`);
     if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
     const nativeSessionId = this.currentSession(task)?.nativeSessionId;
     if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
-    return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkSession' | 'forkPoints'>>, nativeSessionId };
+    return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkPoints'>> & typeof adapter, nativeSessionId };
+  }
+
+  /**
+   * A saved conversation as said, for another CLI to continue: the transcript as shown (each message,
+   * tools by their titles) up to just before the fork point's prompt, read back through the provider.
+   */
+  private async carryOver(src: Task, adapter: ProviderAdapter, nativeSessionId: string, upToMessageId?: string): Promise<{ items: TranscriptItem[]; lines: SaidLine[] }> {
+    const events = await adapter.readHistory!(nativeSessionId, src.cwd, src.host);
+    let items: TranscriptItem[] = [];
+    for (const e of events) {
+      if (e.type !== 'transcriptItem') continue;
+      const copied = copiedItems(src.taskId, e);
+      if (copied) {
+        items.push(...copied);
+        continue;
+      }
+      const i = items.findIndex((h) => h.id === e.itemId);
+      const item = mergeItem(i === -1 ? undefined : items[i], { id: e.itemId, taskId: src.taskId, role: e.role, text: e.text, toolLabel: e.toolLabel, toolStatus: e.toolStatus, createdAt: now() }, e.tool);
+      if (i === -1) items.push(item);
+      else items[i] = item;
+    }
+    if (upToMessageId) {
+      const points = await adapter.forkPoints!(nativeSessionId, src.cwd);
+      const cut = forkCut(items, points, upToMessageId);
+      if (cut === undefined) throw new Error('That point of the conversation was not found; fork it as it is now instead.');
+      items = items.slice(0, cut);
+    }
+    const lines = items.flatMap((i): SaidLine[] => {
+      if (i.role === 'user' || i.role === 'assistant') return i.text.trim() ? [{ role: i.role, text: i.text }] : [];
+      if (i.role === 'tool') {
+        const title = i.tool?.title || i.toolLabel || i.text.split('\n')[0];
+        return title?.trim() ? [{ role: 'tool', text: title }] : [];
+      }
+      return [];
+    });
+    if (!lines.length) throw new Error(`There is nothing to fork in ${src.alias}'s conversation yet.`);
+    return { items, lines };
   }
 
   /** Where the task's conversation can be forked: before each of the user's earlier prompts, oldest first. */
@@ -2120,9 +2203,11 @@ export class Workspace {
    */
   async forkTask(
     taskId: string,
-    opts: { upToMessageId?: string; isolate: boolean; instruction?: string; name?: string; permissionMode?: PermissionMode },
+    opts: { upToMessageId?: string; isolate: boolean; instruction?: string; name?: string; permissionMode?: PermissionMode; provider?: AgentProvider },
   ): Promise<Task> {
-    const { task: src, adapter, nativeSessionId } = this.forkSource(taskId);
+    const { task: src, adapter, nativeSessionId } = this.forkSource(taskId, opts.provider);
+    // Onto another CLI: a new agent there, given the conversation as text with its first message.
+    const onto = opts.provider && opts.provider !== src.provider ? opts.provider : undefined;
     // Mid-turn, the saved conversation can end on a tool call with no result yet.
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
       throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
@@ -2139,9 +2224,11 @@ export class Workspace {
       const prefix = (await run('git', ['-C', src.cwd, 'rev-parse', '--show-prefix'])).stdout.trim().replace(/\/+$/, '');
       cwd = prefix ? join(worktree.path, prefix) : worktree.path;
     }
-    let forkId: string;
+    let forkId = '';
+    let carried: { items: TranscriptItem[]; lines: SaidLine[] } | undefined;
     try {
-      forkId = await adapter.forkSession(nativeSessionId, { cwd: src.cwd, targetCwd: cwd, upToMessageId: opts.upToMessageId, title });
+      if (onto) carried = await this.carryOver(src, adapter, nativeSessionId, opts.upToMessageId);
+      else forkId = await adapter.forkSession!(nativeSessionId, { cwd: src.cwd, targetCwd: cwd, upToMessageId: opts.upToMessageId, title });
     } catch (error) {
       if (worktree) await this.worktrees.removeIfClean(worktree);
       throw error;
@@ -2152,9 +2239,10 @@ export class Workspace {
     const ids = this.newTaskIds();
     const { taskId: newId, alias } = ids;
     const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';
+    const on = onto ? ` on ${providerName(onto)}` : '';
     const task = this.addTask(ids, {
       projectId: src.projectId,
-      provider: src.provider,
+      provider: onto ?? src.provider,
       host: src.host,
       cwd,
       worktree,
@@ -2162,24 +2250,32 @@ export class Workspace {
       name: opts.name?.trim() || (src.name === src.alias ? alias : this.forkName(src.name, labelLang(alias))),
       nameSource: 'auto',
       title,
-      status: 'disconnected',
-      summary: `Forked from ${src.alias}'s conversation ${point}. Send a message to continue.`,
-      session: { nativeSessionId: forkId, integrationMode: 'resumed' },
+      status: onto ? 'idle' : 'disconnected',
+      summary: `Forked from ${src.alias}'s conversation ${point}${on}. Send a message to continue.`,
+      session: onto ? undefined : { nativeSessionId: forkId, integrationMode: 'resumed' },
       permissionMode: 'permissionMode' in opts ? opts.permissionMode : src.permissionMode,
       forkedFrom: { taskId: src.taskId, alias: src.alias },
       mockScript: src.mockScript,
     });
     const notes = [
-      `${alias} continues ${src.alias}'s conversation ${point}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
+      `${alias} continues ${src.alias}'s conversation ${point}${on}${worktree ? ` in its own worktree (${worktree.branch}) with ${src.alias}'s files as they are now` : ''}.`,
       ...(copied?.error
         ? [`${src.alias}'s uncommitted changes were not fully copied (${copied.error}); check ${alias}'s files before relying on them.`]
         : copied?.files
           ? [`${src.alias}'s uncommitted changes were copied too (${copied.files} file${copied.files === 1 ? '' : 's'}).`]
           : []),
     ];
-    this.coordinatorSay(`Forked ${src.alias} as ${alias}. ${notes.join(' ')}`);
+    this.coordinatorSay(`Forked ${src.alias} as ${alias}${on}. ${notes.join(' ')}`);
+    if (carried) {
+      // Shown as it was; the new CLI receives it with the first message.
+      (this.store.data.carried ??= {})[newId] = carried.lines;
+      this.store.setTranscript(newId, carried.items.slice(-400).map((i) => ({ ...i, taskId: newId, streaming: false })));
+      for (const cb of this.transcriptListeners) cb(newId, null);
+      const last = [...carried.items].reverse().find((x) => x.role === 'assistant' && x.text.trim());
+      if (last) task.summary = summaryFor(last.text);
+    }
     this.changed();
-    if (src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
+    if (!onto && src.provider !== 'mock') void this.previewHistory(task, src.provider, forkId);
     const instruction = opts.instruction?.trim();
     // A fork with its own instruction is new work: label that work, not the original's.
     if (instruction && !opts.name?.trim()) void this.refineLabel(task, `${instruction}\n(branched off: ${src.name})`);
@@ -2211,12 +2307,18 @@ export class Workspace {
    */
   private memoryGiven(task: Task, covered = new Map<string, Set<string>>()): MemoryRecord[] {
     const machine = task.host ?? LOCAL;
-    const file = task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md';
+    // An ACP CLI reads its own rules file (shared/acp-agents.ts `memory`), if the app writes one there.
+    const acp = acpAgent(task.provider);
+    if (acp && !acp.memory) return memoryForTask(task, this.store.data.memory);
+    const file = acp?.memory?.file ?? (task.provider === 'codex' ? '~/.codex/AGENTS.md' : '~/.claude/CLAUDE.md');
     // (Worked out once per machine and file when asked for many agents at once.)
     let inFiles = covered.get(`${machine}|${file}`);
     if (!inFiles) {
       const link = this.store.data.settings.memoryLinks?.[machine];
-      const viaFiles = !!link && !link.unlinking && !this.writeback.targets(machine).some((t) => t.paused);
+      const targets = this.writeback.targets(machine);
+      // An ACP CLI's file is written only where its folder exists: only then does it hold the notes.
+      const written = !acp?.memory || targets.some((t) => t.kind === acp.memory!.kind && t.added);
+      const viaFiles = !!link && !link.unlinking && !targets.some((t) => t.paused) && written;
       inFiles = viaFiles ? notesFor(machine, file, this.store.data.memory).covered : new Set<string>();
       covered.set(`${machine}|${file}`, inFiles);
     }
@@ -2259,7 +2361,7 @@ export class Workspace {
   /**
    * Images in a user message read back from a CLI's history, kept in the app's store so the
    * conversation shows them. A file on an SSH host is not fetched (it shows as an image that
-   * could not be kept); bytes from history and files on this Mac are.
+   * could not be kept); bytes from history and files on this computer are.
    */
   private historyImages(images: HistoryImage[] | undefined, host: string | undefined): ImageRef[] | undefined {
     if (!images?.length) return undefined;
@@ -2318,11 +2420,15 @@ export class Workspace {
       const handover = task === this.store.data.mainAgent ? this.pendingHandover : undefined;
       this.pendingHandover = task === this.store.data.mainAgent ? undefined : this.pendingHandover;
       const openNote = this.openRequestNote(task, opts.openRequest);
-      const delivery = await live.session.send([handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n'), {
+      // An agent continuing a conversation from another CLI gets it with its first message.
+      const carried = this.store.data.carried?.[taskId];
+      const message = [handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n');
+      const delivery = await live.session.send(carried ? conversationCopy(carried, `${CARRY_NOTE}\n\n${message}`) : message, {
         interrupt: opts.interrupt,
         ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
       });
       this.shellOutput.delete(taskId);
+      if (carried) delete this.store.data.carried![taskId];
       if (update) {
         task.memorySeen = seenOf(given);
         task.injectedMemoryIds = given.map((m) => m.id);
@@ -2355,9 +2461,9 @@ export class Workspace {
       const message = (error as Error).message;
       // A research's own message (a result reported up, research_tell) to an agent whose host cannot be reached:
       // it waits, and goes out when the host answers.
-      if (opts.keepAsks && task.host && connectionLost(message)) {
+      if (opts.keepAsks && this.connectionLost(task, message)) {
         this.queued.set(taskId, [...(this.queued.get(taskId) ?? []), text]);
-        this.watchHost(task.host, taskId);
+        if (!this.live.has(taskId)) this.scheduleReconnect(task, false);
         this.changed();
         return { ok: true, taskId, queued: true };
       }
@@ -2380,7 +2486,7 @@ export class Workspace {
       try {
         const live = await this.connect(taskId);
         if (live.session.shell) {
-          await live.session.shell(command);
+          await live.session.shell(command, this.commandTimeoutMs());
           return { ok: true };
         }
       } catch (error) {
@@ -2393,11 +2499,12 @@ export class Workspace {
     const tool: ToolCallInfo = { name: 'Bash', kind: 'execute', title: `! ${first}`, locations: [], content: [terminal], byUser: true };
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: 'running', tool, createdAt: now() });
     this.changed();
+    const timeoutMs = this.commandTimeoutMs();
     const r = task.host
-      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, SHELL_TIMEOUT_MS)
+      ? await sshRun(task.host, `cd ${shq(task.cwd)} && { ${command}\n}`, timeoutMs)
       : process.platform === 'win32'
-        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS })
-        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs: SHELL_TIMEOUT_MS });
+        ? await run('cmd.exe', ['/d', '/s', '/c', command], { cwd: task.cwd, timeoutMs })
+        : await run(process.env.SHELL || '/bin/sh', ['-lc', command], { cwd: task.cwd, timeoutMs });
     const output = [r.stdout, r.stderr].filter((s) => s.trim()).join('\n');
     this.upsertTranscript(taskId, { id, taskId, role: 'tool', text: '', toolStatus: r.code === 0 ? 'completed' : 'failed', createdAt: now() }, { content: [{ ...terminal, output: clipOutput(output), exitCode: r.code }] });
     const pending = this.shellOutput.get(taskId) ?? [];
@@ -2407,20 +2514,45 @@ export class Workspace {
     return { ok: true };
   }
 
-  /** Each CLI's model list (per machine), asked once: it changes with the CLI or the account, rarely. */
+  /**
+   * Each CLI's model list (per machine): the last one read, or the read under way. It changes with the
+   * CLI and with the account (a new plan, another sign-in), so the picker asks again each time it opens.
+   */
   private modelLists = new Map<string, Promise<ModelOption[]>>();
+  private modelReads = new Set<string>();
 
-  /** The models this agent's CLI offers, for the picker in its header. */
-  listModels(taskId: string): Promise<ModelOption[]> {
+  /** The models this agent's CLI offers, for the picker in its header: the last list read, or (`fresh`) read again now. */
+  listModels(taskId: string, fresh = false): Promise<ModelOption[]> {
     const task = this.task(taskId);
     const adapter = this.opts.adapters[task.provider];
     if (!adapter?.listModels) return Promise.resolve([]);
     const key = `${task.provider}|${task.host ?? ''}`;
     let list = this.modelLists.get(key);
-    if (!list) {
-      list = adapter.listModels(task.host);
+    // One read at a time: a fresh ask while one is under way gets that one.
+    if (!list || (fresh && !this.modelReads.has(key))) {
+      // Some CLIs (ACP) offer their models per session: one not started yet is started quietly for it
+      // (its own session, which its first message then uses; nothing is sent).
+      const ask = adapter.listModels.bind(adapter);
+      list = ask(task.host).catch(async (error) => {
+        if (this.live.has(taskId) || !isAcpProvider(task.provider)) throw error;
+        await this.connect(taskId, true);
+        return ask(task.host);
+      });
+      const previous = this.modelLists.get(key);
       this.modelLists.set(key, list);
-      list.catch(() => this.modelLists.delete(key)); // a failure is not cached
+      this.modelReads.add(key);
+      const read = list;
+      // A failure is not kept: the last good list stays.
+      read.then(
+        () => this.modelReads.delete(key),
+        () => {
+          this.modelReads.delete(key);
+          if (this.modelLists.get(key) === read) {
+            if (previous) this.modelLists.set(key, previous);
+            else this.modelLists.delete(key);
+          }
+        },
+      );
     }
     return list;
   }
@@ -2429,13 +2561,22 @@ export class Workspace {
    * The model for this agent from its next turn (unset: the CLI's default). Kept on the
    * task, so a resumed session runs on it too; a running turn keeps its model.
    */
+  /** Remote Control entries whose session is still the agent's live one (it ends with the session). */
+  private liveRemote(): Array<[string, { localId: string; url?: string; codex?: CodexRemoteControl }]> {
+    return [...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId);
+  }
+
   /**
-   * Remote Control for a local Claude agent: on connects its session (starting it if needed) so the
-   * Claude app and claude.ai/code can drive it; off disconnects them, the session keeps running here.
+   * Remote Control for a local agent: on connects its session (starting it if needed) so a phone can
+   * drive it; off disconnects the phone, the session keeps running here. Claude Code: the Claude app and
+   * claude.ai/code (resolves with the link). Codex: the ChatGPT app, paired with a code (in the snapshot);
+   * on again while on asks Codex for a fresh code. Agents on SSH hosts and the main agent go without.
    */
   async setRemoteControl(taskId: string, on: boolean): Promise<string | undefined> {
     const task = this.task(taskId);
-    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this Mac.');
+    const codex = task.provider === 'codex';
+    if ((task.provider !== 'claude' && task.provider !== 'mock' && !codex) || task.host || this.store.data.mainAgent?.taskId === taskId)
+      throw new Error('Remote Control is for Claude Code and Codex agents on this computer.');
     let live = this.live.get(taskId);
     if (!live) {
       if (!on) return undefined;
@@ -2443,10 +2584,19 @@ export class Workspace {
     }
     if (!live.session.setRemoteControl) throw new Error('This session cannot turn on Remote Control.');
     const res = await live.session.setRemoteControl(on, task.name);
-    if (on) this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
-    else this.remote.delete(taskId);
+    if (!on) this.remote.delete(taskId);
+    else if (codex) this.remote.set(taskId, { localId: live.localId, codex: res.codex });
+    else this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
     this.changed();
     return res.url;
+  }
+
+  /** Codex Remote Control: unpairs one of the devices paired with this computer. */
+  async revokeRemoteDevice(taskId: string, clientId: string): Promise<void> {
+    const live = this.live.get(taskId);
+    const entry = this.remote.get(taskId);
+    if (!live || !entry?.codex || entry.localId !== live.localId || !live.session.revokeRemoteDevice) throw new Error('Remote Control is not on for this agent.');
+    await live.session.revokeRemoteDevice(clientId);
   }
 
   async setModel(taskId: string, model: string | undefined): Promise<void> {
@@ -2459,7 +2609,7 @@ export class Workspace {
     this.changed();
   }
 
-  /** The library for an agent on this Mac, or its copy on the agent's host (copied when it changed). */
+  /** The library for an agent on this computer, or its copy on the agent's host (copied when it changed). */
   private async skillsFor(task: Task): Promise<{ pluginDir: string; root: string } | undefined> {
     try {
       return task.host ? await this.skills.ensureOnHost(task.host) : this.skills.localLoad();
@@ -2473,7 +2623,7 @@ export class Workspace {
   /** Last scan's results, so an import names a found skill by key rather than by path. */
   private foundSkills = new Map<string, FoundSkill>();
 
-  /** Skills in the CLIs' own folders on this Mac and on every reachable enabled host. */
+  /** Skills in the CLIs' own folders on this computer and on every reachable enabled host. */
   async scanSkills(): Promise<{ found: FoundSkill[]; errors: Array<{ host: string; error: string }> }> {
     const errors: Array<{ host: string; error: string }> = [];
     const found: FoundSkill[] = [...scanLocal()];
@@ -2597,6 +2747,14 @@ export class Workspace {
       this.log('dropped stale event', taskId, sessionLocalId, event.type);
       return;
     }
+    if (event.type === 'remoteControl') {
+      // Pairing and connection news, not activity: kept beside the session, never on the task.
+      const entry = this.remote.get(taskId);
+      if (entry?.localId !== sessionLocalId) return;
+      if (event.state) entry.codex = event.state;
+      else this.remote.delete(taskId);
+      return this.changed();
+    }
     let quiet = false;
     if (live.warm) {
       // A background connect ending before it was used: back to "Not connected", nothing to report.
@@ -2695,7 +2853,7 @@ export class Workspace {
       }
       case 'retrying':
         task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
-        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;
+        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}${event.maxAttempts ? `/${event.maxAttempts}` : ''})`;
         break;
       case 'approvalRequested':
         if (!this.findOpenByRequest(taskId, event.requestId)) {
@@ -2799,35 +2957,27 @@ export class Workspace {
             a.options = undefined;
           }
         const working = !asking && (live.turnActive || ['running', 'starting'].includes(task.status) || !!task.retry);
-        // Its session ended while it had nothing to do (the connection dropped, the Mac slept): nothing for the
-        // user to handle; the next message connects it again.
+        this.endSubtasks(task, 'The agent disconnected.');
+        this.live.delete(taskId);
+        if (this.connectionLost(task, reason)) {
+          // The connection to its host went (not the agent): reconnected by itself, and a turn it was in
+          // carries on then. No error to dismiss meanwhile.
+          const carry = !asking && (live.turnActive || task.retry?.by === 'app');
+          this.cancelRetry(taskId);
+          task.lastError = reason;
+          this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
+          this.scheduleReconnect(task, carry);
+          if (asking) task.status = 'waiting_for_user';
+          break;
+        }
+        // Its session ended while it had nothing to do: nothing for the user to handle; the next message connects it again.
         if (!working && !this.hasOpenNative(taskId)) {
-          this.endSubtasks(task, 'The agent disconnected.');
-          this.live.delete(taskId);
           this.cancelRetry(taskId);
           task.lastError = reason;
           if (task.status === 'idle') task.status = 'disconnected';
           this.log('idle session ended', taskId, reason);
-          // Cut off from its host: connected again by itself once the host answers.
-          if (task.host && connectionLost(reason)) this.watchHost(task.host, taskId);
           break;
         }
-        // The connection to its host was lost while it worked: one item for every agent there, and they carry on
-        // by themselves once the host can be reached again.
-        if (task.host && connectionLost(reason)) {
-          this.endSubtasks(task, 'The agent disconnected.');
-          this.live.delete(taskId);
-          this.cancelRetry(taskId);
-          task.retry = undefined;
-          task.status = 'disconnected';
-          task.lastError = reason;
-          task.summary = `Lost the connection to ${task.host}; carries on when it is back.`;
-          this.expireNative(taskId, sessionLocalId, `Provider session ended: ${reason}`);
-          if (!this.trouble(task, 'lost', reason)) this.addAttention({ taskId, kind: 'error', headline: task.summary, details: reason });
-          break;
-        }
-        this.endSubtasks(task, 'The agent disconnected.');
-        this.live.delete(taskId);
         this.handBackRetry(task);
         task.status = event.type === 'sessionFailed' ? 'failed' : 'disconnected';
         task.lastError = reason;
@@ -2847,6 +2997,139 @@ export class Workspace {
       this.throttle = undefined;
       this.changed();
     }, 120);
+  }
+
+  // ---------------------------------------------------------------- reconnecting
+
+  /**
+   * Whether a failure is the connection to the agent's host rather than the agent: it mends itself
+   * once the host answers again. Not when the user has to act (a login, a key, a host key).
+   */
+  private connectionLost(task: Task, reason: string | undefined): boolean {
+    if (!task.host || !reason) return false;
+    if (/needs a login|unlocked key|host key|not signed in|not installed|no longer exists|refused another SSH session/i.test(reason)) return false;
+    return /ssh|ended unexpectedly|connection|could not resolve|unreachable|no route to host|timed out|cannot reach|is not connected|exited \(255\)|code 255/i.test(reason);
+  }
+
+  private scheduleReconnect(task: Task, working: boolean): void {
+    const host = task.host!;
+    const r = this.reconnects.get(host) ?? { attempt: 0, since: Date.now(), tasks: new Map<string, boolean>() };
+    r.tasks.set(task.taskId, (r.tasks.get(task.taskId) ?? false) || working);
+    this.reconnects.set(host, r);
+    task.status = 'disconnected';
+    task.summary = `Lost the connection to ${host}; reconnecting…`;
+    if (!r.timer) this.armReconnect(host);
+  }
+
+  private armReconnect(host: string, delayMs?: number): void {
+    const r = this.reconnects.get(host);
+    if (!r) return;
+    if (r.timer) clearTimeout(r.timer);
+    // Soon at first (a blip), then further apart (a machine that is off): every 10 minutes at most.
+    const waits = this.opts.reconnectMs ?? [5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
+    r.timer = setTimeout(() => void this.runReconnect(host), delayMs ?? waits[Math.min(r.attempt, waits.length - 1)]);
+  }
+
+  /** The computer woke up (or the screen unlocked): try every waiting host again shortly, from the start. */
+  reconnectNow(): void {
+    for (const [host, r] of this.reconnects) {
+      r.attempt = 0;
+      r.since = Date.now();
+      this.armReconnect(host, 3000);
+    }
+    // Those that stopped trying start again too.
+    for (const [host, ids] of this.givenUp) {
+      this.givenUp.delete(host);
+      for (const id of ids) {
+        const task = this.findTask(id);
+        if (task && task.status === 'disconnected' && !this.live.has(id)) this.scheduleReconnect(task, false);
+      }
+      const r = this.reconnects.get(host);
+      if (r) this.armReconnect(host, 3000);
+    }
+  }
+
+  /** Hosts tried for a day without an answer: their agents wait, quietly, for a wake-up or a message. */
+  private givenUp = new Map<string, Set<string>>();
+
+  private async runReconnect(host: string): Promise<void> {
+    const r = this.reconnects.get(host);
+    if (!r) return;
+    r.timer = undefined;
+    r.attempt++;
+    const status = await this.checkHost(host, { quiet: true }).catch(() => undefined);
+    if (status && ['needs_key', 'needs_login', 'unknown_host_key'].includes(status.ssh)) {
+      // Only the user can let it in: one note on the first agent, and the rest wait for them.
+      this.reconnects.delete(host);
+      const first = [...r.tasks.keys()].map((id) => this.findTask(id)).find(Boolean);
+      if (first) this.addAttention({ taskId: first.taskId, kind: 'error', headline: `Cannot reconnect to ${host}: ${clip(status.error ?? 'it needs a login', 140)}`, details: status.error ?? '' });
+      this.changed();
+      return;
+    }
+    if (status?.ssh === 'ok') {
+      for (const [taskId, working] of [...r.tasks]) {
+        const task = this.findTask(taskId);
+        if (!task || this.live.has(taskId)) {
+          r.tasks.delete(taskId);
+          continue;
+        }
+        try {
+          const live = await this.connect(taskId, true);
+          r.tasks.delete(taskId);
+          this.resolveConnectionErrors(taskId);
+          this.appendSystem(taskId, `Reconnected to ${host}.`);
+          // Research messages that waited for it go out now.
+          const waiting = this.queued.get(taskId);
+          this.queued.delete(taskId);
+          for (const text of waiting ?? []) await this.send(taskId, text, 'text', { keepAsks: true }).catch(() => {});
+          if (working) {
+            // Carries on with the turn the connection cut short.
+            this.claim(taskId, live);
+            task.summary = 'Reconnected; carrying on with the turn.';
+            await live.session.send(RECONNECT_PROMPT).catch((error) => this.turnFailed(task, (error as Error).message, undefined, 1));
+          } else task.summary = 'Reconnected.';
+        } catch (error) {
+          const message = (error as Error).message;
+          if (!this.connectionLost(task, message)) {
+            // Reachable, but the agent itself cannot start: that is for the user.
+            r.tasks.delete(taskId);
+            task.status = 'failed';
+            task.lastError = message;
+            task.summary = `Could not reconnect: ${clip(message, 140)}`;
+            this.addAttention({ taskId, kind: 'error', headline: task.summary, details: message });
+          }
+        }
+      }
+    }
+    if (!r.tasks.size) this.reconnects.delete(host);
+    else if (Date.now() - r.since > (this.opts.reconnectGiveUpMs ?? 24 * 3600_000)) {
+      // A day without an answer (the machine is off): stop trying; the agent says so, no error.
+      this.reconnects.delete(host);
+      this.givenUp.set(host, new Set(r.tasks.keys()));
+      for (const id of r.tasks.keys()) {
+        const task = this.findTask(id);
+        if (task) task.summary = `Cannot reach ${host}. Reconnects when you send a message, or when the computer wakes.`;
+      }
+    } else this.armReconnect(host);
+    this.changed();
+  }
+
+  /** No longer waiting to be reconnected (stopped, removed, or connected by the user). */
+  private dropReconnect(taskId: string): void {
+    for (const ids of this.givenUp.values()) ids.delete(taskId);
+    for (const [host, r] of this.reconnects) {
+      if (!r.tasks.delete(taskId) || r.tasks.size) continue;
+      clearTimeout(r.timer);
+      this.reconnects.delete(host);
+    }
+  }
+
+  /** Errors about a connection that is back are over. */
+  private resolveConnectionErrors(taskId: string): void {
+    const task = this.findTask(taskId);
+    if (!task) return;
+    for (const a of this.store.data.attention)
+      if (a.taskId === taskId && a.state === 'open' && a.kind === 'error' && this.connectionLost(task, `${a.headline} ${a.details ?? ''}`)) this.closeAttention(a, 'resolved', 'Reconnected.');
   }
 
   // ---------------------------------------------------------------- retries
@@ -2919,9 +3202,7 @@ export class Workspace {
 
   // ---------------------------------------------------------------- attention
 
-  /** Hosts whose connection was lost, checked until they answer; and what waits for each: agents to reconnect. */
-  private lostHosts = new Map<string, { timer?: NodeJS.Timeout; started: number; reconnect: Set<string> }>();
-  /** Research messages (results reported up, research_tell) to agents whose host could not be reached: sent when it is back. */
+  /** Research messages (results reported up, research_tell) to agents whose host could not be reached: sent once reconnected. */
   private queued = new Map<string, string[]>();
 
   /** Where an agent's session troubles are reported: its research's one item, its host's (connection lost), or its own. */
@@ -2943,7 +3224,6 @@ export class Workspace {
     if (!item) item = this.addAttention({ taskId: task.taskId, kind: 'error', group, members: [], headline: '', details: '' });
     item.members = [...(item.members ?? []).filter((m) => m.taskId !== task.taskId), { taskId: task.taskId, why, reason, ...(task.host ? { host: task.host } : {}) }];
     this.retitle(item);
-    if (why === 'lost' && task.host) this.watchHost(task.host);
     return true;
   }
 
@@ -2973,54 +3253,9 @@ export class Workspace {
     }
   }
 
-  /** The connection to `host` is gone: checked every 20 s (a day at most) and, when it answers, everything waiting goes on. */
-  private watchHost(host: string, reconnect?: string): void {
-    let w = this.lostHosts.get(host);
-    if (!w) {
-      w = { started: Date.now(), reconnect: new Set() };
-      this.lostHosts.set(host, w);
-    }
-    if (reconnect) w.reconnect.add(reconnect);
-    if (w.timer) return;
-    const state = w;
-    const check = async () => {
-      state.timer = undefined;
-      const ok = (await sshProbe(host).catch(() => ({ state: 'unreachable' as const }))).state === 'ok';
-      if (!ok) {
-        if (Date.now() - state.started < 24 * 3600_000) state.timer = setTimeout(() => void check(), 20_000);
-        return;
-      }
-      this.lostHosts.delete(host);
-      await this.hostBack(host, state.reconnect);
-    };
-    w.timer = setTimeout(() => void check(), 20_000);
-  }
-
-  /** `host` answers again: agents cut off mid-work carry on, idle ones connect again quietly, queued research messages go out. */
-  private async hostBack(host: string, reconnect: Set<string>): Promise<void> {
-    const lost = this.store.data.attention.filter((a) => a.state === 'open' && a.members?.some((m) => m.why === 'lost' && m.host === host)).flatMap((a) => a.members!.filter((m) => m.why === 'lost' && m.host === host).map((m) => m.taskId));
-    for (const id of lost) {
-      this.untrouble(id, 'lost');
-      const t = this.findTask(id);
-      if (!t || this.live.get(id)?.turnActive) continue;
-      this.appendSystem(id, this.language() === 'zh' ? `与 ${host} 的连接已恢复，继续。` : `The connection to ${host} is back; carrying on.`);
-      await this.retry(id).catch((error) => this.log('carry on after reconnect failed', id, error));
-    }
-    for (const id of reconnect) {
-      if (lost.includes(id) || this.live.has(id) || !this.findTask(id)) continue;
-      const msgs = this.queued.get(id);
-      if (msgs?.length) continue; // connects with its first message below
-      await this.connect(id, true).catch((error) => this.log('reconnect failed', id, error));
-    }
-    for (const [id, msgs] of [...this.queued]) {
-      if (this.findTask(id)?.host !== host) continue;
-      this.queued.delete(id);
-      for (const text of msgs) await this.send(id, text, 'text', { keepAsks: true }).catch(() => {});
-    }
-    this.changed();
-  }
-
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
+    // One error per agent: the latest says what is wrong now.
+    if (a.kind === 'error') for (const o of this.store.data.attention) if (o.taskId === a.taskId && o.state === 'open' && o.kind === 'error') this.closeAttention(o, 'resolved', 'Superseded by a newer error.');
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
     this.store.data.attention.push(item);
     // Anything but a finished report needs the user: an agent they set aside comes back.
@@ -3086,8 +3321,8 @@ export class Workspace {
     const picked = new Set([decision, ...Object.values(answers ?? {}).flatMap((v) => String(v).split(/\s*,\s*/))].filter(Boolean).map(String));
     const offered = a.kind === 'approval' ? (a.options ?? []) : (a.questions ?? []).flatMap((q) => q.options);
     const options = offered.slice(0, 8).map((o) => ({ label: clip(o.label, 60), chosen: picked.has(o.id) || picked.has(o.label) }));
-    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${task.provider}: ${label}`, {
-      decision: { kind: a.kind === 'approval' ? 'approval' : 'answer', label: clip(chosen, 200), about: clip(a.headline, 200), ...(options.length ? { options } : {}) },
+    this.appendSystem(a.taskId, `${a.kind === 'approval' ? 'Approval decision' : 'Answer'} sent to ${providerName(task.provider)}: ${label}`, {
+      decision: { kind: a.kind === 'approval' ? 'approval' : 'answer', label: clip(chosen, 200), about: clip(a.headline, 200), ...(options.length ? { options } : {}), ...(a.kind === 'approval' && declinedOption(a.options?.find((o) => o.id === decision)) ? { declined: true } : {}) },
     });
     this.changed();
   }
@@ -3292,13 +3527,13 @@ export class Workspace {
   private async scanMachine(host?: string): Promise<MemoryCandidate[]> {
     const r = host
       ? await sshRun(host, `sh -c ${shq(MEMORY_SCAN_SCRIPT)}`, 30_000)
-      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
+      : await run('/bin/sh', ['-c', this.opts.home ? `HOME=${shq(this.opts.home)}; unset XDG_CONFIG_HOME\n${MEMORY_SCAN_SCRIPT}` : MEMORY_SCAN_SCRIPT], { timeoutMs: 30_000 });
     const out = parseScanOutput(r.stdout);
     if (!out.complete) throw new Error(host ? sshError(host, r.stderr) : r.stderr.trim() || 'Could not read the memory files.');
     return candidatesFrom(host, out.home, out.files, this.store.data.projects, out.shared);
   }
 
-  /** This Mac and every reachable enabled host; hosts that are not connected are reported, not waited for. */
+  /** This computer and every reachable enabled host; hosts that are not connected are reported, not waited for. */
   async scanMemoryImports(): Promise<{ candidates: MemoryCandidate[]; scanned: string[]; errors: Array<{ host: string; error: string }> }> {
     const errors: Array<{ host: string; error: string }> = [];
     const ready: Array<string | undefined> = [undefined];
@@ -3654,6 +3889,16 @@ export class Workspace {
     ].join('\n');
   }
 
+  private commandTimeoutMs(): number {
+    const min = this.store.data.settings.commandTimeoutMin;
+    return min ? min * 60_000 : SHELL_TIMEOUT_MS;
+  }
+
+  mainLimits(): { calls?: number; forks?: number } {
+    const s = this.store.data.settings;
+    return { calls: s.mainCallsPerTurn, forks: s.mainForksPerTurn };
+  }
+
   mainTurn(): number {
     return this.mainTurns;
   }
@@ -3768,7 +4013,7 @@ export class Workspace {
    * just before an earlier prompt (matched by its start). In its own worktree when the project is a
    * git repository, and never with more permissions than the workspace default, which only the user can raise.
    */
-  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean }): Promise<{ task: Task; delivery: DispatchResult }> {
+  async forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean; provider?: AgentProvider }): Promise<{ task: Task; delivery: DispatchResult }> {
     const src = this.task(taskId);
     let upToMessageId: string | undefined;
     // Whitespace as read_agent and the error below show it: collapsed.
@@ -3788,7 +4033,7 @@ export class Workspace {
     const RANK: Record<PermissionMode, number> = { ask: 0, edits: 1, auto: 2 };
     const fallback = this.store.data.settings.permissionMode ?? 'auto';
     const permissionMode = src.permissionMode && RANK[src.permissionMode] <= RANK[fallback] ? src.permissionMode : undefined;
-    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode });
+    const task = await this.forkTask(taskId, { upToMessageId, isolate: true, name: args.label, permissionMode, provider: args.provider });
     if (!args.label?.trim()) void this.refineLabel(task, `${args.instruction}\n(branched off: ${src.name})`);
     return { task, delivery: await this.send(task.taskId, args.instruction, 'main', { images: args.withImages ? this.userImages() : undefined }) };
   }
@@ -3854,14 +4099,14 @@ export class Workspace {
   }
 
   availableProviders(): AgentProvider[] {
-    return (['claude', 'codex'] as const).filter((p) => this.providerReady(p));
+    return CODING_PROVIDERS.filter((p) => this.providerReady(p));
   }
 
   // ---------------------------------------------------------------- file preview
 
   /** Folders a task's files may be previewed from: its cwd, its worktree, its project. */
   private previewRoots(t: Task): string[] {
-    // The main agent talks about every agent's files: any project or agent folder on this Mac.
+    // The main agent talks about every agent's files: any project or agent folder on this computer.
     if (t === this.store.data.mainAgent)
       return [t.cwd, ...this.store.data.projects.filter((p) => !p.host).map((p) => p.rootPath), ...this.store.data.tasks.filter((x) => !x.host).flatMap((x) => [x.cwd, x.worktree?.path])].filter((r): r is string => !!r);
     const project = this.store.data.projects.find((p) => p.projectId === t.projectId);
@@ -3879,8 +4124,8 @@ export class Workspace {
     return t.host ? readRemote(t.host, path, where) : readLocal(path, where);
   }
 
-  /** The checked local path to hand to the default app (this Mac only). */
-  /** The folder "Open with…" opens for an agent: its worktree or folder (the main agent's own too). On this Mac only. */
+  /** The checked local path to hand to the default app (this computer only). */
+  /** The folder "Open with…" opens for an agent: its worktree or folder (the main agent's own too). On this computer only. */
   agentFolder(taskId: string): string {
     const t = this.task(taskId);
     if (t.host) throw new Error(`${t.alias} works on ${t.host}; its folder is there.`);
@@ -3957,4 +4202,44 @@ export function withLimits(all: Record<string, ProviderLimits>, task: Pick<Task,
 export function mergeLimits(prev: ProviderLimits | undefined, windows: LimitWindow[], plan?: string): ProviderLimits {
   const keep = (prev?.windows ?? []).filter((w) => !windows.some((n) => n.key === w.key));
   return { windows: [...windows, ...keep].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity)), at: now(), ...((plan ?? prev?.plan) ? { plan: plan ?? prev?.plan } : {}) };
+}
+
+/** An approval option that refuses (by its kind, or for providers without kinds by its label). */
+export function declinedOption(o: { kind?: string; label: string } | undefined): boolean {
+  if (!o) return false;
+  return o.kind ? o.kind.startsWith('reject') : /^(deny|reject|decline|no\b|don.t)/i.test(o.label.trim());
+}
+
+/** A provider as people know it (Claude Code, Codex, OpenCode…), for messages. */
+export function providerName(provider: string): string {
+  return acpAgent(provider)?.label ?? ({ claude: 'Claude Code', codex: 'Codex', mock: 'Mock' } as Record<string, string>)[provider] ?? provider;
+}
+
+/**
+ * A saved user message that carries a copied conversation (a fork onto another CLI, or one where the
+ * CLI copies sessions as text) is shown as that conversation, then the message that came with it.
+ */
+function copiedItems(taskId: string, e: Extract<ProviderEvent, { type: 'transcriptItem' }>): TranscriptItem[] | undefined {
+  const copy = e.role === 'user' ? parseCopy(e.text) : undefined;
+  if (!copy) return undefined;
+  const at = now();
+  const items: TranscriptItem[] = copy.lines.flatMap((l, i) =>
+    l.role === 'tool' ? [] : [{ id: `${e.itemId}-copy-${i}`, taskId, role: l.role, text: l.text, createdAt: at }],
+  );
+  if (copy.rest) items.push({ id: e.itemId, taskId, role: 'user', text: copy.rest, createdAt: at });
+  return items;
+}
+
+/**
+ * Where a conversation is cut for a fork onto another CLI: just before the user message that the fork
+ * point names (its prompt; the same text asked again counts in order). Fork points start at the second prompt.
+ */
+export function forkCut(items: Pick<TranscriptItem, 'role' | 'text'>[], points: ForkPoint[], upToMessageId: string): number | undefined {
+  const at = points.findIndex((p) => p.upToMessageId === upToMessageId);
+  if (at === -1) return undefined;
+  const same = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+  const prompt = points[at].prompt;
+  const nth = points.slice(0, at).filter((p) => same(p.prompt, prompt)).length;
+  const users = items.flatMap((i, n) => (i.role === 'user' ? [n] : []));
+  return users.slice(1).filter((n) => same(items[n].text, prompt))[nth];
 }

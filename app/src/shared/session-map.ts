@@ -16,6 +16,8 @@ export interface MapDecision {
   kind: 'decided' | 'approval' | 'answer' | 'redirect';
   /** What was decided: the option chosen, the answer given, or the new direction. */
   label: string;
+  /** An approval answered with a refusal (deny, reject, decline). */
+  declined?: boolean;
   /** What it was about: the tool call approved, the question answered, or what a decision ruled out. */
   about?: string;
   /** The options that were offered, the chosen ones marked (approvals and answers). */
@@ -200,7 +202,7 @@ export function sessionMap(items: TranscriptItem[], forks: Pick<Task, 'taskId' |
       if (item.role === 'tool' && item.tool && SUBAGENT_TOOLS.has(item.tool.name))
         task.subagents.push({ itemId: item.id, turnId: turn.user.id, label: subagentLabel(item), status: item.toolStatus === 'failed' ? 'failed' : item.toolStatus === 'completed' ? 'done' : 'running' });
       for (const f of item.role === 'tool' ? filesOf({ user: turn.user, items: [item] }) : []) if (!task.files.includes(f)) task.files.push(f);
-      if (item.decision) task.decisions.push({ itemId: item.id, turnId: turn.user.id, kind: item.decision.kind, label: clip(item.decision.label, 60), about: item.decision.about ? clip(item.decision.about, 80) : undefined, ...(item.decision.options?.length ? { options: item.decision.options } : {}) });
+      if (item.decision) task.decisions.push({ itemId: item.id, turnId: turn.user.id, kind: item.decision.kind, label: clip(item.decision.label, 60), ...(item.decision.declined ? { declined: true } : {}), about: item.decision.about ? clip(item.decision.about, 80) : undefined, ...(item.decision.options?.length ? { options: item.decision.options } : {}) });
     }
   });
   // Agents forked from this one hang off the task that was under way when they were made.

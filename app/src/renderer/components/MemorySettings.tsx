@@ -18,7 +18,7 @@ const MAX_BODY = 4000; // keep in sync with main/memory-import MAX_BODY
 export function describeImportKey(key: string): string {
   const [, host, file, section] = key.split('|');
   if (!file) return key;
-  return `${host && host !== 'local' ? `${host} · ` : `${t('This Mac')} · `}${file}${section && section !== 'all' ? ` › ${section}` : ''}`;
+  return `${host && host !== 'local' ? `${host} · ` : `${t('Local')} · `}${file}${section && section !== 'all' ? ` › ${section}` : ''}`;
 }
 
 /** Where a note came from, in a few words. */
@@ -151,7 +151,7 @@ export function MemorySettings({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [adding, setAdding] = useState(false);
   const sync = snapshot.memorySync;
   const last = sync.last;
-  const hostName = (h: string) => (h === 'local' ? t('This Mac') : h);
+  const hostName = (h: string) => (h === 'local' ? t('Local') : h);
   const user = snapshot.memory.filter((m) => m.scope === 'global');
   const projectNotes = snapshot.memory.filter((m) => m.scope === 'project');
   const groups = snapshot.projects.map((p) => ({ p, notes: projectNotes.filter((m) => m.scopeId === p.projectId) })).filter((g) => g.notes.length);
@@ -301,14 +301,14 @@ function ImportList({ snapshot, onClose }: { snapshot: WorkspaceSnapshot; onClos
       <p className="muted small">{t('Copies notes into app memory; the files themselves are not changed. Each note is at most {n} characters.', { n: MAX_BODY })}</p>
       {scan?.errors.map((e) => (
         <div key={e.host} className="error-text small">
-          {e.host === 'local' ? t('This Mac') : e.host}: {e.error}
+          {e.host === 'local' ? t('Local') : e.host}: {e.error}
         </div>
       ))}
       {scan && scan.candidates.length === 0 ? <div className="muted small">{t('No memory or instruction files found.')}</div> : null}
       {[...groups].map(([host, bySource]) => (
         <div key={host} className="memory-import-machine">
           <div className="section-label">
-            <Icon name={host === 'local' ? 'folder' : 'globe'} size={12} /> {host === 'local' ? t('This Mac') : host}
+            <Icon name={host === 'local' ? 'folder' : 'globe'} size={12} /> {host === 'local' ? t('Local') : host}
           </div>
           {[...bySource].map(([source, list]) => (
             <div key={source} className="memory-import-source">
