@@ -8,7 +8,8 @@ import { t as tr } from '../i18n';
 import { defaultShortcut, shortcutLabel } from '../voice/shortcut';
 import { call } from '../api';
 import { InlineEdit, menuAt, menuKey, useContextMenu, type MenuItem } from './ContextMenu';
-import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
+import { agentMenuItems, canFork, EditableAgentName, type AgentField } from './AgentMenu';
+import { ForkDialog } from './Dialogs';
 
 /**
  * Always-visible participant list. In Focus it doubles as the rail that keeps
@@ -63,6 +64,8 @@ export function Sidebar({
   const [showIdle, setShowIdle] = useState<Record<string, boolean>>({});
   // Right-click: one menu at a time; a rename edits the name where it stands.
   const menu = useContextMenu();
+  // Forking from a row's menu (the dialog asks from where and on which CLI).
+  const [forking, setForking] = useState<Task | null>(null);
   const [editing, setEditing] = useState<{ taskId: string; field: AgentField; needs: boolean } | { projectId: string } | null>(null);
   const editingField = (t: Task, needs: boolean) => (editing && 'taskId' in editing && editing.taskId === t.taskId && editing.needs === needs ? editing.field : null);
   const editingProject = (id: string) => !!editing && 'projectId' in editing && editing.projectId === id;
@@ -178,7 +181,8 @@ export function Sidebar({
     const subs = opts.needs ? undefined : liveSubtasks(t);
     const unfolded = !!subs?.length && subOpen.has(t.taskId);
     const field = editingField(t, !!opts.needs);
-    const items = () => agentMenuItems(t, { onRename: (f) => setEditing({ taskId: t.taskId, field: f, needs: !!opts.needs }), setAside: true, onOpen: () => onSelect(t.taskId) });
+    const items = () =>
+      agentMenuItems(t, { onRename: (f) => setEditing({ taskId: t.taskId, field: f, needs: !!opts.needs }), setAside: true, onOpen: () => onSelect(t.taskId), onFork: canFork(snapshot, t) ? () => setForking(t) : undefined });
     const cls = `agent-row status-${t.status}${t.taskId === focusId ? ' active' : ''}${pending.length ? ' needs' : ''}${opts.needs ? ' compact' : ''}`;
     const inner = (
       <>
@@ -340,6 +344,7 @@ export function Sidebar({
         </div>
       </div>
       {menu.element}
+      {forking ? <ForkDialog snapshot={snapshot} task={forking} onClose={() => setForking(null)} onForked={(id) => onSelect(id)} /> : null}
     </aside>
   );
 }

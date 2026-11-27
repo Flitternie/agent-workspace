@@ -670,6 +670,7 @@ export const zh: Record<string, string> = {
   'Mock script': '模拟脚本',
   'Run in its own git worktree': '使用独立 worktree',
   Fork: '分叉',
+  'Fork…': '分叉…',
   'Fork {name}': '分叉 {name}',
   'Forking…': '正在分叉…',
   'Fork from': '从哪里分叉',

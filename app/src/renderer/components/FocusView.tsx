@@ -13,7 +13,7 @@ import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 import { AgentMemoryPanel, MemoryChip, RememberButton, RememberDialog } from './SessionMemory';
 import { menuAt, useContextMenu } from './ContextMenu';
-import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
+import { agentMenuItems, canFork, EditableAgentName, type AgentField } from './AgentMenu';
 import { RetryNotice } from './Retry';
 import { UsageChips } from './SessionUsage';
 import { FindBar } from './FindBar';
@@ -263,7 +263,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
   const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
   // Conversations on this computer can be forked once saved, when their provider supports it.
-  const canFork = !isMainAgent(task) && !task.host && (() => { const c = snapshot.capabilities.find((x) => x.provider === task.provider); return !!(c?.fork || c?.forkElsewhere); })() && !!session?.nativeSessionId;
+  const forkable = canFork(snapshot, task);
   const [error, setError] = useState('');
   const run = (fn: () => Promise<unknown>) => {
     setError('');
@@ -439,7 +439,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <Icon name="refresh" />
               </button>
             ) : null}
-            {canFork ? (
+            {forkable ? (
               <button
                 className="btn btn-icon"
                 aria-label={t('Fork')}
