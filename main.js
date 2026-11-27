@@ -150,7 +150,7 @@ Object.assign(ZH, {"cv.a1": "orders 表有 210 万行，customer_id 上没有索
 Object.assign(ZH, {"sc.short": "对话旁的侧栏"});
 
 // 0.16: Antigravity and OpenCode join Claude Code and Codex; Remote Control for Codex too
-Object.assign(ZH, {"ov.c3": "Claude Code、Codex、Antigravity、OpenCode 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "手机远程控制", "st1.t": "装好一个 Agent", "st1.p": "用现有账号登录就行。"});
+Object.assign(ZH, {"ov.c3": "Claude Code、Codex、Antigravity、OpenCode 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "手机远程控制", "st1.t": "装好一个 Agent", "st1.p": "用现有账号登录就行。", "st3.t": "添加项目，或导入已有的", "st3.p": "新建 Agent，或把终端里开过的会话导入进来，历史都在。", "m6.t": "导入已有会话", "m6.p": "终端里的会话直接接上，历史都在。"});
 
 const EN = {};
 document.querySelectorAll('[data-k]').forEach((el) => (EN[el.dataset.k] = el.innerHTML));
