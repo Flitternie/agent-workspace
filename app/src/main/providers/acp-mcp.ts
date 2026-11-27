@@ -16,6 +16,9 @@ export const MCP_SERVER_NAME = 'workspace';
 /** Told to the main agent: CLIs present MCP tools under their own names. */
 export const MCP_TOOLS_NOTE = `Your workspace tools (list_workspace_agents, create_agent, send_to_agent and the others named above) are on the MCP server "${MCP_SERVER_NAME}"; your CLI may show them prefixed (e.g. ${MCP_SERVER_NAME}_create_agent, mcp_${MCP_SERVER_NAME}_create_agent) or as tools.${MCP_SERVER_NAME}.create_agent(...) in its code tool. They are not shell commands: never run them in a shell.`;
 
+/** Told to a research's agent on a CLI reached through ACP: where its research tools are. */
+export const RESEARCH_TOOLS_NOTE = 'Your research tools (research_overview, research_record, research_tell and the others named above) are on the MCP server "research"; your CLI may show them prefixed (e.g. research_research_overview, mcp_research_research_overview). They are not shell commands: never run them in a shell.';
+
 /** A minimal MCP stdio server (initialize, tools/list, tools/call, ping), forwarding to the app. No dependencies. */
 const BRIDGE = String.raw`'use strict';
 const url = process.env.AMW_MCP_URL;
@@ -89,8 +92,8 @@ export interface McpBridge {
   close(): void;
 }
 
-/** Serves `tools` to a bridge the CLI starts; resolves once listening. */
-export async function startMcpBridge(tools: WorkspaceTool[], opts: { node?: string } = {}): Promise<McpBridge> {
+/** Serves `tools` over 127.0.0.1 with a random token: what a bridge forwards to. */
+async function serveTools(tools: WorkspaceTool[]): Promise<{ port: number; token: string; owns: (name: string) => boolean; close: () => void }> {
   const token = randomBytes(24).toString('hex');
   const listed = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) }));
   const http: Server = createServer((req, res) => {
@@ -126,16 +129,8 @@ export async function startMcpBridge(tools: WorkspaceTool[], opts: { node?: stri
   const port = (http.address() as { port: number }).port;
   const names = new Set(tools.map((t) => t.name));
   return {
-    server: {
-      name: MCP_SERVER_NAME,
-      command: opts.node ?? process.execPath,
-      args: [bridgeScript()],
-      env: [
-        { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
-        { name: 'AMW_MCP_URL', value: `http://127.0.0.1:${port}` },
-        { name: 'AMW_MCP_TOKEN', value: token },
-      ],
-    },
+    port,
+    token,
     owns: (name) => {
       const n = name.trim();
       for (const t of names) if (n === t || n.endsWith(`_${t}`) || n.endsWith(`__${t}`) || n.endsWith(`/${t}`) || n.endsWith(`.${t}`) || n.endsWith(`:${t}`)) return true;
@@ -143,4 +138,97 @@ export async function startMcpBridge(tools: WorkspaceTool[], opts: { node?: stri
     },
     close: () => http.close(),
   };
+}
+
+/** Serves `tools` to a bridge the CLI starts; resolves once listening. */
+export async function startMcpBridge(tools: WorkspaceTool[], opts: { node?: string; name?: string } = {}): Promise<McpBridge> {
+  const served = await serveTools(tools);
+  return {
+    server: {
+      name: opts.name ?? MCP_SERVER_NAME,
+      command: opts.node ?? process.execPath,
+      args: [bridgeScript()],
+      env: [
+        { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
+        { name: 'AMW_MCP_URL', value: `http://127.0.0.1:${served.port}` },
+        { name: 'AMW_MCP_TOKEN', value: served.token },
+      ],
+    },
+    owns: served.owns,
+    close: served.close,
+  };
+}
+
+/** The same bridge in Python, for a CLI on an SSH host (where python3 is more often there than node). */
+const PY_BRIDGE = String.raw`import json, os, sys, urllib.request
+URL = os.environ['AMW_MCP_URL']
+TOKEN = os.environ['AMW_MCP_TOKEN']
+def out(m):
+    m['jsonrpc'] = '2.0'
+    sys.stdout.write(json.dumps(m) + '\n')
+    sys.stdout.flush()
+def call(path, body=None):
+    req = urllib.request.Request(URL + path, data=None if body is None else json.dumps(body).encode(), headers={'authorization': 'Bearer ' + TOKEN, 'content-type': 'application/json'}, method='GET' if body is None else 'POST')
+    with urllib.request.urlopen(req, timeout=600) as r:
+        return json.loads(r.read().decode())
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        m = json.loads(line)
+    except Exception:
+        continue
+    if 'method' not in m or 'id' not in m:
+        continue
+    try:
+        p = m.get('params') or {}
+        if m['method'] == 'initialize':
+            out({'id': m['id'], 'result': {'protocolVersion': p.get('protocolVersion') or '2025-06-18', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'agent-workspace', 'version': '1.0.0'}}})
+        elif m['method'] == 'ping':
+            out({'id': m['id'], 'result': {}})
+        elif m['method'] == 'tools/list':
+            out({'id': m['id'], 'result': {'tools': call('/tools')}})
+        elif m['method'] == 'tools/call':
+            r = call('/call', {'name': p.get('name'), 'arguments': p.get('arguments') or {}})
+            out({'id': m['id'], 'result': {'content': [{'type': 'text', 'text': str(r.get('text'))}], 'isError': bool(r.get('isError'))}})
+        else:
+            out({'id': m['id'], 'error': {'code': -32601, 'message': 'Method not found: ' + str(m['method'])}})
+    except Exception as e:
+        out({'id': m['id'], 'error': {'code': -32603, 'message': str(e)}})
+`;
+
+/**
+ * Tools served here to a CLI on `host`: the Python bridge is put there (content-addressed, in
+ * ~/.agent-workspace/bin), and reaches this process through a tunnel on the shared SSH connection.
+ */
+export async function startRemoteBridge(host: string, tools: WorkspaceTool[], name: string): Promise<McpBridge> {
+  const { sshForward, sshRunInput, sshError } = await import('../util/ssh');
+  const served = await serveTools(tools);
+  try {
+    const file = `mcp-bridge-${createHash('sha256').update(PY_BRIDGE).digest('hex').slice(0, 12)}.py`;
+    const put = await sshRunInput(host, `d="$HOME/.agent-workspace/bin"; mkdir -p "$d" && chmod 700 "$d" && cat > "$d/${file}" && echo "$d/${file}"`, Buffer.from(PY_BRIDGE));
+    if (put.code !== 0) throw new Error(sshError(host, put.stderr));
+    const path = put.stdout.trim().split('\n').pop()!;
+    const tunnel = await sshForward(host, served.port);
+    return {
+      server: {
+        name,
+        command: 'python3',
+        args: [path],
+        env: [
+          { name: 'AMW_MCP_URL', value: `http://127.0.0.1:${tunnel.remotePort}` },
+          { name: 'AMW_MCP_TOKEN', value: served.token },
+        ],
+      },
+      owns: served.owns,
+      close: () => {
+        tunnel.cancel();
+        served.close();
+      },
+    };
+  } catch (error) {
+    served.close();
+    throw error;
+  }
 }

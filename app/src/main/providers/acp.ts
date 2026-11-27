@@ -12,7 +12,8 @@ import { transientKind } from '../retry';
 import { detachedSpawn, type RemoteRunner } from '../util/detached';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRunner } from '../util/ssh';
-import { MCP_TOOLS_NOTE, startMcpBridge, type McpBridge } from './acp-mcp';
+import type { WorkspaceTool } from '../main-agent';
+import { MCP_TOOLS_NOTE, RESEARCH_TOOLS_NOTE, startMcpBridge, startRemoteBridge, type McpBridge } from './acp-mcp';
 import { AcpLimitsReader, planOf } from './acp-limits';
 import { authScript, parseAuth, readAuth, splitAuthScript } from './acp-auth';
 import { acpNative, mergeEnv } from './acp-native';
@@ -428,6 +429,11 @@ export class AcpAdapter implements ProviderAdapter {
   }
 
   /** A folder for sessions that are not about the agent's folder (side questions without session/fork). */
+  /** A research's tools for an agent of this CLI: here, or on its host through a tunnel back. */
+  researchBridge(tools: WorkspaceTool[], host?: string): Promise<McpBridge> {
+    return host ? startRemoteBridge(host, tools, 'research') : startMcpBridge(tools, { name: 'research' });
+  }
+
   scratchDir(host?: string): string {
     if (host) return '/tmp';
     const dir = join(tmpdir(), 'amw-acp-side');
@@ -634,6 +640,8 @@ class AcpSession implements ProviderSession {
   private permModes?: Partial<Record<PermissionMode, string>>;
   /** Main agent: the bridge serving its workspace tools. */
   private bridge?: McpBridge;
+  /** A research's agent: its research tools (served here, on its host through a tunnel). */
+  private toolBridge?: McpBridge;
   private lastCost?: number;
   /** The account's plan, as the CLI named it at the start (Antigravity's tier). */
   private plan?: string;
@@ -712,7 +720,9 @@ class AcpSession implements ProviderSession {
       const sessionCaps = rec(this.agentCaps.sessionCapabilities);
       // Main agent: the workspace tools, as an MCP server this app serves (acp-mcp.ts), and where to find them.
       if (this.args.tools?.length && !this.args.host) this.bridge = await startMcpBridge(this.args.tools);
-      const instructions = [this.args.developerInstructions?.trim(), this.bridge ? MCP_TOOLS_NOTE : '', native.instructions].filter(Boolean).join('\n\n') || undefined;
+      // A research's agent: its research tools, the same way (on its host, through a tunnel back here).
+      if (this.args.extraTools?.length && !this.bridge) this.toolBridge = await this.adapter.researchBridge(this.args.extraTools, this.args.host);
+      const instructions = [this.args.developerInstructions?.trim(), this.bridge ? MCP_TOOLS_NOTE : '', this.toolBridge ? RESEARCH_TOOLS_NOTE : '', native.instructions].filter(Boolean).join('\n\n') || undefined;
       // System prompts: ACP's own field, or Antigravity's `_meta.antigravity.systemPrompt.append`; else with the first prompt.
       const agyAppend = rec(rec(rec(this.agentCaps._meta).antigravity).systemPrompt).append === true;
       const systemPrompt = !instructions
@@ -723,7 +733,7 @@ class AcpSession implements ProviderSession {
             ? { _meta: { antigravity: { systemPrompt: { append: instructions } } } }
             : {};
       const dirs = sessionCaps.additionalDirectories && native.additionalDirectories.length ? { additionalDirectories: native.additionalDirectories } : {};
-      const base = { cwd: this.args.cwd, mcpServers: this.bridge ? [this.bridge.server] : [], ...systemPrompt, ...dirs };
+      const base = { cwd: this.args.cwd, mcpServers: [this.bridge?.server, this.toolBridge?.server].filter((x): x is NonNullable<typeof x> => !!x), ...systemPrompt, ...dirs };
       const resumeId = this.args.resumeNativeSessionId;
       let result: Rec | undefined;
       let resumed = false;
@@ -767,6 +777,7 @@ class AcpSession implements ProviderSession {
     } catch (error) {
       conn.kill();
       this.bridge?.close();
+      this.toolBridge?.close();
       throw new Error(this.errorText(error));
     }
   }
@@ -1125,6 +1136,7 @@ class AcpSession implements ProviderSession {
     this.stopTimers();
     this.conn?.kill();
     this.bridge?.close();
+    this.toolBridge?.close();
   }
 
   // ---------------------------------------------------------------- the agent's requests
@@ -1163,7 +1175,9 @@ class AcpSession implements ProviderSession {
       if (!ok && toolCallId) this.declined.add(toolCallId);
       return void this.conn?.reply(rpcId, { outcome: ok ? { outcome: 'selected', optionId: allow.optionId } : reject ? { outcome: 'selected', optionId: reject.optionId } : { outcome: 'cancelled' } });
     }
-    if (allow && this.autoAllowed(tool)) return void this.conn?.reply(rpcId, { outcome: { outcome: 'selected', optionId: allow.optionId } });
+    // Its research tools are the app's own: never put to the user.
+    const ours = !!this.toolBridge && [tool.name, tool.title].some((n) => !!n && this.toolBridge!.owns(n));
+    if (allow && (ours || this.autoAllowed(tool))) return void this.conn?.reply(rpcId, { outcome: { outcome: 'selected', optionId: allow.optionId } });
     const requestId = `acp-${String(rpcId)}-${toolCallId ?? randomUUID().slice(0, 6)}`;
     this.requests.set(requestId, { rpcId, options, toolCallId });
     const info = acpToolInfo(tool, this.args.cwd);

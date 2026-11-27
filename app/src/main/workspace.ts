@@ -60,7 +60,7 @@ import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools, roleInstructions } from './research-tools';
 import { moveClaudeSession } from './research-move';
 import { repoOf } from './worktree';
-import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
+import { aspectOf, childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
 import { settleStops } from './util/detached';
 
@@ -752,9 +752,15 @@ export class Workspace {
   }
 
   /** The provider a research starts agents with: mock agents in the demo or a workspace with nothing else; else the first signed-in CLI. */
-  private async researchProvider(): Promise<AgentProvider> {
+  private async researchProvider(id?: string, nodeId?: string): Promise<AgentProvider> {
     // Right after launch the CLIs may not be checked yet: checked now rather than refused.
     if (!this.capabilities.length) await this.refreshCapabilities({ localOnly: true });
+    // The one chosen for its aspect, else for the research (the user's choice; whether it can start there is checked then).
+    const doc = id ? this.researchGet(id) : null;
+    const node = doc && nodeId ? doc.nodes.find((n) => n.id === nodeId) : undefined;
+    const aspect = node && doc ? (node.type === 'aspect' ? node : aspectOf(doc, node)) : undefined;
+    const wanted = aspect?.provider ?? doc?.policy?.provider;
+    if (wanted && this.opts.adapters[wanted]) return wanted;
     const onlyMock = Object.keys(this.opts.adapters).every((k) => k === 'mock');
     const order: AgentProvider[] = this.opts.demo || onlyMock ? ['mock', 'claude', 'codex'] : ['claude', 'codex'];
     const p = order.find((x) => this.opts.adapters[x] && (x === 'mock' || this.capabilities.find((c) => c.provider === x)?.available));
@@ -810,7 +816,7 @@ export class Workspace {
     const doc = this.researchGet(projectId);
     const node = doc?.nodes.find((n) => n.id === nodeId);
     if (!doc || !node) throw new Error('That node is not in the research.');
-    const provider = await this.researchProvider();
+    const provider = await this.researchProvider(projectId, nodeId);
     const aspect = node.type === 'aspect' ? node : doc.nodes.find((n) => n.id === doc.nodes.find((m) => m.id === node.parent)?.parent);
     const zh = this.language() === 'zh';
     const task = await this.createTask({
@@ -836,7 +842,7 @@ export class Workspace {
     const doc = this.researchGet(projectId);
     if (!doc) throw new Error('This project has no research.');
     const zh = this.language() === 'zh';
-    const leadProvider = await this.researchProvider();
+    const leadProvider = await this.researchProvider(projectId);
     const task = await this.createTask({
       projectId: parseResearchId(projectId).projectId,
       provider: leadProvider,
@@ -894,6 +900,48 @@ export class Workspace {
     this.researchIds.delete(parseResearchId(id).projectId);
     this.changed();
     return { kept };
+  }
+
+  /** The CLI a research's agents start on, or an aspect's (null: back to the research's, or the default). */
+  async researchSetProvider(id: string, nodeId: string | undefined, provider: AgentProvider | null): Promise<void> {
+    await this.researchReady(id);
+    const doc = this.researchGet(id);
+    if (!doc) throw new Error('No research.');
+    if (provider && !this.opts.adapters[provider]) throw new Error(`${providerName(provider)} is not available here.`);
+    if (nodeId) {
+      const n = doc.nodes.find((x) => x.id === nodeId && x.type === 'aspect');
+      if (!n) throw new Error('A CLI is chosen for the research or one of its aspects.');
+      this.researchSave(id, updateNode(doc, nodeId, { provider: provider ?? undefined }));
+    } else this.researchSave(id, { ...doc, policy: { ...doc.policy, provider: provider ?? undefined }, updatedAt: new Date().toISOString() });
+  }
+
+  /**
+   * A research's agent goes on in another CLI: a new agent there continues its conversation (the fork onto
+   * another CLI, in the same folder) and takes its place in the tree; the old one is set aside.
+   */
+  async researchSwitchAgent(id: string, taskId: string, provider: AgentProvider): Promise<Task> {
+    await this.researchReady(id);
+    const role = this.researchRole(id, taskId);
+    if (role === 'none') throw new Error('That agent is not in this research.');
+    const src = this.task(taskId);
+    if (src.provider === provider) return src;
+    if (src.host) this.requireOnHost(provider, src.host);
+    const t = await this.forkTask(taskId, { provider, isolate: false, name: src.name });
+    t.title = src.title;
+    t.researchAgent = true;
+    if (src.researchManager) t.researchManager = true;
+    // The folder (its worktree, if it had one) is the new agent's now.
+    t.worktree = src.worktree;
+    src.worktree = undefined;
+    const doc = this.researchGet(id)!;
+    const node = doc.nodes.find((n) => n.taskId === taskId);
+    this.researchSave(id, role === 'lead' ? { ...doc, leadTaskId: t.taskId, updatedAt: new Date().toISOString() } : updateNode(doc, node!.id, { taskId: t.taskId }));
+    await this.stop(taskId).catch(() => {});
+    src.setAside = true;
+    const zh = this.language() === 'zh';
+    this.appendSystem(taskId, zh ? `已换到 ${providerName(provider)}：由 ${t.alias} 接着做。` : `Moved to ${providerName(provider)}: ${t.alias} carries on.`);
+    this.changed();
+    return t;
   }
 
   /** A folder research's agents that still work at the project root (started before its agents ran in its folder). */
@@ -2146,7 +2194,8 @@ export class Workspace {
     if (!adapter?.forkPoints || !(elsewhere ? adapter.readHistory : adapter.forkSession))
       throw new Error(`${providerName(task.provider)} conversations cannot be forked${elsewhere ? ' onto another CLI' : ''} yet.`);
     if (elsewhere && !this.opts.adapters[onto]) throw new Error(`${providerName(onto)} is not available here.`);
-    if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
+    // Onto another CLI the conversation is read and passed on as text, which works on a host too.
+    if (task.host && !elsewhere) throw new Error('Conversations on SSH hosts cannot be forked yet.');
     const nativeSessionId = this.currentSession(task)?.nativeSessionId;
     if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
     return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkPoints'>> & typeof adapter, nativeSessionId };

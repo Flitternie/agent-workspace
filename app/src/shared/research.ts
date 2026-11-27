@@ -1,3 +1,4 @@
+import type { AgentProvider } from './types';
 // A research: the tree of what is being tried in one project, kept in the project's repository
 // (.research/research.json) so it travels with the code. Levels answer different questions:
 //   the goal     which aspects move the end result? (evidence: end-to-end runs and ablations)
@@ -52,6 +53,8 @@ export interface ResearchNode {
   taskId?: string;
   /** Aspect: how it is validated (none: by judgement, pass / fail). */
   metric?: ResearchMetric;
+  /** An aspect's CLI: its agent's and its experiments' (else the research's). */
+  provider?: AgentProvider;
   /** Aspect: more metrics watched besides the main one (shown, not used to judge). */
   metrics?: ResearchMetric[];
   /** Aspect: the row of cross-aspect combinations (validated end to end). */
@@ -108,6 +111,8 @@ export interface ResearchPolicy {
   autoNotes?: boolean;
   /** Ask the lead to fold the aspects' notes into the summary at most this often, in minutes (0: never; default 30). */
   summaryEvery?: number;
+  /** The CLI its agents start on (an aspect may have its own). */
+  provider?: AgentProvider;
 }
 export const DEFAULT_MODE: ResearchMode = 'review';
 

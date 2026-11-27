@@ -1,6 +1,7 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { AgentProvider, Task, TranscriptItem, WorkspaceSnapshot } from '../../shared/types';
+import type { MenuItem } from './ContextMenu';
 import {
   aspectOf,
   bestExperiment,
@@ -30,6 +31,7 @@ import {
   type ResearchStatus,
   researchColor,
   researchId,
+  parseResearchId,
 } from '../../shared/research';
 import { call, errorText } from '../api';
 import { language as currentLanguage, t } from '../i18n';
@@ -190,22 +192,45 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
     setSel(ids);
     setLook((l) => ({ ids, n: l.n + 1 }));
   };
-  /** A right-click on a node with an agent: open its conversation, or take it out of the research (it is an ordinary agent again; the node stays). */
+  // The CLIs this research's agents can run on: where its project is (this computer, or its host), signed in.
+  const host = snapshot.projects.find((p) => p.projectId === parseResearchId(researchId).projectId)?.host;
+  const clis: AgentProvider[] = (host ? (snapshot.remoteHosts.find((h) => h.host === host)?.capabilities ?? []) : snapshot.capabilities)
+    .filter((c) => c.available && c.auth?.loggedIn !== false && (c.provider !== 'mock' || snapshot.demo))
+    .map((c) => c.provider);
+  /**
+   * A right-click on a node: its agent's conversation, going on in another CLI, taking it out of the research (it is an
+   * ordinary agent again; the node stays); on an aspect or the goal, which CLI new agents there start on.
+   */
   const nodeMenu = (e: ReactMouseEvent, n?: ResearchNode) => {
     const task = taskOf(n ? n.taskId : doc.leadTaskId);
-    if (!task) return;
-    const out = () =>
-      void call('research:save', { researchId, doc: { ...(n ? { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? { ...x, taskId: undefined } : x)) } : { ...doc, leadTaskId: undefined }), updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err)));
-    menu.open(
-      menuAt(
-        e,
-        [
-          { id: 'node-open', label: t('Open {alias}’s conversation', { alias: task.alias }), onSelect: () => onOpenAgent(task.taskId) },
-          { id: 'node-out', label: t('Take {alias} out of the research', { alias: task.alias }), onSelect: out },
-        ],
-        'research-node-menu',
-      ),
-    );
+    const items: Array<MenuItem | '-'> = [];
+    if (task) {
+      const out = () =>
+        void call('research:save', { researchId, doc: { ...(n ? { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? { ...x, taskId: undefined } : x)) } : { ...doc, leadTaskId: undefined }), updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err)));
+      const busy = task.status === 'running' || task.status === 'starting';
+      items.push({ id: 'node-open', label: t('Open {alias}’s conversation', { alias: task.alias }), onSelect: () => onOpenAgent(task.taskId) });
+      const others = clis.filter((p) => p !== task.provider);
+      if (others.length) {
+        items.push('-');
+        for (const p of others)
+          items.push({
+            id: `node-switch-${p}`,
+            label: t('Go on in {cli}', { cli: PROVIDER_LABEL[p] }),
+            disabled: busy,
+            onSelect: () => void call('research:switchAgent', { researchId, taskId: task.taskId, provider: p }).catch((err) => setError(errorText(err))),
+          });
+      }
+      items.push('-', { id: 'node-out', label: t('Take {alias} out of the research', { alias: task.alias }), onSelect: out });
+    }
+    // Which CLI new agents start on: the research's, or an aspect's own.
+    if (!n || n.type === 'aspect') {
+      const now = n ? n.provider : doc.policy?.provider;
+      const set = (p: AgentProvider | null) => void call('research:setProvider', { researchId, ...(n ? { nodeId: n.id } : {}), provider: p }).catch((err) => setError(errorText(err)));
+      if (items.length) items.push('-');
+      if (n) items.push({ id: 'cli-inherit', label: `${!now ? '✓ ' : ''}${t('New agents here: as the research')}`, onSelect: () => set(null) });
+      for (const p of clis) items.push({ id: `cli-${p}`, label: `${now === p ? '✓ ' : ''}${n ? t('New agents here: {cli}', { cli: PROVIDER_LABEL[p] }) : t('New agents in this research: {cli}', { cli: PROVIDER_LABEL[p] })}`, onSelect: () => set(p) });
+    }
+    if (items.length) menu.open(menuAt(e, items, 'research-node-menu'));
   };
   const ringFresh = () => {
     setOpened((o) => new Set([...o, ...exps.filter((e) => fresh.has(e.id)).map((e) => e.parent!)]));
@@ -771,7 +796,7 @@ function AgentLine({ ctx, task, role, none }: { ctx: Ctx; task?: Task; role: str
       <span className="rs-agent-text">
         <b>{task.alias}</b>
         <small>
-          {role} · {t(AGENT_STATUS[task.status])}
+          {role} · {PROVIDER_LABEL[task.provider]} · {t(AGENT_STATUS[task.status])}
         </small>
       </span>
       <button className="link small" onClick={() => ctx.onOpenAgent(task.taskId)} data-testid="research-open-agent">

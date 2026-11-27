@@ -66,6 +66,8 @@ export const ipcSchemas = {
     .refine((v) => v.text.trim() || v.images?.length, { message: 'Nothing to send.' }),
   'research:dissolve': z.object({ researchId: id }),
   'research:moveAgents': z.object({ researchId: id }),
+  'research:setProvider': z.object({ researchId: id, nodeId: id.optional(), provider: agentProvider.nullable() }),
+  'research:switchAgent': z.object({ researchId: id, taskId: id, provider: agentProvider }),
   'research:fromTasks': z.object({ projectId: id, taskIds: z.array(id).min(1).max(50), title: z.string().max(300).optional(), dir: z.string().max(200).optional() }),
   'research:addTasks': z.object({ researchId: id, taskIds: z.array(id).min(1).max(50) }),
   'research:html': z.object({ html: z.string().min(1).max(500_000) }),

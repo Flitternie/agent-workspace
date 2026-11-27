@@ -318,6 +318,36 @@ describe('a research’s idle agents', () => {
   });
 });
 
+describe('which CLI a research’s agents use', () => {
+  it('each aspect may have its own; an agent can go on in another CLI with its conversation and its place in the tree', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY), codex: new MockAdapter(join(dataDir, 'other-sessions'), DELAY) } });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    await ws.researchCreate(p.projectId, 'Paper', '', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ type: 'aspect', title: 'Coding' });
+    await main.research_add.run({ type: 'aspect', title: 'Writing' });
+    const [coding, writing] = ws.researchGet(p.projectId)!.nodes;
+    await ws.researchSetProvider(p.projectId, undefined, 'mock');
+    await ws.researchSetProvider(p.projectId, writing.id, 'codex');
+    const w = await ws.researchStartAgent(p.projectId, writing.id, { isolate: false });
+    const c = await ws.researchStartAgent(p.projectId, coding.id, { isolate: false });
+    expect(w.provider).toBe('codex');
+    expect(c.provider).toBe('mock');
+    const status = (id: string) => ws.snapshot().tasks.find((t) => t.taskId === id)!;
+    await until(() => !['running', 'starting'].includes(status(c.taskId).status));
+    // Coding goes on in the other CLI: a new agent continues the conversation and takes the node.
+    const n = await ws.researchSwitchAgent(p.projectId, c.taskId, 'codex');
+    expect(n.provider).toBe('codex');
+    expect(ws.researchGet(p.projectId)!.nodes.find((x) => x.id === coding.id)!.taskId).toBe(n.taskId);
+    expect(ws.transcript(n.taskId).some((i) => i.role === 'user')).toBe(true);
+    expect(status(c.taskId).setAside).toBe(true);
+    expect(status(n.taskId).researchManager).toBe(true);
+  });
+});
+
 describe('moving a research’s agents into its folder', () => {
   it('agents started at the project root move with their conversation; the page counts them until then', async () => {
     const ws = open();

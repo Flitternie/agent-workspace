@@ -95,6 +95,22 @@ export function sshRunner(host: string): import('./detached').RemoteRunner {
   return { spawn: (command) => sshSpawn(host, command), run: (command, timeoutMs) => sshRun(host, command, timeoutMs) };
 }
 
+/**
+ * A tunnel from `host` back to this computer's 127.0.0.1:`localPort`, on the shared connection: a port there
+ * (picked by sshd, on its loopback) that reaches the port here. For tools served here to a CLI running there.
+ */
+export async function sshForward(host: string, localPort: number): Promise<{ remotePort: number; cancel: () => void }> {
+  if (!HOST_RE.test(host)) throw new Error(`Not a usable SSH host alias: ${host}`);
+  // The shared connection first: forwards are added to it.
+  const up = await sshRun(host, 'true');
+  if (up.code !== 0) throw new Error(sshError(host, up.stderr));
+  const ctl = (op: string, spec: string) => run('ssh', [...baseOptions(false), '-O', op, '-R', spec, '--', host], childEnv(), 20_000);
+  const r = await ctl('forward', `0:127.0.0.1:${localPort}`);
+  const remotePort = Number(r.stdout.trim().split('\n').pop());
+  if (r.code !== 0 || !remotePort) throw new Error(`Could not open a tunnel from ${host}: ${r.stderr.trim() || 'no port given'}`);
+  return { remotePort, cancel: () => void ctl('cancel', `${remotePort}:127.0.0.1:${localPort}`) };
+}
+
 /** A long-lived remote process whose stdio is the SSH channel. */
 export function sshSpawn(host: string, command: string): ChildProcessWithoutNullStreams {
   return spawn('ssh', sshArgs(host, command), { env: childEnv(), stdio: 'pipe', detached: process.platform !== 'win32' });

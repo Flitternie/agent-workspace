@@ -3,7 +3,7 @@
 // checks who is calling: the main agent may do anything; an aspect's agent works within its aspect;
 // an experiment's agent records its own result. The page only shows the tree.
 import { z } from 'zod';
-import type { Task } from '../shared/types';
+import { CODING_PROVIDERS, type CodingProvider, type Task } from '../shared/types';
 import {
   addFinding,
   addNode,
@@ -690,11 +690,24 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
     {
       name: 'research_settings',
       description: 'Records how the user wants this research run (the lead’s): mode auto (agents go ahead within the budget), direction (ask before a new direction), review (propose experiments, start when the user agrees), collaborative (both); whether aspects’ agents are reminded to update their notes when a batch has its results; how often (minutes, 0 = never) the lead is reminded to update the summary. New agents are told the mode.',
-      schema: z.object({ ...projectArg, mode: z.enum(['auto', 'direction', 'review', 'collaborative']).optional(), auto_notes: z.boolean().optional(), summary_every_minutes: z.number().min(0).max(100_000).optional() }),
+      schema: z.object({
+        ...projectArg,
+        mode: z.enum(['auto', 'direction', 'review', 'collaborative']).optional(),
+        auto_notes: z.boolean().optional(),
+        summary_every_minutes: z.number().min(0).max(100_000).optional(),
+        cli: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]).optional().describe('The CLI new agents start on (when the user wants one): for the research, or with aspect_id for that aspect (its agent and its experiments).'),
+        aspect_id: z.string().optional(),
+      }),
       run: async (a) => {
-        const { projectId, doc } = await load(a.project);
-        if (!full(doc)) throw new Error('How the research runs is set with its lead.');
-        const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}) };
+        const { projectId, doc: loaded } = await load(a.project);
+        if (!full(loaded)) throw new Error('How the research runs is set with its lead.');
+        let doc = loaded;
+        if (a.cli && a.aspect_id) {
+          const asp = doc.nodes.find((n) => n.id === a.aspect_id && n.type === 'aspect');
+          if (!asp) throw new Error(`No aspect [${String(a.aspect_id)}].`);
+          doc = updateNode(doc, asp.id, { provider: a.cli as CodingProvider });
+        }
+        const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}), ...(a.cli && !a.aspect_id ? { provider: a.cli as CodingProvider } : {}) };
         save(projectId, { ...doc, policy, updatedAt: new Date().toISOString() });
         // A change of mode reaches the agents already at work (their briefs said the old one).
         if (a.mode && a.mode !== (doc.policy?.mode ?? DEFAULT_MODE)) {
