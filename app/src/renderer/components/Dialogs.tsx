@@ -394,6 +394,13 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   const [isolate, setIsolate] = useState(!!project?.isGitRepo);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Which CLI continues it: its own, or another one installed here (given the conversation as text).
+  const [onto, setOnto] = useState<AgentProvider>(task.provider);
+  const capOf = (p: AgentProvider) => snapshot.capabilities.find((c) => c.provider === p);
+  const usable = (p: AgentProvider) => (p === task.provider ? capOf(p)?.fork !== false : !!capOf(p)?.available);
+  const ontoChoices: AgentProvider[] = capOf(task.provider)?.forkElsewhere
+    ? [...new Set<AgentProvider>([...CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || !!capOf(p)?.available), ...(snapshot.demo ? (['mock'] as const) : []), task.provider])]
+    : [];
   useEffect(() => {
     call('task:forkPoints', { taskId: task.taskId })
       .then((p) => setPoints([...p].reverse()))
@@ -407,7 +414,7 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
     setBusy(true);
     setError('');
     try {
-      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo });
+      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo, provider: onto !== task.provider ? onto : undefined });
       // Forked back to before a message: that message waits in the new agent's reply box, to edit and send.
       const prompt = upTo ? points?.find((p) => p.upToMessageId === upTo)?.prompt : undefined;
       if (prompt) setDraftText(t.taskId, prompt);
@@ -422,6 +429,12 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   return (
     <Modal title={t('Fork {name}', { name: task.alias })} onClose={onClose}>
       <div className="muted small">{t('A new agent continues from a copy; {name} stays as it is.', { name: task.alias })}</div>
+      {ontoChoices.length > 1 ? (
+        <div className="field">
+          <label>{t('Continue in')}</label>
+          <ProviderPicker providers={ontoChoices} value={onto} onChange={setOnto} capOf={capOf} usable={usable} name="fork-onto" testId="fork-onto" />
+        </div>
+      ) : null}
       <div className="field">
         <label>{t('Fork from')}</label>
         <div className="fork-points" data-testid="fork-points">

@@ -17,7 +17,7 @@ export interface AcpAgentSpec {
   /** Signing in, in a terminal (on the agent's machine). */
   login: string;
   docs: string;
-  /** One or two letters for its mark (a neutral badge, not the product's logo). */
+  /** One or two letters for its badge, shown when the app has no mark of its own for it (renderer/components/agent-marks.tsx). */
   mark: string;
   /**
    * Environment for its ACP server. OpenCode: every edit, command and fetch asks (its own default is

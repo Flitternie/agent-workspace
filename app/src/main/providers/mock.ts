@@ -70,6 +70,11 @@ export class MockAdapter implements ProviderAdapter {
     return new MockSession(this.dir, this.delayMs, args, onEvent);
   }
 
+  /** A saved mock conversation as history (what a fork onto another CLI carries). */
+  async readHistory(nativeSessionId: string): Promise<ProviderEvent[]> {
+    return this.load(nativeSessionId).messages.map((m) => ({ type: 'transcriptItem' as const, itemId: m.itemId, role: m.role, text: m.text, history: true }));
+  }
+
   async forkPoints(nativeSessionId: string): Promise<ForkPoint[]> {
     const { messages } = this.load(nativeSessionId);
     return messages.flatMap((m, i) => (i > 0 && m.role === 'user' ? [{ upToMessageId: messages[i - 1].itemId, prompt: m.text }] : []));

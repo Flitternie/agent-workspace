@@ -1,5 +1,5 @@
 import { ALIAS_PROBLEM_TEXT, aliasProblem } from '../../shared/agent-name';
-import type { Task } from '../../shared/types';
+import type { Task, WorkspaceSnapshot } from '../../shared/types';
 import { call } from '../api';
 import { t } from '../i18n';
 import { InlineEdit, type MenuItem } from './ContextMenu';
@@ -19,16 +19,25 @@ export function aliasCheck(tasks: ReadonlyArray<Task>, taskId: string): (v: stri
 export const saveAlias = (taskId: string, alias: string) => call('task:renameAgent', { taskId, alias });
 export const saveTitle = (taskId: string, name: string) => call('task:rename', { taskId, name });
 
+/** A saved conversation on this computer, whose CLI can fork it (as itself, or onto another CLI). */
+export function canFork(snapshot: WorkspaceSnapshot, task: Task): boolean {
+  if (isMainAgent(task) || task.host) return false;
+  const c = snapshot.capabilities.find((x) => x.provider === task.provider);
+  return !!(c?.fork || c?.forkElsewhere) && !!snapshot.sessions.find((s) => s.localId === task.sessionLocalId)?.nativeSessionId;
+}
+
 /** The same items wherever an agent is right-clicked (sidebar row, Overview tile, its header). */
 export function agentMenuItems(
   task: Task,
-  opts: { onRename: (field: AgentField) => void; onOpen?: () => void; setAside?: boolean },
+  opts: { onRename: (field: AgentField) => void; onOpen?: () => void; setAside?: boolean; onFork?: () => void },
 ): Array<MenuItem | '-'> {
   if (isMainAgent(task)) return opts.onOpen ? [{ id: 'open', label: t('Open'), icon: 'expand', onSelect: opts.onOpen }] : [];
   const items: Array<MenuItem | '-'> = [
     { id: 'rename-agent', label: t('Rename agent…'), icon: 'pencil', onSelect: () => opts.onRename('alias') },
     { id: 'rename-title', label: t('Rename title…'), icon: 'note', onSelect: () => opts.onRename('name') },
   ];
+  // Fork, here or onto another CLI (the dialog asks which); after the turn under way.
+  if (opts.onFork) items.push({ id: 'fork', label: t('Fork…'), icon: 'branch', onSelect: opts.onFork, disabled: task.status === 'running' || task.status === 'starting' });
   if (opts.setAside || opts.onOpen) items.push('-');
   if (opts.setAside)
     items.push({

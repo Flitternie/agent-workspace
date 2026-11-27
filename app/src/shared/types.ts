@@ -381,6 +381,8 @@ export interface ProviderCapabilities {
   structuredQuestions: boolean;
   /** Saved conversations on this computer can be forked (the adapter implements forkPoints / forkSession). */
   fork?: boolean;
+  /** Its saved conversations can be forked onto another CLI (the adapter reads them back: readHistory). */
+  forkElsewhere?: boolean;
   /** Answers side questions ("btw") without entering the conversation; unset = yes. */
   sideQuestions?: boolean;
   /** Login state read from the CLI's own status command (never its credentials). */

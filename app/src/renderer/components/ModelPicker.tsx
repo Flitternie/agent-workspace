@@ -42,8 +42,8 @@ const matches = (o: ModelOption, id?: string) => !!id && (o.id === id || o.resol
 /**
  * In the agent's header: the model it runs on; a click lists the models its CLI offers
  * (here or on its host) and switches: Claude Code from its next request (as /model does, the running
- * turn included), Codex from its next turn. The list is asked for on first
- * open, not on every view.
+ * turn included), Codex from its next turn. The list is read again each time it opens (a new plan or
+ * another sign-in changes it); the last one shows meanwhile.
  */
 export function ModelPicker({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
@@ -52,14 +52,15 @@ export function ModelPicker({ task }: { task: Task }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!open) return;
-    if (!models)
-      call('task:models', { taskId: task.taskId }).then(
-        (list) => {
-          for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) remember(id, o.label);
-          setModels(list);
-        },
-        (e) => setError(errorText(e)),
-      );
+    call('task:models', { taskId: task.taskId, fresh: true }).then(
+      (list) => {
+        for (const o of list) if (!o.isDefault) for (const id of [o.id, o.resolves]) if (id) remember(id, o.label);
+        setModels(list);
+        setError('');
+      },
+      // With a list already shown, a failed refresh leaves it as it is.
+      (e) => setError((prev) => (models ? prev : errorText(e))),
+    );
     const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
     // Esc closes just this (before the app's Esc, which leaves the agent view).
     const esc = (e: KeyboardEvent) => {

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/release/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
+  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/tag/Flitternie/agent-workspace?label=%E4%B8%8B%E8%BD%BD&color=2563eb" alt="最新版本"></a>
   <img src="https://badgen.net/badge/%E6%94%AF%E6%8C%81/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity%20%C2%B7%20OpenCode/d97757" alt="支持 Claude Code、Codex、Antigravity 和 OpenCode">
   <img src="https://badgen.net/badge/%E5%B9%B3%E5%8F%B0/macOS%20%C2%B7%20Windows/111" alt="macOS 和 Windows">
   <a href="LICENSE"><img src="https://badgen.net/badge/license/AGPL-3.0/16a34a" alt="AGPL-3.0"></a>

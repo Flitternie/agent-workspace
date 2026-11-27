@@ -22,7 +22,7 @@ export interface MainAgentHost {
   transcriptText(taskId: string, limit: number): string;
   sendFromMain(taskId: string, text: string, interrupt: boolean, withImages?: boolean): Promise<{ ok: boolean; delivery?: string; error?: string }>;
   createFromMain(args: { projectId: string; provider: AgentProvider; title: string; instruction?: string; label?: string; withImages?: boolean }): Promise<Task>;
-  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
+  forkFromMain(taskId: string, args: { instruction: string; beforePrompt?: string; label?: string; withImages?: boolean; provider?: AgentProvider }): Promise<{ task: Task; delivery: { ok: boolean; error?: string } }>;
   stopFromMain(taskId: string): Promise<void>;
   saveMemory(scope: 'project' | 'global', body: string, projectId?: string): void;
   availableProviders(): AgentProvider[];
@@ -155,7 +155,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
     {
       name: 'fork_agent',
       description:
-        'Branch off work from an agent: a new agent continues a copy of its conversation (so it already knows what the original found out and decided) in its own worktree with the original’s files as they are now (in a git repository; otherwise it shares the folder), and gets its own instruction. The original is untouched. Use it to try different approaches in parallel, or to split the remaining work after an agent has explored the problem; use create_agent for unrelated work. Each fork carries the whole conversation, so fork only when that context matters, and say in one line what each branch does. Only an agent that is not working right now can be forked; otherwise wait for its turn to end (that comes to you on its own). Agents on SSH hosts cannot be forked yet.',
+        'Branch off work from an agent: a new agent continues a copy of its conversation (so it already knows what the original found out and decided) in its own worktree with the original’s files as they are now (in a git repository; otherwise it shares the folder), and gets its own instruction. The original is untouched. Use it to try different approaches in parallel, or to split the remaining work after an agent has explored the problem; use create_agent for unrelated work. Each fork carries the whole conversation, so fork only when that context matters, and say in one line what each branch does. Only an agent that is not working right now can be forked; otherwise wait for its turn to end (that comes to you on its own). Agents on SSH hosts cannot be forked yet. With provider, the branch continues on another coding agent CLI (e.g. a Claude Code conversation carried on in Codex): it gets the conversation as text, without the tools’ results.',
       schema: z.object({
         agent: agentArg,
         instruction: z.string().min(1).describe('What this branch does, different from the original’s work, and what done looks like.'),
@@ -164,10 +164,13 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
           .optional()
           .describe('Fork from just before one of the user’s earlier prompts to this agent, given by its first words (as read_agent shows them). Omit to fork the whole conversation as it is now.'),
         label: z.string().optional().describe('Optional short label for this branch’s work, e.g. "Index-based fix"; otherwise one is written from the instruction.'),
+        provider: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]).optional().describe('Continue on this CLI instead of the original’s own. Omit to stay on the same one.'),
         images: imagesArg,
       }),
       run: async (a) => {
         const t = agent(a.agent);
+        const providers = host.availableProviders();
+        if (a.provider && !providers.includes(a.provider as AgentProvider)) return `Provider ${String(a.provider)} is not available here. Available: ${providers.join(', ') || 'none'}.`;
         if (host.mainTurn() !== forkTurn) {
           forkTurn = host.mainTurn();
           forks = 0;
@@ -183,6 +186,7 @@ export function workspaceTools(host: MainAgentHost): WorkspaceTool[] {
             beforePrompt: a.before_prompt ? String(a.before_prompt) : undefined,
             label: a.label ? String(a.label) : undefined,
             withImages: a.images === true,
+            provider: a.provider as AgentProvider | undefined,
           });
         } catch (error) {
           forks--;

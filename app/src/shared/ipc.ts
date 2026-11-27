@@ -51,7 +51,7 @@ export const ipcSchemas = {
   /** An image pasted, dropped or picked in a message box (already converted and shrunk by the renderer). */
   'attachment:save': z.object({ bytes: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= 4_000_000, 'The image is too large.'), name: z.string().max(500).optional() }),
   'task:interrupt': z.object({ taskId: id }),
-  'task:models': z.object({ taskId: id }),
+  'task:models': z.object({ taskId: id, fresh: z.boolean().optional() }),
   'task:setModel': z.object({ taskId: id, model: z.string().min(1).max(200).nullable() }),
   'task:shell': z.object({ taskId: id, command: text.min(1) }),
   'memory:linkPreview': z.object({ host: z.union([z.literal('local'), z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/)]) }),
@@ -69,7 +69,7 @@ export const ipcSchemas = {
   'skills:setEnabled': z.object({ name: z.string().min(1).max(64), enabled: z.boolean() }),
   'skills:remove': z.object({ name: z.string().min(1).max(64) }),
   'task:forkPoints': z.object({ taskId: id }),
-  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional() }),
+  'task:fork': z.object({ taskId: id, upToMessageId: id.optional(), isolate: z.boolean(), instruction: text.optional(), provider: agentProvider.optional() }),
   'task:retry': z.object({ taskId: id }),
   'task:resume': z.object({ taskId: id }),
   'task:warm': z.object({ taskId: id }),

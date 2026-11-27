@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, powerSaveBlocker, protocol, session, shell, systemPreferences } from 'electron';
 import { EVENT_TRANSCRIPT, EVENT_WORKSPACE, ipcSchemas, type IpcChannel } from '../shared/ipc';
 import { openableKind } from '../shared/preview';
-import type { CodingProvider, ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
+import type { AgentProvider, CodingProvider, ImageRef, PermissionMode, Settings, TranscriptItem } from '../shared/types';
 import { KeyStore } from './keystore';
 import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './openai';
 import { ClaudeAdapter } from './providers/claude';
@@ -192,7 +192,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[]; about?: string }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images, openRequest: i.about }),
   'attachment:save': (i: { bytes: Uint8Array; name?: string }) => workspace.attachments.save(i.bytes, i.name),
   'task:interrupt': (i: { taskId: string }) => workspace.interrupt(i.taskId),
-  'task:models': (i: { taskId: string }) => workspace.listModels(i.taskId),
+  'task:models': (i: { taskId: string; fresh?: boolean }) => workspace.listModels(i.taskId, i.fresh),
   'task:setModel': (i: { taskId: string; model: string | null }) => workspace.setModel(i.taskId, i.model ?? undefined),
   'task:shell': (i: { taskId: string; command: string }) => workspace.runShell(i.taskId, i.command),
   'memory:linkPreview': (i: { host: string }) => workspace.linkPreview(i.host),
@@ -210,7 +210,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'skills:setEnabled': (i: { name: string; enabled: boolean }) => workspace.setSkillEnabled(i.name, i.enabled),
   'skills:remove': (i: { name: string }) => workspace.removeSkill(i.name),
   'task:forkPoints': (i: { taskId: string }) => workspace.forkPoints(i.taskId),
-  'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string }) => workspace.forkTask(i.taskId, i),
+  'task:fork': (i: { taskId: string; upToMessageId?: string; isolate: boolean; instruction?: string; provider?: AgentProvider }) => workspace.forkTask(i.taskId, i),
   'task:retry': (i: { taskId: string }) => workspace.retry(i.taskId),
   'task:resume': (i: { taskId: string }) => workspace.resume(i.taskId),
   'task:warm': (i: { taskId: string }) => workspace.warm(i.taskId),
