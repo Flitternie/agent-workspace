@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/release/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
+  <a href="https://github.com/Flitternie/agent-workspace/releases/latest"><img src="https://badgen.net/github/tag/Flitternie/agent-workspace?label=download&color=2563eb" alt="Latest release"></a>
   <img src="https://badgen.net/badge/works%20with/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity%20%C2%B7%20OpenCode/d97757" alt="Works with Claude Code, Codex, Antigravity and OpenCode">
   <img src="https://badgen.net/badge/platform/macOS%20%C2%B7%20Windows/111" alt="macOS and Windows">
   <a href="LICENSE"><img src="https://badgen.net/badge/license/AGPL-3.0/16a34a" alt="AGPL-3.0"></a>
