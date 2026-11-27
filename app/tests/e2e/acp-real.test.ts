@@ -493,4 +493,45 @@ describe.runIf(enabled)('ACP agents with the real CLIs', () => {
       delete process.env.AMW_ACP_COMMAND_ANTIGRAVITY;
     }
   }, 300_000);
+
+  // Signed in as the CLI's own status says, and a sub-agent shown as one (OpenCode's background
+  // `subagent` with its child-session updates; Antigravity's invoke_subagent). One tiny prompt each.
+  for (const id of Object.keys(SETUPS) as Array<keyof typeof SETUPS>) {
+    it.runIf(!only || only === id)(`${id}: signed in, and its sub-agent shown as a sub-agent`, async () => {
+      await app?.close().catch(() => {});
+      mkdirSync(join(appDir, '.cache'), { recursive: true });
+      const root = realpathSync(mkdtempSync(join(appDir, '.cache', `acp-sub-${id}-`)));
+      cleanup.push(root);
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      writeFileSync(join(root, 'notes.txt'), 'The secret fruit is PAPAYA-5.\n');
+      const dataDir = mkdtempSync(join(tmpdir(), `amw-acp-sub-${id}-`));
+      cleanup.push(dataDir);
+      const page = await launch(dataDir);
+      await invoke(page, 'settings:update', { onboarding: { dismissed: true }, permissionMode: 'auto', language: 'en' });
+      const snap = () => invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {});
+      await expect.poll(async () => (await snap()).capabilities.find((c) => c.provider === id)?.auth?.loggedIn, { timeout: 60_000 }).toBe(true);
+      const auth = (await snap()).capabilities.find((c) => c.provider === id)!.auth;
+      const project = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: root, name: `sub-${id}` });
+      const t = await invoke<Task>(page, 'task:create', { projectId: project.projectId, provider: id, isolate: false });
+      const tool = id === 'opencode' ? 'subagent tool (general agent)' : 'invoke_subagent tool';
+      const r = await invoke<{ ok: boolean; error?: string }>(page, 'task:send', { taskId: t.taskId, text: `Use your ${tool} to read notes.txt and report the secret fruit. Do not read it yourself. Keep the answer short.`, via: 'text' });
+      expect(r.ok).toBe(true);
+      const task = async () => (await snap()).tasks.find((x) => x.taskId === t.taskId)!;
+      try {
+        await expect.poll(async () => (await task()).subtasks?.some((s) => s.status === 'done'), { timeout: 240_000, interval: 1000 }).toBe(true);
+      } catch (e) {
+        writeFileSync(join(shots, `acp-real-${id}-subagent-fail.json`), JSON.stringify({ task: await task(), transcript: await invoke<TranscriptItem[]>(page, 'transcript:get', { taskId: t.taskId }) }, null, 1));
+        throw e;
+      }
+      await expect.poll(async () => (await invoke<TranscriptItem[]>(page, 'transcript:get', { taskId: t.taskId })).some((i) => i.role === 'assistant' && i.text.includes('PAPAYA-5')), { timeout: 240_000, interval: 1000 }).toBe(true);
+      await expect.poll(async () => (await task()).status, { timeout: 120_000, interval: 1000 }).toMatch(/done|idle/);
+      const subs = (await task()).subtasks ?? [];
+      await page.getByText((await task()).name ?? '', { exact: true }).first().click().catch(() => {});
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: join(shots, `acp-real-${id}-subagent.png`) });
+      const evidence = { auth, subtasks: subs.map((s) => ({ description: s.description, status: s.status, steps: s.steps?.map((x) => x.text), result: s.result?.slice(0, 200) })) };
+      writeFileSync(join(shots, `acp-real-${id}-subagent.json`), JSON.stringify(evidence, null, 2));
+      console.log(`[${id}] sub-agent:`, JSON.stringify(evidence));
+    }, 600_000);
+  }
 });

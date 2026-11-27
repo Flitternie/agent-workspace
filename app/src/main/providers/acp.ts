@@ -19,6 +19,7 @@ import { acpNative, mergeEnv } from './acp-native';
 import { acpApprovalHeadline, acpBlockText, commandOf, readOnlyCommand, acpPlan, acpToolInfo, acpToolStatus, mergeAcpTool, type AcpTool } from './acp-content';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, HistoryImage, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 import { cleanUserText } from './user-text';
+import { AcpSubtasks } from './subtasks';
 
 // Any CLI with an Agent Client Protocol server (agentclientprotocol.com, protocol version 1): JSON-RPC
 // 2.0, one message per line, over the CLI's stdin/stdout; this app is the client. The CLI keeps its
@@ -37,6 +38,14 @@ const CLIENT_INFO = { name: 'agent_workspace', title: 'Agent Workspace', version
 /** ACP's "authentication required" error code. */
 const AUTH_REQUIRED = -32000;
 const PERMISSION_KINDS: PermissionKind[] = ['allow_once', 'allow_always', 'reject_once', 'reject_always'];
+/** OpenCode 2.x reports its sub-agents' sessions when asked (`opencode/session/child_update`). */
+const CHILD_UPDATES = 'opencode/child-session-updates';
+/** OpenCode 2.x: a model request failed and is retried (`{ attempt, nextRetryAt, error }`), or no more (null). */
+const RETRY_META = 'opencode/retry';
+/** Updates by which the agent speaks or acts (a round of its own when no prompt is under way). */
+const ACTIVE = new Set(['agent_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update', 'plan']);
+/** An account limit rather than a passing failure (Antigravity: RESOURCE_EXHAUSTED). */
+const QUOTA = /resource[_ ]exhausted|quota|usage limit|exhausted your/i;
 
 class RpcError extends Error {
   constructor(
@@ -180,6 +189,10 @@ export interface AcpAdapterOptions {
   /** Passed to the detached transport (tests: quick reconnects, giving up soon). */
   backoff?: number[];
   giveUpMs?: number;
+  /** Silence after which a turn says it has heard nothing (default two minutes). */
+  stallMs?: number;
+  /** Silence that ends a round the agent started by itself (default 15 s). */
+  idleMs?: number;
 }
 
 /** The agent's permission modes (ACP session modes) that match the app's, when it has them (Antigravity: default / accept-edits / auto). */
@@ -675,6 +688,18 @@ class AcpSession implements ProviderSession {
   private sides = new Map<string, { text: string; done?: (error?: Error) => void }>();
   /** In a replay: the agent's "ok" after a conversation copy is not shown. */
   private skipAck = false;
+  /** Its sub-agents (helper tool calls, OpenCode's child sessions). */
+  private subtasks = new AcpSubtasks();
+  /** The CLI retried a model request in this turn (OpenCode's opencode/retry). */
+  private retried = false;
+  /** The turn under way is one the agent started by itself (OpenCode, when a background sub-agent reports back): no prompt answers it. */
+  private background = false;
+  private quietTimer?: NodeJS.Timeout;
+  private watch?: NodeJS.Timeout;
+  private lastUpdateAt = 0;
+  private stallSaid = false;
+  /** When a turn last ended by being stopped. */
+  private stoppedAt = 0;
 
   constructor(
     private adapter: AcpAdapter,
@@ -694,13 +719,14 @@ class AcpSession implements ProviderSession {
     return this.sessionId;
   }
 
-  /** A failed request as the user should read it: a missing login says how to sign in. */
+  /** A failed request as the user should read it: a missing login says how to sign in, a used-up quota says so. */
   private errorText(error: unknown): string {
     const e = error as RpcError;
     if (e.code === AUTH_REQUIRED || /auth(entication)? required|not (logged|signed) in|unauthori[sz]ed/i.test(e.message ?? ''))
       return this.args.host
         ? `${this.label} on ${this.args.host} is not signed in. Sign in from Settings › Remote machines (or run ${this.adapter.spec.login} there), then try again.`
         : `${this.label} is not signed in. Sign in from Settings › Coding agents (or run ${this.adapter.spec.login} in a terminal), then try again.`;
+    if (QUOTA.test(e.message ?? '')) return `${this.label} is out of quota for this model (${(e.message ?? '').slice(0, 300)}). Switch to another model, or wait until the limit resets.`;
     return e.message || String(error);
   }
 
@@ -711,6 +737,7 @@ class AcpSession implements ProviderSession {
     this.conn = conn;
     conn.onNotification = (method, p) => {
       if (method === 'session/update') this.update(p);
+      else if (method === 'opencode/session/child_update') this.childUpdate(p);
     };
     conn.onRequest = (id, method, p) => this.request(id, method, p);
     conn.onExit = (reason) => this.exited(reason);
@@ -719,7 +746,8 @@ class AcpSession implements ProviderSession {
         await conn.rpc('initialize', {
           protocolVersion: PROTOCOL_VERSION,
           // No file system, terminal or terminal-login: the agent uses its own tools and its own sign-in.
-          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } },
+          // OpenCode: its sub-agents' sessions too (shown as sub-agents).
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} }, _meta: { [CHILD_UPDATES]: true } },
           clientInfo: CLIENT_INFO,
         }),
       );
@@ -790,6 +818,8 @@ class AcpSession implements ProviderSession {
     for (const id of this.requests.keys()) this.emit({ type: 'requestResolved', requestId: id, reason: 'disconnected' });
     this.requests.clear();
     this.working = false;
+    this.background = false;
+    this.stopTimers();
     for (const resolve of this.idleWaiters.splice(0)) resolve();
     if (this.closed || reason === 'stopped') return;
     // The connection to its host (not the agent) went: the workspace reconnects by itself.
@@ -869,6 +899,8 @@ class AcpSession implements ProviderSession {
   async send(text: string, opts?: { interrupt?: boolean; images?: ImageInput[] }): Promise<Delivery> {
     if (!this.conn || this.conn.closed || !this.sessionId) throw new Error(`${this.label} session is not connected.`);
     const blocks = await this.promptBlocks(text, opts?.images ?? []);
+    // A round the agent started by itself has no prompt to wait for: it ends here, and this one goes.
+    if (this.working && this.background) this.finishTurn({ stopReason: 'end_turn' });
     if (this.working && opts?.interrupt) {
       await this.waitForIdle(() => this.cancel());
       this.startTurn([...this.queue.splice(0).flat(), ...blocks]);
@@ -889,7 +921,9 @@ class AcpSession implements ProviderSession {
     this.working = true;
     this.interruptRequested = false;
     this.lastAgentText = '';
+    this.retried = false;
     this.emit({ type: 'turnStarted' });
+    this.startWatch();
     const said = blocks.filter((b) => b.type === 'text').map((b) => str(b.text)).join('\n').trim();
     if (said) this.said.push({ role: 'user', text: said });
     const prompt = this.instructionsDue ? [{ type: 'text', text: `<system-reminder>\n${this.instructionsDue}\n</system-reminder>` }, ...blocks] : blocks;
@@ -900,12 +934,89 @@ class AcpSession implements ProviderSession {
     );
   }
 
+  /**
+   * The agent speaks or acts with no prompt under way (OpenCode, after a background sub-agent reports
+   * back): a turn of its own, ended by a quiet spell since no answer marks its end.
+   */
+  private beginBackground(): void {
+    if (this.working || this.closed || this.historyOnly || !this.sessionId) return;
+    this.working = true;
+    this.background = true;
+    this.interruptRequested = false;
+    this.lastAgentText = '';
+    this.retried = false;
+    this.emit({ type: 'turnStarted' });
+    this.startWatch();
+    this.armQuiet();
+  }
+
+  /**
+   * An update by which the agent acts on its own: it speaks or thinks, plans, or starts a tool. Not
+   * the endings of tool calls a stopped turn leaves behind, nor what still trickles in right after a stop.
+   */
+  private startsRound(kind: string, u: Rec): boolean {
+    if (!ACTIVE.has(kind)) return false;
+    if (this.stoppedAt && Date.now() - this.stoppedAt < 3000) return false;
+    if (kind === 'tool_call_update') return !this.tools.has(str(u.toolCallId)) || u.status === 'pending' || u.status === 'in_progress';
+    return true;
+  }
+
+  /** Something of its own is still under way: a request to the user, or a tool call not finished. */
+  private busy(): boolean {
+    return this.requests.size > 0 || [...this.tools.values()].some((t) => t.status === 'pending' || t.status === 'in_progress');
+  }
+
+  private armQuiet(): void {
+    clearTimeout(this.quietTimer);
+    this.quietTimer = setTimeout(() => {
+      if (!this.background || !this.working) return;
+      if (this.busy()) return this.armQuiet();
+      this.finishTurn({ stopReason: 'end_turn' });
+    }, this.adapter.opts.idleMs ?? 15_000);
+  }
+
+  /** While a turn runs: a long silence (no update, nothing of its own under way) is said, with the quota when it is used up. */
+  private startWatch(): void {
+    this.lastUpdateAt = Date.now();
+    this.stallSaid = false;
+    clearInterval(this.watch);
+    const stall = this.adapter.opts.stallMs ?? 120_000;
+    this.watch = setInterval(() => {
+      if (!this.working || this.stallSaid || this.busy() || Date.now() - this.lastUpdateAt < stall) return;
+      this.stallSaid = true;
+      const mins = Math.max(1, Math.round((Date.now() - this.lastUpdateAt) / 60_000));
+      this.emit({ type: 'progress', text: `No update from ${this.label} for ${mins} min; still waiting for it.` });
+      if (this.adapter.spec.limits)
+        void this.adapter.limits.read(this.args.host).then((l) => {
+          if (!l || this.closed) return;
+          this.emit({ type: 'limits', windows: l.windows, ...(this.plan ? { plan: this.plan } : {}) });
+          const out = l.windows.find((w) => w.usedPercent >= 100);
+          if (out && this.working)
+            this.emit({ type: 'progress', text: `${this.label} may be out of quota: ${out.label ? `${out.label} ` : ''}limit used up${out.resetsAt ? `, resets ${new Date(out.resetsAt).toLocaleString()}` : ''}. Still waiting for it.` });
+        });
+    }, Math.min(30_000, Math.max(50, Math.floor(stall / 4))));
+  }
+
+  private stopTimers(): void {
+    clearTimeout(this.quietTimer);
+    clearInterval(this.watch);
+    this.quietTimer = undefined;
+    this.watch = undefined;
+  }
+
   private finishTurn(result: Rec | undefined, error?: unknown): void {
     if (!this.working) return;
     this.flush();
+    this.stopTimers();
     for (const id of this.requests.keys()) this.emit({ type: 'requestResolved', requestId: id, reason: 'turn ended' });
     this.requests.clear();
     this.working = false;
+    this.background = false;
+    // OpenCode names the retry it was waiting on when the turn ended.
+    const retried = this.retried || !!rec(rec(result?._meta)[RETRY_META]).attempt;
+    const stopped = str(result?.stopReason) === 'cancelled' || this.interruptRequested;
+    if (stopped) this.stoppedAt = Date.now();
+    for (const e of this.subtasks.turnEnded(error ? 'failed' : stopped ? 'interrupted' : 'completed')) this.emit(e);
     if (error && this.conn?.closed) {
       // The process went: reported once, by exited().
       for (const resolve of this.idleWaiters.splice(0)) resolve();
@@ -918,7 +1029,7 @@ class AcpSession implements ProviderSession {
       this.emit({ type: 'usage', add: { input: n('inputTokens'), output: n('outputTokens'), cacheRead: n('cachedReadTokens'), cacheWrite: n('cachedWriteTokens'), reasoning: n('thoughtTokens') } });
     if (error) {
       const message = this.errorText(error);
-      this.emit({ type: 'turnCompleted', status: 'failed', finalText: this.lastAgentText, error: message, transient: transientKind(message) });
+      this.emit({ type: 'turnCompleted', status: 'failed', finalText: this.lastAgentText, error: message, transient: transientKind(message), ...(retried ? { retried } : {}) });
     } else if (stop === 'cancelled' || this.interruptRequested) this.emit({ type: 'turnCompleted', status: 'interrupted', finalText: this.lastAgentText });
     else if (stop === 'refusal') this.emit({ type: 'turnCompleted', status: 'failed', finalText: this.lastAgentText, error: `${this.label} refused to continue.` });
     else {
@@ -950,6 +1061,11 @@ class AcpSession implements ProviderSession {
   private cancel(): void {
     if (!this.conn || this.conn.closed || !this.sessionId || !this.working) return;
     this.interruptRequested = true;
+    if (this.background) {
+      this.conn.notify('session/cancel', { sessionId: this.sessionId });
+      this.finishTurn({ stopReason: 'cancelled' });
+      return;
+    }
     for (const [id, r] of this.requests) {
       try {
         this.conn.reply(r.rpcId, { outcome: { outcome: 'cancelled' } });
@@ -1049,6 +1165,7 @@ class AcpSession implements ProviderSession {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.stopTimers();
     this.conn?.kill();
     this.bridge?.close();
   }
@@ -1068,13 +1185,18 @@ class AcpSession implements ProviderSession {
       return void this.conn?.reply(rpcId, { outcome: reject ? { outcome: 'selected', optionId: str(reject.optionId) } : { outcome: 'cancelled' } });
     }
     if (str(p.sessionId) !== this.sessionId) return void this.conn?.reply(rpcId, { outcome: { outcome: 'cancelled' } });
+    // Asked with no prompt under way (a background sub-agent of OpenCode's): a round of its own, put to the user.
+    if (!this.working && !this.replaying) this.beginBackground();
+    this.lastUpdateAt = Date.now();
     const options = arr(p.options)
       .map(rec)
       .map((o) => ({ optionId: str(o.optionId), name: str(o.name), kind: str(o.kind) }))
       .filter((o) => o.optionId);
     const u = rec(p.toolCall);
     const toolCallId = str(u.toolCallId) || undefined;
-    const tool = toolCallId ? this.toolUpdate(u) : mergeAcpTool(undefined, u);
+    // A sub-agent's tool (OpenCode marks it): asked here, not part of the main transcript.
+    const ofChild = !!rec(u._meta)['opencode/child-session'];
+    const tool = toolCallId && !ofChild ? this.toolUpdate(u) : mergeAcpTool(undefined, u);
     if (!this.working) return void this.conn?.reply(rpcId, { outcome: { outcome: 'cancelled' } });
     const allow = options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind === 'allow_always');
     if (this.bridge) {
@@ -1144,7 +1266,14 @@ class AcpSession implements ProviderSession {
     }
     if (this.sessionId && str(p.sessionId) && str(p.sessionId) !== this.sessionId) return;
     const u = rec(p.update);
-    switch (str(u.sessionUpdate)) {
+    const kind = str(u.sessionUpdate);
+    if (!this.replaying) {
+      this.lastUpdateAt = Date.now();
+      this.stallSaid = false;
+      if (!this.working && !this.historyOnly && this.startsRound(kind, u)) this.beginBackground();
+      if (this.background) this.armQuiet();
+    }
+    switch (kind) {
       case 'agent_message_chunk':
         return this.chunk('assistant', u);
       case 'agent_thought_chunk':
@@ -1184,6 +1313,19 @@ class AcpSession implements ProviderSession {
       case 'config_option_update':
         this.readModels(u);
         return;
+      case 'session_info_update': {
+        // OpenCode retries a failed model request by itself, with backoff: shown as the app's retry notice.
+        const retry = rec(u._meta)[RETRY_META];
+        if (this.replaying || !retry || typeof retry !== 'object') return;
+        const r = rec(retry);
+        const err = r.error;
+        const message = typeof err === 'string' ? err : str(rec(err).message);
+        const status = [rec(err).statusCode, rec(err).status].find((v) => typeof v === 'number') as number | undefined;
+        const at = Date.parse(str(r.nextRetryAt));
+        this.retried = true;
+        this.emit({ type: 'retrying', kind: transientKind(message, status) ?? 'error', attempt: Number(r.attempt) || 1, maxAttempts: 0, delayMs: Number.isFinite(at) ? Math.max(0, at - Date.now()) : 0, ...(message ? { error: message.slice(0, 500) } : {}) });
+        return;
+      }
       default:
         // current_mode_update, available_commands_update, session_info_update and future kinds: nothing to show.
         return;
@@ -1245,7 +1387,27 @@ class AcpSession implements ProviderSession {
     if (!known && tool.title) this.said.push({ role: 'tool', text: tool.title });
     this.tools.set(id, tool);
     this.emitTool(tool);
+    if (!this.replaying && !this.historyOnly && AcpSubtasks.isAgentTool(tool.name)) {
+      const output = arr(tool.content).map((c) => (rec(c).type === 'content' ? acpBlockText(rec(c).content) : '')).filter(Boolean).join('\n');
+      for (const e of this.subtasks.tool(tool, output)) this.emit(e);
+    }
     return tool;
+  }
+
+  /** OpenCode's report on one of its sub-agents' sessions (a status, or one of its own updates). */
+  private childUpdate(p: Rec): void {
+    if (this.replaying || this.historyOnly || (this.sessionId && str(p.rootSessionId) && str(p.rootSessionId) !== this.sessionId)) return;
+    this.lastUpdateAt = Date.now();
+    this.stallSaid = false;
+    const step = (u: Rec) => {
+      const info = acpToolInfo(mergeAcpTool(undefined, u), this.args.cwd);
+      // OpenCode titles a sub-agent's tool "<its title>: <tool>".
+      const prefix = `${str(p.title)}: `;
+      const title = info.title.startsWith(prefix) ? info.title.slice(prefix.length) : info.title;
+      const where = info.locations[0]?.path;
+      return where && !/\s/.test(title) ? `${title} ${where}` : title;
+    };
+    for (const e of this.subtasks.child(p, step)) this.emit(e);
   }
 
   private emitTool(tool: AcpTool, status = acpToolStatus(tool.status)): void {

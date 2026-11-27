@@ -14,7 +14,14 @@ export function RetryNotice({ retry }: { retry: RetryState }) {
   return (
     <div className="retry-notice" role="status" data-testid="retry-notice" title={retry.error}>
       <Icon name="history" size={12} />
-      {seconds ? t('{reason}, retrying in {s}s (attempt {n}/{max})', vars) : t('{reason}, retrying now (attempt {n}/{max})', vars)}
+      {/* No maximum: the CLI retries for as long as it decides (OpenCode). */}
+      {retry.maxAttempts
+        ? seconds
+          ? t('{reason}, retrying in {s}s (attempt {n}/{max})', vars)
+          : t('{reason}, retrying now (attempt {n}/{max})', vars)
+        : seconds
+          ? t('{reason}, retrying in {s}s (attempt {n})', vars)
+          : t('{reason}, retrying now (attempt {n})', vars)}
     </div>
   );
 }

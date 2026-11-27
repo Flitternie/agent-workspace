@@ -2207,7 +2207,7 @@ export class Workspace {
       }
       case 'retrying':
         task.retry = { kind: event.kind, attempt: event.attempt, maxAttempts: event.maxAttempts, at: new Date(Date.now() + event.delayMs).toISOString(), by: 'provider', error: event.error };
-        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}/${event.maxAttempts})`;
+        task.summary = `${RETRY_LABEL[event.kind]}, retrying (attempt ${event.attempt}${event.maxAttempts ? `/${event.maxAttempts}` : ''})`;
         break;
       case 'approvalRequested':
         if (!this.findOpenByRequest(taskId, event.requestId)) {

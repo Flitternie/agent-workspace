@@ -7,6 +7,9 @@
 //   slow  streams for a few seconds (cancel, dropped links) fail  a failed prompt
 //   auth  "authentication required"                         else  an echo, in chunks
 //   mcp <tool> [json]  calls that tool on the first MCP server it was given (after asking permission)
+//   subagent  a background sub-agent as OpenCode 2.x (child-session updates; it reports back in a round of its own)
+//   delegate  Antigravity's invoke_subagent        retry  OpenCode's retry notice, then a reply
+//   quota     Antigravity's quota error             silent  says nothing for 1.5 s, then replies
 // Its own commands (as the CLIs' status and login): `auth list`, `models`, `--login` (prints a link, reads
 // the code: "good-code" signs in). Signed in unless FAKE_ACP_AUTH_FILE names a missing file (login creates it)
 // or FAKE_ACP_SIGNED_OUT=1.
@@ -91,6 +94,9 @@ const ask = (method, params) =>
   });
 
 const sessions = new Map();
+/** The client asked for OpenCode's child-session updates. */
+let childUpdates = false;
+const childUpdate = (s, params) => childUpdates && send({ method: 'opencode/session/child_update', params: { rootSessionId: s.id, parentSessionId: s.id, depth: 1, ...params } });
 const file = (id) => join(dir, `${id}.json`);
 function session(id) {
   if (!sessions.has(id) && existsSync(file(id))) sessions.set(id, JSON.parse(readFileSync(file(id), 'utf8')));
@@ -178,6 +184,60 @@ async function prompt(s, text) {
   }
   if (/\bfail\b/.test(user)) throw { code: -32603, message: 'Model exploded' };
   if (/\bauth\b/.test(user)) throw { code: -32000, message: 'Authentication required' };
+  if (/\bquota\b/.test(user)) throw { code: -32603, message: 'RESOURCE_EXHAUSTED: You have exhausted your capacity on this model.' };
+  if (/\bsilent\b/.test(user)) {
+    await sleep(1500);
+    await stream(s, 'agent_message_chunk', 'Finally.', `m-${n}`);
+    return 'end_turn';
+  }
+  if (/\bretry\b/.test(user)) {
+    update(s, { sessionUpdate: 'session_info_update', _meta: { 'opencode/retry': { attempt: 1, nextRetryAt: new Date(Date.now() + 1000).toISOString(), error: { message: 'Rate limit exceeded (429)' } } } }, false);
+    await sleep(300);
+    update(s, { sessionUpdate: 'session_info_update', _meta: { 'opencode/retry': null } }, false);
+    await stream(s, 'agent_message_chunk', 'Done after a retry.', `m-${n}`);
+    return 'end_turn';
+  }
+  if (/\bdelegate\b/.test(user)) {
+    const id = `agy-sub-${n}`;
+    const input = { Prompt: 'Find the secret word in the readme.', Role: 'Readme Reader', TypeName: 'research' };
+    update(s, { sessionUpdate: 'tool_call', toolCallId: id, name: 'invoke_subagent', title: 'Run invoke_subagent', kind: 'other', status: 'in_progress', rawInput: input });
+    update(s, { sessionUpdate: 'tool_call_update', toolCallId: id, name: 'invoke_subagent', title: 'Run invoke_subagent', kind: 'other', status: 'completed', rawInput: input });
+    await sleep(100);
+    await stream(s, 'agent_message_chunk', 'The secret word is pineapple.', `m-${n}`);
+    return 'end_turn';
+  }
+  if (/\bsubagent\b/.test(user)) {
+    const id = `call-sub-${n}`;
+    const child = `ses-child-${n}`;
+    const input = { agent: 'general', description: 'Find the secret word', prompt: 'Find the secret word in the readme.' };
+    update(s, { sessionUpdate: 'tool_call', toolCallId: id, name: 'subagent', title: 'subagent', kind: 'think', status: 'pending', locations: [], rawInput: {} });
+    update(s, { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'in_progress', kind: 'think', title: 'subagent', rawInput: input });
+    childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'status', status: 'created' });
+    update(s, { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `The subagent is working in the background (sessionID: ${child}).` } }], rawOutput: { metadata: { sessionID: child, status: 'running' } } });
+    childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'status', status: 'running' });
+    await stream(s, 'agent_message_chunk', 'Launched a sub-agent.', `m-${n}`);
+    // After the turn: the child works, reports, and the agent speaks again on its own.
+    setTimeout(async () => {
+      const meta = { 'opencode/child-session': { id: child, parentID: s.id, depth: 1, title: 'Find the secret word' } };
+      const tid = `${child}:read-1`;
+      const path = join(s.cwd, 'README.md');
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'tool_call', toolCallId: tid, name: 'read', title: 'Find the secret word: read', kind: 'read', status: 'pending', locations: [], rawInput: {}, _meta: meta } });
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'tool_call_update', toolCallId: tid, status: 'in_progress', kind: 'read', title: 'Find the secret word: read', locations: [{ path }], rawInput: { path: 'README.md' }, _meta: meta } });
+      if (/\bask\b/.test(user)) {
+        const choice = await permission(s, { toolCallId: `${child}:edit-1`, title: 'Find the secret word: edit', kind: 'edit', locations: [{ path }], _meta: meta }, OPTIONS);
+        childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'agent_message_chunk', messageId: 'cm-0', content: { type: 'text', text: `edit ${choice}. ` }, _meta: meta } });
+      }
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'tool_call_update', toolCallId: tid, status: 'completed', kind: 'read', locations: [{ path }], content: [{ type: 'content', content: { type: 'text', text: 'pineapple' } }], _meta: meta } });
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'agent_message_chunk', messageId: 'cm-1', content: { type: 'text', text: 'pine' }, _meta: meta } });
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'update', update: { sessionUpdate: 'agent_message_chunk', messageId: 'cm-1', content: { type: 'text', text: 'apple' }, _meta: meta } });
+      childUpdate(s, { childSessionId: child, title: 'Find the secret word', type: 'status', status: 'completed' });
+      await sleep(50);
+      await stream(s, 'agent_thought_chunk', 'It came back.', `m-${n}-bg:reasoning:0`);
+      await stream(s, 'agent_message_chunk', 'The secret word is pineapple.', `m-${n}-bg`);
+      save(s);
+    }, 150);
+    return 'end_turn';
+  }
   const mcp = user.match(/\bmcp (\w+)(?: (\{.*\}))?/);
   if (mcp) {
     const server = (s.mcpServers ?? [])[0];
@@ -278,6 +338,7 @@ async function handle(msg) {
   const fail = (code, message) => send({ id: msg.id, error: { code, message } });
   switch (msg.method) {
     case 'initialize':
+      childUpdates = !!p.clientCapabilities?._meta?.['opencode/child-session-updates'];
       return reply({
         protocolVersion: 1,
         agentCapabilities: { loadSession: true, promptCapabilities: { image: true, embeddedContext: false }, sessionCapabilities: { list: {}, close: {}, additionalDirectories: {}, ...(withFork ? { fork: {}, delete: {} } : {}) }, ...(process.env.FAKE_ACP_AGY_SYSPROMPT === '1' ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}) },

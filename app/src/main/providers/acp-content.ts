@@ -135,7 +135,9 @@ export function acpToolInfo(t: AcpTool, cwd: string): ToolCallInfo {
     .map(rec)
     .filter((l) => str(l.path))
     .map((l) => ({ path: displayPath(str(l.path), cwd), ...(typeof l.line === 'number' ? { line: l.line } : {}) }));
-  const title = t.kind === 'execute' && !t.title ? `$ ${firstLine(commandOf(t))}` : t.title || t.name || t.kind;
+  // A sub-agent (OpenCode's subagent / task, Antigravity's invoke_subagent): what it is for, not the tool's name.
+  const helper = t.name === 'subagent' || t.name === 'task' || t.name === 'invoke_subagent' ? firstLine(str(rec(t.rawInput).description) || str(rec(t.rawInput).Role)) : '';
+  const title = helper ? `Sub-agent: ${helper}` : t.kind === 'execute' && !t.title ? `$ ${firstLine(commandOf(t))}` : t.title || t.name || t.kind;
   return { name: t.name || t.kind, kind: t.kind, title, locations, content };
 }
 
