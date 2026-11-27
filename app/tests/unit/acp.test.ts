@@ -283,14 +283,16 @@ describe('ACP adapter (local)', () => {
     const caps = await adapter.capabilities();
     expect(caps).toMatchObject({ provider: 'opencode', available: true, createSession: true, resumeHistorical: true, importHistory: true, sideQuestions: true, structuredApprovals: true });
     expect(typeof adapter.forkSession === 'function' && typeof adapter.forkPoints === 'function').toBe(true);
-    expect(caps.auth).toBeUndefined();
+    // Signed in, as its own `auth list` says (the fake's).
+    expect(caps.auth).toEqual({ loggedIn: true, method: 'FakeCo' });
     expect(ACP_AGENTS.map((a) => `${a.command} ${a.args.join(' ')}`)).toEqual(['opencode acp', 'agy acp']);
   });
 });
 
 describe('ACP adapter on a host (detached, through a local shell)', () => {
   function runner(home: string) {
-    const env = { ...process.env, HOME: home };
+    // The host's own PATH (not this computer's, where the real CLIs may be installed).
+    const env = { ...process.env, HOME: home, PATH: (process.env.PATH ?? '').split(':').filter((d) => !existsSync(join(d, 'opencode'))).join(':') };
     const attachments: ChildProcessWithoutNullStreams[] = [];
     const r: RemoteRunner = {
       spawn(command) {

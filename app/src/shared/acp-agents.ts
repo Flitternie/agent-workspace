@@ -49,6 +49,14 @@ export interface AcpAgentSpec {
    * (Antigravity: `agy -p /usage --output-format json`); read by main/providers/acp-limits.ts.
    */
   limits?: readonly string[];
+  /**
+   * Its sign-in, natively (ACP has no status call): how the state is read without a model call
+   * (`status`, parsed by main/providers/acp-auth.ts) and how the app signs it in. `terminal`: its
+   * login is an interactive menu, run in a Terminal window (OpenCode). `acpMethod`: the ACP
+   * `authenticate` method that opens the browser on this computer; `codeLogin`: arguments that
+   * print a sign-in link and read the code its page shows on stdin (Antigravity, and on SSH hosts).
+   */
+  signIn?: { status: 'opencode' | 'antigravity'; terminal?: boolean; acpMethod?: string; codeLogin?: readonly string[] };
 }
 
 export const ACP_AGENTS = [
@@ -68,6 +76,8 @@ export const ACP_AGENTS = [
     emptyTitle: /^New session - \d{4}-\d\d-\d\dT/,
     memory: { kind: 'opencode-md', file: '~/.config/opencode/AGENTS.md' },
     skills: 'config',
+    // `opencode auth list`; without stored credentials its built-in free models still work.
+    signIn: { status: 'opencode', terminal: true },
   },
   {
     id: 'antigravity',
@@ -82,6 +92,8 @@ export const ACP_AGENTS = [
     memory: { kind: 'gemini-md', file: '~/.gemini/GEMINI.md' },
     skills: 'workspace',
     limits: ['-p', '/usage', '--output-format', 'json'],
+    // `agy models` fails at once when signed out ("Please sign in…"); `-p /usage` would wait a minute for a login.
+    signIn: { status: 'antigravity', acpMethod: 'oauth-personal', codeLogin: ['acp', '--login'] },
   },
 ] as const satisfies readonly AcpAgentSpec[];
 

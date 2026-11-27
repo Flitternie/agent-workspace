@@ -7,6 +7,9 @@
 //   slow  streams for a few seconds (cancel, dropped links) fail  a failed prompt
 //   auth  "authentication required"                         else  an echo, in chunks
 //   mcp <tool> [json]  calls that tool on the first MCP server it was given (after asking permission)
+// Its own commands (as the CLIs' status and login): `auth list`, `models`, `--login` (prints a link, reads
+// the code: "good-code" signs in). Signed in unless FAKE_ACP_AUTH_FILE names a missing file (login creates it)
+// or FAKE_ACP_SIGNED_OUT=1.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +34,37 @@ if (process.argv.includes('/usage')) {
     })}\n`,
   );
   process.exit(0);
+}
+
+const authFile = process.env.FAKE_ACP_AUTH_FILE;
+const signedIn = () => (authFile ? existsSync(authFile) : process.env.FAKE_ACP_SIGNED_OUT !== '1');
+if (process.argv.includes('auth') && process.argv.includes('list')) {
+  process.stdout.write(`${JSON.stringify(signedIn() ? [{ id: 'fakeco', name: 'FakeCo', connections: [{ type: 'credential', id: 'c1', label: 'Personal', method: 'oauth' }] }] : [])}\n`);
+  process.exit(0);
+}
+if (process.argv.includes('models')) {
+  if (!signedIn()) {
+    process.stderr.write('Error: Please sign in to view available models.\n');
+    process.exit(1);
+  }
+  process.stdout.write('fakeco/fake-small\nfakeco/fake-large\n');
+  process.exit(0);
+}
+if (process.argv.includes('--login')) {
+  process.stdout.write('Open this link in a browser to log in:\n\n  https://example.test/oauth?state=fake\n\nThen paste the authorization code and press Enter:\n');
+  const rl = createInterface({ input: process.stdin });
+  rl.on('close', () => setTimeout(() => process.exit(1), 50));
+  rl.once('line', (code) => {
+    if (code.trim() !== 'good-code') {
+      process.stdout.write('couldn\'t log in: token exchange failed: "invalid_grant"\n');
+      process.exit(1);
+    }
+    if (authFile) writeFileSync(authFile, 'ok');
+    process.stdout.write('Logged in.\n');
+    process.exit(0);
+  });
+  // Waits for the code (stdin stays open).
+  setInterval(() => {}, 1000);
 }
 
 const dir = process.env.FAKE_ACP_DIR || join(tmpdir(), 'fake-acp');
@@ -288,6 +322,12 @@ async function handle(msg) {
     }
     case 'session/close':
       return reply({});
+    case 'authenticate':
+      // As Antigravity's browser sign-in: answers once the browser is done (here: at once, or never for FAKE_ACP_AUTH_HANG).
+      if (process.env.FAKE_ACP_AUTH_HANG === '1') return;
+      await sleep(100);
+      if (authFile) writeFileSync(authFile, 'ok');
+      return reply({});
     case 'session/set_mode': {
       const s = session(p.sessionId);
       s.mode = p.modeId;
@@ -325,7 +365,8 @@ async function handle(msg) {
   }
 }
 
-createInterface({ input: process.stdin })
+if (!process.argv.includes('--login'))
+  createInterface({ input: process.stdin })
   .on('line', (line) => {
     if (!line.trim()) return;
     void handle(JSON.parse(line));

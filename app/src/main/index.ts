@@ -11,6 +11,7 @@ import { checkOpenAiKey, envOpenAiKey, loadOpenAiKey, OpenAiClient } from './ope
 import { ClaudeAdapter } from './providers/claude';
 import { CodexAdapter } from './providers/codex';
 import { AcpAdapter } from './providers/acp';
+import { AcpLogins } from './providers/acp-login';
 import { ACP_AGENTS } from '../shared/acp-agents';
 import { MockAdapter } from './providers/mock';
 import { LocalStt } from './stt/local';
@@ -60,14 +61,20 @@ const key = loadOpenAiKey(appRoot);
 let notifyModels = () => {};
 const localStt = new LocalStt(process.env.AMW_MODELS_DIR ?? join(userBase, app.isPackaged ? 'Models' : '.models'), () => notifyModels());
 const openai = key ? new OpenAiClient(key) : undefined;
+// OpenCode, Antigravity…: one shared ACP adapter per registry entry (tests about Claude Code and Codex alone turn them off).
+const acpAdapters: Record<string, AcpAdapter> = process.env.AMW_ACP_OFF === '1' ? {} : Object.fromEntries(ACP_AGENTS.map((spec) => [spec.id, new AcpAdapter(spec)]));
+const acpOf = (provider: string): AcpAdapter => {
+  const a = acpAdapters[provider];
+  if (!a) throw new Error(`${provider} is not a coding agent reached through ACP.`);
+  return a;
+};
 const workspace = new Workspace({
   dataDir,
   adapters: {
     claude: new ClaudeAdapter(),
     codex: new CodexAdapter(),
     mock: new MockAdapter(join(dataDir, 'mock-sessions')),
-    // OpenCode, Antigravity…: one shared ACP adapter per registry entry (tests about Claude Code and Codex alone turn them off).
-    ...(process.env.AMW_ACP_OFF === '1' ? {} : Object.fromEntries(ACP_AGENTS.map((spec) => [spec.id, new AcpAdapter(spec)]))),
+    ...acpAdapters,
   },
   openai,
   localStt,
@@ -78,6 +85,8 @@ const workspace = new Workspace({
   ...(process.env.AMW_BACKGROUND_ANSWER ? { backgroundModel: async () => readFileSync(process.env.AMW_BACKGROUND_ANSWER!, 'utf8') } : {}),
 });
 notifyModels = () => workspace.notifyChanged();
+// Signing in to an ACP CLI, its own way (providers/acp-login.ts); the machine is rechecked when it ends.
+const acpLogins = new AcpLogins((_provider, host) => void (host ? workspace.checkHost(host, { quiet: true }) : workspace.refreshCapabilities({ localOnly: true })).catch(() => {}));
 const keySource = (): 'env' | 'file' | null => (envOpenAiKey() ? 'env' : key ? 'file' : null);
 if (key) workspace.setOpenAi(openai, { source: keySource(), last4: key.slice(-4) });
 
@@ -170,6 +179,14 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'ssh:loginCode': (i: { host: string; provider: 'claude' | 'codex'; code: string }) => sendHostLoginCode(i.host, i.provider, i.code),
   'ssh:loginCancel': (i: { host: string; provider: 'claude' | 'codex' }) => cancelHostLogin(i.host, i.provider),
   'ssh:connect': (i: { host: string }) => workspace.connectHost(i.host),
+  // OpenCode, Antigravity…: here, or on an enabled host.
+  'acp:login': (i: { provider: string; host?: string; mode?: 'code' }) => {
+    if (i.host) workspace.requireHost(i.host);
+    return acpLogins.start(acpOf(i.provider), i.host, i.mode);
+  },
+  'acp:loginCode': (i: { provider: string; host?: string; code: string }) => acpLogins.sendCode(acpOf(i.provider), i.host, i.code),
+  'acp:loginWait': (i: { provider: string; host?: string }) => acpLogins.wait(acpOf(i.provider), i.host),
+  'acp:loginCancel': (i: { provider: string; host?: string }) => acpLogins.cancel(acpOf(i.provider), i.host),
   'ssh:terminal': (i: { host: string }) => workspace.openHostTerminal(i.host),
   'task:create': (i: Parameters<Workspace['createTask']>[0]) => workspace.createTask(i),
   'task:send': (i: { taskId: string; text: string; via: 'text' | 'card'; interrupt?: boolean; images?: ImageRef[]; about?: string }) => workspace.send(i.taskId, i.text, i.via, { interrupt: i.interrupt, images: i.images, openRequest: i.about }),

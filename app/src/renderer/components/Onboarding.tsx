@@ -24,6 +24,8 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
   // This computer's agents; another machine's count just as well (one of the two is enough).
   // CLIs reached through ACP count too, once installed (they sign in on their own).
   const acpReady = ACP_AGENTS.filter((a) => readiness(snapshot.capabilities.find((c) => c.provider === a.id)) === 'ready');
+  // Installed ones are listed (signed in or not: signing in happens from their row).
+  const acpInstalled = ACP_AGENTS.filter((a) => snapshot.capabilities.find((c) => c.provider === a.id)?.available);
   const local = ready.length > 0 || acpReady.length > 0;
   const broughtIn = snapshot.projects.length > 0;
 
@@ -77,7 +79,7 @@ export function Onboarding({ snapshot, onSettings, now }: { snapshot: WorkspaceS
           {(['claude', 'codex'] as const).map((p) => (
             <ProviderRow key={p} provider={p} cap={cap(p)} signingIn={!!signingIn[p]} onSigningIn={(v) => setSigningIn((s) => ({ ...s, [p]: v }))} />
           ))}
-          {acpReady.map((a) => (
+          {acpInstalled.map((a) => (
             <AcpAgentRow key={a.id} spec={a} cap={snapshot.capabilities.find((c) => c.provider === a.id)} testId={`onboarding-${a.id}`} />
           ))}
           {ready.length === 2 ? <MainAgentChoice snapshot={snapshot} /> : null}

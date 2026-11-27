@@ -1093,4 +1093,9 @@ export const zh: Record<string, string> = {
   'To sign in, run in a terminal:': '登录：在终端运行',
   'Install it in a terminal, then click Recheck:': '在终端安装后点“重新检测”：',
   'Stops the agent and removes it from the workspace. Its conversation stays in {provider}.': '停止这个 agent 并把它从工作区移除。对话仍保留在 {provider} 里。',
+  '{provider} is not signed in.': '{provider} 未登录。',
+  'Sign in…': '登录…',
+  'Finish signing in in the Terminal window, then click Recheck.': '请在打开的终端窗口里完成登录，然后点“重新检测”。',
+  'Code sent; this updates once it is confirmed.': '授权码已提交，确认后这里会自动更新。',
+  'Browser did not open? Sign in with a code': '浏览器没打开？改用授权码登录',
 };

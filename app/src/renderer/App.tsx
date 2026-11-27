@@ -416,7 +416,7 @@ export function App() {
                       return (
                         <div key={p} className="setup-row">
                           <span className="truncate">{PROVIDER_LABEL[p]}</span>
-                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} compact installedOnly={isAcpProvider(p)} />
+                          <ReadinessBadge state={readiness(c)} method={c?.auth?.method} compact installedOnly={isAcpProvider(p) && !c?.auth} />
                         </div>
                       );
                     })}

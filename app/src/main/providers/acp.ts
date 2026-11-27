@@ -14,6 +14,7 @@ import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRunner } from '../util/ssh';
 import { MCP_TOOLS_NOTE, startMcpBridge, type McpBridge } from './acp-mcp';
 import { AcpLimitsReader, planOf } from './acp-limits';
+import { authScript, parseAuth, readAuth, splitAuthScript } from './acp-auth';
 import { acpNative, mergeEnv } from './acp-native';
 import { acpApprovalHeadline, acpBlockText, commandOf, readOnlyCommand, acpPlan, acpToolInfo, acpToolStatus, mergeAcpTool, type AcpTool } from './acp-content';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, HistoryImage, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
@@ -318,6 +319,23 @@ export class AcpAdapter implements ProviderAdapter {
     return env.split(/\s+/).filter(Boolean);
   }
 
+  /**
+   * The CLI itself, for its other commands (status, limits, login). On a host: its name, found on the
+   * PATH set by remotePath (as installed there). Here: a test's command line without the ACP server's
+   * arguments it ends with, else the executable; null when not installed.
+   */
+  cliArgv(host?: string): string[] | null {
+    if (host) return [this.spec.command];
+    const override = this.override();
+    if (override) {
+      const n = this.spec.args.length;
+      const tail = override.slice(-n);
+      return n && override.length > n && tail.every((a, i) => a === this.spec.args[i]) ? override.slice(0, -n) : override;
+    }
+    const exe = this.executable();
+    return exe ? [exe] : null;
+  }
+
   /** The executable on this computer: PATH (incl. the usual install folders), then the installer's own folder. */
   executable(): string | null {
     for (const dir of this.spec.dirs) {
@@ -337,7 +355,7 @@ export class AcpAdapter implements ProviderAdapter {
   }
 
   /** On a host: its login shell's PATH plus the installers' folders. */
-  private remotePath(): string {
+  remotePath(): string {
     return `export PATH="${[...new Set(this.spec.dirs)].map((d) => `$HOME/${d}`).join(':')}:$PATH"`;
   }
 
@@ -367,13 +385,14 @@ export class AcpAdapter implements ProviderAdapter {
     return new AcpConnection(proc, this.spec.label);
   }
 
-  private describe(available: boolean, version: string | undefined, detail: string): ProviderCapabilities {
+  private describe(available: boolean, version: string | undefined, detail: string, auth?: ProviderCapabilities['auth']): ProviderCapabilities {
     return {
       provider: this.provider,
       available,
       version,
       detail,
-      // ACP has no sign-in status call; a prompt that needs a login fails with the hint (see authError).
+      // ACP has no sign-in status call: the CLI's own commands tell (acp-auth.ts); unknown, a prompt that needs a login fails with the hint (errorText).
+      ...(auth ? { auth } : {}),
       createSession: available,
       resumeHistorical: available,
       // session/list + session/load ("Continue a session"); a CLI without session/list lists nothing.
@@ -392,32 +411,48 @@ export class AcpAdapter implements ProviderAdapter {
 
   async capabilities(): Promise<ProviderCapabilities> {
     const override = this.override();
-    if (override) return this.describe(true, undefined, `${this.spec.label} (ACP) → ${override.join(' ')}`);
+    if (override) return this.describe(true, undefined, `${this.spec.label} (ACP) → ${override.join(' ')}`, await this.localAuth(this.cliArgv()!));
     const path = this.executable();
     const version = path ? (await run(path, ['--version'], { timeoutMs: 15_000 })).stdout.trim().split('\n')[0] || undefined : undefined;
     this.versions.set('', version);
-    return this.describe(!!path, version, path ? `${this.spec.command} ${this.spec.args.join(' ')} (ACP over stdio) → ${path}. Uses its own sign-in.` : `${this.spec.label} CLI not found on PATH.`);
+    const auth = path ? await this.localAuth([path]) : undefined;
+    return this.describe(!!path, version, path ? `${this.spec.command} ${this.spec.args.join(' ')} (ACP over stdio) → ${path}. Uses its own sign-in.` : `${this.spec.label} CLI not found on PATH.`, auth);
+  }
+
+  /** The sign-in state on this computer, with `argv` (the executable, or a test's command line). */
+  private localAuth(argv: string[]): Promise<ProviderCapabilities['auth']> {
+    const kind = this.spec.signIn?.status;
+    if (!kind) return Promise.resolve(undefined);
+    const [exe, ...pre] = argv;
+    // Read afresh each time, as Claude Code's and Codex's status commands are: a recheck right after a sign-in sees it.
+    return readAuth(kind, (args) => run(exe, [...pre, ...args], { timeoutMs: 20_000 })).catch(() => undefined);
   }
 
   async hostCapabilities(host: string): Promise<ProviderCapabilities> {
-    const exe = shq(this.spec.command);
-    const r = await this.runner(host).run(`${this.remotePath()}; command -v ${exe} >/dev/null || exit 127; ${exe} --version 2>/dev/null | head -n 1`, 30_000);
+    const argv = this.cliArgv(host)!;
+    const exe = argv.map(shq).join(' ');
+    const kind = this.spec.signIn?.status;
+    // One connection: the version, then the sign-in (acp-auth.ts), each output marked.
+    const status = kind ? `; echo __AMW_VERSION_END__; ${authScript(kind, exe, shq)}` : '';
+    const r = await this.runner(host).run(`${this.remotePath()}; command -v ${shq(argv[0])} >/dev/null || exit 127; ${exe} --version 2>/dev/null </dev/null | head -n 1${status}`, 45_000);
     if (r.code === 255) throw new Error(sshError(host, r.stderr));
     const found = r.code !== 127;
-    this.versions.set(host, found ? r.stdout.trim() || undefined : undefined);
-    return this.describe(found, found ? r.stdout.trim() || undefined : undefined, found ? `${this.spec.command} ${this.spec.args.join(' ')} over SSH on ${host}, with the sign-in there.` : `${this.spec.label} CLI not found on ${host} (in its login shell's PATH).`);
+    const [head, rest = ''] = r.stdout.split('__AMW_VERSION_END__');
+    const version = found ? head.trim() || undefined : undefined;
+    this.versions.set(host, version);
+    const auth = found && kind ? parseAuth(kind, splitAuthScript(rest.replace(/^\n/, ''))) : undefined;
+    return this.describe(found, version, found ? `${this.spec.command} ${this.spec.args.join(' ')} over SSH on ${host}, with the sign-in there.` : `${this.spec.label} CLI not found on ${host} (in its login shell's PATH).`, auth);
   }
 
   /** The registry's limits command, on this computer or the host (acp-limits.ts parses it). */
   private async runLimits(host?: string): Promise<{ code: number | null; stdout: string }> {
     const args = this.spec.limits;
     if (!args?.length) return { code: 1, stdout: '' };
-    const override = this.override();
     if (host) {
-      const argv = [...(override ?? [this.spec.command]), ...args].map(shq).join(' ');
-      return this.runner(host).run(`${this.remotePath()}; ${argv}`, 30_000);
+      const argv = [...this.cliArgv(host)!, ...args].map(shq).join(' ');
+      return this.runner(host).run(`${this.remotePath()}; ${argv} </dev/null`, 30_000);
     }
-    const [exe, ...pre] = override ?? [this.executable() ?? ''];
+    const [exe, ...pre] = this.cliArgv() ?? [''];
     if (!exe) return { code: 1, stdout: '' };
     return run(exe, [...pre, ...args], { timeoutMs: 30_000 });
   }
@@ -664,8 +699,8 @@ class AcpSession implements ProviderSession {
     const e = error as RpcError;
     if (e.code === AUTH_REQUIRED || /auth(entication)? required|not (logged|signed) in|unauthori[sz]ed/i.test(e.message ?? ''))
       return this.args.host
-        ? `${this.label} on ${this.args.host} is not signed in. Sign in once in a terminal there (${this.adapter.spec.login}), then try again.`
-        : `${this.label} is not signed in. Sign in once in a terminal (${this.adapter.spec.login}), then try again.`;
+        ? `${this.label} on ${this.args.host} is not signed in. Sign in from Settings › Remote machines (or run ${this.adapter.spec.login} there), then try again.`
+        : `${this.label} is not signed in. Sign in from Settings › Coding agents (or run ${this.adapter.spec.login} in a terminal), then try again.`;
     return e.message || String(error);
   }
 

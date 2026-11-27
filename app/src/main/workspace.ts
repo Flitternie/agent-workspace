@@ -141,6 +141,7 @@ export class Workspace {
   private warming = new Set<string>();
   private capabilities: ProviderCapabilities[] = [];
   private hostStatus = new Map<string, RemoteHostStatus>();
+  private capsSeq = 0;
   private changeListeners = new Set<() => void>();
   /** item === null means "the whole transcript was replaced; reload it". */
   private transcriptListeners = new Set<(taskId: string, item: TranscriptItem | null) => void>();
@@ -363,6 +364,8 @@ export class Workspace {
    * installs or signs in here; hosts have their own slower recheck.
    */
   async refreshCapabilities(opts: { localOnly?: boolean } = {}): Promise<void> {
+    // Looks overlap (a recheck while the guide polls, a sign-in ending): the latest one started wins, never an older one finishing late.
+    const seq = ++this.capsSeq;
     const caps: ProviderCapabilities[] = [];
     for (const a of Object.values(this.opts.adapters)) {
       if (!a) continue;
@@ -373,6 +376,7 @@ export class Workspace {
         this.log('capabilities failed', a.provider, error);
       }
     }
+    if (seq !== this.capsSeq) return;
     this.capabilities = caps;
     this.syncMainAgent();
     this.changed();
@@ -389,7 +393,7 @@ export class Workspace {
     return (this.store.data.settings.remoteHosts ?? []).filter((h) => known.includes(h));
   }
 
-  private requireHost(host: string): void {
+  requireHost(host: string): void {
     if (!this.enabledHosts().includes(host)) throw new Error(`${host} is not enabled in Settings › Remote machines.`);
   }
 

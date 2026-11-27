@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Language, MicMode, PermissionMode, ProviderCapabilities, RemoteHostStatus, WorkspaceSnapshot } from '../../shared/types';
 import { call, errorText } from '../api';
 import { t } from '../i18n';
@@ -7,7 +7,7 @@ import { defaultShortcut, MODIFIERS, recording, shortcutFrom, shortcutKeys } fro
 import { Icon, Kbd, PROVIDER_LABEL, shortVersion } from './bits';
 import { ConfirmDialog } from './Dialogs';
 import { INSTALL_SCRIPT } from '../../shared/install';
-import { ACP_AGENTS, isAcpProvider, type AcpAgentSpec } from '../../shared/acp-agents';
+import { ACP_AGENTS, isAcpProvider, type AcpAgentSpec, type AcpProvider } from '../../shared/acp-agents';
 import { choiceControl } from '../choice-layout';
 import { CODING_PROVIDERS } from '../../shared/types';
 import { MemorySettings } from './MemorySettings';
@@ -224,8 +224,137 @@ export function ReadinessBadge({ state, method, missing = 'Not installed', compa
 }
 
 /**
- * A CLI reached through ACP (OpenCode, Antigravity…): installed or not, how to install it, and how to
- * sign in (in a terminal, with its own command: ACP has no sign-in status to read).
+ * Signing in to a CLI reached through ACP, its own way (main/providers/acp-login.ts): OpenCode's
+ * interactive login in a Terminal window (here, or `ssh -t` to the host); Antigravity opens the
+ * browser itself here, or gives a link whose page shows a code to paste back (on a host, or when
+ * asked). The row updates itself once the machine is rechecked.
+ */
+export function AcpSignIn({ spec, host }: { spec: AcpAgentSpec; host?: string }) {
+  type Phase = 'idle' | 'starting' | 'terminal' | 'browser' | 'code' | 'sent';
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [url, setUrl] = useState('');
+  const [paste, setPaste] = useState('');
+  const [error, setError] = useState('');
+  const [manual, setManual] = useState(false);
+  // Each start supersedes the last: an earlier one's ending (cancelled) changes nothing.
+  const run = useRef(0);
+  const target = { provider: spec.id as AcpProvider, ...(host ? { host } : {}) };
+  const recheck = () => void (host ? call('ssh:check', { host, quiet: true }) : call('capabilities:refresh', { localOnly: true })).catch(() => {});
+  const waitDone = (mine: number) =>
+    call('acp:loginWait', target)
+      .then((r) => {
+        if (mine !== run.current) return;
+        setPhase('idle');
+        if (!r.ok && r.error && r.error !== 'Cancelled.') setError(r.error);
+      })
+      .catch((e) => {
+        if (mine !== run.current) return;
+        setPhase('idle');
+        setError(errorText(e));
+      });
+  const start = (mode?: 'code') => {
+    const mine = ++run.current;
+    setError('');
+    setPaste('');
+    setPhase('starting');
+    call('acp:login', { ...target, ...(mode ? { mode } : {}) })
+      .then((r) => {
+        if (r.terminal) return setPhase('terminal');
+        if (mine !== run.current) return;
+        if (r.url) {
+          setUrl(r.url);
+          setPhase('code');
+        } else setPhase('browser');
+        void waitDone(mine);
+      })
+      .catch((e) => {
+        if (mine !== run.current) return;
+        setPhase('idle');
+        setError(errorText(e));
+      });
+  };
+  const cancel = () => {
+    run.current++;
+    setPhase('idle');
+    void call('acp:loginCancel', target).catch(() => {});
+  };
+  const sendCode = () => {
+    if (!paste.trim()) return;
+    call('acp:loginCode', { ...target, code: paste.trim() })
+      .then(() => setPhase('sent'))
+      .catch((e) => setError(errorText(e)));
+  };
+    return (
+    <div className="host-setup" data-testid="acp-signin" data-provider={spec.id} data-phase={phase}>
+      {phase === 'idle' || phase === 'starting' ? (
+        <span className="host-setup-line">
+          {host ? t('{provider} on {host} is not signed in.', { provider: spec.label, host }) : t('{provider} is not signed in.', { provider: spec.label })}
+          <button className="btn btn-sm btn-primary" disabled={phase === 'starting'} onClick={() => start()} data-testid="acp-signin-start">
+            {spec.signIn?.terminal ? t('Sign in…') : t('Sign in')}
+          </button>
+          <button className="link small" onClick={() => setManual((m) => !m)}>
+            {t('Sign in myself')}
+          </button>
+        </span>
+      ) : phase === 'terminal' ? (
+        <span className="host-setup-line" data-testid="acp-signin-terminal">
+          {t('Finish signing in in the Terminal window, then click Recheck.')}
+          <button className="btn btn-sm" onClick={() => { setPhase('idle'); recheck(); }} data-testid="acp-signin-recheck">
+            {t('Recheck')}
+          </button>
+        </span>
+      ) : (
+        <div className="host-setup-confirm" data-testid="acp-signing">
+          {phase === 'browser' ? (
+            <span className="host-setup-line">
+              <span className="spinner" aria-hidden /> {t('Finish signing in in your browser; this updates by itself.')}
+            </span>
+          ) : (
+            <a className="link small" href={url} target="_blank" rel="noreferrer" data-testid="acp-signin-link">
+              {t('Open the sign-in page')}
+            </a>
+          )}
+          {phase === 'code' ? (
+            <form
+              className="row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendCode();
+              }}
+            >
+              <input className="input" placeholder={t('Paste the code the page shows')} value={paste} onChange={(e) => setPaste(e.target.value)} data-testid="acp-signin-code" />
+              <button className="btn btn-sm btn-primary" type="submit" disabled={!paste.trim()}>
+                {t('Send')}
+              </button>
+            </form>
+          ) : phase === 'sent' ? (
+            <span className="muted small">{t('Code sent; this updates once it is confirmed.')}</span>
+          ) : null}
+          <span className="row">
+            {phase === 'browser' && spec.signIn?.codeLogin ? (
+              <button className="link small" onClick={() => start('code')} data-testid="acp-signin-use-code">
+                {t('Browser did not open? Sign in with a code')}
+              </button>
+            ) : null}
+            <button className="link small" onClick={cancel}>
+              {t('Cancel')}
+            </button>
+          </span>
+        </div>
+      )}
+      {manual || error ? (
+        <div className="muted small host-hint">
+          {host ? t('In a terminal on {host} (“Open in Terminal”):', { host }) : t('To sign in, run in a terminal:')} <CopyCommand command={spec.login} />
+        </div>
+      ) : null}
+      {error ? <div className="error-text small" data-testid="acp-signin-error">{error}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * A CLI reached through ACP (OpenCode, Antigravity…): installed or not, signed in or not (read with
+ * its own commands), how to install it, and signing in from here.
  */
 export function AcpAgentRow({ spec, cap, testId }: { spec: AcpAgentSpec; cap?: ProviderCapabilities; testId?: string }) {
   const state = readiness(cap);
@@ -234,13 +363,14 @@ export function AcpAgentRow({ spec, cap, testId }: { spec: AcpAgentSpec; cap?: P
       <div className="settings-row-main">
         <strong>{spec.label}</strong>
         {cap?.version ? <span className="muted small mono"> {shortVersion(cap.version)}</span> : null}
-        <ReadinessBadge state={state} installedOnly />
+        <ReadinessBadge state={state} method={cap?.auth?.method} installedOnly={!cap?.auth} />
       </div>
-      {state === 'ready' ? (
+      {state === 'ready' && !cap?.auth ? (
         <div className="muted small">
           {t('To sign in, run in a terminal:')} <code className="nowrap">{spec.login}</code>
         </div>
       ) : null}
+      {state === 'signed_out' ? <AcpSignIn spec={spec} /> : null}
       {state === 'missing' ? (
         <div className="small">
           {t('Install it in a terminal, then click Recheck:')} <CopyCommand command={spec.install} />{' '}
@@ -650,6 +780,7 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
         const state = SSH_STATE[status.ssh];
         const addr = address(hosts.find((e) => e.host === host));
         const signedOut = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'signed_out') : [];
+        const acpSignedOut = status.ssh === 'ok' ? ACP_AGENTS.filter((a) => readiness(status.capabilities.find((x) => x.provider === a.id)) === 'signed_out') : [];
         const missing = status.ssh === 'ok' ? (['claude', 'codex'] as const).filter((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'missing') : [];
         // Nothing usable there yet: say how to install, and offer a terminal on that machine.
         const noAgent = status.ssh === 'ok' && !CODING_PROVIDERS.some((p) => readiness(status.capabilities.find((x) => x.provider === p)) === 'ready');
@@ -671,7 +802,7 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
                     {busy === host ? t('Waiting for you…') : t(state.action)}
                   </button>
                 ) : null}
-                {(status.ssh !== 'ok' && status.ssh !== 'checking') || noAgent || signedOut.length ? (
+                {(status.ssh !== 'ok' && status.ssh !== 'checking') || noAgent || signedOut.length || acpSignedOut.length ? (
                   <button className="btn btn-sm" onClick={() => void act(host, () => call('ssh:terminal', { host }))} title={t('Opens Terminal with ssh {host}, for anything the app cannot handle', { host })}>
                     {t('Open in Terminal')}
                   </button>
@@ -690,7 +821,7 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
                 {shown.map((p) => {
                   const c = status.capabilities.find((x) => x.provider === p);
                   const r = readiness(c);
-                  const detail = r === 'ready' ? (isAcpProvider(p) ? t('Installed') : c?.auth?.method ? t('Signed in · {method}', { method: c.auth.method }) : t('Ready')) : r === 'signed_out' ? t('Not signed in') : t('Not installed');
+                  const detail = r === 'ready' ? (isAcpProvider(p) && !c?.auth ? t('Installed') : c?.auth?.method ? t('Signed in · {method}', { method: c.auth.method }) : t('Ready')) : r === 'signed_out' ? t('Not signed in') : t('Not installed');
                   return (
                     <span key={p} className={`badge badge-${r}`} title={r === 'ready' && c?.version ? `${PROVIDER_LABEL[p]} ${shortVersion(c.version)} · ${detail}` : detail} data-testid="readiness" data-provider={p} data-state={r}>
                       <Icon name={r === 'ready' ? 'check' : 'alert'} size={12} />
@@ -703,6 +834,9 @@ export function RemoteHosts({ snapshot, autoRecheck = false }: { snapshot: Works
             ) : null}
             {signedOut.map((p) => (
               <HostAgentSetup key={p} host={host} provider={p} state="signed_out" />
+            ))}
+            {acpSignedOut.map((a) => (
+              <AcpSignIn key={a.id} spec={a} host={host} />
             ))}
             {noAgent ? missing.map((p) => <HostAgentSetup key={p} host={host} provider={p} state="missing" />) : null}
             {state.hint ? <div className="muted small">{t(state.hint)}</div> : null}

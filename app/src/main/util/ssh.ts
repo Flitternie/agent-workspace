@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { childEnv } from './exec';
@@ -212,6 +212,18 @@ export async function openInTerminal(host: string): Promise<void> {
   if (!HOST_RE.test(host)) throw new Error(`Not a usable SSH host alias: ${host}`);
   if (process.platform !== 'darwin') throw new Error('Only supported on macOS.');
   await run('/usr/bin/osascript', ['-e', 'on run argv', '-e', 'tell application "Terminal" to do script "ssh " & item 1 of argv', '-e', 'tell application "Terminal" to activate', '-e', 'end run', host], childEnv(), 15_000);
+}
+
+/**
+ * Opens Terminal running `command`: on this computer, or on `host` through `ssh -t` (a terminal there,
+ * for a CLI's interactive login). Tests set AMW_TERMINAL_LOG: the line is appended to that file instead.
+ */
+export async function openCommandInTerminal(command: string, host?: string): Promise<void> {
+  if (host !== undefined && !HOST_RE.test(host)) throw new Error(`Not a usable SSH host alias: ${host}`);
+  const line = host ? `ssh -t ${host} ${shq(command)}` : command;
+  if (process.env.AMW_TERMINAL_LOG) return void appendFileSync(process.env.AMW_TERMINAL_LOG, `${line}\n`);
+  if (process.platform !== 'darwin') throw new Error('Only supported on macOS.');
+  await run('/usr/bin/osascript', ['-e', 'on run argv', '-e', 'tell application "Terminal" to do script (item 1 of argv)', '-e', 'tell application "Terminal" to activate', '-e', 'end run', line], childEnv(), 15_000);
 }
 
 // ------------------------------------------------------------ diagnosis

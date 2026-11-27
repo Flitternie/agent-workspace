@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CODING_PROVIDERS, type AgentProvider, type CodingProvider } from './types';
+import { ACP_IDS, type AcpProvider } from './acp-agents';
 
 // Every renderer -> main call goes through one of these named channels. The main
 // process validates the payload with the schema before acting on it; the preload
@@ -11,6 +12,7 @@ const host = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,252}$/);
 const text = z.string().max(100_000);
 /** A stored image (main/attachments.ts names them by their content). */
 /** Any provider an agent can be created on (the ACP CLIs included). */
+const acpProvider = z.enum(ACP_IDS as [AcpProvider, ...AcpProvider[]]);
 const agentProvider = z.enum(['mock', ...CODING_PROVIDERS] as [AgentProvider, ...AgentProvider[]]);
 const imageRef = z.object({ id: z.string().regex(/^[0-9a-f]{24}\.(png|jpg|gif|webp)$/), mediaType: z.string().max(50), name: z.string().max(200).optional() });
 
@@ -28,6 +30,10 @@ export const ipcSchemas = {
   'ssh:loginCode': z.object({ host, provider: z.enum(['claude', 'codex']), code: z.string().min(4).max(2000) }),
   'ssh:loginCancel': z.object({ host, provider: z.enum(['claude', 'codex']) }),
   'ssh:connect': z.object({ host }),
+  'acp:login': z.object({ provider: acpProvider, host: host.optional(), mode: z.literal('code').optional() }),
+  'acp:loginCode': z.object({ provider: acpProvider, host: host.optional(), code: z.string().min(4).max(2000) }),
+  'acp:loginWait': z.object({ provider: acpProvider, host: host.optional() }),
+  'acp:loginCancel': z.object({ provider: acpProvider, host: host.optional() }),
   'ssh:terminal': z.object({ host }),
   'task:create': z.object({
     projectId: id,

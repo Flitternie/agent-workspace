@@ -469,6 +469,13 @@ describe.runIf(enabled)('ACP agents with the real CLIs', () => {
       cleanup.push(dataDir);
       const page = await launch(dataDir);
       await invoke(page, 'settings:update', { onboarding: { dismissed: true }, language: 'en' });
+      // Its own status command (`agy models`) says so, without a prompt.
+      await expect.poll(async () => (await invoke<WorkspaceSnapshot>(page, 'workspace:snapshot', {})).capabilities.find((c) => c.provider === 'antigravity')?.auth, { timeout: 60_000 }).toEqual({ loggedIn: false });
+      // Signing in with a code: the link its login prints (Google's sign-in page); cancelled, never completed.
+      const login = await invoke<{ url?: string }>(page, 'acp:login', { provider: 'antigravity', mode: 'code' });
+      expect(login.url).toMatch(/^https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?/);
+      await invoke(page, 'acp:loginCancel', { provider: 'antigravity' });
+      writeFileSync(join(shots, 'acp-real-antigravity-login-url.txt'), (login.url ?? '').replace(/(state|code_challenge)=[^&]+/g, '$1=…'));
       const project = await invoke<{ projectId: string }>(page, 'project:add', { rootPath: root, name: 'auth' });
       const t = await invoke<Task>(page, 'task:create', { projectId: project.projectId, provider: 'antigravity', isolate: false });
       await page.getByTestId('agent-card').first().click().catch(() => {});
