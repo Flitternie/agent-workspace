@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project } from '../shared/types';
-import { normalizeResearch, type ResearchDoc, type ResearchNotes } from '../shared/research';
+import { mergeResearch, normalizeResearch, type ResearchDoc, type ResearchNotes } from '../shared/research';
 import { createResearch, isNoteScope, noteRel, readNotes, readResearch, sampleNotes, sampleResearch, writeNote, writeResearch } from './research';
 import { emptyResearch, isResearchDir, parseResearchId, researchId } from '../shared/research';
 import { shq, sshError, sshRun, sshRunInput } from './util/ssh';
@@ -21,12 +21,21 @@ and notes/ are the agents' markdown notes. Plain files, so people and tools can 
 interface Remote {
   doc: ResearchDoc | null;
   notes: ResearchNotes;
+  /** The tree as it was in the file when last read or written here: what a merge starts from. */
+  base?: string;
+  /** When it was fetched (read again after a while: another window may have changed it). */
+  at?: number;
 }
+
+/** A host's research is read again when used this long after its last fetch. */
+const STALE_MS = 30_000;
 
 export class ResearchFiles {
   private remote = new Map<string, Remote>();
   private fetching = new Map<string, Promise<void>>();
   private writes = new Map<string, Promise<void>>();
+  /** Writes queued and not done, per research: a fetch then would undo them in memory. */
+  private pending = new Map<string, number>();
   /** A host project's folders with a research (found in one round trip). */
   private remoteDirs = new Map<string, string[]>();
   private listing = new Map<string, Promise<void>>();
@@ -87,7 +96,8 @@ export class ResearchFiles {
     const p = this.project(projectId);
     if (!p.host) return readResearch(p);
     const r = this.remote.get(projectId);
-    if (!r) void this.fetch(p);
+    // Read again after a while (another window, or a hand edit, may have changed it), unless writes are pending.
+    if (!r || (Date.now() - (r.at ?? 0) > STALE_MS && !this.pending.get(projectId))) void this.fetch(p);
     return r?.doc ?? null;
   }
 
@@ -104,7 +114,7 @@ export class ResearchFiles {
     const first = !r.doc;
     this.remote.set(projectId, { ...r, doc });
     if (first) this.enqueue(p, '.research/README.md', README);
-    this.enqueue(p, '.research/research.json', `${JSON.stringify(doc, null, 2)}\n`);
+    this.enqueueDoc(p, projectId);
   }
 
   saveNote(projectId: string, scope: string, text: string): void {
@@ -184,7 +194,8 @@ export class ResearchFiles {
     const job = sshRun(p.host!, `sh -c ${shq(script)}`, 60_000)
       .then((r) => {
         if (r.code !== 0) throw new Error(sshError(p.host!, r.stderr));
-        this.remote.set(p.projectId, parseFetch(r.stdout));
+        if (this.pending.get(p.projectId)) return; // written meanwhile: what is here is newer
+        this.remote.set(p.projectId, { ...parseFetch(r.stdout), at: Date.now() });
       })
       .catch((e) => {
         this.log('research fetch failed', p.host, (e as Error).message);
@@ -199,17 +210,56 @@ export class ResearchFiles {
   }
 
   /** Written in order, each whole (to a temporary file, then moved into place). */
-  private enqueue(p: Project, rel: string, text: string): void {
+  private enqueue(p: Project, rel: string, text: string | (() => Promise<string | null>)): void {
     const file = `${p.rootPath}/${rel}`;
     const dir = file.slice(0, file.lastIndexOf('/'));
     const prev = this.writes.get(p.projectId) ?? Promise.resolve();
+    this.pending.set(p.projectId, (this.pending.get(p.projectId) ?? 0) + 1);
     const next = prev
       .then(async () => {
-        const r = await sshRunInput(p.host!, `mkdir -p ${shq(dir)} && cat > ${shq(`${file}.tmp`)} && mv ${shq(`${file}.tmp`)} ${shq(file)}`, Buffer.from(text));
+        const body = typeof text === 'string' ? text : await text();
+        if (body == null) return;
+        const r = await sshRunInput(p.host!, `mkdir -p ${shq(dir)} && cat > ${shq(`${file}.tmp`)} && mv ${shq(`${file}.tmp`)} ${shq(file)}`, Buffer.from(body));
         if (r.code !== 0) throw new Error(sshError(p.host!, r.stderr));
       })
-      .catch((e) => this.log('research write failed', p.host, rel, (e as Error).message));
+      .catch((e) => this.log('research write failed', p.host, rel, (e as Error).message))
+      .finally(() => this.pending.set(p.projectId, (this.pending.get(p.projectId) ?? 1) - 1));
     this.writes.set(p.projectId, next);
+  }
+
+  /**
+   * The tree, written when its turn comes: if the file changed since it was last read or written here (another
+   * window on the same research, a hand edit), both sides' changes are merged (mergeResearch) and the merge is
+   * what is written and kept.
+   */
+  private enqueueDoc(p: Project, id: string): void {
+    this.enqueue(p, '.research/research.json', async () => {
+      const r = this.remote.get(id);
+      if (!r?.doc) return null;
+      const mine = r.doc;
+      const now = await sshRun(p.host!, `cat ${shq(`${p.rootPath}/.research/research.json`)} 2>/dev/null || true`, 60_000);
+      let out = mine;
+      const disk = now.code === 0 ? now.stdout : '';
+      if (disk.trim() && r.base && disk !== r.base) {
+        try {
+          const theirs = normalizeResearch(JSON.parse(disk));
+          const base = normalizeResearch(JSON.parse(r.base));
+          if (theirs && base) {
+            out = mergeResearch(base, mine, theirs);
+            this.log('research merged with a change made elsewhere', id);
+          }
+        } catch {
+          // Unreadable on disk: ours is written.
+        }
+      }
+      const text = `${JSON.stringify(out, null, 2)}\n`;
+      const cur = this.remote.get(id) ?? r;
+      // A save made while this one waited is written next: it gets what was merged in too.
+      const later = cur.doc && cur.doc !== mine && out !== mine ? mergeResearch(mine, cur.doc, out) : cur.doc === mine ? out : cur.doc;
+      this.remote.set(id, { ...cur, doc: later, base: text });
+      if (out !== mine) this.changed();
+      return text;
+    });
   }
 }
 
@@ -225,6 +275,7 @@ export function parseFetch(out: string): Remote {
     if (file === 'research.json') {
       try {
         r.doc = normalizeResearch(JSON.parse(text));
+        r.base = text;
       } catch {
         r.doc = null;
       }

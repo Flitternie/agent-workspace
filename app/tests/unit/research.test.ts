@@ -245,6 +245,12 @@ describe('research on an SSH host', () => {
           calls.push('list');
           return { code: 0, stdout: '.\nharness-evo\n', stderr: '' };
         }
+        // Before writing the tree: what is in the file now (changed elsewhere?).
+        const cat = /^cat '([^']+)'/.exec(cmd);
+        if (cat) {
+          calls.push('read');
+          return { code: 0, stdout: files.get(cat[1]) ?? '', stderr: '' };
+        }
         calls.push('fetch');
         // What the fetch script prints: a marker line per file, then its base64.
         expect(cmd).toMatch(/research\.json summary\.md ui\.json memory\.md notes/);
@@ -283,10 +289,39 @@ describe('research on an SSH host', () => {
     expect(rf.doc('p')!.title).toBe('Renamed');
     expect(rf.notes('p').summary!.text).toBe('# New\n');
     await rf.ready('p');
-    expect(calls.slice(1)).toEqual(['write .research/research.json', 'write .research/summary.md']);
+    expect(calls.slice(1).filter((c) => c !== 'read')).toEqual(['write .research/research.json', 'write .research/summary.md']);
     expect(JSON.parse(files.get('/srv/p/.research/research.json')!).title).toBe('Renamed');
+    // Another window changes the tree meanwhile (a new aspect): the next save here keeps it.
+    const onDisk = JSON.parse(files.get('/srv/p/.research/research.json')!);
+    onDisk.nodes.push({ id: 'elsewhere', type: 'aspect', parent: null, title: 'From the other window', status: 'idea', createdAt: 't' });
+    files.set('/srv/p/.research/research.json', JSON.stringify(onDisk, null, 2) + '\n');
+    rf.saveDoc('p', { ...rf.doc('p')!, goal: 'Changed here' });
+    await rf.ready('p');
+    const merged = JSON.parse(files.get('/srv/p/.research/research.json')!);
+    expect(merged.goal).toBe('Changed here');
+    expect(merged.nodes.some((n: { id: string }) => n.id === 'elsewhere')).toBe(true);
+    expect(rf.doc('p')!.nodes.some((n) => n.id === 'elsewhere')).toBe(true);
     expect(changed).toBeGreaterThan(0);
     await expect(rf.create('p', 'Again', '', false, 'en')).rejects.toThrow(/already has/);
     vi.doUnmock('../../src/main/util/ssh');
+  });
+});
+
+describe('two writers on one tree', () => {
+  it('keeps both sides’ changes: additions, edits to different nodes and fields, removals the other side left alone', async () => {
+    const { mergeResearch, emptyResearch } = await import('../../src/shared/research');
+    const node = (id: string, title: string, extra: Record<string, unknown> = {}) => ({ id, type: 'aspect' as const, parent: null, title, status: 'idea' as const, createdAt: 't', ...extra }) as never;
+    const base = { ...emptyResearch('T', 'g'), nodes: [node('a', 'A'), node('b', 'B'), node('c', 'C')] };
+    const mine = { ...base, title: 'T2', nodes: [node('a', 'A', { takeaway: 'mine' }), node('b', 'B'), node('m', 'Mine')] }; // c removed, m added, a edited
+    const theirs = { ...base, goal: 'g2', nodes: [node('a', 'A', { status: 'pass' }), node('b', 'B2'), node('c', 'C'), node('t', 'Theirs')] }; // a, b edited, t added
+    const out = mergeResearch(base, mine, theirs);
+    expect(out.title).toBe('T2');
+    expect(out.goal).toBe('g2');
+    expect(out.nodes.map((n) => n.id)).toEqual(['a', 'b', 't', 'm']);
+    expect(out.nodes[0]).toMatchObject({ takeaway: 'mine', status: 'pass' });
+    expect(out.nodes[1].title).toBe('B2');
+    // A removal the other side changed is not lost.
+    const theirs2 = { ...base, nodes: [node('a', 'A'), node('b', 'B'), node('c', 'C changed')] };
+    expect(mergeResearch(base, mine, theirs2).nodes.map((n) => n.id)).toContain('c');
   });
 });

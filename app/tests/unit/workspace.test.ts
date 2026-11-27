@@ -271,6 +271,53 @@ describe('several researches in a project (one per repository folder)', () => {
   });
 });
 
+describe('an isolated agent of a research kept in a repository inside the project', () => {
+  it('works in a worktree of that repository (the project folder itself is not one), at the same place in it', async () => {
+    const ws = open();
+    const root = mkdtempSync(join(tmpdir(), 'amw-test-multi-'));
+    const sub = repo();
+    execFileSync('mv', [sub, join(root, 'trace')]);
+    mkdirSync(join(root, 'trace', 'eval'));
+    writeFileSync(join(root, 'trace', 'eval', 'x.txt'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: join(root, 'trace') });
+    execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'eval'], { cwd: join(root, 'trace') });
+    const p = await ws.addProject(root, 'projects');
+    const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'variant', isolate: true, subdir: 'trace/eval', mockScript: 'work' });
+    const task = ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!;
+    expect(task.worktree).toBeTruthy();
+    expect(task.worktree!.parentRepo).toBe(realpathSync(join(root, 'trace')));
+    expect(task.cwd).toBe(join(task.worktree!.path, 'eval'));
+    expect(existsSync(join(task.cwd, 'x.txt'))).toBe(true);
+    expect(await ws.remove(t.taskId)).toMatch(/clean worktree was deleted/);
+  });
+});
+
+describe('a research’s idle agents', () => {
+  it('are disconnected after a while with nothing to do, keep their status, and connect again when told something', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY) }, researchIdleMs: 120 });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    const other = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: 'Not in it', isolate: false, mockScript: 'work', instruction: 'go' });
+    await ws.researchCreate(p.projectId, 'Tuning', '', false);
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ type: 'aspect', title: 'Data' });
+    const a = await ws.researchStartAgent(p.projectId, ws.researchGet(p.projectId)!.nodes[0].id, { isolate: false });
+    const t = () => ws.snapshot().tasks.find((x) => x.taskId === a.taskId)!;
+    await until(() => !['running', 'starting'].includes(t().status));
+    const was = t().status;
+    await until(() => !ws.snapshot().connectedTaskIds.includes(a.taskId), 3000);
+    expect(t().status).toBe(was);
+    // Others are left alone.
+    expect(ws.snapshot().connectedTaskIds).toContain(other.taskId);
+    const replies = () => ws.transcript(a.taskId).filter((i) => i.role === 'assistant').length;
+    const before = replies();
+    await ws.send(a.taskId, 'one more', 'text');
+    await until(() => replies() > before);
+  });
+});
+
 describe('moving a research’s agents into its folder', () => {
   it('agents started at the project root move with their conversation; the page counts them until then', async () => {
     const ws = open();

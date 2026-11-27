@@ -3,6 +3,21 @@ import { cp, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { WorktreeInfo } from '../shared/types';
 import { run } from './util/exec';
+import { shq, sshRun } from './util/ssh';
+
+/** git in `dir`, on this Mac or on `host`. */
+function git(host: string | undefined, dir: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  if (!host) return run('git', ['-C', dir, ...args]);
+  return sshRun(host, `git -C ${shq(dir)} ${args.map(shq).join(' ')}`, 120_000);
+}
+
+/** The repository `dir` is in (its top folder; on a host, its real path) and where `dir` is inside it ('' at the top). */
+export async function repoOf(host: string | undefined, dir: string): Promise<{ root: string; prefix: string } | null> {
+  const r = await git(host, dir, ['rev-parse', '--show-toplevel', '--show-prefix']);
+  if (r.code !== 0) return null;
+  const [root, prefix = ''] = r.stdout.split('\n');
+  return root ? { root: root.trim(), prefix: prefix.trim().replace(/\/+$/, '') } : null;
+}
 
 // Per-task git worktrees isolate concurrent edits. They are NOT a security
 // boundary; provider sandboxes and approvals remain the boundary.
@@ -63,12 +78,29 @@ export class WorktreeService {
     return { files: status.stdout.split('\n').filter(Boolean).length };
   }
 
+  /**
+   * A worktree on an SSH host: next to the repository, in .amw-worktrees/ beside it (on the same disk as the
+   * repository, which on a shared machine is where the room is), never in the home folder.
+   */
+  async createRemote(host: string, repoRoot: string, slug: string, from = 'HEAD'): Promise<WorktreeInfo> {
+    const head = await git(host, repoRoot, ['rev-parse', '--verify', '--end-of-options', `${from}^{commit}`]);
+    if (head.code !== 0) throw new Error('The repository has no commits yet, so a worktree cannot be created.');
+    const baseRef = head.stdout.trim();
+    const branch = `amw/${slug}`;
+    const root = repoRoot.replace(/\/+$/, '');
+    const parent = root.slice(0, root.lastIndexOf('/')) || '/';
+    const path = `${parent}/.amw-worktrees/${root.slice(root.lastIndexOf('/') + 1)}-${slug}`;
+    const r = await sshRun(host, `mkdir -p ${shq(`${parent}/.amw-worktrees`)} && git -C ${shq(root)} worktree add -b ${shq(branch)} ${shq(path)} ${shq(baseRef)}`, 300_000);
+    if (r.code !== 0) throw new Error(`git worktree add failed on ${host}: ${r.stderr.trim() || r.stdout.trim()}`);
+    return { path, branch, baseRef, parentRepo: root, host };
+  }
+
   /** Why the worktree must be kept, or null when it is safe to remove. */
   async keepReason(info: WorktreeInfo): Promise<string | null> {
-    const status = await run('git', ['-C', info.path, 'status', '--porcelain']);
+    const status = await git(info.host, info.path, ['status', '--porcelain']);
     if (status.code !== 0) return `cannot read git status (${status.stderr.trim()})`;
     if (status.stdout.trim()) return 'it has uncommitted changes';
-    const ahead = await run('git', ['-C', info.path, 'rev-list', '--count', `${info.baseRef}..HEAD`]);
+    const ahead = await git(info.host, info.path, ['rev-list', '--count', `${info.baseRef}..HEAD`]);
     if (ahead.code === 0 && Number(ahead.stdout.trim()) > 0) return `branch ${info.branch} has commits not in the base`;
     return null;
   }
@@ -77,11 +109,11 @@ export class WorktreeService {
   async removeIfClean(info: WorktreeInfo): Promise<{ removed: boolean; reason?: string }> {
     const reason = await this.keepReason(info);
     if (reason) return { removed: false, reason };
-    const r = await run('git', ['-C', info.parentRepo, 'worktree', 'remove', info.path]);
+    const r = await git(info.host, info.parentRepo, ['worktree', 'remove', info.path]);
     if (r.code !== 0) return { removed: false, reason: r.stderr.trim() };
     // keepReason found nothing past baseRef, so nothing is lost. `-d` would refuse a branch that isn't merged into the
     // parent's HEAD, which a branch started from another agent's commit (a fork) usually isn't.
-    await run('git', ['-C', info.parentRepo, 'branch', '-D', info.branch]);
+    await git(info.host, info.parentRepo, ['branch', '-D', info.branch]);
     return { removed: true };
   }
 }

@@ -508,3 +508,59 @@ export function experimentsUnder(doc: ResearchDoc, node: ResearchNode): Research
   const ids = new Set(node.type === 'aspect' ? childrenOf(doc, node.id).map((m) => m.id) : [node.id]);
   return doc.nodes.filter((n) => n.type === 'experiment' && n.parent && ids.has(n.parent)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
+
+// ------------------------------------------------------------------ two writers
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** A record changed on both sides since `base`: field by field, each side's change kept (ours where both changed one). */
+function mergeFields<T extends object>(base: T | undefined, mine: T, theirs: T): T {
+  const out: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(mine), ...Object.keys(theirs), ...Object.keys(base ?? {})]);
+  for (const k of keys) {
+    const b = (base as Record<string, unknown> | undefined)?.[k];
+    const m = (mine as Record<string, unknown>)[k];
+    const t = (theirs as Record<string, unknown>)[k];
+    const v = !same(m, b) ? m : t;
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
+}
+
+/** Lists of records with ids, merged: additions on both sides kept, a removal kept unless the other side changed it. */
+function mergeById<T extends { id: string }>(base: T[], mine: T[], theirs: T[]): T[] {
+  const b = new Map(base.map((x) => [x.id, x]));
+  const m = new Map(mine.map((x) => [x.id, x]));
+  const t = new Map(theirs.map((x) => [x.id, x]));
+  const order = [...theirs.map((x) => x.id), ...mine.map((x) => x.id).filter((id) => !t.has(id))];
+  const out: T[] = [];
+  for (const id of order) {
+    const bx = b.get(id);
+    const mx = m.get(id);
+    const tx = t.get(id);
+    if (mx && tx) out.push(same(mx, bx) ? tx : same(tx, bx) ? mx : mergeFields(bx, mx, tx));
+    else if (mx) {
+      if (!bx || !same(mx, bx)) out.push(mx); // added here, or changed here though removed there
+    } else if (tx) {
+      if (!bx || !same(tx, bx)) out.push(tx);
+    }
+  }
+  return out;
+}
+
+/**
+ * A tree two writers changed (two app windows on one research, an edit by hand): `mine` is what this one would
+ * write, `theirs` what is in the file now, `base` what both started from. Each side's changes are kept.
+ */
+export function mergeResearch(base: ResearchDoc, mine: ResearchDoc, theirs: ResearchDoc): ResearchDoc {
+  const { nodes: _bn, evidence: _be, ...bTop } = base;
+  const { nodes: _mn, evidence: _me, ...mTop } = mine;
+  const { nodes: _tn, evidence: _te, ...tTop } = theirs;
+  const top = mergeFields(bTop, mTop, tTop);
+  return {
+    ...top,
+    nodes: mergeById(base.nodes, mine.nodes, theirs.nodes),
+    evidence: mergeById(base.evidence, mine.evidence, theirs.evidence),
+    updatedAt: [mine.updatedAt, theirs.updatedAt].sort().at(-1)!,
+  } as ResearchDoc;
+}

@@ -56,6 +56,7 @@ import { readResearch, sampleResearch, writeResearch, writeSampleNotes } from '.
 import { ResearchFiles } from './research-files';
 import { aboutPrefix, leadBrief, researchBrief, researchTools, roleInstructions } from './research-tools';
 import { moveClaudeSession } from './research-move';
+import { repoOf } from './worktree';
 import { connectionLost } from './providers/claude-remote';
 import { childrenOf, formatValue, isResearchDir, nextResearchColor, parseResearchId, RESEARCH_COLORS, researchColor, researchId, routeFor, taskIdsOf, updateNode, type ResearchDoc, type ResearchNotes, type ResearchSummary } from '../shared/research';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -88,6 +89,8 @@ interface LiveSession {
   resumeNote?: string;
   /** Its place in a research when it connected (research:role); a new place means connecting again (roleInstructions). */
   role?: string;
+  /** When it was last connected to or sent to (ms): a research agent idle for long is disconnected. */
+  lastUsed?: number;
 }
 
 /** A `!command` the user typed is stopped after this long. */
@@ -117,6 +120,8 @@ export interface WorkspaceOptions {
   hiddenSessionDirs?: string[];
   /** Automatic retries of turns that failed because the model was busy (tests use short waits). */
   retry?: Partial<RetryPolicy>;
+  /** A research's agent with nothing to do is disconnected after this long (it connects again when used). */
+  researchIdleMs?: number;
   /** Home folder whose native memory files this Mac's scan reads (tests); default $HOME. */
   home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
@@ -172,6 +177,33 @@ export class Workspace {
     // Relabelling waits for the CLIs to be detected (refreshCapabilities), so the user's own Claude Code
     // or Codex writes the labels rather than a fallback; tests hand in a model directly.
     if (opts.backgroundModel) setTimeout(() => this.relabelStale(), 0);
+    this.idleSweep = setInterval(() => void this.closeIdleResearchAgents(), Math.min(60_000, Math.max(20, (opts.researchIdleMs ?? 15 * 60_000) / 4)));
+    this.idleSweep.unref?.();
+  }
+
+  private idleSweep?: NodeJS.Timeout;
+
+  /**
+   * A research has many agents, most of them done most of the time: each kept connected holds a CLI process (and
+   * on a host an SSH session: sshd allows 10 per connection) and goes down with the connection. One with nothing to
+   * do for a while is disconnected quietly; it keeps its status, and the next message (or research message)
+   * connects it again with its conversation.
+   */
+  private async closeIdleResearchAgents(): Promise<void> {
+    const idleMs = this.opts.researchIdleMs ?? 15 * 60_000;
+    const cutoff = Date.now() - idleMs;
+    for (const [taskId, live] of [...this.live]) {
+      const t = this.findTask(taskId);
+      if (!t || t === this.store.data.mainAgent || live.turnActive || this.connecting.has(taskId) || this.hasOpenNative(taskId)) continue;
+      if (['running', 'starting'].includes(t.status) || t.retry) continue;
+      if (!(t.researchAgent || t.researchManager || this.researchPlace(t))) continue;
+      if (Date.parse(t.updatedAt) > cutoff || (live.lastUsed ?? 0) > cutoff) continue;
+      this.live.delete(taskId);
+      await live.session.close().catch(() => {});
+      if (t.status === 'idle') t.status = 'disconnected';
+      this.log('closed idle research agent', taskId);
+      this.changed();
+    }
   }
 
   /**
@@ -477,6 +509,7 @@ export class Workspace {
     // Detach first so close-time events are dropped; restart recovery then marks state honestly.
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
+    clearInterval(this.idleSweep);
     for (const w of this.lostHosts.values()) clearTimeout(w.timer);
     this.lostHosts.clear();
     const sessions = [...this.live.values()];
@@ -1168,22 +1201,25 @@ export class Workspace {
     if (project.host) this.requireOnHost(args.provider, project.host);
     const ids = this.newTaskIds();
     const { taskId } = ids;
-    let cwd = project.rootPath;
+    if (args.subdir && !isResearchDir(args.subdir)) throw new Error(`Not a folder of the project: ${args.subdir}`);
+    const at = (base: string, sub?: string) => (!sub ? base : project.host ? `${base.replace(/\/+$/, '')}/${sub}` : join(base, sub));
+    // Where it works: the project's folder, or one of its folders (a research's); isolated, a worktree of the
+    // repository that folder is in (the project's own, or one inside it), here or on the project's host.
+    const target = at(project.rootPath, args.subdir);
+    let cwd = target;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
-    if (args.isolate && project.isGitRepo && project.host) {
-      sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
-    } else if (args.isolate && project.isGitRepo) {
+    if (args.isolate) {
+      const slug = `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`;
       try {
-        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`);
-        cwd = worktree.path;
+        const repo = await repoOf(project.host, target);
+        if (repo) {
+          worktree = project.host ? await this.worktrees.createRemote(project.host, repo.root, slug) : await this.worktrees.create(repo.root, project.projectId, slug);
+          cwd = at(worktree.path, repo.prefix || undefined);
+        }
       } catch (error) {
-        sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
+        sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd}${project.host ? ` on ${project.host}` : ''} directly.`;
       }
-    }
-    if (args.subdir) {
-      if (!isResearchDir(args.subdir)) throw new Error(`Not a folder of the project: ${args.subdir}`);
-      cwd = project.host ? `${cwd.replace(/\/+$/, '')}/${args.subdir}` : join(cwd, args.subdir);
     }
     const title = (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80);
     const task = this.addTask(ids, {
@@ -1678,7 +1714,7 @@ export class Workspace {
         this.handleEvent(taskId, record.localId, event);
       },
     );
-    const live: LiveSession = { localId: record.localId, session, turnActive: false, ...(before ? { warm: { status: before.status } } : {}), ...(place ? { role: `${place.id}:${place.role}` } : {}) };
+    const live: LiveSession = { localId: record.localId, session, turnActive: false, lastUsed: Date.now(), ...(before ? { warm: { status: before.status } } : {}), ...(place ? { role: `${place.id}:${place.role}` } : {}) };
     this.live.set(taskId, live);
     try {
       await session.start();
@@ -2262,6 +2298,7 @@ export class Workspace {
         }
       }
       const live = await this.connect(taskId);
+      live.lastUsed = Date.now();
       const busy = live.turnActive;
       // Memory saved, changed or removed since the session was given its notes reaches it with this message.
       const given = this.memoryGiven(task);
