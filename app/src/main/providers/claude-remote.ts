@@ -137,6 +137,12 @@ export function remoteExitError(host: string, exit: RemoteExit, fallback: string
   return why ? `Claude Code on ${host} ${how}: ${why}` : fallback.replace(/^Claude Code process/, `Claude Code on ${host}`);
 }
 
+/** A folder's real path on `host` (a link: where it points), where the CLI there keeps its sessions; the folder itself if that fails. */
+export async function remoteRealpath(host: string, cwd: string): Promise<string> {
+  const r = await sshRun(host, `cd ${shq(cwd)} 2>/dev/null && pwd -P`).catch(() => undefined);
+  return (r?.code === 0 && r.stdout.trim().split('\n').pop()) || cwd;
+}
+
 /**
  * Fails early with a clear reason (folder or CLI missing) instead of an opaque exit code. Returns the folder's
  * real path: the CLI keeps its sessions under it (a folder that is a link: where it points).
