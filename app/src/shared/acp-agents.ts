@@ -17,8 +17,10 @@ export interface AcpAgentSpec {
   /** Signing in, in a terminal (on the agent's machine). */
   login: string;
   docs: string;
-  /** One or two letters for its mark (a neutral badge, not the product's logo). */
+  /** One or two letters for its badge, shown when it has no `icon`. */
   mark: string;
+  /** Its own mark, drawn in one colour: an SVG path and the viewBox it is drawn in. */
+  icon?: { viewBox: string; d: string };
   /**
    * Environment for its ACP server. OpenCode: every edit, command and fetch asks (its own default is
    * to allow them), so the app's permission mode decides, as for Claude Code and Codex. A JSON value
@@ -70,6 +72,8 @@ export const ACP_AGENTS = [
     login: 'opencode auth login',
     docs: 'https://opencode.ai/docs/acp',
     mark: 'O',
+    // Simple Icons (CC0 data; the mark is its owner's trademark).
+    icon: { viewBox: '0 0 24 24', d: 'M22 24H2V0h20zM17 4.8H7v14.4h10z' },
     env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' } }) },
     // OpenCode 2.x's server API (`opencode api`); 1.x has none, and forks whole conversations only.
     forkBefore: (sessionId: string, messageId: string) => ['api', 'session.fork', '--param', `sessionID=${sessionId}`, '-d', JSON.stringify({ before: messageId })],
@@ -89,6 +93,11 @@ export const ACP_AGENTS = [
     login: 'agy acp --login',
     docs: 'https://antigravity.google/docs/cli/acp/',
     mark: 'A',
+    // The mark from antigravity.google's favicon, in one colour.
+    icon: {
+      viewBox: '7.6 9.8 96 96',
+      d: 'M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z',
+    },
     memory: { kind: 'gemini-md', file: '~/.gemini/GEMINI.md' },
     skills: 'workspace',
     limits: ['-p', '/usage', '--output-format', 'json'],
