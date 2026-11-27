@@ -1768,13 +1768,23 @@ body { overflow-x: clip !important; }
 
 /* First screen: the product in view at a glance. A smaller headline, tighter spacing, the two downloads
    (GitHub is in the nav), what it works with, and the app right below. */
-.hero { padding-top: 64px; }
-html[data-lang='zh'] .hero h1 { font-size: clamp(40px, 5vw, 68px); }
-html[data-lang='en'] .hero h1 { font-size: clamp(40px, 5.2vw, 74px); }
-.hero .prompt { margin-top: 20px; font-size: clamp(15px, 1.35vw, 18px); }
-.hero .cta { margin-top: 26px; }
-.hero-works { margin-top: 16px; }
-.hero .stage { margin-top: 36px; }
+.hero { padding-top: 88px; }
+html[data-lang='zh'] .hero h1 { max-width: none; font-size: clamp(42px, 7.6vw, 108px); font-weight: 800; }
+html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weight: 800; }
+/* Three groups, close within and apart between: the words, the downloads with what it works with, the app. */
+.hero .prompt { margin-top: 24px; gap: 8px; font-size: clamp(15px, 1.35vw, 18px); }
+.hero .cta { margin-top: 44px; }
+.hero-works { margin-top: 18px; }
+.hero .stage { margin-top: 64px; }
+@media (max-width: 640px) {
+  /* Two lines on a phone anyway: as large as they fit. */
+  html[data-lang='zh'] .hero h1 { font-size: min(15.5vw, 64px); }
+  html[data-lang='en'] .hero h1 { font-size: min(13vw, 56px); }
+  .hero { padding-top: 56px; }
+  .hero .prompt { margin-top: 18px; }
+  .hero .cta { margin-top: 32px; }
+  .hero .stage { margin-top: 44px; }
+}
 /* The Chinese headline on one line, except on a phone. */
 .br-narrow { display: none; }
 @media (max-width: 640px) { .br-narrow { display: inline; } }
