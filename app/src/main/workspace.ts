@@ -1672,8 +1672,8 @@ export class Workspace {
     const lines = items.flatMap((i): SaidLine[] => {
       if (i.role === 'user' || i.role === 'assistant') return i.text.trim() ? [{ role: i.role, text: i.text }] : [];
       if (i.role === 'tool') {
-        const title = i.tool?.title || i.toolLabel || i.text.split('\n')[0];
-        return title?.trim() ? [{ role: 'tool', text: title }] : [];
+        const text = carriedTool(i);
+        return text ? [{ role: 'tool', text }] : [];
       }
       return [];
     });
@@ -3629,4 +3629,45 @@ export function forkCut(items: Pick<TranscriptItem, 'role' | 'text'>[], points: 
   const nth = points.slice(0, at).filter((p) => same(p.prompt, prompt)).length;
   const users = items.flatMap((i, n) => (i.role === 'user' ? [n] : []));
   return users.slice(1).filter((n) => same(items[n].text, prompt))[nth];
+}
+
+/** The start and end of a long text (an error is at the end of a command's output, a file's gist at its start). */
+function clipMiddle(text: string, head: number, tail: number): string {
+  const t = text.trim();
+  if (t.length <= head + tail + 20) return t;
+  return `${t.slice(0, head)}\n[… ${t.length - head - tail} characters left out …]${tail ? `\n${t.slice(-tail)}` : ''}`;
+}
+
+/**
+ * A tool call as carried to another CLI: its title and status, and what it produced, shortened. What
+ * went wrong is kept most (a failed command's output, an error), then what changed (diffs, command
+ * output); a file read is its first lines only, since the file can be read again as it is now.
+ */
+export function carriedTool(i: Pick<TranscriptItem, 'text' | 'toolLabel' | 'toolStatus' | 'tool'>): string {
+  const title = (i.tool?.title || i.toolLabel || i.text.split('\n')[0] || '').trim();
+  const failed = i.toolStatus === 'failed';
+  const head = [title, failed ? '(failed)' : i.toolStatus === 'declined' ? '(declined by the user)' : i.toolStatus === 'interrupted' ? '(interrupted)' : ''].filter(Boolean).join(' ');
+  const parts: string[] = [];
+  for (const c of i.tool?.content ?? []) {
+    if (c.type === 'terminal') {
+      const bad = failed || (c.exitCode !== undefined && c.exitCode !== 0);
+      const out = c.output.trim() ? clipMiddle(c.output, bad ? 600 : 300, bad ? 2400 : 500) : '';
+      parts.push([c.exitCode !== undefined ? `exit code ${c.exitCode}` : '', out].filter(Boolean).join('\n'));
+    } else if (c.type === 'diff') {
+      const d = c.diff;
+      const lines = d.hunks.flatMap((h) => [`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`, ...h.lines]);
+      parts.push(clipMiddle(`${d.operation} ${d.path} (+${d.added} -${d.removed})\n${lines.join('\n')}`, 1500, 300));
+    } else if (c.type === 'text') {
+      const read = i.tool?.kind === 'read' && !failed;
+      parts.push(read ? clipMiddle(c.text, 300, 0) : clipMiddle(c.text, failed ? 600 : 400, failed ? 1800 : 400));
+    } else if (c.type === 'search') {
+      parts.push(`${c.total ?? c.files.length} file(s) for "${c.query}"${c.files.length ? `: ${c.files.slice(0, 10).join(', ')}` : ''}`);
+    } else if (c.type === 'fetch') {
+      parts.push([c.url, c.status ? `status ${c.status}` : '', c.summary ? clipMiddle(c.summary, 500, 0) : ''].filter(Boolean).join('\n'));
+    }
+  }
+  // Providers that put the result in the item's text instead (titles aside).
+  if (!parts.length && i.text.trim() && i.text.trim() !== title) parts.push(clipMiddle(i.text, failed ? 600 : 300, failed ? 1800 : 300));
+  const body = parts.filter((p) => p.trim()).join('\n');
+  return [head, body].filter(Boolean).join('\n');
 }

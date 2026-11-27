@@ -29,7 +29,7 @@ export const COPY_NOTE = 'The conversation above is a copy of an earlier convers
 
 /** Goes before the user's first message to an agent continuing a conversation from another CLI. */
 export const CARRY_NOTE =
-  '(The conversation above was carried over from another coding agent. Continue from it as if it were this one. The results of its tool calls are not included, so read files again when you need them.)';
+  '(The conversation above was carried over from another coding agent. Continue from it as if it were this one. Its tool results are shortened, and files may have changed since, so read them again when you need their contents.)';
 
 /** The lines of a conversation copy, and the message that came with it (when it is more than the copy's own note). */
 export function parseCopy(text: string): { lines: SaidLine[]; rest?: string } | undefined {
