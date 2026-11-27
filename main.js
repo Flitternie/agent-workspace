@@ -150,7 +150,7 @@ Object.assign(ZH, {"cv.a1": "orders 表有 210 万行，customer_id 上没有索
 Object.assign(ZH, {"sc.short": "对话旁的侧栏"});
 
 // 0.16: OpenCode and Antigravity join Claude Code and Codex; Remote Control for Codex too
-Object.assign(ZH, {"ov.c3": "Claude Code、Codex、OpenCode、Antigravity 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "手机远程控制", "st1.t": "装好一个 Agent", "st1.p": "Claude Code、Codex、OpenCode、Antigravity 任选。OpenCode 自带免费模型，无需登录。"});
+Object.assign(ZH, {"ov.c3": "Claude Code、Codex、OpenCode、Antigravity 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "手机远程控制", "st1.t": "装好一个 Agent", "st1.p": "用现有账号登录就行。"});
 
 const EN = {};
 document.querySelectorAll('[data-k]').forEach((el) => (EN[el.dataset.k] = el.innerHTML));
