@@ -1764,11 +1764,16 @@ body { overflow-x: clip !important; }
 .hero .prompt { max-width: 100% !important; }
 @media (max-width: 640px) { .prompt { font-size: 15px !important; } }
 
-/* Four coding agents: the table scrolls inside its card rather than widening the page; the memory targets wrap to rows of three */
+/* Four coding agents: the table scrolls inside its card rather than widening the page.
+   Memory targets: the four agents on one row, the two machines under them, each twice as wide. */
 .compat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .compat-scroll table { min-width: 520px; }
 .compat td.no { color: var(--text-3); }
-.mm-targets { grid-template-columns: repeat(3, 1fr); }
+.mm-targets { grid-template-columns: repeat(4, 1fr); width: min(560px, 100%); gap: 8px; }
+.mm-targets span { padding: 10px 4px; gap: 5px; }
+.mm-targets span:nth-child(n+5) { grid-column: span 2; }
+.mm-targets span:nth-child(5) { transition-delay: 0.48s; } .mm-targets span:nth-child(6) { transition-delay: 0.6s; }
+@media (max-width: 640px) { .mm-targets span:nth-child(n+5) { grid-column: auto; } }
 
 /* First screen: the product in view at a glance. A smaller headline, tighter spacing, the two downloads
    (GitHub is in the nav), what it works with, and the app right below. */
