@@ -232,6 +232,7 @@ html[data-lang='zh'] h1 { max-width: 12em; font-size: clamp(46px, 7.4vw, 100px);
 .hero-works { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 20px; margin: 22px auto 0; }
 .hero-works .works-item { font-size: 14px; }
 .hero-works .works-item svg { width: 16px; height: 16px; }
+.hw-pair { display: contents; }
 @media (max-width: 960px) { .works-div { display: none; } .works-group { gap: 16px; flex-wrap: wrap; justify-content: center; } .works-row { gap: 16px 32px; } }
 .chip { display: inline-block; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); background: #fff; }
 .kicker { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--text-3); font: 500 13px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -1562,8 +1563,9 @@ html[data-lang] .hero .prompt { max-width: calc(100vw - 32px); }
   .works-item { font-size: 14px; }
   /* Phone: each group's caption on its own line above its items; the four agents in two even rows of two. */
   .works-cap { flex-basis: 100%; text-align: center; }
-  .hero-works { display: grid; grid-template-columns: repeat(2, auto); justify-content: center; gap: 8px 24px; margin-top: 18px; }
-  .hero-works .works-cap { grid-column: 1 / -1; }
+  /* Phone: the caption, then two rows of two, each row centred on its own, evenly spaced. */
+  .hero-works { flex-direction: column; gap: 8px; margin-top: 18px; }
+  .hero-works .hw-pair { display: flex; justify-content: center; gap: 22px; }
   .works > .works-group { display: grid; grid-template-columns: repeat(2, auto); justify-content: center; gap: 8px 24px; }
   .works > .works-group .works-cap { grid-column: 1 / -1; }
   .foot { flex-direction: column; align-items: flex-start; gap: 14px; padding: 24px 20px 36px; }
