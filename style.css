@@ -1803,3 +1803,9 @@ html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weigh
    characters (the system font is no heavier than semibold, and Google Fonts is often unreachable). */
 @font-face { font-family: 'Noto Sans SC Hero'; font-weight: 800; font-display: swap; src: url('assets/fonts/noto-sans-sc-800-hero.woff2') format('woff2'); unicode-range: U+3002, U+4E00, U+4E0D, U+4E71, U+5168, U+591A, U+5F00, U+770B, U+773C, U+FF0C; }
 html[data-lang='zh'] .hero h1 { font-family: 'Noto Sans SC Hero', var(--sans); font-weight: 800; letter-spacing: 0; }
+/* Phone: the desktop app and where agents run, each caption on the same line as its items (two lines, not four). */
+@media (max-width: 640px) {
+  .works-row { flex-direction: column; gap: 12px; }
+  .works-row .works-group { flex-wrap: nowrap; gap: 14px; }
+  .works-row .works-cap { flex-basis: auto; }
+}

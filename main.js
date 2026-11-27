@@ -221,7 +221,8 @@ sizeCards();
 updateStories();
 
 const nav = document.querySelector('.nav');
-const onScroll = () => nav.classList.toggle('scrolled', scrollY > 8);
+// The bar's backdrop and line only once the page has really scrolled (not a nudge or a restored offset).
+const onScroll = () => nav.classList.toggle('scrolled', scrollY > 48);
 addEventListener('scroll', onScroll, { passive: true });
 onScroll();
 
