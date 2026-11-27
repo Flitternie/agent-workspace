@@ -1765,3 +1765,16 @@ body { overflow-x: clip !important; }
 .compat-scroll table { min-width: 520px; }
 .compat td.no { color: var(--text-3); }
 .mm-targets { grid-template-columns: repeat(3, 1fr); }
+
+/* First screen: the product in view at a glance. A smaller headline, tighter spacing, the two downloads
+   (GitHub is in the nav), what it works with, and the app right below. */
+.hero { padding-top: 64px; }
+html[data-lang='zh'] .hero h1 { font-size: clamp(40px, 5vw, 68px); }
+html[data-lang='en'] .hero h1 { font-size: clamp(40px, 5.2vw, 74px); }
+.hero .prompt { margin-top: 20px; font-size: clamp(15px, 1.35vw, 18px); }
+.hero .cta { margin-top: 26px; }
+.hero-works { margin-top: 16px; }
+.hero .stage { margin-top: 36px; }
+/* The Chinese headline on one line, except on a phone. */
+.br-narrow { display: none; }
+@media (max-width: 640px) { .br-narrow { display: inline; } }
