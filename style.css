@@ -220,13 +220,15 @@ html[data-lang='zh'] h1 { max-width: 12em; font-size: clamp(46px, 7.4vw, 100px);
 .wave i:nth-child(4) { animation-delay: -0.3s; } .wave i:nth-child(5) { animation-delay: -0.75s; }
 @keyframes wave { 50% { height: 22px; } }
 
-.works { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 22px 40px; margin: 88px 0 0; }
+.works { display: flex; flex-direction: column; align-items: center; gap: 22px; margin: 88px 0 0; }
+/* The agents on one line; the desktop app and where agents run on the next. */
+.works-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 22px 40px; }
 .works-group { display: flex; align-items: center; gap: 22px; }
 .works-cap { color: var(--text-3); font: 500 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .works-item { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 15px; font-weight: 550; }
 .works-item svg { width: 18px; height: 18px; color: #6b7280; }
 .works-div { width: 1px; height: 22px; background: var(--line-2); }
-@media (max-width: 960px) { .works-div { display: none; } .works-group { gap: 16px; flex-wrap: wrap; justify-content: center; } }
+@media (max-width: 960px) { .works-div { display: none; } .works-group { gap: 16px; flex-wrap: wrap; justify-content: center; } .works-row { gap: 16px 32px; } }
 .chip { display: inline-block; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); background: #fff; }
 .kicker { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--text-3); font: 500 13px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .kicker span:first-child { color: var(--text); padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 6px; letter-spacing: 0; }
