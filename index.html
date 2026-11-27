@@ -241,17 +241,14 @@
       </div>
       <div class="grid">
         <div class="tile tile-side reveal">
-          <div class="sc-text"><h3><span class="lbl-full" data-k="sc.t">Everything else, beside the conversation</span><span class="lbl-short" data-k="sc.short">Side column</span></h3><p data-k="sc.p">Open a file, check this turn’s changes, ask on the side or see what an agent remembers, without leaving the chat.</p>
-            <div class="sc-tabs"><span data-tab="0" data-k="sc.t0">Preview</span><span data-tab="1" data-k="sc.t1">Changes</span><span data-tab="2" data-k="sc.t2">Side question</span><span data-tab="3" data-k="sc.t3">Memory</span></div></div>
+          <div class="sc-text"><h3><span class="lbl-full" data-k="sc.t">Everything else, beside the conversation</span><span class="lbl-short" data-k="sc.short">Side column</span></h3><p data-k="sc.p">Open a file, ask on the side or see what an agent remembers, without leaving the chat.</p>
+            <div class="sc-tabs"><span data-tab="0" data-k="sc.t0">Preview</span><span data-tab="1" data-k="sc.t2">Side question</span><span data-tab="2" data-k="sc.t3">Memory</span></div></div>
           <div class="sc-win">
             <div class="sc-chat"><span class="aw-l"></span><span class="aw-l s"></span><span class="sc-me"></span><span class="aw-l"></span><span class="aw-l xs"></span></div>
             <div class="sc-panel">
               <div class="sc-p" data-p="0"><div class="sc-ph"><code>README.md</code></div><b class="sc-h1">Shop</b><span class="aw-l"></span><span class="aw-l s"></span><span class="sc-img"></span><span class="aw-l xs"></span></div>
-              <div class="sc-p" data-p="1"><div class="sc-ph"><code>src/api/orders.ts</code><b class="add">+12</b><b class="rm">−3</b></div><pre><span class="rm">- export default createOrder</span>
-<span class="add">+ export function createOrder(body) {</span>
-<span class="add">+   assertItems(body.items)</span></pre><div class="sc-ph"><code>tests/orders.test.ts</code><b class="add">+24</b></div></div>
-              <div class="sc-p" data-p="2"><div class="sc-q" data-k="mu.btw">/btw why UTC here?</div><div class="sc-a" data-k="sc.a">So logs line up across servers. It stays in this side panel, not in the agent’s context.</div><div class="sc-run"><i></i><span data-k="sc.run">Agent still working</span></div></div>
-              <div class="sc-p" data-p="3"><div class="sc-mem"><span>✦</span><b data-k="mm.nt">Prefer named exports</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m2">Run tests before committing</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m3">Use pnpm, not npm</b></div></div>
+              <div class="sc-p" data-p="1"><div class="sc-q" data-k="mu.btw">/btw why UTC here?</div><div class="sc-a" data-k="sc.a">So logs line up across servers. It stays in this side panel, not in the agent’s context.</div><div class="sc-run"><i></i><span data-k="sc.run">Agent still working</span></div></div>
+              <div class="sc-p" data-p="2"><div class="sc-mem"><span>✦</span><b data-k="mm.nt">Prefer named exports</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m2">Run tests before committing</b></div><div class="sc-mem"><span>✦</span><b data-k="sc.m3">Use pnpm, not npm</b></div></div>
             </div>
           </div>
         </div>
@@ -323,6 +320,6 @@
     </div>
   </footer>
 
-  <script src="main.js?v=91"></script>
+  <script src="main.js?v=92"></script>
 </body>
 </html>

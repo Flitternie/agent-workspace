@@ -131,7 +131,7 @@ Object.assign(ZH, {"hero.q": "用普通索引还是并发索引？", "hero.o1": 
 
 Object.assign(ZH, {"nav.mem": "记忆", "mm.kicker": "记忆", "mm.title": "教会一个 Agent，<br>所有 Agent 都知道。", "mm.c0t": "说一次就行", "mm.c0": "在你的消息上点「记住」。", "mm.c1t": "提炼成一条笔记", "mm.c1": "记下的是你的要求，不是原话。", "mm.c2t": "所有 Agent 都能用", "mm.c2": "Claude Code 和 Codex，每台机器都同步。", "mm.c3t": "你的文件不会被改", "mm.c3": "先备份，你自己写的内容一字不动。", "mm.you": "你", "mm.msg": "这里别用 default export，我们都按名字导入。", "mm.rem": "记住", "mm.nt": "优先使用具名导出", "mm.scope": "项目 · shop", "mm.nb": "这个代码库里用具名导出，按名字导入模块。", "mm.merge": "已与一条关于导入的旧笔记合并", "mm.bak": "已备份", "mm.ownk": "你的内容：一字未动", "mm.oursk": "我们的部分：一行带标记", "mu.btwA": "日志要跨服务器对比。"});
 
-Object.assign(ZH, {"sc.t": "不离开对话，旁边就能看", "sc.p": "打开文件、看这一轮改了什么、问个旁支问题、查 Agent 记住了什么，都在对话旁边的侧栏里。", "sc.t0": "预览", "sc.t1": "改动", "sc.t2": "旁支提问", "sc.t3": "记忆", "sc.a": "这样各台服务器的日志才能对上。这个回答只留在侧栏，不进 Agent 的上下文。", "sc.run": "Agent 仍在工作", "sc.m2": "提交前先跑测试", "sc.m3": "用 pnpm，不用 npm", "m7.t": "! 命令", "m7.p": "在 Agent 的目录里直接跑命令，它能看到输出。", "m8.t": "每个 Agent 单独选模型", "m8.p": "从下一轮起切换模型。"});
+Object.assign(ZH, {"sc.t": "不离开对话，旁边就能看", "sc.p": "打开文件、问个旁支问题、查 Agent 记住了什么，都在对话旁边的侧栏里。", "sc.t0": "预览", "sc.t1": "改动", "sc.t2": "旁支提问", "sc.t3": "记忆", "sc.a": "这样各台服务器的日志才能对上。这个回答只留在侧栏，不进 Agent 的上下文。", "sc.run": "Agent 仍在工作", "sc.m2": "提交前先跑测试", "sc.m3": "用 pnpm，不用 npm", "m7.t": "! 命令", "m7.p": "在 Agent 的目录里直接跑命令，它能看到输出。", "m8.t": "每个 Agent 单独选模型", "m8.p": "从下一轮起切换模型。"});
 
 Object.assign(ZH, {"hero.o3": "或输入你自己的答案", "tm.h": "团队地图", "cv.me": "给订单历史加个索引（按客户、最新在前）。", "cv.ai": "这张表很大、写入频繁。普通索引建的时候会锁写入；并发索引不锁，但更慢。"});
 
@@ -521,7 +521,7 @@ const laneOutcomes = () => [{ kind: 'out', lane: 1, st: 'w' }, { kind: 'out', la
   if (!tile) return;
   let i = 0, timer;
   const show = (n) => { i = n; tile.dataset.tab = String(n); };
-  const loop = () => { clearInterval(timer); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) timer = setInterval(() => show((i + 1) % 4), 3200); };
+  const loop = () => { clearInterval(timer); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) timer = setInterval(() => show((i + 1) % 3), 3200); };
   tile.querySelectorAll('[data-tab]').forEach((t) => t.addEventListener('click', () => { show(Number(t.dataset.tab)); loop(); }));
   show(0); loop();
 })();
