@@ -230,7 +230,8 @@ html[data-lang='zh'] h1 { max-width: 12em; font-size: clamp(46px, 7.4vw, 100px);
 .works-div { width: 1px; height: 22px; background: var(--line-2); }
 /* The agents it works with, right under the download buttons: a quiet line of marks and names. */
 .hero-works { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 20px; margin: 22px auto 0; }
-.hero-works .works-item { font-size: 14px; }
+.hero-works .works-item { font-size: 14px; color: var(--text-3); font-weight: 500; }
+.hero-works .works-item svg { color: currentColor; }
 .hero-works .works-item svg { width: 16px; height: 16px; }
 .hw-pair { display: contents; }
 @media (max-width: 960px) { .works-div { display: none; } .works-group { gap: 16px; flex-wrap: wrap; justify-content: center; } .works-row { gap: 16px 32px; } }
@@ -1798,3 +1799,7 @@ html[data-lang='en'] .hero h1 { font-size: clamp(44px, 7.4vw, 104px); font-weigh
   .nav-gh .gh-label { display: none; }
   .hero-works { margin-top: 24px; }
 }
+/* The Chinese headline in Noto Sans SC Black (SIL OFL), served from here as a subset of just its ten
+   characters (the system font is no heavier than semibold, and Google Fonts is often unreachable). */
+@font-face { font-family: 'Noto Sans SC Hero'; font-weight: 900; font-display: swap; src: url('assets/fonts/noto-sans-sc-900-hero.woff2') format('woff2'); unicode-range: U+3002, U+4E00, U+4E0D, U+4E71, U+5168, U+591A, U+5F00, U+770B, U+773C, U+FF0C; }
+html[data-lang='zh'] .hero h1 { font-family: 'Noto Sans SC Hero', var(--sans); font-weight: 900; letter-spacing: 0; }
