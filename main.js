@@ -150,7 +150,7 @@ Object.assign(ZH, {"cv.a1": "orders 表有 210 万行，customer_id 上没有索
 Object.assign(ZH, {"sc.short": "对话旁的侧栏"});
 
 // 0.16: OpenCode and Antigravity join Claude Code and Codex; Remote Control for Codex too
-Object.assign(ZH, {"ov.c3": "Claude Code、Codex、OpenCode、Antigravity 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各编程 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "在手机上继续（Remote Control）", "st1.t": "装好一个编程 Agent", "st1.p": "Claude Code、Codex、OpenCode、Antigravity 任选。OpenCode 自带免费模型，无需登录。"});
+Object.assign(ZH, {"ov.c3": "Claude Code、Codex、OpenCode、Antigravity 随意搭配。", "mm.c2": "不管用哪个 Agent，每台机器都同步。", "compat.title": "各 Agent 支持的功能", "c7": "图片和 @文件", "c8": "接上已有会话", "c9": "手机远程控制", "st1.t": "装好一个 Agent", "st1.p": "Claude Code、Codex、OpenCode、Antigravity 任选。OpenCode 自带免费模型，无需登录。"});
 
 const EN = {};
 document.querySelectorAll('[data-k]').forEach((el) => (EN[el.dataset.k] = el.innerHTML));
@@ -302,8 +302,8 @@ fetch('https://api.github.com/repos/Flitternie/agent-workspace/releases/latest')
 // are tired of, one thing after another. The cursor sits on the line being typed.
 (function typeLines() {
   const LINES = {
-    en: ['Stop juggling tabs and terminals.', 'Stop juggling Claude Code, Codex and friends.', 'Stop checking which agent is stuck.', 'Stop digging through old chats.', 'Stop repeating yourself to every agent.'],
-    zh: ['不想在多个 Agent 窗口之间来回切换？', '不想在 Claude Code、Codex 这些 Agent 之间来回切换？', '想快速知道哪个 Agent 卡住了？', '想一眼看到每个 Agent 做过哪些改动？', '想一句话通知所有 Agent？'],
+    en: ['Stop juggling tabs and terminals.', 'Stop juggling every coding agent.', 'Stop checking which agent is stuck.', 'Stop digging through old chats.', 'Stop repeating yourself to every agent.'],
+    zh: ['不想在多个 Agent 窗口之间来回切换？', '不想在各种 Agent 之间来回切换？', '想快速知道哪个 Agent 卡住了？', '想一眼看到每个 Agent 做过哪些改动？', '想一句话通知所有 Agent？'],
   };
   const KEEP = { en: 5, zh: 0 };
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
