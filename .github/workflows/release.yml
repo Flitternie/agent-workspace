@@ -1,67 +1,69 @@
-# Builds installers on GitHub's runners and publishes them as a GitHub release.
-# - Bump "version" in app/package.json on main (e.g. `npm version minor --no-git-tag-version`
-#   in app/): this tags the commit v<version>, builds the macOS DMG and the Windows installer,
-#   and publishes the release once both are attached. Pushes that keep the version only run
-#   nothing here.
-# - Pushing a tag like v0.6.0 by hand does the same for that tag.
-# - Run it by hand (Actions → Release → Run workflow): builds only; download the files
-#   from the run's artifacts.
+# Releases are cut by release-please (https://github.com/googleapis/release-please-action).
+# - Every push to main updates a release PR ("chore: release vX.Y.Z") from the Conventional
+#   Commit titles merged since the last release: the next version (feat → minor, fix → patch,
+#   `!` or BREAKING CHANGE → major), app/package.json and package-lock.json, and CHANGELOG.md.
+# - Merging that PR tags vX.Y.Z and creates the GitHub release with the changelog as its notes;
+#   this run then builds the macOS DMG and the Windows installer and attaches them.
+# - Pushing a tag like v0.6.0 by hand builds and attaches installers to that tag's release.
+# - Run it by hand (Actions → Release → Run workflow): builds only; download the files from
+#   the run's artifacts.
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: ['app/package.json']
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # Decides what this run releases: a new version on main gets its tag here.
-  tag:
+  # Decides what this run releases: release-please on main, the pushed tag, or nothing (a manual build).
+  plan:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
       publish: ${{ steps.pick.outputs.publish }}
       ref: ${{ steps.pick.outputs.ref }}
     steps:
-      - uses: actions/checkout@v7
+      - id: release
+        if: github.ref == 'refs/heads/main'
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
       - id: pick
         run: |
-          version=$(node -p "require('./app/package.json').version")
-          tag="v$version"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            [[ "$GITHUB_REF_NAME" == "$tag" ]] || { echo "::error::Tag $GITHUB_REF_NAME does not match app/package.json version $version"; exit 1; }
-            echo "tag=$tag" "publish=true" "ref=$GITHUB_REF" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
+            echo "tag=$GITHUB_REF_NAME" "publish=true" "ref=$GITHUB_REF" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASED" == true ]]; then
+            echo "tag=$TAG" "publish=true" "ref=refs/tags/$TAG" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
           elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-              echo "$tag already exists; nothing to release."
-              echo "publish=skip" >> "$GITHUB_OUTPUT"
-            else
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "refs/tags/$tag"
-              echo "tag=$tag" "publish=true" "ref=refs/tags/$tag" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
-            fi
+            echo "No release in this push; nothing to build."
+            echo "publish=skip" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" "ref=$GITHUB_SHA" | tr ' ' '\n' >> "$GITHUB_OUTPUT"
           fi
-      # One draft for both platforms: left to each build, the two would race and create two.
-      - name: Create the draft release
-        if: steps.pick.outputs.publish == 'true'
-        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --title "Agent Workspace $TAG" --notes ""
+        env:
+          RELEASED: ${{ steps.release.outputs['app--release_created'] }}
+          TAG: ${{ steps.release.outputs['app--tag_name'] }}
+      # A tag pushed by hand has no release yet: one, with GitHub's generated notes.
+      - name: Create the release for a pushed tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.pick.outputs.tag }}
+          TAG: ${{ github.ref_name }}
 
   build:
-    needs: tag
-    if: needs.tag.outputs.publish != 'skip'
+    needs: plan
+    if: needs.plan.outputs.publish != 'skip'
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.tag.outputs.ref }}
+          ref: ${{ needs.plan.outputs.ref }}
 
       - uses: actions/setup-node@v7
         with:
@@ -98,17 +100,16 @@ jobs:
       - name: Build installer
         run: bash scripts/dist.sh ${{ matrix.target }}
 
-      # Only the installers go to the draft release; it is published below once every platform is in.
-      # The app has no in-app updater, so electron-builder's update files (latest*.yml, .blockmap)
-      # are turned off in package.json.
-      - name: Upload to the draft release
-        if: needs.tag.outputs.publish == 'true'
+      # Only the installers go to the release. The app has no in-app updater, so
+      # electron-builder's update files (latest*.yml, .blockmap) are turned off in package.json.
+      - name: Upload to the release
+        if: needs.plan.outputs.publish == 'true'
         run: |
           shopt -s nullglob
           gh release upload "$TAG" release/*.dmg release/*.exe --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.tag.outputs.tag }}
+          TAG: ${{ needs.plan.outputs.tag }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -118,15 +119,14 @@ jobs:
             app/release/*.exe
           if-no-files-found: error
 
-  publish:
-    needs: [tag, build]
-    if: needs.tag.outputs.publish == 'true'
+  # The release keeps release-please's notes (the changelog section); only its title is set here.
+  finish:
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Publish the release
-        run: |
-          notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body)
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest --title "Agent Workspace $TAG" --notes "$notes"
+      - name: Name the release
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Agent Workspace $TAG" --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.tag.outputs.tag }}
+          TAG: ${{ needs.plan.outputs.tag }}
