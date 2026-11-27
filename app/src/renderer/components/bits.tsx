@@ -4,6 +4,7 @@ import type { AgentProvider, AgentStatus, AttentionKind, SubtaskInfo } from '../
 import { digestSubtasks, orderSubtasks, type SubtaskDigest } from '../../shared/subtasks';
 import { t, t as tr } from '../i18n';
 import { ACP_AGENTS, acpAgent } from '../../shared/acp-agents';
+import { AGENT_MARK_VIEWBOX, AgentMark } from './agent-marks';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: 'Idle',
@@ -51,18 +52,18 @@ const OPENAI_MARK = 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0
 
 /**
  * A provider as its mark where its name would be too long (the sidebar's limits): Claude Code the Claude
- * mark in its orange, Codex the OpenAI mark, OpenCode and Antigravity their own marks; the name is the label.
+ * mark in its orange, Codex the OpenAI mark, OpenCode and Antigravity their own marks in their colours; the name is the label.
  */
 export function ProviderIcon({ provider, size = 14 }: { provider: AgentProvider; size?: number }) {
   const acp = acpAgent(provider);
   return (
-    <svg className={`provider-icon provider-icon-${provider}`} width={size} height={size} viewBox={acp?.icon?.viewBox ?? '0 0 24 24'} role="img" aria-label={PROVIDER_LABEL[provider]}>
+    <svg className={`provider-icon provider-icon-${provider}`} width={size} height={size} viewBox={AGENT_MARK_VIEWBOX[provider] ?? '0 0 24 24'} role="img" aria-label={PROVIDER_LABEL[provider]}>
       {provider === 'claude' ? (
         <path d={CLAUDE_MARK} fill="currentColor" />
       ) : provider === 'codex' ? (
         <path d={OPENAI_MARK} fill="currentColor" />
-      ) : acp?.icon ? (
-        <path d={acp.icon.d} fill="currentColor" />
+      ) : AGENT_MARK_VIEWBOX[provider] ? (
+        <AgentMark provider={provider} />
       ) : acp ? (
         // An ACP agent without a mark of its own: a neutral badge with its letter.
         <g>

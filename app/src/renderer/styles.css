@@ -7566,8 +7566,7 @@ button.subtask-row:hover {
   color: #d97757;
 }
 .provider-icon-codex,
-.provider-icon-opencode,
-.provider-icon-antigravity {
+.provider-icon-opencode {
   color: var(--text);
 }
 .provider-icon-mock {
