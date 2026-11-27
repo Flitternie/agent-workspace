@@ -4764,6 +4764,36 @@ button.subtask-row:hover {
   white-space: nowrap;
   user-select: all;
 }
+.remote-code {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  user-select: all;
+}
+.remote-dot.remote-dot-err {
+  background: var(--risk);
+}
+.remote-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.remote-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.remote-device-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .remote-actions {
   display: flex;
   gap: 6px;
@@ -7763,4 +7793,19 @@ button.subtask-row:hover {
 /* A command that must not break mid-word. */
 code.nowrap {
   white-space: nowrap;
+}
+
+/* Codex pairing QR code: white quiet zone in either theme. */
+.remote-qr {
+  width: 168px;
+  height: 168px;
+  margin: 4px auto 8px;
+  padding: 6px;
+  background: #fff;
+  border-radius: 8px;
+}
+.remote-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }

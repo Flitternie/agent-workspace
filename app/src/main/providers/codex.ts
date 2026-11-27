@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
-import type { ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
+import type { CodexRemoteControl, ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
 import { transientKind } from '../retry';
 import { childEnv, findExecutable, needsShell, run } from '../util/exec';
 import { shq, sshError, sshRun, sshRunner } from '../util/ssh';
@@ -181,7 +181,46 @@ function itemEvents(value: unknown, history: boolean, completed: boolean, cwd: s
   return [{ type: 'transcriptItem', itemId: v.id, role: v.role, text: v.text, toolStatus: v.status, tool: v.tool, history, ...(v.images ? { images: v.images } : {}) }];
 }
 
+/** Remote Control needs a ChatGPT login (Codex refuses API keys: "remote control requires ChatGPT authentication"). */
+export const REMOTE_CHATGPT_ONLY = 'Remote Control needs Codex signed in with ChatGPT; API keys are not supported.';
+const REMOTE_OLD_CODEX = 'This Codex version has no Remote Control. Update the Codex CLI and try again.';
+const REMOTE_BY_REQUIREMENTS = "Remote Control is turned off by your organization's Codex requirements (allowRemoteControl).";
+
+/** An app-server error from a remoteControl/* request, said plainly (Codex 0.162's own messages). */
+export function codexRemoteError(message: string): string {
+  if (/unknown variant|method not found|requires experimentalApi|^no remoteControl\//i.test(message)) return REMOTE_OLD_CODEX;
+  if (/requires ChatGPT auth|API key/i.test(message)) return REMOTE_CHATGPT_ONLY;
+  if (/disabled by managed requirements/i.test(message)) return REMOTE_BY_REQUIREMENTS;
+  if (/requires sqlite state db/i.test(message)) return "Remote Control needs Codex's state database, which is turned off in its config.";
+  if (/unavailable for this app-server/i.test(message)) return 'Remote Control is not available for this Codex app-server.';
+  return message || 'Codex could not turn on Remote Control.';
+}
+
+/** A Codex timestamp (unix seconds; milliseconds tolerated) as ISO. */
+export function codexTime(v: unknown): string | undefined {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return new Date(n < 1e11 ? n * 1000 : n).toISOString();
+}
+
+const REMOTE_STATUSES = ['connecting', 'connected', 'errored', 'disabled'] as const;
+const remoteStatus = (v: unknown): CodexRemoteControl['status'] => (REMOTE_STATUSES as readonly string[]).includes(str(v)) ? (str(v) as CodexRemoteControl['status']) : 'connecting';
+
 /** From `codex login status`; only the method is kept (e.g. "ChatGPT", "an API key"), never the key. */
+/**
+ * The QR code's content for a pairing: Codex's own (long) pairing code in the ChatGPT pairing link the
+ * ChatGPT app's scanner reads (https://chatgpt.com/codex/pair?pairing_code=…). The short manual code is
+ * typed instead. AMW_CODEX_QR_FORMAT, a template with {code}, replaces the link (tests, or if it moves).
+ */
+export function qrPayload(pairingCode: string): string | undefined {
+  if (!pairingCode) return undefined;
+  const format = process.env.AMW_CODEX_QR_FORMAT;
+  if (format && format.includes('{code}')) return format.replace('{code}', encodeURIComponent(pairingCode));
+  const url = new URL('https://chatgpt.com/codex/pair');
+  url.searchParams.set('pairing_code', pairingCode);
+  return url.toString();
+}
+
 function loginState(code: number, text: string): ProviderCapabilities['auth'] {
   const using = /Logged in using ([^-\n]+)/i.exec(text)?.[1]?.trim();
   return { loggedIn: code === 0 && !/not logged in/i.test(text), method: using };
@@ -355,7 +394,9 @@ export class CodexAdapter implements ProviderAdapter {
       const status = await run(path, ['login', 'status'], { timeoutMs: 15_000 });
       auth = loginState(status.code, `${status.stdout}\n${status.stderr}`);
     }
-    return this.describe(!!path, version, auth, path ? `codex app-server (stdio) → ${path}. Uses your existing Codex login.` : 'Codex CLI not found on PATH.');
+    // Remote Control pairs with the ChatGPT app, so it needs a ChatGPT login (not an API key).
+    const remoteControl = !!auth?.loggedIn && /chatgpt/i.test(auth.method ?? '');
+    return { ...this.describe(!!path, version, auth, path ? `codex app-server (stdio) → ${path}. Uses your existing Codex login.` : 'Codex CLI not found on PATH.'), remoteControl };
   }
 
   async discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]> {
@@ -562,13 +603,17 @@ class CodexSession implements ProviderSession {
     const instructions = this.args.developerInstructions
       ? { developerInstructions: this.args.developerInstructions }
       : {};
+    const fresh = { cwd: this.args.cwd, ...policy, ...instructions, ...(this.args.model ? { model: this.args.model } : {}) };
+    let resumed = !!resumeId;
     const result = rec(
-      await server.rpc(
-        resumeId ? 'thread/resume' : 'thread/start',
-        resumeId
-          ? { threadId: resumeId, cwd: this.args.cwd, ...policy, ...instructions, ...(this.args.model ? { model: this.args.model } : {}) }
-          : { cwd: this.args.cwd, ...policy, ...instructions, ...(this.args.model ? { model: this.args.model } : {}) },
-      ),
+      resumeId
+        ? await server.rpc('thread/resume', { threadId: resumeId, ...fresh }).catch(async (error: Error) => {
+            // A thread that never had a message has nothing saved (no rollout) to resume: start it afresh.
+            if (!/no rollout found/i.test(error.message)) throw error;
+            resumed = false;
+            return server.rpc('thread/start', fresh);
+          })
+        : await server.rpc('thread/start', fresh),
     );
     if (str(result.model)) this.emit({ type: 'model', model: str(result.model) });
     const thread = rec(result.thread);
@@ -577,7 +622,7 @@ class CodexSession implements ProviderSession {
     for (const turn of Array.isArray(thread.turns) ? thread.turns : [])
       for (const item of Array.isArray(rec(turn).items) ? (rec(turn).items as unknown[]) : [])
         for (const e of itemEvents(item, true, true, this.args.cwd)) this.emit(e);
-    this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed: !!resumeId });
+    this.emit({ type: 'sessionStarted', nativeSessionId: this.threadId, resumed });
     // The account's limits need no turn: read them now (a nicety; older CLIs or API-key logins have none).
     server
       .rpc('account/rateLimits/read', {})
@@ -703,7 +748,137 @@ class CodexSession implements ProviderSession {
     await this.server.rpc('thread/shellCommand', { threadId: this.threadId, command, timeoutMs });
   }
 
+  /**
+   * Remote Control, Codex's own (what `codex remote-control` does): this agent's app-server links to
+   * the ChatGPT service and a phone pairs with it by typing the manual code in the ChatGPT app. Enabled
+   * `ephemeral`, so it lasts as long as this app-server and never changes the preference Codex keeps
+   * for its own daemon or other app-servers. On again while on: a fresh code (the old one expired).
+   */
+  private remote?: { state: CodexRemoteControl; environmentId?: string; manualCode?: string; poll?: NodeJS.Timeout };
+
+  async setRemoteControl(on: boolean): Promise<{ codex?: CodexRemoteControl }> {
+    const server = this.server;
+    if (!server || server.closed) throw new Error('Codex session is not connected.');
+    const fail = (e: Error): never => {
+      throw new Error(codexRemoteError(e.message));
+    };
+    if (!on) {
+      const was = this.remote;
+      this.stopRemotePoll();
+      this.remote = undefined;
+      if (was) await server.rpc('remoteControl/disable', { ephemeral: true }, 15_000).catch(fail);
+      return {};
+    }
+    const fresh = !this.remote;
+    if (fresh) {
+      await this.remoteAllowed(server);
+      const enabled = rec(await server.rpc('remoteControl/enable', { ephemeral: true }, 30_000).catch(fail));
+      this.remote = { state: { status: remoteStatus(enabled.status), paired: false, serverName: str(enabled.serverName) || undefined }, environmentId: str(enabled.environmentId) || undefined };
+    }
+    const remote = this.remote!;
+    try {
+      const pairing = rec(await server.rpc('remoteControl/pairing/start', { manualCode: true }, 30_000).catch(fail));
+      const code = str(pairing.manualPairingCode);
+      if (!code) throw new Error('Codex did not return a pairing code to enter in the ChatGPT app.');
+      remote.environmentId = str(pairing.environmentId) || remote.environmentId;
+      remote.manualCode = code;
+      remote.state = { ...remote.state, paired: false, code, qr: qrPayload(str(pairing.pairingCode)), expiresAt: codexTime(pairing.expiresAt) };
+    } catch (error) {
+      // Nothing to pair with: leave Remote Control as it was before this call.
+      if (fresh) {
+        this.remote = undefined;
+        await server.rpc('remoteControl/disable', { ephemeral: true }, 15_000).catch(() => undefined);
+      }
+      throw error;
+    }
+    this.pollPairing();
+    void this.refreshRemoteDevices();
+    return { codex: { ...remote.state } };
+  }
+
+  async revokeRemoteDevice(clientId: string): Promise<void> {
+    const remote = this.remote;
+    if (!this.server || this.server.closed || !remote?.environmentId) throw new Error('Remote Control is not on for this agent.');
+    await this.server.rpc('remoteControl/client/revoke', { environmentId: remote.environmentId, clientId }, 15_000).catch((e: Error) => {
+      throw new Error(codexRemoteError(e.message));
+    });
+    remote.state = { ...remote.state, devices: remote.state.devices?.filter((d) => d.id !== clientId) };
+    this.emitRemote();
+  }
+
+  /** Refuses before enabling anything when it cannot work: an API-key login, or the organization's requirements. */
+  private async remoteAllowed(server: AppServer): Promise<void> {
+    const account = await server.rpc('account/read', { refreshToken: false }, 15_000).then(rec, () => undefined);
+    if (account) {
+      const type = str(rec(account.account).type);
+      if (type && type !== 'chatgpt') throw new Error(REMOTE_CHATGPT_ONLY);
+      if (!type && account.requiresOpenaiAuth === true) throw new Error('Codex is not signed in. Sign in with ChatGPT, then try again.');
+    }
+    const requirements = await server.rpc('configRequirements/read', {}, 15_000).then((r) => rec(rec(r).requirements), () => ({}) as Rec);
+    if (requirements.allowRemoteControl === false) throw new Error(REMOTE_BY_REQUIREMENTS);
+  }
+
+  /** Until the code is claimed or expires: whether a phone entered it. */
+  private pollPairing(): void {
+    this.stopRemotePoll();
+    const remote = this.remote;
+    if (!remote) return;
+    const every = Number(process.env.AMW_CODEX_PAIR_POLL_MS ?? 2000);
+    remote.poll = setInterval(() => {
+      const server = this.server;
+      if (this.remote !== remote || !server || server.closed || !remote.manualCode) return this.stopRemotePoll();
+      const expires = remote.state.expiresAt ? Date.parse(remote.state.expiresAt) : NaN;
+      if (expires <= Date.now()) {
+        this.stopRemotePoll();
+        remote.manualCode = undefined;
+        remote.state = { ...remote.state, code: undefined, qr: undefined };
+        return this.emitRemote();
+      }
+      const asked = remote.manualCode;
+      void server
+        .rpc('remoteControl/pairing/status', { manualPairingCode: asked }, 15_000)
+        .then((r) => {
+          if (rec(r).claimed !== true || this.remote !== remote || remote.manualCode !== asked) return;
+          this.stopRemotePoll();
+          remote.manualCode = undefined;
+          remote.state = { ...remote.state, paired: true, code: undefined, qr: undefined, expiresAt: undefined };
+          this.emitRemote();
+          void this.refreshRemoteDevices();
+        })
+        .catch(() => undefined); // asked again next time
+    }, every);
+    remote.poll.unref?.();
+  }
+
+  private stopRemotePoll(): void {
+    if (this.remote?.poll) clearInterval(this.remote.poll);
+    if (this.remote) this.remote.poll = undefined;
+  }
+
+  /** The devices paired with this computer (a nicety: none listed when Codex cannot say). */
+  private async refreshRemoteDevices(): Promise<void> {
+    const remote = this.remote;
+    if (!remote?.environmentId || !this.server || this.server.closed) return;
+    const listed = await this.server.rpc('remoteControl/client/list', { environmentId: remote.environmentId, limit: 20, order: 'desc' }, 15_000).catch(() => undefined);
+    if (!listed || this.remote !== remote) return;
+    const data = rec(listed).data;
+    remote.state = {
+      ...remote.state,
+      devices: (Array.isArray(data) ? data : []).map(rec).filter((c) => str(c.clientId)).map((c) => ({
+        id: str(c.clientId),
+        name: str(c.displayName) || [str(c.deviceModel), str(c.platform)].filter(Boolean).join(' · ') || 'Device',
+        lastSeenAt: codexTime(c.lastSeenAt),
+      })),
+    };
+    this.emitRemote();
+  }
+
+  private emitRemote(): void {
+    this.emit({ type: 'remoteControl', state: this.remote ? { ...this.remote.state } : undefined });
+  }
+
   async close(): Promise<void> {
+    this.stopRemotePoll();
     this.server?.kill();
   }
 
@@ -848,6 +1023,13 @@ class CodexSession implements ProviderSession {
     }
     if (p.threadId && this.threadId && p.threadId !== this.threadId) return;
     switch (method) {
+      case 'remoteControl/status/changed': {
+        // Sent at start-up too (disabled); only while this agent has it on.
+        if (!this.remote) return;
+        this.remote.state = { ...this.remote.state, status: remoteStatus(p.status), serverName: str(p.serverName) || this.remote.state.serverName };
+        this.remote.environmentId = str(p.environmentId) || this.remote.environmentId;
+        return this.emitRemote();
+      }
       case 'turn/started':
         // Only our own turn: a `!command` runs in a turn of its own (see shell()).
         if (this.working && !this.turnId) this.turnId = str(rec(p.turn).id) || undefined;

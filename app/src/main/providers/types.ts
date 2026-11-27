@@ -1,4 +1,5 @@
 import type {
+  CodexRemoteControl,
   ForkPoint,
   PlanEntry,
   ToolCallInfo,
@@ -98,6 +99,8 @@ export type ProviderEvent =
   | { type: 'usage'; add?: Partial<UsageTokens> & { costUsd?: number }; context?: number; contextWindow?: number }
   /** The account's usage limits (rate-limit windows), as just reported. */
   | { type: 'limits'; windows: LimitWindow[]; plan?: string }
+  /** Codex Remote Control changed (paired, connection status, devices); undefined: off. */
+  | { type: 'remoteControl'; state?: CodexRemoteControl }
   | { type: 'sessionFailed'; error: string }
   | { type: 'sessionDisconnected'; reason: string };
 
@@ -162,10 +165,13 @@ export interface ProviderSession {
   /** Changes what the agent may do without asking; applies from the next action (Claude) or turn (Codex). */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
   /**
-   * Remote Control (Claude Code): this live session also shows in the Claude app and at claude.ai/code,
-   * driven from the phone while it keeps running here. Resolves with the session's link when on.
+   * Remote Control: this live session driven from a phone while it keeps running here. Claude Code:
+   * the Claude app and claude.ai/code; resolves with the session's link when on. Codex: the ChatGPT
+   * app; resolves with a pairing code and the connection state, later changes come as `remoteControl` events.
    */
-  setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string }>;
+  setRemoteControl?(on: boolean, name?: string): Promise<{ url?: string; codex?: CodexRemoteControl }>;
+  /** Codex Remote Control: unpairs a device (it can no longer reach this computer until paired again). */
+  revokeRemoteDevice?(clientId: string): Promise<void>;
   /**
    * A side question ("btw"): answered from this conversation without entering it or interrupting a
    * turn under way. `history` holds the earlier side questions and answers, oldest first.

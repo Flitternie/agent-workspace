@@ -17,6 +17,7 @@ import type { ModelOption,
   PermissionMode,
   Project,
   ProviderCapabilities,
+  CodexRemoteControl,
   RemoteHostStatus,
   RouteDecision,
   SessionRecord,
@@ -133,7 +134,8 @@ export class Workspace {
   readonly store: JsonStore;
   private live = new Map<string, LiveSession>(); // taskId -> live provider session
   /** Remote Control links, for the live session that turned it on (gone with that session). */
-  private remote = new Map<string, { localId: string; url: string }>();
+  /** Remote Control per agent while its session lives: a Claude session's link, or a Codex agent's pairing. */
+  private remote = new Map<string, { localId: string; url?: string; codex?: CodexRemoteControl }>();
   /** `!command` output not yet handed to the agent (providers without their own shell). */
   private shellOutput = new Map<string, string[]>();
   private connecting = new Map<string, Promise<LiveSession>>();
@@ -560,7 +562,8 @@ export class Workspace {
       main: d.mainAgent,
       demo: !!this.opts.demo,
       connectedTaskIds: [...this.live.keys()],
-      remoteControl: Object.fromEntries([...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId).map(([id, r]) => [id, r.url])),
+      remoteControl: Object.fromEntries(this.liveRemote().flatMap(([id, r]) => (r.url ? [[id, r.url]] : []))),
+      codexRemote: Object.fromEntries(this.liveRemote().flatMap(([id, r]) => (r.codex ? [[id, r.codex]] : []))),
       // Read from the cached groupings only: nothing is asked of a model to fill it.
       limits: d.limits ?? {},
       workTitles: Object.fromEntries(Object.entries(d.sessionMaps ?? {}).flatMap(([id, g]) => (g.version === GROUPING_VERSION && g.tasks.length ? [[id, g.tasks.at(-1)!.title]] : []))),
@@ -1941,13 +1944,22 @@ export class Workspace {
    * The model for this agent from its next turn (unset: the CLI's default). Kept on the
    * task, so a resumed session runs on it too; a running turn keeps its model.
    */
+  /** Remote Control entries whose session is still the agent's live one (it ends with the session). */
+  private liveRemote(): Array<[string, { localId: string; url?: string; codex?: CodexRemoteControl }]> {
+    return [...this.remote].filter(([id, r]) => this.live.get(id)?.localId === r.localId);
+  }
+
   /**
-   * Remote Control for a local Claude agent: on connects its session (starting it if needed) so the
-   * Claude app and claude.ai/code can drive it; off disconnects them, the session keeps running here.
+   * Remote Control for a local agent: on connects its session (starting it if needed) so a phone can
+   * drive it; off disconnects the phone, the session keeps running here. Claude Code: the Claude app and
+   * claude.ai/code (resolves with the link). Codex: the ChatGPT app, paired with a code (in the snapshot);
+   * on again while on asks Codex for a fresh code. Agents on SSH hosts and the main agent go without.
    */
   async setRemoteControl(taskId: string, on: boolean): Promise<string | undefined> {
     const task = this.task(taskId);
-    if ((task.provider !== 'claude' && task.provider !== 'mock') || task.host || this.store.data.mainAgent?.taskId === taskId) throw new Error('Remote Control is for Claude Code agents on this computer.');
+    const codex = task.provider === 'codex';
+    if ((task.provider !== 'claude' && task.provider !== 'mock' && !codex) || task.host || this.store.data.mainAgent?.taskId === taskId)
+      throw new Error('Remote Control is for Claude Code and Codex agents on this computer.');
     let live = this.live.get(taskId);
     if (!live) {
       if (!on) return undefined;
@@ -1955,10 +1967,19 @@ export class Workspace {
     }
     if (!live.session.setRemoteControl) throw new Error('This session cannot turn on Remote Control.');
     const res = await live.session.setRemoteControl(on, task.name);
-    if (on) this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
-    else this.remote.delete(taskId);
+    if (!on) this.remote.delete(taskId);
+    else if (codex) this.remote.set(taskId, { localId: live.localId, codex: res.codex });
+    else this.remote.set(taskId, { localId: live.localId, url: res.url ?? 'https://claude.ai/code' });
     this.changed();
     return res.url;
+  }
+
+  /** Codex Remote Control: unpairs one of the devices paired with this computer. */
+  async revokeRemoteDevice(taskId: string, clientId: string): Promise<void> {
+    const live = this.live.get(taskId);
+    const entry = this.remote.get(taskId);
+    if (!live || !entry?.codex || entry.localId !== live.localId || !live.session.revokeRemoteDevice) throw new Error('Remote Control is not on for this agent.');
+    await live.session.revokeRemoteDevice(clientId);
   }
 
   async setModel(taskId: string, model: string | undefined): Promise<void> {
@@ -2108,6 +2129,14 @@ export class Workspace {
     if (!task || task.sessionLocalId !== sessionLocalId || !live || live.localId !== sessionLocalId) {
       this.log('dropped stale event', taskId, sessionLocalId, event.type);
       return;
+    }
+    if (event.type === 'remoteControl') {
+      // Pairing and connection news, not activity: kept beside the session, never on the task.
+      const entry = this.remote.get(taskId);
+      if (entry?.localId !== sessionLocalId) return;
+      if (event.state) entry.codex = event.state;
+      else this.remote.delete(taskId);
+      return this.changed();
     }
     let quiet = false;
     if (live.warm) {

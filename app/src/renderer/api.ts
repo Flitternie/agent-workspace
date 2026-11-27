@@ -127,6 +127,7 @@ export interface Outputs {
   'apps:open': void;
   'task:setAside': void;
   'task:remoteControl': string | undefined;
+  'task:remoteControlRevoke': void;
   'file:stat': { mtimeMs: number; size: number } | null;
   'models:list': string[];
   'openai:setKey': { ok: boolean; error?: string; overriddenByEnv?: boolean };
