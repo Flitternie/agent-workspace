@@ -592,7 +592,7 @@ function ResearchDialog({
         <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="research-merge-title" />
       </div>
       <ResearchFolderField snapshot={snapshot} projectId={dlg.projectId} value={dir} onChange={setDir} testId="research-merge-dir" />
-      <div className="muted small">{tr('A research lead is started: it reads these conversations, lays out the tree and attaches them. They move from this list to the research’s page.')}</div>
+      <div className="muted small">{tr('A research lead sorts these conversations into a tree.')}</div>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>

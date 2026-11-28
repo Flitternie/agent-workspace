@@ -123,7 +123,7 @@ export function ResearchFolderField({ snapshot, projectId, value, onChange, test
           </div>
         </div>
       ) : null}
-      <div className="muted small">{t('The research’s files and its agents are in this folder. A project holding several repositories can have one research for each. Empty: the project’s own folder.')}</div>
+      <div className="muted small">{t('The research and its agents work here; empty is the project’s own folder.')}</div>
     </div>
   );
 }
