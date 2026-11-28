@@ -31,11 +31,33 @@ import { resolvePosix } from '../../shared/preview';
 import { t, language } from '../i18n';
 import { OpenInApp } from './OpenInApp';
 import { AttachButton, AttachmentStrip, MessageImages, useAttachments } from './Attachments';
-import { dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
+import { findAgentIn } from '../../shared/agent-ref';
+import { agentMention, dropMentions, MentionHighlight, MentionMenu, useMentions } from './Mentions';
 import { savedPreview, savePreview, type PreviewState } from '../preview-store';
 import { useDraft } from '../drafts';
 
 export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapshot: WorkspaceSnapshot; task: Task; transcript: TranscriptItem[]; now: number; onOpen?: (taskId: string) => void }) {
+  /** An @name that is another agent (dropped from the sidebar), and that agent's name as shown. */
+  const isAgentRef = (ref: string) => !!findAgentIn(snapshot.tasks, ref);
+  const agentNamed = (ref: string) => {
+    const other = findAgentIn(snapshot.tasks, ref);
+    return other ? displayName(other) : undefined;
+  };
+  /** Opens the agent a chip names: by name (@结账页方案), or by the session file its conversation is in. */
+  const openAgent = (refOrPath: string) => {
+    const other = findAgentIn(snapshot.tasks, refOrPath) ?? sessionOwner(refOrPath);
+    if (other) onOpen?.(other.taskId);
+  };
+  /** A mentioned file that holds another agent's conversation (its CLI's session file): that agent's name. */
+  const sessionOwner = (path: string) => {
+    const id = /([A-Za-z0-9-]{8,80})\.jsonl$/.exec(path)?.[1];
+    const session = id ? snapshot.sessions.find((s) => s.nativeSessionId && id.endsWith(s.nativeSessionId)) : undefined;
+    return session ? snapshot.tasks.find((t) => t.taskId === session.taskId) : undefined;
+  };
+  const agentFor = (path: string) => {
+    const other = sessionOwner(path);
+    return other ? displayName(other) : undefined;
+  };
   // Completion reports duplicate the last transcript message here; only show what needs a decision.
   const open = snapshot.attention.filter((a) => a.taskId === task.taskId && a.state === 'open' && a.kind !== 'completion');
   // A question the agent asked in its own words is its message right above: only the newest
@@ -533,7 +555,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
                 <SessionMiniMap tasks={mapTasks} current={currentTask} onOpen={() => { setShowMap(true); setPreview(null); setShowBtw(false); }} />
               )
             ) : null}
-            <PreviewContext.Provider value={{ preview: setPreview, openExternal }}>
+            <PreviewContext.Provider value={{ preview: setPreview, openExternal, agentFor, agentNamed, openAgent }}>
               <Transcript items={transcript} main={isMainAgent(task)} task={task} snapshot={snapshot} />
             </PreviewContext.Provider>
             {/* Requests wait at the end of the conversation, where the agent asked, above the reply box. */}
@@ -555,6 +577,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
             <Composer
               key={task.taskId}
               task={task}
+              isAgent={isAgentRef}
               onBtw={isMainAgent(task) || snapshot.capabilities.find((c) => c.provider === task.provider)?.sideQuestions === false ? undefined : askBtw}
               btwCount={btw.length}
               inject={inject}
@@ -1137,6 +1160,7 @@ function Composer({
   onClearAbout,
   side,
   under,
+  isAgent,
 }: {
   task: Task;
   /** Beside the box, outside it on the right, level with its bottom (the context used). */
@@ -1149,6 +1173,8 @@ function Composer({
   /** The request the message is likely about (unfolded above): sent along as a hint, shown here. */
   about?: { id: string; alias: string; headline: string };
   onClearAbout?: () => void;
+  /** Whether an @name in the box is another agent (dropped from the sidebar): marked like a file. */
+  isAgent?: (ref: string) => boolean;
 }) {
   // The unsent message is the agent's, not the box's: it is still there after the Overview or another
   // agent, and the agent's Overview tile shows the same text.
@@ -1213,13 +1239,17 @@ function Composer({
   const [sending, setSending] = useState(false);
   // Images pasted, dropped or picked go with the next message (the main agent passes them on when the work is about them).
   // @ lists the files in the agent's folder (the main agent has none: only @~/ and @/ browse there).
-  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task) });
+  const mention = useMentions(task.taskId, box, draft, setDraft, { browseOnly: isMainAgent(task), isAgent });
   // Other files dropped here are mentioned with @, as if picked from the list.
   const attach = useAttachments(async (files) => {
     const text = await dropMentions(task.taskId, files);
     if (text) mention.insert(text);
     box.current?.focus();
-  }, task.taskId);
+  }, task.taskId, async (other) => {
+    // Another agent dragged from the sidebar: the file its conversation is in, for this agent to read.
+    mention.insert(await agentMention(task.taskId, other));
+    box.current?.focus();
+  });
   // While the agent works, Enter adds to what it is doing (read at its next step);
   // ⌘Enter stops the current turn and starts over with this message.
   const working = task.status === 'running' || task.status === 'starting';
@@ -1296,7 +1326,7 @@ function Composer({
       >
         <AttachmentStrip items={attach.items} busy={attach.busy} onRemove={attach.remove} />
         <div className="composer-field">
-        <MentionHighlight text={draft} box={box} />
+        <MentionHighlight text={draft} box={box} isAgent={isAgent} />
         <textarea
           ref={box}
           className="composer-input"

@@ -9,7 +9,7 @@ import { Alias, Icon, labelOf, liveSubtasks, ProviderTag, StatusDot, SubtaskDots
 import { RetryNotice } from './Retry';
 import { t } from '../i18n';
 import { AttachmentStrip, useAttachments } from './Attachments';
-import { dropMentions } from './Mentions';
+import { agentMention, dropMentions } from './Mentions';
 import { useDraft } from '../drafts';
 import { menuAt, useContextMenu } from './ContextMenu';
 import { agentMenuItems, EditableAgentName, type AgentField } from './AgentMenu';
@@ -64,7 +64,10 @@ export function AgentCard({
   const attach = useAttachments(async (files) => {
     const text = await dropMentions(task.taskId, files);
     if (text) setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + text);
-  }, task.taskId);
+  }, task.taskId, async (other) => {
+    const text = await agentMention(task.taskId, other);
+    setDraft((d) => (d && !/\s$/.test(d) ? `${d} ` : d) + text);
+  });
   const send = async (interrupt = false) => {
     const text = draft.trim();
     const images = attach.refs;

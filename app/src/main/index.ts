@@ -234,6 +234,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'btw:clear': (i: { taskId: string }) => workspace.clearBtw(i.taskId),
   // Typing a folder path in the project chooser: its subfolders, here or on a machine.
   'files:search': (i: { taskId: string; query: string }) => workspace.searchFiles(i.taskId, i.query),
+  'files:agent': (i: { taskId: string; otherTaskId: string }) => workspace.agentReference(i.taskId, i.otherTaskId),
   'files:dropped': (i: { taskId: string; paths: string[] }) => workspace.droppedFiles(i.taskId, i.paths),
   'fs:listDirs': (i: { dir: string; host?: string }) => workspace.listDirs(i.dir, i.host),
   'sessions:discoverHost': (i: { host: string }) => workspace.discoverHostSessions(i.host),

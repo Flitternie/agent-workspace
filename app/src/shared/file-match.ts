@@ -93,11 +93,13 @@ export function pathLike(ref: string): boolean {
 
 /**
  * The @-mentions in a message: @path or @"path with spaces", at the start or after a space or
- * bracket, path-like only. Trailing punctuation ("see @a.ts.") is not part of the path.
+ * bracket. Path-like ones are files; with `isAgent`, others that name an agent are that agent
+ * (@结账页方案, dropped from the sidebar). Trailing punctuation ("see @a.ts.") is not part of it.
  */
-export function splitMentions(text: string): Array<{ text: string; path?: string }> {
-  const out: Array<{ text: string; path?: string }> = [];
-  const re = /(^|[\s(（])@(?:"([^"\n]+)"|([^\s"@]+))/g;
+export function splitMentions(text: string, isAgent?: (ref: string) => boolean): Array<{ text: string; path?: string; agent?: string }> {
+  const out: Array<{ text: string; path?: string; agent?: string }> = [];
+  // An unquoted mention ends at a space or at Chinese punctuation ("@src/a.ts，问" ends before "，").
+  const re = /(^|[\s(（])@(?:"([^"\n]+)"|([^\s"@，。；：！？、（）「」]+))/g;
   let last = 0;
   for (const m of text.matchAll(re)) {
     let raw = m[3] ?? m[2];
@@ -109,11 +111,12 @@ export function splitMentions(text: string): Array<{ text: string; path?: string
         raw = raw.slice(0, -tail.length);
       }
     }
-    if (!pathLike(raw)) continue;
+    const file = pathLike(raw);
+    if (!file && !isAgent?.(raw)) continue;
     const start = (m.index ?? 0) + m[1].length;
     const token = m[0].slice(m[1].length, m[0].length - tail.length);
     if (start > last) out.push({ text: text.slice(last, start) });
-    out.push({ text: token, path: raw });
+    out.push(file ? { text: token, path: raw } : { text: token, agent: raw });
     last = start + token.length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });
@@ -121,11 +124,16 @@ export function splitMentions(text: string): Array<{ text: string; path?: string
 }
 
 /** A whole @-mention just before the caret (Backspace there removes it at once): its start, or undefined. */
-export function mentionBefore(text: string, caret: number): number | undefined {
-  const m = /(^|\s)(@(?:"[^"\n]+"|[^\s"@]+))$/.exec(text.slice(0, caret));
+export function mentionBefore(text: string, caret: number, isAgent?: (ref: string) => boolean): number | undefined {
+  const m = /(^|[\s，。；：！？、（）「」])(@(?:"[^"\n]+"|[^\s"@，。；：！？、（）「」]+))$/.exec(text.slice(0, caret));
   if (!m) return undefined;
   const ref = m[2].slice(1).replace(/^"|"$/g, '');
-  return pathLike(ref) ? caret - m[2].length : undefined;
+  return pathLike(ref) || isAgent?.(ref) ? caret - m[2].length : undefined;
+}
+
+/** An agent as it goes into a message: @name, quoted when it has spaces, then a space. */
+export function agentMentionText(name: string): string {
+  return /\s/.test(name) ? `@"${name}" ` : `@${name} `;
 }
 
 /**

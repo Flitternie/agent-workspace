@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { browsePath, mentionAt, mentionBefore, mentionText, splitMentions, type FileMatch } from '../../shared/file-match';
+import { agentMentionText, browsePath, mentionAt, mentionBefore, mentionText, splitMentions, type FileMatch } from '../../shared/file-match';
 import { call } from '../api';
 import { t } from '../i18n';
 import { Icon } from './bits';
@@ -10,7 +10,7 @@ import { Icon } from './bits';
  * puts @path in the message. Claude Code reads a mentioned file in with the message; Codex reads it
  * with its tools.
  */
-export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void, opts: { browseOnly?: boolean } = {}) {
+export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void, opts: { browseOnly?: boolean; isAgent?: (ref: string) => boolean } = {}) {
   const [at, setAt] = useState<{ start: number; query: string } | null>(null);
   const [items, setItems] = useState<FileMatch[]>([]);
   const [active, setActive] = useState(0);
@@ -113,7 +113,7 @@ export function useMentions(taskId: string | undefined, box: RefObject<HTMLTextA
   const onBackspace = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     const el = e.currentTarget;
     if (e.key !== 'Backspace' || open || e.metaKey || e.altKey || el.selectionStart !== el.selectionEnd) return false;
-    const start = mentionBefore(el.value, el.selectionStart);
+    const start = mentionBefore(el.value, el.selectionStart, opts.isAgent);
     if (start === undefined) return false;
     e.preventDefault();
     caretAfter.current = start;
@@ -189,7 +189,7 @@ export function MentionMenu({ m }: { m: ReturnType<typeof useMentions> }) {
  * the box itself (the box stays a plain textarea: voice drafts, suggestions and IME keep working).
  * It copies the box's text metrics and follows its scrolling.
  */
-export function MentionHighlight({ text, box }: { text: string; box: RefObject<HTMLTextAreaElement | null> }) {
+export function MentionHighlight({ text, box, isAgent }: { text: string; box: RefObject<HTMLTextAreaElement | null>; isAgent?: (ref: string) => boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -205,7 +205,7 @@ export function MentionHighlight({ text, box }: { text: string; box: RefObject<H
   if (!text.includes('@')) return null;
   return (
     <div className="composer-mirror" ref={ref} aria-hidden>
-      {splitMentions(text).map((p, i) => (p.path ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+      {splitMentions(text, isAgent).map((p, i) => (p.path || p.agent ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
       {'\u200b'}
     </div>
   );
@@ -217,4 +217,13 @@ export async function dropMentions(taskId: string, files: File[]): Promise<strin
   if (!paths.length) return '';
   const found = await call('files:dropped', { taskId, paths });
   return found.map((m) => mentionText({ ...m, dir: false })).join('');
+}
+
+/**
+ * Another agent dropped on an agent's box, as a short @name. Checked now (same machine, a saved
+ * conversation); the message reaches the CLI with the file its conversation is in.
+ */
+export async function agentMention(taskId: string, otherTaskId: string): Promise<string> {
+  const m = await call('files:agent', { taskId, otherTaskId });
+  return agentMentionText(m.name);
 }

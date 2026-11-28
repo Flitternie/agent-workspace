@@ -94,6 +94,7 @@ export interface Outputs {
   'btw:clear': void;
   'files:search': FileMatch[];
   'files:dropped': FileMatch[];
+  'files:agent': FileMatch & { name: string };
   'fs:listDirs': { dir: string; names: string[] };
   'sessions:discoverHost': NativeSessionInfo[];
   'task:importSession': Task;
