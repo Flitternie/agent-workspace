@@ -3,7 +3,16 @@ import { PREVIEW_EXTENSIONS, previewKind } from '../../shared/preview';
 import { splitMentions } from '../../shared/file-match';
 
 /** Set by the agent view: what a click on a file (a tool row's Preview, a path in a message) does. */
-export const PreviewContext = createContext<{ preview(path: string, opts?: { line?: number }): void; openExternal?: (path: string) => void } | null>(null);
+export const PreviewContext = createContext<{
+  preview(path: string, opts?: { line?: number }): void;
+  openExternal?: (path: string) => void;
+  /** The agent whose conversation a mentioned file holds (an agent dropped on the box), by name. */
+  agentFor?: (path: string) => string | undefined;
+  /** Another agent mentioned by name (@结账页方案), by its name as shown; undefined for anything else. */
+  agentNamed?: (ref: string) => string | undefined;
+  /** Opens that agent's page (an agent mentioned by name, or the file its conversation is in). */
+  openAgent?: (refOrPath: string) => void;
+} | null>(null);
 
 // File paths in agent messages become preview links: absolute (/…), home (~/…) and
 // relative (docs/a.md, ./a.md, ../a.md, src/app.ts) paths to a file the preview can show
@@ -16,6 +25,8 @@ export const PreviewContext = createContext<{ preview(path: string, opts?: { lin
 export const FILE_SCHEME = 'amw-file:';
 /** @-mentions the user wrote (shown as file chips); also never a real URL. */
 export const MENTION_SCHEME = 'amw-mention:';
+/** Another agent the user mentioned by name; never a real URL. */
+export const AGENT_SCHEME = 'amw-agent:';
 
 // Longest first, so "tsx" is not read as "ts" followed by a letter.
 const EXT = `(?:${[...PREVIEW_EXTENSIONS].sort((a, b) => b.length - a.length).join('|')})`;
@@ -87,7 +98,7 @@ export function remarkFilePaths() {
     if (!node.children) return;
     const next: Node[] = [];
     for (const child of node.children) {
-      if (child.type === 'link' && child.url?.startsWith(MENTION_SCHEME)) {
+      if (child.type === 'link' && (child.url?.startsWith(MENTION_SCHEME) || child.url?.startsWith(AGENT_SCHEME))) {
         next.push(child);
       } else if (child.type === 'link') {
         const target = fileTarget(child.url ?? '');
@@ -114,14 +125,18 @@ export function remarkFilePaths() {
  * remark plugin for what the user wrote: @path mentions (as typed with the @ list) become chips.
  * Runs before remarkFilePaths, which leaves them alone; code stays as it is.
  */
-export function remarkMentions() {
+export function remarkMentions(isAgent?: (ref: string) => boolean) {
   const walk = (node: Node) => {
     if (!node.children) return;
     const next: Node[] = [];
     for (const child of node.children) {
       if (child.type === 'text' && child.value) {
-        for (const piece of splitMentions(child.value))
-          next.push(piece.path ? { type: 'link', url: MENTION_SCHEME + encodeURIComponent(piece.path), children: [{ type: 'text', value: piece.text }] } : { type: 'text', value: piece.text });
+        for (const piece of splitMentions(child.value, isAgent))
+          next.push(
+            piece.path || piece.agent
+              ? { type: 'link', url: (piece.agent ? AGENT_SCHEME + encodeURIComponent(piece.agent) : MENTION_SCHEME + encodeURIComponent(piece.path!)), children: [{ type: 'text', value: piece.text }] }
+              : { type: 'text', value: piece.text },
+          );
       } else {
         if (child.type !== 'code' && child.type !== 'inlineCode' && child.type !== 'link') walk(child);
         next.push(child);

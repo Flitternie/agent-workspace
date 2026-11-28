@@ -2,6 +2,7 @@ import { CodexUsage, codexLimits } from './usage';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { CodexRemoteControl, ForkPoint, ModelOption, AttentionQuestion, NativeSessionInfo, PermissionMode, ProviderCapabilities, TransientKind } from '../../shared/types';
@@ -13,6 +14,7 @@ import { z } from 'zod';
 import { privateFolders } from '../private-folders';
 import { codexFileDiffs, codexItem, codexPlan } from './codex-content';
 import { CodexSubtasks } from './subtasks';
+import { findSessionFile } from './session-file';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
 import { cleanUserText } from './user-text';
 
@@ -397,6 +399,11 @@ export class CodexAdapter implements ProviderAdapter {
     // Remote Control pairs with the ChatGPT app, so it needs a ChatGPT login (not an API key).
     const remoteControl = !!auth?.loggedIn && /chatgpt/i.test(auth.method ?? '');
     return { ...this.describe(!!path, version, auth, path ? `codex app-server (stdio) → ${path}. Uses your existing Codex login.` : 'Codex CLI not found on PATH.'), remoteControl };
+  }
+
+  async sessionFile(nativeSessionId: string, host?: string): Promise<string | undefined> {
+    const local = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions');
+    return findSessionFile(local, '"${CODEX_HOME:-$HOME/.codex}/sessions"', nativeSessionId, 4, host);
   }
 
   async discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]> {

@@ -212,6 +212,8 @@ export interface ProviderAdapter {
   oneShot?(system: string, prompt: string): Promise<string>;
   /** The user's earlier prompts in a saved session, oldest first: the session can be forked just before each. */
   forkPoints?(nativeSessionId: string, cwd: string): Promise<ForkPoint[]>;
+  /** The file the CLI keeps a saved conversation in (on `host`, as a path there), for another agent to read. */
+  sessionFile?(nativeSessionId: string, host?: string): Promise<string | undefined>;
   /**
    * Copies a saved session (all of it, or up to and including `upToMessageId`) into a new
    * session and returns its id; the original is left as it is. `cwd` is where the original is

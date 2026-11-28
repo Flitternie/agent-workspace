@@ -52,7 +52,8 @@ import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from '.
 import { run } from './util/exec';
 import { DISTILL_SYSTEM, distillPrompt, parseDistill } from './memory-distill';
 import { chapterDue, chapterStart, IDLE_NEW } from '../shared/chapters';
-import { browsePath, matchFiles, type FileMatch } from '../shared/file-match';
+import { browsePath, matchFiles, mentionText, splitMentions, type FileMatch } from '../shared/file-match';
+import { agentRefName, findAgentIn } from '../shared/agent-ref';
 import { MemoryWriteback, notesFor, ownerOf, plan as planWriteback, renderNotes, type BackupEntry, type TargetKind, type TargetState, type WriteResult } from './memory-writeback';
 import { parseRemoteScan, remoteScanScript, scanLocal, SkillLibrary, type FoundSkill } from './skills';
 import { loadKeychainKeys, openInTerminal, shq, sshConnect, sshError, sshHostEntries, sshHosts, sshProbe, sshRun, unlockKeys, type SshHostEntry } from './util/ssh';
@@ -1428,6 +1429,42 @@ export class Workspace {
     return matchFiles(await entry.files, query);
   }
 
+  /** Each @agent in a message, as `@<its session file> (<name>'s conversation)`; left as written when it cannot be pointed to. */
+  private async expandAgentMentions(task: Task, text: string): Promise<string> {
+    if (!text.includes('@')) return text;
+    const tasks = this.store.data.tasks;
+    const parts = splitMentions(text, (ref) => !!findAgentIn(tasks, ref));
+    if (!parts.some((p) => p.agent)) return text;
+    const out: string[] = [];
+    for (const p of parts) {
+      const other = p.agent ? findAgentIn(tasks, p.agent) : undefined;
+      const ref = other && other !== task ? await this.agentReference(task.taskId, other.taskId).catch(() => undefined) : undefined;
+      out.push(ref ? `${mentionText(ref).trimEnd()} (${other!.name}'s conversation)` : p.text);
+    }
+    return out.join('');
+  }
+
+  /**
+   * Another agent dropped on an agent's message box: the file its CLI keeps its conversation in,
+   * as an @-mention, for this agent to read itself (nothing is copied or summarised). Both must be on
+   * the same machine, since the path is read where the agent runs.
+   */
+  async agentReference(taskId: string, otherTaskId: string): Promise<FileMatch & { name: string }> {
+    const task = this.task(taskId);
+    const other = this.task(otherTaskId);
+    if (other === task) throw new Error('That is this agent itself.');
+    const where = (t: Task) => (t.host ? t.host : 'this computer');
+    if ((other.host ?? '') !== (task.host ?? '')) throw new Error(`${other.alias} runs on ${where(other)} and ${task.alias} on ${where(task)}; its conversation can only be read on the same machine.`);
+    const nativeSessionId = this.currentSession(other)?.nativeSessionId;
+    if (!nativeSessionId) throw new Error(`${other.alias} has no saved conversation yet.`);
+    const adapter = this.opts.adapters[other.provider];
+    const file = adapter?.sessionFile ? await adapter.sessionFile(nativeSessionId, other.host) : undefined;
+    if (!file) throw new Error(`${other.alias}'s conversation is not kept in a file that can be pointed to.`);
+    const home = homedir();
+    const path = !other.host && (file === home || file.startsWith(home + sep)) ? `~${file.slice(home.length)}`.split(sep).join('/') : file;
+    return { path, dir: false, name: agentRefName(this.store.data.tasks, other) };
+  }
+
   /**
    * Files dropped on an agent's message box, as @-mentions: relative to the agent's folder when
    * inside it, else from ~ or /, a folder ending in /. The agent reads them where it is, so an agent
@@ -1902,7 +1939,9 @@ export class Workspace {
       const openNote = this.openRequestNote(task, opts.openRequest);
       // An agent continuing a conversation from another CLI gets it with its first message.
       const carried = this.store.data.carried?.[taskId];
-      const message = [handover, update, ...ran, openNote, text].filter(Boolean).join('\n\n');
+      // An agent mentioned by name (@结账页方案, dropped from the sidebar) reaches the CLI as the file its
+      // conversation is in, to read; the conversation here keeps the short name.
+      const message = [handover, update, ...ran, openNote, await this.expandAgentMentions(task, text)].filter(Boolean).join('\n\n');
       const delivery = await live.session.send(carried ? conversationCopy(carried, `${CARRY_NOTE}\n\n${message}`) : message, {
         interrupt: opts.interrupt,
         ...(images ? { images: images.map((r) => ({ path: this.attachments.path(r.id), mediaType: r.mediaType })) } : {}),
@@ -3363,12 +3402,7 @@ export class Workspace {
   }
 
   findAgent(name: string): Task | undefined {
-    const n = name.trim().toLowerCase();
-    const tasks = this.store.data.tasks;
-    const exact = tasks.find((t) => t.alias.toLowerCase() === n || `${t.name} ${t.alias}`.toLowerCase() === n || `${t.name}${t.alias}`.toLowerCase() === n);
-    if (exact) return exact;
-    const byRole = tasks.filter((t) => t.name.toLowerCase() === n);
-    return byRole.length === 1 ? byRole[0] : undefined;
+    return findAgentIn(this.store.data.tasks, name);
   }
 
   transcriptText(taskId: string, limit: number): string {

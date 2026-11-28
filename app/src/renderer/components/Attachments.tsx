@@ -60,7 +60,10 @@ export interface Attachment {
  * A message box's images until it is sent: add (paste, drop, pick), remove, clear. Other files are
  * not attached: `onOtherFiles` mentions them instead (the agent reads files where it runs).
  */
-export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>, taskId?: string) {
+/** What a dragged agent row carries (Sidebar): its task id. */
+export const AGENT_DRAG = 'application/x-amw-agent';
+
+export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>, taskId?: string, onAgent?: (otherTaskId: string) => Promise<void>) {
   // With an agent given, the images wait with its unsent message: leaving the page and coming back
   // (or going to its Overview tile) finds them still there. Kept through a ref as well as state so an
   // image finishing after the box is gone, or a send clearing it, still updates what is kept.
@@ -120,7 +123,8 @@ export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>, 
     void add(files);
   };
   const [dragging, setDragging] = useState(false);
-  const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  // Files, or (when the box takes them) an agent dragged from the sidebar.
+  const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).some((x) => x === 'Files' || (onAgent && x === AGENT_DRAG));
   const dropProps = {
     onDragOver: (e: DragEvent) => {
       if (!hasFiles(e)) return;
@@ -134,6 +138,12 @@ export function useAttachments(onOtherFiles?: (files: File[]) => Promise<void>, 
       if (!hasFiles(e)) return;
       e.preventDefault();
       setDragging(false);
+      const agent = onAgent ? e.dataTransfer.getData(AGENT_DRAG) : '';
+      if (agent) {
+        setError('');
+        void onAgent!(agent).catch((err) => setError(errorText(err)));
+        return;
+      }
       void add(Array.from(e.dataTransfer.files));
     },
   };

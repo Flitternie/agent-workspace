@@ -7,7 +7,7 @@ import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethr
 import remarkGfm from 'remark-gfm';
 import { t } from '../i18n';
 import { Icon } from './bits';
-import { FILE_SCHEME, MENTION_SCHEME, parseFileHref, PreviewContext, remarkFilePaths, remarkMentions } from './filePaths';
+import { AGENT_SCHEME, FILE_SCHEME, MENTION_SCHEME, parseFileHref, PreviewContext, remarkFilePaths, remarkMentions } from './filePaths';
 import { previewKind } from '../../shared/preview';
 
 // Agent text is untrusted Markdown (GFM: tables, task lists, strikethrough).
@@ -18,17 +18,32 @@ import { previewKind } from '../../shared/preview';
 
 const SAFE_URL = /^(https?:|mailto:)/i;
 // File paths become FILE_SCHEME links (remarkFilePaths); they open the preview, never navigate.
-const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) || url.startsWith(MENTION_SCHEME) ? url : '');
+const urlTransform = (url: string) => (SAFE_URL.test(url) || url.startsWith(FILE_SCHEME) || url.startsWith(MENTION_SCHEME) || url.startsWith(AGENT_SCHEME) ? url : '');
+
+/** Another agent the user mentioned by name: a chip with its name, as the file mention of its conversation shows. */
+function AgentChip({ refName }: { refName: string }) {
+  const ctx = useContext(PreviewContext);
+  const name = ctx?.agentNamed?.(refName) ?? refName;
+  const open = ctx?.openAgent && ctx.agentNamed?.(refName) ? () => ctx.openAgent!(refName) : undefined;
+  return (
+    <button type="button" className={`mention-chip${open ? '' : ' static'}`} title={open ? t('Open {name}', { name }) : name} data-testid="mention-chip" data-agent={refName} onClick={open} tabIndex={open ? 0 : -1}>
+      <Icon name="agent" size={11} />
+      <span>{name}</span>
+    </button>
+  );
+}
 
 /** A file or folder the user mentioned with @: a chip with its name (the full path on hover); a file the preview can show opens on click. */
 function MentionChip({ path }: { path: string }) {
   const ctx = useContext(PreviewContext);
   const dir = path.endsWith('/');
-  const name = path.replace(/\/$/, '').split('/').pop() || path;
-  const open = ctx && !dir && previewKind(path) ? () => ctx.preview(path) : undefined;
+  // Another agent's conversation shows as that agent; the file is what the agent reads.
+  const agent = ctx?.agentFor?.(path);
+  const name = agent ?? (path.replace(/\/$/, '').split('/').pop() || path);
+  const open = agent ? (ctx?.openAgent ? () => ctx.openAgent!(path) : undefined) : ctx && !dir && previewKind(path) ? () => ctx.preview(path) : undefined;
   return (
-    <button type="button" className={`mention-chip${open ? '' : ' static'}`} title={path} data-testid="mention-chip" data-path={path} onClick={open} tabIndex={open ? 0 : -1}>
-      <Icon name={dir ? 'folder' : 'file'} size={11} />
+    <button type="button" className={`mention-chip${open ? '' : ' static'}`} title={agent ? t('Open {name}', { name: agent }) : path} data-testid="mention-chip" data-path={path} onClick={open} tabIndex={open ? 0 : -1}>
+      <Icon name={agent ? 'agent' : dir ? 'folder' : 'file'} size={11} />
       <span>{name}</span>
     </button>
   );
@@ -74,7 +89,9 @@ function CodeBlock({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
 const components: Components = {
   pre: CodeBlock,
   a: ({ href, children }) =>
-    href?.startsWith(MENTION_SCHEME) ? (
+    href?.startsWith(AGENT_SCHEME) ? (
+      <AgentChip refName={decodeURIComponent(href.slice(AGENT_SCHEME.length))} />
+    ) : href?.startsWith(MENTION_SCHEME) ? (
       <MentionChip path={decodeURIComponent(href.slice(MENTION_SCHEME.length))} />
     ) : href?.startsWith(FILE_SCHEME) ? (
       <FileLink {...parseFileHref(href)}>{children}</FileLink>
@@ -116,7 +133,7 @@ function remarkHtmlAsText() {
 const cjk = [remarkCjkFriendly, remarkCjkFriendlyGfmStrikethrough];
 const remarkPlugins = [remarkGfm, ...cjk, remarkBreaks, remarkHtmlAsText, remarkFilePaths];
 /** What the user wrote: their @-mentions show as chips too. */
-const userRemarkPlugins = [remarkGfm, ...cjk, remarkBreaks, remarkHtmlAsText, remarkMentions, remarkFilePaths];
+const userRemarkPlugins = (isAgent?: (ref: string) => boolean) => [remarkGfm, ...cjk, remarkBreaks, remarkHtmlAsText, [remarkMentions, isAgent], remarkFilePaths] as never;
 const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
 
 /** Streaming text re-renders at most this often; the final text renders at once. */
@@ -149,6 +166,11 @@ function useThrottled(text: string, streaming: boolean): string {
  */
 export const Markdown = memo(function Markdown({ text, streaming = false, children, image, mentions = false }: { text: string; streaming?: boolean; children?: ReactNode; image?: (src: string, alt: string) => ReactNode; mentions?: boolean }) {
   const shown = useThrottled(text, streaming);
+  // The agents' names change rarely; the check reads the latest through a ref so the plugins stay put.
+  const ctx = useContext(PreviewContext);
+  const named = useRef(ctx?.agentNamed);
+  named.current = ctx?.agentNamed;
+  const userPlugins = useMemo(() => userRemarkPlugins((ref) => !!named.current?.(ref)), []);
   const [comps, transform] = useMemo(
     () =>
       image
@@ -158,7 +180,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, childr
   );
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={mentions ? userRemarkPlugins : remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={comps} urlTransform={transform}>
+      <ReactMarkdown remarkPlugins={mentions ? userPlugins : remarkPlugins} rehypePlugins={streaming ? [] : rehypePlugins} components={comps} urlTransform={transform}>
         {shown}
       </ReactMarkdown>
       {children}

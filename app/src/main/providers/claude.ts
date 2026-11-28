@@ -18,6 +18,7 @@ import { privateFolders } from '../private-folders';
 import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteExitError, remoteSessionStore, remoteSpawn, scanRemoteSessions, type RemoteExit } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { ClaudeSubtasks } from './subtasks';
+import { findSessionFile } from './session-file';
 import { cleanUserText } from './user-text';
 import type { WorkspaceTool } from '../main-agent';
 import type { ApprovalResponse, Delivery, ForkSessionOpts, HistoryImage, ImageInput, ProviderAdapter, ProviderEvent, ProviderSession, StartArgs } from './types';
@@ -195,6 +196,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     const [version, status = ''] = r.stdout.split('__AMW_STATUS__');
     const code = Number(/__AMW_CODE__(\d+)/.exec(status)?.[1] ?? 1);
     return describe(found, version.trim() || undefined, found ? authState(code, status.replace(/__AMW_CODE__\d+/, '')) : undefined, found ? `Agent SDK → claude over SSH on ${host}, with the login and settings there.` : `Claude Code not found on ${host} (in its login shell's PATH).`);
+  }
+
+  async sessionFile(nativeSessionId: string, host?: string): Promise<string | undefined> {
+    const local = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
+    return findSessionFile(local, '~/.claude/projects', nativeSessionId, 2, host);
   }
 
   async discoverSessions(filter: { cwd?: string; limit?: number; host?: string }): Promise<NativeSessionInfo[]> {
