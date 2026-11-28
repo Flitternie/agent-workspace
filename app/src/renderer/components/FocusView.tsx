@@ -181,6 +181,7 @@ export function FocusView({ snapshot, task, transcript, now, onOpen }: { snapsho
     jumpedAt.current = Date.now();
     setCurrentTask(mapTasks.find((x) => x.turnIds.includes(turnId))?.startItemId ?? null);
     const el = threadRef.current?.querySelector<HTMLElement>(`.msg.user[data-item-id="${turnId}"]`);
+    window.dispatchEvent(new Event('amw:transcript-leave-end'));
     el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   /**
@@ -906,10 +907,28 @@ const Transcript = memo(function Transcript({ items, main, task, snapshot }: { i
     const el = ref.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [task.taskId]);
+  // A message the user just sent: back to the end, following what the agent does with it.
+  const lastSent = [...items].reverse().find((i) => i.role === 'user' && i.via !== 'main')?.id;
+  const seenSent = useRef(lastSent);
   useLayoutEffect(() => {
     const el = ref.current;
+    if (lastSent !== seenSent.current) {
+      seenSent.current = lastSent;
+      stick.current = true;
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
+  // Only the reader scrolling up leaves the end: a wheel, a touch, the scrollbar or a key, just before
+  // the scroll. Scrolls the view makes itself (keeping to the end while content grows, code
+  // highlighted a moment later) never do, however far they move.
+  const userScrolledAt = useRef(0);
+  const byUser = () => (userScrolledAt.current = Date.now());
+  // A jump elsewhere (the session map) is the reader's too.
+  useEffect(() => {
+    const leave = () => (stick.current = false);
+    window.addEventListener('amw:transcript-leave-end', leave);
+    return () => window.removeEventListener('amw:transcript-leave-end', leave);
+  }, []);
   // Also when the size changes (the preview opens or is resized, the window, images loading):
   // a conversation that was at its end stays at its end.
   useEffect(() => {
@@ -1021,9 +1040,15 @@ const Transcript = memo(function Transcript({ items, main, task, snapshot }: { i
       className="transcript"
       ref={ref}
       data-testid="transcript"
+      onWheel={byUser}
+      onTouchMove={byUser}
+      onPointerDown={byUser}
+      onKeyDown={byUser}
       onScroll={(e) => {
         const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        if (atEnd) stick.current = true;
+        else if (Date.now() - userScrolledAt.current < 800) stick.current = false;
       }}
     >
       <div className="transcript-inner" ref={inner}>
