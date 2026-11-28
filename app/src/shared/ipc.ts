@@ -40,6 +40,7 @@ const researchNode = z.object({
   results: z.array(z.object({ metric: z.string().min(1).max(200), dataset: z.string().max(200).optional(), value: z.number() })).max(2000).optional(),
   resultAt: z.string().max(40).optional(),
   findings: z.array(z.object({ id, text: text, by: z.string().max(200).optional(), at: z.string().max(40) })).max(200).optional(),
+  provider: agentProvider.optional(),
   createdAt: z.string().max(40),
 });
 const researchDoc = z.object({
@@ -48,7 +49,7 @@ const researchDoc = z.object({
   goal: text,
   leadTaskId: id.optional(),
   color: z.number().int().min(0).max(31).optional(),
-  policy: z.object({ mode: z.enum(['auto', 'direction', 'review', 'collaborative']).optional(), autoNotes: z.boolean().optional(), summaryEvery: z.number().min(0).max(100_000).optional() }).optional(),
+  policy: z.object({ mode: z.enum(['auto', 'direction', 'review', 'collaborative']).optional(), autoNotes: z.boolean().optional(), summaryEvery: z.number().min(0).max(100_000).optional(), provider: agentProvider.optional(), approvals: z.enum(['user', 'lead']).optional(), extraDirs: z.array(z.string().max(500)).max(10).optional() }).optional(),
   endMetric: researchMetric.optional(),
   nodes: z.array(researchNode).max(5000),
   evidence: z.array(z.object({ id, kind: z.enum(['e2e', 'ablation']), title: z.string().max(300), value: z.number(), delta: z.number(), aspect: id.optional(), at: z.string().max(40) })).max(1000),

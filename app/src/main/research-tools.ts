@@ -46,6 +46,8 @@ export interface ResearchHost {
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
   findTaskById(taskId: string): Task | undefined;
+  /** The lead's decision on a permission request of one of its agents, delegated to it. */
+  researchApprove(leadTaskId: string, attentionId: string, decision: 'allow' | 'deny' | 'ask_user', note?: string): Promise<string>;
   /** A conversation as text (its recent items): for the lead bringing conversations into the research. */
   transcriptText(taskId: string, limit: number): string;
   researchNotes(projectId: string): ResearchNotes;
@@ -160,6 +162,11 @@ export function roleInstructions(doc: ResearchDoc, role: 'lead' | 'aspect' | 'ex
     zh ? '## 你在研究里的角色（由 Agent Workspace 提供）' : '## Your place in a research (provided by Agent Workspace)',
     who,
     role === 'experiment' ? '' : rules(role, lang),
+    role === 'lead' && doc.policy?.approvals === 'lead'
+      ? zh
+        ? '这个研究里各 agent 的权限请求由你决定（会以「【权限请求 …】」发给你）：在研究范围内、可恢复的操作用 research_approve 批准；不合理的拒绝并说明理由；有风险、不可逆、超出研究范围或要花钱的交给用户（ask_user）。尽快处理，对方在等。'
+        : 'You decide this research’s agents’ permission requests (they reach you as "[Permission request …]"): allow what is within the research and can be undone, with research_approve; deny what makes no sense, saying why; pass to the user (ask_user) what is risky, irreversible, outside the research or spends money. Decide promptly: the agent waits.'
+      : '',
     memoryIn(notes, lang),
     replyIn(lang),
   ]
@@ -510,6 +517,15 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
       },
     },
     {
+      name: 'research_approve',
+      description: 'Decides a permission request one of the research’s agents made, when the research leaves them to you (they reach you as "[Permission request <id>]"): allow, deny (say why: the agent is told, so it can do otherwise), or ask_user when it is not yours to decide (risky, irreversible, outside the research, spending money). Decide promptly: the agent waits, and an undecided request goes to the user after a while.',
+      schema: z.object({ request: z.string().describe('The id in the request.'), decision: z.enum(['allow', 'deny', 'ask_user']), note: z.string().max(1000).optional() }),
+      run: async (a) => {
+        if (caller.kind !== 'agent') throw new Error('Permission requests are decided by a research’s lead.');
+        return host.researchApprove(caller.taskId, String(a.request), a.decision as 'allow' | 'deny' | 'ask_user', a.note ? String(a.note) : undefined);
+      },
+    },
+    {
       name: 'research_memory',
       description: 'The research’s own memory (memory.md in .research/): rules, definitions and decisions the user set that hold for this research only (e.g. how a label is defined, what not to do, where things go). Every agent of the research is given it whole. The lead keeps it: add one entry, or rewrite it whole (markdown). With nothing given it returns it.',
       schema: z.object({ ...projectArg, add: z.string().max(2000).optional().describe('One entry to add (a line, with why if it matters).'), markdown: z.string().max(20_000).optional().describe('The whole memory, replacing it.') }),
@@ -697,6 +713,8 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         summary_every_minutes: z.number().min(0).max(100_000).optional(),
         cli: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]).optional().describe('The CLI new agents start on (when the user wants one): for the research, or with aspect_id for that aspect (its agent and its experiments).'),
         aspect_id: z.string().optional(),
+        approvals: z.enum(['user', 'lead']).optional().describe('Who decides the agents’ permission requests: the user, or the lead (you; your own still go to the user).'),
+        extra_dirs: z.array(z.string().max(500)).max(10).optional().describe('Absolute folders the agents also work in besides their own (scratch space, data on another disk): edits there need no approval. [] clears.'),
       }),
       run: async (a) => {
         const { projectId, doc: loaded } = await load(a.project);
@@ -707,7 +725,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
           if (!asp) throw new Error(`No aspect [${String(a.aspect_id)}].`);
           doc = updateNode(doc, asp.id, { provider: a.cli as CodingProvider });
         }
-        const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}), ...(a.cli && !a.aspect_id ? { provider: a.cli as CodingProvider } : {}) };
+        const policy = { ...doc.policy, ...(a.mode ? { mode: a.mode as ResearchMode } : {}), ...(typeof a.auto_notes === 'boolean' ? { autoNotes: a.auto_notes } : {}), ...(typeof a.summary_every_minutes === 'number' ? { summaryEvery: a.summary_every_minutes } : {}), ...(a.cli && !a.aspect_id ? { provider: a.cli as CodingProvider } : {}), ...(a.approvals ? { approvals: a.approvals as 'user' | 'lead' } : {}), ...(Array.isArray(a.extra_dirs) ? { extraDirs: (a.extra_dirs as string[]).map((d) => d.trim()).filter((d) => d.startsWith('/') || d.startsWith('~/')) } : {}) };
         save(projectId, { ...doc, policy, updatedAt: new Date().toISOString() });
         // A change of mode reaches the agents already at work (their briefs said the old one).
         if (a.mode && a.mode !== (doc.policy?.mode ?? DEFAULT_MODE)) {
@@ -716,7 +734,7 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
             await host.researchTell(caller.kind === 'agent' ? caller.taskId : undefined, n.taskId!, `${zh ? '研究方式改了。' : 'How this research runs has changed. '}${modeText(policy.mode, host.language(), { lead: !!doc.leadTaskId })}`).catch(() => {});
           }
         }
-        return `Settings: mode ${policy.mode ?? DEFAULT_MODE}, notes reminders ${policy.autoNotes === false ? 'off' : 'on'}, summary every ${policy.summaryEvery ?? 30} min${policy.summaryEvery === 0 ? ' (never)' : ''}.`;
+        return `Settings: mode ${policy.mode ?? DEFAULT_MODE}, notes reminders ${policy.autoNotes === false ? 'off' : 'on'}, summary every ${policy.summaryEvery ?? 30} min${policy.summaryEvery === 0 ? ' (never)' : ''}, permission requests to the ${policy.approvals ?? 'user'}${policy.extraDirs?.length ? `, also working in ${policy.extraDirs.join(', ')} (from each agent's next start)` : ''}.`;
       },
     },
   );

@@ -126,6 +126,8 @@ export interface WorkspaceOptions {
   retry?: Partial<RetryPolicy>;
   /** A research's agent with nothing to do is disconnected after this long (it connects again when used). */
   researchIdleMs?: number;
+  /** A permission request left to a research's lead goes to the user if not decided in this long. */
+  delegateMs?: number;
   /** Home folder whose native memory files this computer's scan reads (tests); default $HOME. */
   home?: string;
   /** Replaces the CLIs' one-shot answers for background jobs (tests). */
@@ -1063,7 +1065,8 @@ export class Workspace {
       projects: d.projects,
       tasks: d.tasks,
       sessions: d.sessions,
-      attention: d.attention,
+      // A research agent's request its lead is deciding is the lead's for now, not the user's.
+      attention: d.attention.filter((a) => !(a.state === 'open' && a.delegatedTo)),
       memory: d.memory,
       memorySync: { running: this.memSync.running, last: d.memorySync },
       memoryShare: Object.fromEntries(Object.entries(d.settings.memoryLinks ?? {}).map(([h, l]) => [h, { ...l, ...this.shareResults.get(h), paused: this.writeback.targets(h).filter((t) => t.paused).map((t) => ({ kind: t.kind, why: t.paused! })) }])),
@@ -1779,6 +1782,8 @@ export class Workspace {
         // The tree, notes and views are changed through the research tools, never by editing the files; and a
         // research's agents never write the CLI's own memory (kept by folder, read by every session there):
         // what holds for the research goes in its memory (research_memory).
+        // Folders its research works in besides its own (scratch space on another disk).
+        ...(place && doc?.policy?.extraDirs?.length ? { additionalDirectories: doc.policy.extraDirs } : {}),
         ...(inResearch ? { denyEdit: ['**/.research/**', ...(task.researchAgent || manages || this.inAnyResearch(task.taskId) ? ['~/.claude/projects/**/memory/**', '~/.claude/**/CLAUDE.md', '~/.codex/**'] : [])] } : {}),
         skills,
         // As the interactive CLI has them (each use still asks first). The browser is the user's own
@@ -3302,11 +3307,76 @@ export class Workspace {
     }
   }
 
+  /** Requests a lead is deciding, given back to the user if it has not in time. */
+  private delegated = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * A research agent's permission request, when its research leaves them to its lead: sent to the lead to decide
+   * (research_approve) instead of being put to the user. Not the lead's own, nor a high-risk one; one the lead has
+   * not decided in a while goes to the user.
+   */
+  private delegateToLead(a: AttentionItem): boolean {
+    const task = this.findTask(a.taskId);
+    if (!task || a.highRisk || !a.providerRequestId) return false;
+    const place = this.researchPlace(task);
+    if (!place || place.role === 'lead') return false;
+    const doc = this.researchGet(place.id);
+    const lead = doc?.leadTaskId ? this.findTask(doc.leadTaskId) : undefined;
+    if (doc?.policy?.approvals !== 'lead' || !lead || lead === task) return false;
+    a.delegatedTo = lead.taskId;
+    const zh = this.language() === 'zh';
+    const what = [a.headline, ...(a.preview ?? []).flatMap((c) => (c.type === 'terminal' ? [`$ ${(c as { command?: string }).command ?? ''}`] : c.type === 'diff' ? [`(${(c as { diff?: { path?: string } }).diff?.path ?? 'file'})`] : []))].filter(Boolean).join('\n');
+    const text = zh
+      ? `【权限请求 ${a.id}】${task.alias}（${this.researchGet(place.id)?.nodes.find((n) => n.taskId === task.taskId)?.title ?? ''}）想要：\n${clip(what, 1500)}\n\n用 research_approve（request "${a.id}"）决定：allow 批准、deny 拒绝（说明理由，它会收到），拿不准就 ask_user 交给用户。`
+      : `[Permission request ${a.id}] ${task.alias} (${this.researchGet(place.id)?.nodes.find((n) => n.taskId === task.taskId)?.title ?? ''}) wants to:\n${clip(what, 1500)}\n\nDecide with research_approve (request "${a.id}"): allow, deny (say why; it is told), or ask_user when unsure.`;
+    void this.send(lead.taskId, text, 'text', { keepAsks: true }).then((r) => {
+      if (!r.ok) this.undelegate(a.id, `The lead could not be told: ${r.error ?? ''}`);
+    });
+    const timer = setTimeout(() => this.undelegate(a.id, 'The lead did not decide in time.'), this.opts.delegateMs ?? 10 * 60_000);
+    timer.unref?.();
+    this.delegated.set(a.id, timer);
+    return true;
+  }
+
+  /** A delegated request goes to the user after all (the lead asked, could not be reached, or took too long). */
+  private undelegate(attentionId: string, why: string): void {
+    clearTimeout(this.delegated.get(attentionId));
+    this.delegated.delete(attentionId);
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    if (!a || a.state !== 'open' || !a.delegatedTo) return;
+    a.delegatedTo = undefined;
+    this.appendSystem(a.taskId, `${this.language() === 'zh' ? '权限请求交给你决定' : 'Permission request passed to you'}: ${why}`);
+    this.changed();
+  }
+
+  /** The lead's decision on a request delegated to it (research_approve). */
+  async researchApprove(leadTaskId: string, attentionId: string, decision: 'allow' | 'deny' | 'ask_user', note?: string): Promise<string> {
+    const a = this.store.data.attention.find((x) => x.id === attentionId);
+    if (!a || a.delegatedTo !== leadTaskId) throw new Error(`No request ${attentionId} waiting on you.`);
+    if (a.state !== 'open') throw new Error(`Request ${attentionId} is already ${a.state}.`);
+    const lead = this.findTask(leadTaskId);
+    const zh = this.language() === 'zh';
+    if (decision === 'ask_user') {
+      this.undelegate(attentionId, zh ? `负责人 ${lead?.alias ?? ''} 交给你${note ? `：${note}` : ''}` : `the lead ${lead?.alias ?? ''} passed it on${note ? `: ${note}` : ''}`);
+      return 'Passed to the user.';
+    }
+    const opt = decision === 'allow' ? (a.options?.find((o) => o.kind === 'allow_once') ?? a.options?.find((o) => !declinedOption(o))) : (a.options?.find((o) => o.kind === 'reject_once') ?? a.options?.find((o) => declinedOption(o)));
+    if (!opt) throw new Error(`Request ${attentionId} has no ${decision} option; use ask_user.`);
+    clearTimeout(this.delegated.get(attentionId));
+    this.delegated.delete(attentionId);
+    await this.respondAttention(attentionId, opt.id);
+    this.appendSystem(a.taskId, zh ? `负责人 ${lead?.alias ?? ''}${decision === 'allow' ? '批准' : '拒绝'}了：${clip(a.headline, 200)}${note ? `（${note}）` : ''}` : `The lead ${lead?.alias ?? ''} ${decision === 'allow' ? 'allowed' : 'denied'}: ${clip(a.headline, 200)}${note ? ` (${note})` : ''}`);
+    // A refusal's reason reaches the agent, so it can do otherwise.
+    if (decision === 'deny' && note) await this.send(a.taskId, zh ? `【来自 ${lead?.alias ?? '负责人'}】没有批准「${clip(a.headline, 120)}」：${note}` : `[From ${lead?.alias ?? 'the lead'}] Not allowed (${clip(a.headline, 120)}): ${note}`, 'text', { keepAsks: true }).catch(() => {});
+    return decision === 'allow' ? 'Allowed.' : 'Denied.';
+  }
+
   private addAttention(a: Omit<AttentionItem, 'id' | 'state' | 'createdAt'>): AttentionItem {
     // One error per agent: the latest says what is wrong now.
     if (a.kind === 'error') for (const o of this.store.data.attention) if (o.taskId === a.taskId && o.state === 'open' && o.kind === 'error') this.closeAttention(o, 'resolved', 'Superseded by a newer error.');
     const item: AttentionItem = { ...a, id: `a-${randomUUID().slice(0, 8)}`, state: 'open', createdAt: now() };
     this.store.data.attention.push(item);
+    if (item.kind === 'approval' && this.delegateToLead(item)) return item;
     // Anything but a finished report needs the user: an agent they set aside comes back.
     const target = this.findTask(a.taskId);
     if (target && a.kind !== 'completion') target.setAside = undefined;

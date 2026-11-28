@@ -113,6 +113,10 @@ export interface ResearchPolicy {
   summaryEvery?: number;
   /** The CLI its agents start on (an aspect may have its own). */
   provider?: AgentProvider;
+  /** Who decides its agents' permission requests: the user (default), or its lead (the lead's own go to the user). */
+  approvals?: 'user' | 'lead';
+  /** Folders its agents also work in besides their own (scratch space, data on another disk): edits there are in their workspace. */
+  extraDirs?: string[];
 }
 export const DEFAULT_MODE: ResearchMode = 'review';
 

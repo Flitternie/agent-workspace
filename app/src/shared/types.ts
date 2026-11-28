@@ -264,6 +264,8 @@ export interface AttentionItem {
    * as they are not each in the sidebar), or the agents on a host whose connection was lost.
    */
   group?: string;
+  /** A research agent's permission request its lead decides (the lead's taskId): not shown to the user meanwhile. */
+  delegatedTo?: string;
   /** Who is in it, and what happened to each (lost: its host's connection, it carries on when it is back). */
   members?: Array<{ taskId: string; why: 'lost' | 'failed'; reason: string; host?: string }>;
   createdAt: string;

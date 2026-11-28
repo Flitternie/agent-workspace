@@ -732,7 +732,8 @@ class AcpSession implements ProviderSession {
           : agyAppend
             ? { _meta: { antigravity: { systemPrompt: { append: instructions } } } }
             : {};
-      const dirs = sessionCaps.additionalDirectories && native.additionalDirectories.length ? { additionalDirectories: native.additionalDirectories } : {};
+      const extra = [...native.additionalDirectories, ...(this.args.additionalDirectories ?? [])];
+      const dirs = sessionCaps.additionalDirectories && extra.length ? { additionalDirectories: [...new Set(extra)] } : {};
       const base = { cwd: this.args.cwd, mcpServers: [this.bridge?.server, this.toolBridge?.server].filter((x): x is NonNullable<typeof x> => !!x), ...systemPrompt, ...dirs };
       const resumeId = this.args.resumeNativeSessionId;
       let result: Rec | undefined;

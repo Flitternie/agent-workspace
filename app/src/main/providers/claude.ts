@@ -457,6 +457,7 @@ class ClaudeSession implements ProviderSession {
         // Never bypass. 'auto' is Claude Code's own classifier (as in the CLI); whatever it
         // will not approve, and everything in 'default', reaches canUseTool → the tile.
         permissionMode: CLAUDE_MODE[this.args.permissionMode ?? 'auto'],
+        ...(this.args.additionalDirectories?.length ? { additionalDirectories: this.args.additionalDirectories } : {}),
         ...(this.args.model ? { model: this.args.model } : {}),
         // Claude in Chrome, as `claude --chrome`: its browser tools (deferred until used) drive the user's Chrome.
         ...(this.args.chrome ? { extraArgs: { chrome: null } } : {}),

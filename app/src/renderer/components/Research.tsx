@@ -231,6 +231,19 @@ export function ResearchView({ snapshot, researchId, onOpenAgent }: { snapshot: 
         ],
       });
     }
+    // On the goal: who decides the agents' permission requests.
+    if (!n) {
+      const now = doc.policy?.approvals ?? 'user';
+      const set = (v: 'user' | 'lead') => void call('research:save', { researchId, doc: { ...doc, policy: { ...doc.policy, approvals: v }, updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err)));
+      items.push({
+        id: 'approvals',
+        label: t('Permission requests go to'),
+        items: [
+          { id: 'approvals-user', label: t('Me'), checked: now === 'user', onSelect: () => set('user') },
+          { id: 'approvals-lead', label: t('The research lead'), checked: now === 'lead', disabled: !doc.leadTaskId, onSelect: () => set('lead') },
+        ],
+      });
+    }
     if (task) items.push('-', { id: 'node-out', label: t('Take {alias} out of the research', { alias: task.alias }), onSelect: () => void call('research:save', { researchId, doc: { ...(n ? { ...doc, nodes: doc.nodes.map((x) => (x.id === n.id ? { ...x, taskId: undefined } : x)) } : { ...doc, leadTaskId: undefined }), updatedAt: new Date().toISOString() } }).catch((err) => setError(errorText(err))) });
     if (items.length) menu.open(menuAt(e, items, 'research-node-menu'));
   };

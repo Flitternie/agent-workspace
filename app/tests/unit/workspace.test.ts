@@ -348,6 +348,46 @@ describe('which CLI a research’s agents use', () => {
   });
 });
 
+describe('a research’s lead deciding its agents’ permission requests', () => {
+  it('when the research leaves them to the lead: the lead is asked, not the user; it allows, denies with a reason, or passes it on', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), 60) }, delegateMs: 60_000 });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    await ws.researchCreate(p.projectId, 'Tuning', '', false);
+    const lead = await ws.researchStartLead(p.projectId, 'Lay it out.');
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_settings.run({ approvals: 'lead', extra_dirs: ['/data/scratch'] });
+    expect(ws.researchGet(p.projectId)!.policy).toMatchObject({ approvals: 'lead', extraDirs: ['/data/scratch'] });
+    await main.research_add.run({ type: 'aspect', title: 'Data' });
+    await main.research_add.run({ type: 'aspect', title: 'Model' });
+    const [d, m] = ws.researchGet(p.projectId)!.nodes;
+    const ask = async (node: string, command: string) => {
+      const t = await ws.createTask({ projectId: p.projectId, provider: 'mock', title: command, isolate: false, mockScript: `approval:${command}`, instruction: 'go' });
+      await main.research_attach.run({ as: 'aspect_agent', node_id: node, agent: t.alias });
+      await until(() => ws.snapshot().tasks.find((x) => x.taskId === t.taskId)!.status === 'waiting_for_user' || ws.transcript(lead.taskId).some((i) => i.role === 'user' && i.text.includes(command)), 5000);
+      return t;
+    };
+    const a = await ask(d.id, 'npm test');
+    // Not put to the user: the lead got it.
+    expect(ws.snapshot().attention.filter((x) => x.taskId === a.taskId && x.kind === 'approval' && x.state === 'open')).toEqual([]);
+    const msg = ws.transcript(lead.taskId).filter((i) => i.role === 'user').at(-1)!.text;
+    const id = /Permission request (a-[0-9a-f]+)/.exec(msg)![1];
+    const asLead = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: lead.taskId }).map((t) => [t.name, t]));
+    expect(await asLead.research_approve.run({ request: id, decision: 'allow', note: 'tests are fine' })).toBe('Allowed.');
+    await until(() => ws.transcript(a.taskId).some((i) => i.role === 'assistant' && /Ran `npm test`/.test(i.text)));
+    // Another: the lead passes it on, and it reaches the user.
+    const b = await ask(m.id, 'make bench');
+    const id2 = /Permission request (a-[0-9a-f]+)/.exec(ws.transcript(lead.taskId).filter((i) => i.role === 'user').at(-1)!.text)![1];
+    // Only the lead decides.
+    const asB = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: b.taskId }).map((t) => [t.name, t]));
+    await expect(asB.research_approve.run({ request: id2, decision: 'allow' })).rejects.toThrow(/waiting on you/);
+    await asLead.research_approve.run({ request: id2, decision: 'ask_user', note: 'costs GPU time' });
+    expect(ws.snapshot().attention.filter((x) => x.taskId === b.taskId && x.kind === 'approval' && x.state === 'open')).toHaveLength(1);
+  });
+});
+
 describe('moving a research’s agents into its folder', () => {
   it('agents started at the project root move with their conversation; the page counts them until then', async () => {
     const ws = open();

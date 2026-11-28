@@ -319,11 +319,13 @@ const MAIN_AGENT_CONFIG = {
  * permissions profile on top of `:workspace` that also keeps the private folders unreadable
  * (an explicit `sandbox` would override the profile).
  */
-function workspaceSandbox(cwd: string, host?: string): Record<string, unknown> {
+function workspaceSandbox(cwd: string, host?: string, extra: string[] = []): Record<string, unknown> {
   const deny = host ? [] : privateFolders(cwd);
-  if (!deny.length) return { sandbox: 'workspace-write' };
-  const filesystem = Object.fromEntries(deny.map((dir) => [dir, 'deny']));
-  return { config: { default_permissions: 'amw', permissions: { amw: { extends: ':workspace', filesystem } } } };
+  // Folders it also works in (a research's scratch space) are writable too.
+  const roots = extra.length ? { sandbox_workspace_write: { writable_roots: extra } } : {};
+  if (!deny.length) return { sandbox: 'workspace-write', ...(extra.length ? { config: roots } : {}) };
+  const filesystem = { ...Object.fromEntries(deny.map((dir) => [dir, 'deny'])), ...Object.fromEntries(extra.map((dir) => [dir, 'write'])) };
+  return { config: { default_permissions: 'amw', permissions: { amw: { extends: ':workspace', filesystem } }, ...roots } };
 }
 
 /**
@@ -601,7 +603,7 @@ class CodexSession implements ProviderSession {
       ? { approvalPolicy: 'never', sandbox: 'read-only', config: MAIN_AGENT_CONFIG, dynamicTools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) }
       : {
           ...codexPolicy(this.args.permissionMode ?? 'auto'),
-          ...workspaceSandbox(this.args.cwd, this.args.host),
+          ...workspaceSandbox(this.args.cwd, this.args.host, this.args.additionalDirectories),
           // A worker in a project with a research: those tools too (answered via item/tool/call).
           ...(this.args.extraTools?.length ? { dynamicTools: this.args.extraTools.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.schema) })) } : {}),
         };

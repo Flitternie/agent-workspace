@@ -131,6 +131,8 @@ export interface StartArgs {
   disallowedTools?: string[];
   /** Folders (glob paths) it may read but not write: changed through tools instead (.research/). */
   denyEdit?: string[];
+  /** Folders it also works in besides its own (a research's scratch space): edits there count as in its workspace. */
+  additionalDirectories?: string[];
   title: string;
 }
 
