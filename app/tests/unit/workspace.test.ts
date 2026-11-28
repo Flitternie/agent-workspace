@@ -388,6 +388,42 @@ describe('a research’s lead deciding its agents’ permission requests', () =>
   });
 });
 
+describe('a research’s lead and its CLIs’ plan limits', () => {
+  it('sees what each CLI has left and what its agents used; hears when one stops at its limit, and can move it to another CLI', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'amw-test-data-'));
+    const ws = new Workspace({ dataDir, adapters: { mock: new MockAdapter(join(dataDir, 'mock-sessions'), DELAY), codex: new MockAdapter(join(dataDir, 'other-sessions'), DELAY) } });
+    opened.push(ws);
+    const p = await ws.addProject(repo(), 'shop');
+    await ws.researchCreate(p.projectId, 'Tuning', '', false);
+    await ws.researchSetProvider(p.projectId, undefined, 'mock');
+    const lead = await ws.researchStartLead(p.projectId, 'Lay it out.');
+    const { researchTools } = await import('../../src/main/research-tools');
+    const main = Object.fromEntries(researchTools(ws, { kind: 'main' }).map((t) => [t.name, t]));
+    await main.research_add.run({ type: 'aspect', title: 'Data' });
+    const a = await ws.researchStartAgent(p.projectId, ws.researchGet(p.projectId)!.nodes[0].id, { isolate: false });
+    const status = (id: string) => ws.snapshot().tasks.find((t) => t.taskId === id)!;
+    await until(() => !['running', 'starting'].includes(status(a.taskId).status) && !['running', 'starting'].includes(status(lead.taskId).status));
+    ws.handleEvent(a.taskId, status(a.taskId).sessionLocalId!, { type: 'limits', windows: [{ key: 'five_hour', mins: 300, usedPercent: 92, resetsAt: Date.now() + 2 * 3600_000 }, { key: 'seven_day', mins: 10080, usedPercent: 40 }] });
+    const asLead = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: lead.taskId }).map((t) => [t.name, t]));
+    const usage = await asLead.research_usage.run({});
+    expect(usage).toMatch(/Usage limits on this computer/);
+    expect(usage).toMatch(/5-hour: 92% used, resets in 2 h/);
+    expect(usage).toMatch(/weekly: 40% used/);
+    expect(usage).toMatch(new RegExp(`${a.alias} \\(Mock\\)`));
+    // Stopped by its plan's limit: the lead is told.
+    ws.handleEvent(a.taskId, status(a.taskId).sessionLocalId!, { type: 'turnCompleted', status: 'failed', error: "You've hit your usage limit. Try again later." });
+    await until(() => ws.transcript(lead.taskId).some((i) => i.role === 'user' && /\[Plan limit\]/.test(i.text) && i.text.includes(a.alias)));
+    await until(() => !['running', 'starting'].includes(status(lead.taskId).status));
+    // The lead moves it to another CLI.
+    expect(await asLead.research_switch.run({ agent: a.alias, cli: 'codex' })).toMatch(/goes on as .* on codex/);
+    const node = ws.researchGet(p.projectId)!.nodes[0];
+    expect(status(node.taskId!).provider).toBe('codex');
+    // Only the lead moves agents.
+    const asAgent = Object.fromEntries(researchTools(ws, { kind: 'agent', taskId: node.taskId! }).map((t) => [t.name, t]));
+    await expect(asAgent.research_switch.run({ agent: lead.alias, cli: 'codex' })).rejects.toThrow(/lead/);
+  });
+});
+
 describe('moving a research’s agents into its folder', () => {
   it('agents started at the project root move with their conversation; the page counts them until then', async () => {
     const ws = open();

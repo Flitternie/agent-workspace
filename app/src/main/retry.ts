@@ -29,6 +29,8 @@ export function retryDelayMs(retry: number, policy: RetryPolicy = DEFAULT_RETRY,
 
 // Not "limit reached": OpenAI's ordinary 429 says "Rate limit reached for …".
 const ACCOUNT_LIMIT = /usage limit|hit your limit|quota|billing|credits?\b|upgrade (your|to)/i;
+/** A plan's or account's usage limit (lasts hours; another CLI, or waiting for the reset, is the way on). */
+export const planLimited = (message = '') => ACCOUNT_LIMIT.test(message);
 const RATE_LIMIT = /rate[ _-]?limit|too many requests|\b429\b/i;
 const CAPACITY = /at capacity|overload|slow[ _]down|service unavailable|temporarily unavailable|\b(502|503|504|529)\b/i;
 const BUSY_STATUS = [502, 503, 504, 529];

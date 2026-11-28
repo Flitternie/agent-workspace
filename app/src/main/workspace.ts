@@ -40,6 +40,7 @@ import type { LocalStt } from './stt/local';
 import { STT_MODEL, ROUTER_MODEL } from './openai';
 import type { HistoryImage, ProviderAdapter, ProviderEvent, ProviderSession } from './providers/types';
 import { AttachmentStore, MAX_IMAGES } from './attachments';
+import { planLimited } from './retry';
 import { CONTINUE_PROMPT, DEFAULT_RETRY, RECONNECT_PROMPT, RETRY_LABEL, RETRY_PROMPT, retryDelayMs, type RetryPolicy } from './retry';
 import { decideDeterministic, decideRoute, type RouteContext } from './router';
 import { aliasFor, JsonStore } from './store';
@@ -3285,6 +3286,59 @@ export class Workspace {
     task.summary = attempts > 1 ? `Turn failed after ${attempts} attempts: ${why}` : `Turn failed: ${why}`;
     // The full message only when the headline had to shorten it.
     this.addAttention({ taskId: task.taskId, kind: 'error', headline: task.summary, details: error && why !== error.replace(/\s+/g, ' ').trim() ? error : '', retryable: true, transient });
+    // A research agent stopped by its plan's limit: its lead hears of it, to move it to another CLI, wait, or ask.
+    if (planLimited(error)) this.tellLeadOfLimit(task, why);
+  }
+
+  private tellLeadOfLimit(task: Task, why: string): void {
+    const place = this.researchPlace(task);
+    if (!place || place.role === 'lead') return;
+    const lead = this.researchGet(place.id)?.leadTaskId;
+    if (!lead || !this.findTask(lead)) return;
+    const zh = this.language() === 'zh';
+    const cli = providerName(task.provider);
+    void this.send(
+      lead,
+      zh
+        ? `【额度用尽】${task.alias} 在 ${cli} 上因为额度用完停下了（${why}）。用 research_usage 看各 CLI 的余量，再决定：用 research_switch 把它换到有余量的 CLI 接着做、等额度重置，或者问用户。`
+        : `[Plan limit] ${task.alias} stopped on ${cli}: its plan's limit is reached (${why}). See what each CLI has left with research_usage, then move it to one with room (research_switch), wait for the reset, or ask the user.`,
+      'text',
+      { keepAsks: true },
+    ).catch(() => {});
+  }
+
+  /** What each CLI account on the research's machine has left (as last seen), and what its agents have used. For research_usage. */
+  researchUsage(id: string): string {
+    const { projectId } = parseResearchId(id);
+    const host = this.project(projectId).host;
+    const nowMs = Date.now();
+    const dur = (ms: number) => (ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : ms < 48 * 3600_000 ? `${Math.round(ms / 3600_000)} h` : `${Math.round(ms / 86_400_000)} d`);
+    const span = (w: LimitWindow) => (w.mins === 300 ? '5-hour' : w.mins === 10080 ? 'weekly' : w.mins ? dur(w.mins * 60_000) : w.key);
+    const lines: string[] = [`Usage limits on ${host ?? 'this computer'} (as each CLI last reported them):`];
+    const accounts = Object.values(this.store.data.limits ?? {}).filter((l) => (l.host ?? undefined) === host && l.provider);
+    for (const l of accounts) {
+      lines.push(`- ${providerName(l.provider!)}${l.plan ? ` (${l.plan})` : ''}, seen ${dur(nowMs - Date.parse(l.at))} ago:`);
+      for (const w of l.windows) {
+        const resets = w.resetsAt ? (w.resetsAt > nowMs ? `, resets in ${dur(w.resetsAt - nowMs)}` : ', reset since') : '';
+        lines.push(`  ${span(w)}${w.label ? ` [${w.label}]` : ''}${w.overage ? ' (beyond the plan)' : ''}: ${w.usedPercent}% used${resets}`);
+      }
+    }
+    const seen = new Set(accounts.map((l) => l.provider));
+    const caps = host ? (this.hostStatus.get(host)?.capabilities ?? []) : this.capabilities;
+    const unseen = caps.filter((c) => c.available && c.provider !== 'mock' && !seen.has(c.provider)).map((c) => providerName(c.provider));
+    if (unseen.length) lines.push(`- No usage reported yet: ${unseen.join(', ')}.`);
+    if (!accounts.length && !unseen.length) lines.push('- Nothing reported yet.');
+    const doc = this.researchGet(id);
+    const agents = doc ? taskIdsOf(doc).map((t) => this.findTask(t)).filter((t): t is Task => !!t) : [];
+    if (agents.length) {
+      lines.push('', 'Used by this research’s agents (tokens: input + output; cache reads apart):');
+      for (const t of agents) {
+        const u = t.usage;
+        const used = u ? `${Math.round((u.input + u.cacheWrite + u.output) / 1000)}k${u.cacheRead ? `, ${Math.round(u.cacheRead / 1000)}k cached` : ''}${u.costUsd ? `, ~$${u.costUsd.toFixed(2)} at API prices` : ''}` : 'nothing yet';
+        lines.push(`- ${t.alias} (${providerName(t.provider)}): ${used}`);
+      }
+    }
+    return lines.join('\n');
   }
 
   // ---------------------------------------------------------------- attention

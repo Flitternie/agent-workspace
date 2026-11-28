@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { CODING_PROVIDERS, type CodingProvider, type Task } from '../shared/types';
 import {
+  taskIdsOf,
   addFinding,
   addNode,
   aspectOf,
@@ -46,6 +47,10 @@ export interface ResearchHost {
   /** Starts an agent for a node (an aspect's, or an experiment's in its own worktree), briefed, and links it. */
   researchStartAgent(projectId: string, nodeId: string, opts: { isolate: boolean; message?: string }): Promise<Task>;
   findTaskById(taskId: string): Task | undefined;
+  /** What each CLI account on the research's machine has left, and what its agents have used. */
+  researchUsage(id: string): string;
+  /** One of the research's agents goes on in another CLI (its conversation and its place in the tree). */
+  researchSwitchAgent(id: string, taskId: string, provider: CodingProvider): Promise<Task>;
   /** The lead's decision on a permission request of one of its agents, delegated to it. */
   researchApprove(leadTaskId: string, attentionId: string, decision: 'allow' | 'deny' | 'ask_user', note?: string): Promise<string>;
   /** A conversation as text (its recent items): for the lead bringing conversations into the research. */
@@ -126,10 +131,17 @@ function rules(role: 'lead' | 'aspect', lang: 'en' | 'zh'): string {
     zh
       ? `· 这个研究的决定、规则和进展记在研究里，不要写进 Claude Code 或 Codex 自己的记忆（那份记忆按目录共享，别的研究和用户自己的会话也会读到，你也写不进去）。用户定下的规则和定义记进研究约定（research_memory）${role === 'lead' ? '' : '：把它告诉负责人，由负责人记'}；进展记在笔记、总结和一句话结论里。`
       : `· Keep this research’s decisions, rules and progress in the research, never in Claude Code’s or Codex’s own memory (shared by folder, read by other researches and the user’s own sessions; you cannot write it anyway). Rules and definitions the user sets go in the research’s memory (research_memory${role === 'lead' ? '' : ': tell the lead, who keeps it'}); progress goes in notes, the summary and takeaways.`,
+    role === 'lead'
+      ? zh
+        ? '· 开一批实验前用 research_usage 看各 CLI 的额度，把工作交给还有余量的 CLI（research_settings 的 cli）；某个 CLI 的额度超过八成时，新工作换别的 CLI 或先问用户。agent 因额度用完停下时你会收到通知，可以用 research_switch 把它换到别的 CLI 接着做。'
+        : '· Before starting a batch of experiments, see what each CLI has left with research_usage and give the work to one with room (research_settings cli); when a CLI is past about 80% of a window, put new work on another or ask the user. When an agent stops at its plan’s limit you are told; move it to another CLI with research_switch.'
+      : '',
     zh
       ? '· agent 之间用 research_tell 通信：把别的部分需要知道的事告诉它的 agent 或负责人（会改变对方计划的发现、对方在等的结果），需要对方做事也用它。实验记录的结果会自动送到所属方面的 agent。'
       : '· Agents talk with research_tell: tell another part’s agent, or the lead, what it needs to know (a finding that changes its plan, a result it waits for), or ask it to do something. Results recorded by experiments reach their aspect’s agent by themselves.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** The research's own memory (rules, definitions, decisions that hold here): in every brief, whole. */
@@ -514,6 +526,28 @@ export function researchTools(host: ResearchHost, caller: ResearchCaller): Works
         const r = addNode(next, { type: 'method', parent: where.id, title: String(a.title), status: 'idea', ...(a.design ? { design: String(a.design) } : {}), links: from.map((m) => ({ from: m.id, kind: a.kind as 'combine' | 'mutate' })) });
         save(projectId, r.doc);
         return `Made method [${r.node.id}] "${r.node.title}" in "${where.title}" (${a.kind} of ${from.map((m) => `"${m.title}"`).join(', ')}).`;
+      },
+    },
+    {
+      name: 'research_usage',
+      description: 'What each CLI account on the research’s machine has left of its plan (5-hour and weekly windows, % used, when they reset; as each CLI last reported them) and what the research’s agents have used. Look before starting a batch of experiments, and to choose which CLI new work goes to.',
+      schema: z.object({ ...projectArg }),
+      run: async (a) => {
+        const { projectId } = await load(a.project);
+        return host.researchUsage(projectId);
+      },
+    },
+    {
+      name: 'research_switch',
+      description: 'Moves one of the research’s agents to another CLI (the lead’s): a new agent there continues its conversation in the same folder and takes its place in the tree; the old one is set aside. For an agent stopped by its plan’s limit, or work better suited to another CLI. Not while it is working.',
+      schema: z.object({ ...projectArg, agent: z.string().describe('The agent’s name.'), cli: z.enum(CODING_PROVIDERS as [CodingProvider, ...CodingProvider[]]) }),
+      run: async (a) => {
+        const { projectId, doc } = await load(a.project);
+        if (!full(doc)) throw new Error('Agents are moved to another CLI by the research’s lead.');
+        const t = host.findAgent(String(a.agent));
+        if (!t || !taskIdsOf(doc).includes(t.taskId)) throw new Error(`No agent "${String(a.agent)}" in this research.`);
+        const n = await host.researchSwitchAgent(projectId, t.taskId, a.cli as CodingProvider);
+        return `${t.alias} goes on as ${n.alias} on ${String(a.cli)}.`;
       },
     },
     {
