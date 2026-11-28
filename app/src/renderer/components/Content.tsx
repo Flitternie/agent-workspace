@@ -192,7 +192,17 @@ export function touchedPaths(item: TranscriptItem): string[] {
     ...tool.content.flatMap((c) => (c.type === 'diff' && c.diff.operation !== 'delete' ? [c.diff.path] : [])),
     ...(tool.kind === 'edit' || tool.kind === 'move' ? tool.locations.map((l) => l.path) : []),
   ];
-  return [...new Set(paths)].filter((p) => previewKind(p));
+  // One file can come both relative (a diff's display path) and absolute (the tool's location):
+  // the same file when the absolute one ends with the relative one; the first one written stays.
+  // Two relative paths are different files ("notes.md" and "docs/notes.md").
+  const abs = (x: string) => x.startsWith('/') || /^[A-Za-z]:[\\/]/.test(x);
+  const unique: string[] = [];
+  for (const p of paths) {
+    const tail = (whole: string, rel: string) => abs(whole) && !abs(rel) && whole.replace(/\\/g, '/').endsWith(`/${rel.replace(/^\.\//, '')}`);
+    const same = (q: string) => q === p || tail(q, p) || tail(p, q);
+    if (!unique.some(same)) unique.push(p);
+  }
+  return unique.filter((p) => previewKind(p));
 }
 
 /** Set by the Focus view; rows elsewhere (cards) offer no file actions. */
