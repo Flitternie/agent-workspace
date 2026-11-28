@@ -95,6 +95,30 @@ export class WorktreeService {
     return { path, branch, baseRef, parentRepo: root, host };
   }
 
+  /** The commit `dir` is at (here or on `host`). */
+  async headOf(host: string | undefined, dir: string): Promise<string> {
+    const r = await git(host, dir, ['rev-parse', '--verify', 'HEAD']);
+    if (r.code !== 0) throw new Error(`Could not read the last commit: ${r.stderr.trim()}`);
+    return r.stdout.trim();
+  }
+
+  /**
+   * copyChanges on an SSH host: the uncommitted work of `from`'s checkout (tracked changes as a stash commit
+   * applied there, untracked files copied with tar) into the worktree at `to`, which starts at the same commit.
+   */
+  async copyChangesRemote(host: string, from: string, to: string): Promise<{ files: number; error?: string }> {
+    const script = [
+      `cd ${shq(from)} && root=$(git rev-parse --show-toplevel) || exit 3`,
+      's=$(git stash create) || exit 4',
+      `if [ -n "$s" ]; then git -C ${shq(to)} stash apply --quiet "$s" || exit 5; fi`,
+      `cd "$root" && git ls-files --others --exclude-standard -z | grep -zv '/$' | tar --null -T - -cf - 2>/dev/null | tar -C ${shq(to)} -xf - || exit 6`,
+      `git -C ${shq(to)} status --porcelain -uall | wc -l`,
+    ].join('; ');
+    const r = await sshRun(host, `sh -c ${shq(script)}`, 300_000);
+    if (r.code !== 0) return { files: 0, error: r.stderr.trim() || `copy failed (${r.code})` };
+    return { files: Number(r.stdout.trim().split('\n').pop()) || 0 };
+  }
+
   /** Why the worktree must be kept, or null when it is safe to remove. */
   async keepReason(info: WorktreeInfo): Promise<string | null> {
     const status = await git(info.host, info.path, ['status', '--porcelain']);

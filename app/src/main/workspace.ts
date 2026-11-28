@@ -2105,6 +2105,34 @@ export class Workspace {
     return { dir: resolved.trim() || dir, names: rest.map((l) => l.replace(/\/$/, '')).filter(Boolean) };
   }
 
+  /**
+   * A project's folders a research can be kept in (one level down): which are repositories, which have one
+   * already. For choosing where a new research goes; one round trip on a host.
+   */
+  async researchFolders(projectId: string): Promise<Array<{ name: string; git: boolean; research: boolean }>> {
+    const p = this.project(projectId);
+    if (!p.host) {
+      try {
+        return readdirSync(p.rootPath, { withFileTypes: true })
+          .filter((e) => !e.name.startsWith('.') && isResearchDir(e.name) && (e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(p.rootPath, e.name)).isDirectory(); } catch { return false; } })())))
+          .map((e) => ({ name: e.name, git: existsSync(join(p.rootPath, e.name, '.git')), research: existsSync(join(p.rootPath, e.name, '.research', 'research.json')) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .slice(0, 500);
+      } catch {
+        return [];
+      }
+    }
+    this.requireHost(p.host);
+    const script = `cd ${shq(p.rootPath)} 2>/dev/null || exit 0; for d in */; do d="\${d%/}"; [ -d "$d" ] || continue; g=0; r=0; [ -e "$d/.git" ] && g=1; [ -f "$d/.research/research.json" ] && r=1; printf '%s\\t%s\\t%s\\n' "$g" "$r" "$d"; done | head -500`;
+    const r = await sshRun(p.host, `sh -c ${shq(script)}`, 20_000);
+    if (r.code !== 0) throw new Error(sshError(p.host, r.stderr));
+    return r.stdout
+      .split('\n')
+      .map((l) => l.split('\t'))
+      .filter((x) => x.length === 3 && isResearchDir(x[2]))
+      .map(([g, rs, name]) => ({ name, git: g === '1', research: rs === '1' }));
+  }
+
   async discoverHostSessions(host: string): Promise<NativeSessionInfo[]> {
     this.requireHost(host);
     // Tests: the fixture's sessions on this host (see discoverAllSessions).
@@ -2245,6 +2273,8 @@ export class Workspace {
 
   /** Where the task's conversation can be forked: before each of the user's earlier prompts, oldest first. */
   async forkPoints(taskId: string): Promise<ForkPoint[]> {
+    // On a host a conversation is carried over as it is now (onto another CLI): no earlier points.
+    if (this.task(taskId).host) return [];
     const { task, adapter, nativeSessionId } = this.forkSource(taskId);
     return adapter.forkPoints(nativeSessionId, task.cwd);
   }
@@ -2262,6 +2292,7 @@ export class Workspace {
     const { task: src, adapter, nativeSessionId } = this.forkSource(taskId, opts.provider);
     // Onto another CLI: a new agent there, given the conversation as text with its first message.
     const onto = opts.provider && opts.provider !== src.provider ? opts.provider : undefined;
+    if (src.host && onto) this.requireOnHost(onto, src.host);
     // Mid-turn, the saved conversation can end on a tool call with no result yet.
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
       throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
@@ -2269,14 +2300,16 @@ export class Workspace {
     const title = clip(`${src.title} (fork)`, 120);
     let cwd = src.cwd;
     let worktree: Task['worktree'];
-    if (opts.isolate && project.isGitRepo) {
-      const head = await run('git', ['-C', src.cwd, 'rev-parse', '--verify', 'HEAD']);
-      if (head.code !== 0) throw new Error(`Could not read ${src.alias}'s last commit: ${head.stderr.trim()}`);
-      const id = randomUUID().slice(0, 8);
-      worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(`${src.name} fork`)}-${id}`, head.stdout.trim());
+    // Its own worktree of the repository the original works in (the project's, or one inside it; here or on its host).
+    const repo = opts.isolate ? await repoOf(src.host, src.cwd) : null;
+    if (repo) {
+      const head = await this.worktrees.headOf(src.host, src.cwd).catch((e: Error) => {
+        throw new Error(`${src.alias}: ${e.message}`);
+      });
+      const slug = `${slugify(`${src.name} fork`)}-${randomUUID().slice(0, 8)}`;
+      worktree = src.host ? await this.worktrees.createRemote(src.host, repo.root, slug, head) : await this.worktrees.create(repo.root, project.projectId, slug, head);
       // The same subfolder as the original (an imported session can work in one), so its paths still hold.
-      const prefix = (await run('git', ['-C', src.cwd, 'rev-parse', '--show-prefix'])).stdout.trim().replace(/\/+$/, '');
-      cwd = prefix ? join(worktree.path, prefix) : worktree.path;
+      cwd = repo.prefix ? (src.host ? `${worktree.path}/${repo.prefix}` : join(worktree.path, repo.prefix)) : worktree.path;
     }
     let forkId = '';
     let carried: { items: TranscriptItem[]; lines: SaidLine[] } | undefined;
@@ -2289,7 +2322,7 @@ export class Workspace {
     }
     // After the fork exists, so a failed fork still leaves a clean worktree to remove. Its conversation
     // remembers the original's edits, so its files must have them too.
-    const copied = worktree ? await this.worktrees.copyChanges(src.cwd, worktree.path) : undefined;
+    const copied = worktree ? (src.host ? await this.worktrees.copyChangesRemote(src.host, src.cwd, worktree.path) : await this.worktrees.copyChanges(src.cwd, worktree.path)) : undefined;
     const ids = this.newTaskIds();
     const { taskId: newId, alias } = ids;
     const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';

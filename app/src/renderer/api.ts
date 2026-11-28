@@ -65,6 +65,7 @@ export interface Outputs {
   'research:html': string;
   'research:dissolve': { kept: string };
   'research:moveAgents': { moved: string[]; busy: string[] };
+  'research:folders': Array<{ name: string; git: boolean; research: boolean }>;
   'research:setProvider': void;
   'research:switchAgent': { taskId: string; alias: string };
   'research:fromTasks': { researchId: string };

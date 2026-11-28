@@ -173,6 +173,7 @@ const handlers: { [C in IpcChannel]: Handler } = {
   'research:message': (i: { researchId: string; nodeIds: string[]; text: string; images?: ImageRef[] }) => workspace.researchMessage(i.researchId, i.nodeIds, i.text, i.images),
   'research:dissolve': (i: { researchId: string }) => workspace.researchDissolve(i.researchId),
   'research:moveAgents': (i: { researchId: string }) => workspace.researchMoveAgents(i.researchId),
+  'research:folders': (i: { projectId: string }) => workspace.researchFolders(i.projectId),
   'research:setProvider': (i: { researchId: string; nodeId?: string; provider: AgentProvider | null }) => workspace.researchSetProvider(i.researchId, i.nodeId, i.provider),
   'research:switchAgent': (i: { researchId: string; taskId: string; provider: AgentProvider }) => workspace.researchSwitchAgent(i.researchId, i.taskId, i.provider).then((t) => ({ taskId: t.taskId, alias: t.alias })),
   'research:fromTasks': (i: { projectId: string; taskIds: string[]; title?: string; dir?: string }) => workspace.researchFromTasks(i.projectId, i.taskIds, i.title, i.dir),

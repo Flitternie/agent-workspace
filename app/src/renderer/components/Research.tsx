@@ -44,6 +44,7 @@ import { Composer, PanelResizer, WaitingOnYou, type ComposerTarget } from './Foc
 import { SidePanel } from './SidePanel';
 import { defaultProject, ProjectChooser } from './ProjectChooser';
 import { menuAt, useContextMenu } from './ContextMenu';
+import { ResearchFolderField } from './ResearchFolderField';
 import { parseUi, statText, type ResearchUi, type UiNodeField } from '../../shared/research-ui';
 import { defaultView, levelOf, liveTable, parseView, templatesFor, viewKey, type TableSpec, type ViewBlockKind, type ViewLevel } from '../../shared/research-views';
 
@@ -1675,14 +1676,10 @@ export function NewResearchDialog({ snapshot, projectId: suggested, onClose, onC
         <label>{t('Goal')}</label>
         <textarea className="input" rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} placeholder={t('What should improve, and how it is measured end to end')} />
       </div>
-      <div className="field">
-        <label>{t('Folder (optional)')}</label>
-        <input className="input" value={dir} onChange={(e) => setDir(e.target.value)} placeholder={t('A folder of the project, e.g. the repository it is about')} data-testid="research-new-dir" />
-      </div>
+      <ResearchFolderField snapshot={snapshot} projectId={projectId} value={dir} onChange={setDir} testId="research-new-dir" />
       <label className="check">
         <input type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} /> {t('Fill it with an example to look around (no agents)')}
       </label>
-      <div className="muted small">{t('Kept in the project’s repository (or that folder of it), in .research/.')}</div>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>

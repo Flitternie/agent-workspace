@@ -12,6 +12,7 @@ import { Modal } from './Dialogs';
 import { InlineEdit, menuAt, menuKey, useContextMenu, type MenuItem } from './ContextMenu';
 import { agentMenuItems, canFork, EditableAgentName, type AgentField } from './AgentMenu';
 import { ForkDialog } from './Dialogs';
+import { ResearchFolderField } from './ResearchFolderField';
 
 /**
  * Always-visible participant list. In Focus it doubles as the rail that keeps
@@ -517,7 +518,14 @@ function ResearchDialog({
 }) {
   const tasks = dlg.kind === 'merge' ? dlg.taskIds.map((id) => snapshot.tasks.find((t) => t.taskId === id)).filter((t): t is Task => !!t) : [];
   const [title, setTitle] = useState(dlg.kind === 'merge' ? (tasks[0]?.title ?? '') : dlg.research.title);
-  const [dir, setDir] = useState('');
+  // Where the conversations worked: their one folder of the project, if they share one (a worktree elsewhere does not count).
+  const [dir, setDir] = useState(() => {
+    if (dlg.kind !== 'merge') return '';
+    const root = snapshot.projects.find((p) => p.projectId === dlg.projectId)?.rootPath.replace(/\/+$/, '');
+    if (!root) return '';
+    const firsts = tasks.map((x) => (x.cwd.startsWith(`${root}/`) ? x.cwd.slice(root.length + 1).split('/')[0] : x.cwd === root ? '' : null)).filter((x): x is string => x !== null);
+    return firsts.length && firsts.every((f) => f === firsts[0]) ? firsts[0] : '';
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const run = (fn: () => Promise<string | undefined | void>) => {
@@ -583,10 +591,7 @@ function ResearchDialog({
         <label>{tr('Title')}</label>
         <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="research-merge-title" />
       </div>
-      <div className="field">
-        <label>{tr('Folder (optional)')}</label>
-        <input className="input" value={dir} onChange={(e) => setDir(e.target.value)} placeholder={tr('A folder of the project, e.g. the repository it is about')} data-testid="research-merge-dir" />
-      </div>
+      <ResearchFolderField snapshot={snapshot} projectId={dlg.projectId} value={dir} onChange={setDir} testId="research-merge-dir" />
       <div className="muted small">{tr('A research lead is started: it reads these conversations, lays out the tree and attaches them. They move from this list to the research’s page.')}</div>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">

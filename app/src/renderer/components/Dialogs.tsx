@@ -391,17 +391,24 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   const [points, setPoints] = useState<ForkPoint[] | null>(null);
   /** '' = the whole conversation as it is now. */
   const [upTo, setUpTo] = useState('');
-  const [isolate, setIsolate] = useState(!!project?.isGitRepo);
+  // On a host the conversation goes onto another CLI there, as it is now.
+  const remote = !!task.host;
+  // A worktree of the repository its folder is in (the project's, or one inside it, as on a host's project of several repositories).
+  const [isolate, setIsolate] = useState(!!project?.isGitRepo || remote);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // Which CLI continues it: its own, or another one installed here (given the conversation as text).
-  const [onto, setOnto] = useState<AgentProvider>(task.provider);
-  const capOf = (p: AgentProvider) => snapshot.capabilities.find((c) => c.provider === p);
-  const usable = (p: AgentProvider) => (p === task.provider ? capOf(p)?.fork !== false : !!capOf(p)?.available);
-  const ontoChoices: AgentProvider[] = capOf(task.provider)?.forkElsewhere
-    ? [...new Set<AgentProvider>([...CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || !!capOf(p)?.available), ...(snapshot.demo ? (['mock'] as const) : []), task.provider])]
+  const hostCaps = remote ? (snapshot.remoteHosts.find((h) => h.host === task.host)?.capabilities ?? []) : null;
+  const capOf = (p: AgentProvider) => (hostCaps ?? snapshot.capabilities).find((c) => c.provider === p);
+  const usable = (p: AgentProvider) => (p === task.provider ? !remote && capOf(p)?.fork !== false : !!capOf(p)?.available && capOf(p)?.auth?.loggedIn !== false);
+  const ontoChoices: AgentProvider[] = snapshot.capabilities.find((c) => c.provider === task.provider)?.forkElsewhere
+    ? remote
+      ? (hostCaps ?? []).filter((c) => c.provider !== task.provider && c.available).map((c) => c.provider)
+      : [...new Set<AgentProvider>([...CODING_PROVIDERS.filter((p) => !isAcpProvider(p) || !!capOf(p)?.available), ...(snapshot.demo ? (['mock'] as const) : []), task.provider])]
     : [];
+  const [onto, setOnto] = useState<AgentProvider>(() => (remote ? (ontoChoices.find(usable) ?? task.provider) : task.provider));
   useEffect(() => {
+    if (remote) return setPoints([]);
     call('task:forkPoints', { taskId: task.taskId })
       .then((p) => setPoints([...p].reverse()))
       .catch((e) => {
@@ -414,7 +421,7 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
     setBusy(true);
     setError('');
     try {
-      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate: isolate && !!project?.isGitRepo, provider: onto !== task.provider ? onto : undefined });
+      const t = await call('task:fork', { taskId: task.taskId, upToMessageId: upTo || undefined, isolate, provider: onto !== task.provider ? onto : undefined });
       // Forked back to before a message: that message waits in the new agent's reply box, to edit and send.
       const prompt = upTo ? points?.find((p) => p.upToMessageId === upTo)?.prompt : undefined;
       if (prompt) setDraftText(t.taskId, prompt);
@@ -429,7 +436,7 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
   return (
     <Modal title={t('Fork {name}', { name: task.alias })} onClose={onClose}>
       <div className="muted small">{t('A new agent continues from a copy; {name} stays as it is.', { name: task.alias })}</div>
-      {ontoChoices.length > 1 ? (
+      {ontoChoices.length > 1 || remote ? (
         <div className="field">
           <label>{t('Continue in')}</label>
           <ProviderPicker providers={ontoChoices} value={onto} onChange={setOnto} capOf={capOf} usable={usable} name="fork-onto" testId="fork-onto" />
@@ -449,12 +456,11 @@ export function ForkDialog({ snapshot, task, onClose, onForked }: { snapshot: Wo
             </label>
           ))}
         </div>
-        <div className="muted small">{t('Only the conversation goes back; files stay as they are now.')}</div>
+        <div className="muted small">{remote ? t('On {host} the conversation is carried over as it is now.', { host: task.host ?? '' }) : t('Only the conversation goes back; files stay as they are now.')}</div>
       </div>
       <label className="check">
-        <input type="checkbox" checked={isolate && !!project?.isGitRepo} disabled={!project?.isGitRepo} onChange={(e) => setIsolate(e.target.checked)} data-testid="fork-isolate" />
-        {t('Run in its own git worktree')}{' '}
-        {project?.isGitRepo ? t('(with {name}’s files as they are now, uncommitted changes included)', { name: task.alias }) : t('(not a git repo — will share the folder)')}
+        <input type="checkbox" checked={isolate} onChange={(e) => setIsolate(e.target.checked)} data-testid="fork-isolate" />
+        {t('Run in its own git worktree')} {t('(with {name}’s files as they are now, uncommitted changes included)', { name: task.alias })}
       </label>
       {error ? <div className="error-text">{error}</div> : null}
       <div className="modal-foot">

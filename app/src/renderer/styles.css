@@ -8974,3 +8974,11 @@ code.nowrap {
   width: 100%;
   height: 100%;
 }
+/* Where a research is kept: its folders listed under the field, inside the dialog. */
+.research-folder-pop .project-list {
+  max-height: 220px;
+}
+.research-folder-pop .project-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
