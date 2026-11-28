@@ -680,6 +680,7 @@ export const zh: Record<string, string> = {
   'Loading…': '加载中…',
   'A new agent continues a copy of this conversation. {name} and its conversation stay as they are.': '新 Agent 会接着这段对话的副本继续，{name} 和它的对话保持不变。',
   'Only the conversation goes back; files stay as they are now.': '只回退对话，文件保持现在的状态。',
+  'On {host} the conversation is carried over as it is now.': '在 {host} 上会把对话按现在的样子带过去。',
   '(with {name}’s files as they are now, uncommitted changes included)': '（带上 {name} 现在的文件，包括未提交的改动）',
   'forked from {name}': '分叉自 {name}',
   'Fork once this turn ends.': '等这一轮结束后再分叉。',

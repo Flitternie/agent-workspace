@@ -15,7 +15,7 @@ import { transientKind } from '../retry';
 import { childEnv, findExecutable, run } from '../util/exec';
 import { sshError, sshRun } from '../util/ssh';
 import { privateFolders } from '../private-folders';
-import { checkRemoteStart, entrypointOf, isSubAgentEntrypoint, remoteExitError, remoteSessionStore, remoteSpawn, scanRemoteSessions, type RemoteExit } from './claude-remote';
+import { checkRemoteStart, entrypointOf, remoteRealpath, isSubAgentEntrypoint, remoteExitError, remoteSessionStore, remoteSpawn, scanRemoteSessions, type RemoteExit } from './claude-remote';
 import { ClaudePlanTracker, claudeToolCall, claudeToolResult } from './claude-content';
 import { ClaudeSubtasks } from './subtasks';
 import { findSessionFile } from './session-file';
@@ -312,7 +312,8 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   async readHistory(nativeSessionId: string, cwd: string, host?: string): Promise<ProviderEvent[]> {
     const events: ProviderEvent[] = [];
-    await new ClaudeSession({ cwd, host, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId);
+    // On a host, under the folder's real path (where the CLI there keeps it), as a resume looks it up.
+    await new ClaudeSession({ cwd, host, title: '' }, (e) => events.push(e)).replayHistory(nativeSessionId, host ? await remoteRealpath(host, cwd) : undefined);
     return events;
   }
 
@@ -396,11 +397,14 @@ class ClaudeSession implements ProviderSession {
   }
 
   /** Emits the saved conversation as history items (read-only; no process is started). */
-  async replayHistory(sessionId: string): Promise<void> {
+  async replayHistory(sessionId: string, dir?: string): Promise<void> {
     const sdk = await loadSdk();
-    const history = await sdk.getSessionMessages(sessionId, { dir: this.args.cwd, ...this.store() });
+    const history = await sdk.getSessionMessages(sessionId, { dir: dir ?? this.sessionDir ?? this.args.cwd, ...this.store() });
     for (const m of history) this.receive(m, true);
   }
+
+  /** On a host, the folder's real path, where the CLI there keeps its sessions (locally the SDK resolves it). */
+  private sessionDir?: string;
 
   /** On an SSH host, transcripts are read from there. */
   private store() {
@@ -413,11 +417,11 @@ class ClaudeSession implements ProviderSession {
     // On a host the SDK only needs some path here; the host's own `claude` runs.
     const executable = findExecutable('claude') ?? (host ? process.execPath : null);
     if (!executable) throw new Error('Claude Code CLI not found on PATH.');
-    if (host) await checkRemoteStart(host, this.args.cwd);
+    if (host) this.sessionDir = await checkRemoteStart(host, this.args.cwd);
     const resumeId = this.args.resumeNativeSessionId;
     let resume = false;
     if (resumeId) {
-      const info = await sdk.getSessionInfo(resumeId, { dir: this.args.cwd, ...this.store() });
+      const info = await sdk.getSessionInfo(resumeId, { dir: this.sessionDir ?? this.args.cwd, ...this.store() });
       if (!info) throw new Error(`Claude session ${resumeId} was not found for ${this.args.cwd}${host ? ` on ${host}` : ''}.`);
       resume = true;
       await this.replayHistory(resumeId);

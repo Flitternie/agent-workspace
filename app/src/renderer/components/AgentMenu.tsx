@@ -19,11 +19,15 @@ export function aliasCheck(tasks: ReadonlyArray<Task>, taskId: string): (v: stri
 export const saveAlias = (taskId: string, alias: string) => call('task:renameAgent', { taskId, alias });
 export const saveTitle = (taskId: string, name: string) => call('task:rename', { taskId, name });
 
-/** A saved conversation on this computer, whose CLI can fork it (as itself, or onto another CLI). */
+/** A saved conversation whose CLI can fork it: as itself (on this computer), or onto another CLI (here or on its host). */
 export function canFork(snapshot: WorkspaceSnapshot, task: Task): boolean {
-  if (isMainAgent(task) || task.host) return false;
+  if (isMainAgent(task)) return false;
   const c = snapshot.capabilities.find((x) => x.provider === task.provider);
-  return !!(c?.fork || c?.forkElsewhere) && !!snapshot.sessions.find((s) => s.localId === task.sessionLocalId)?.nativeSessionId;
+  if (!snapshot.sessions.find((s) => s.localId === task.sessionLocalId)?.nativeSessionId) return false;
+  if (!task.host) return !!(c?.fork || c?.forkElsewhere);
+  // On a host: onto another CLI installed and signed in there.
+  const there = snapshot.remoteHosts.find((h) => h.host === task.host)?.capabilities ?? [];
+  return !!c?.forkElsewhere && there.some((x) => x.provider !== task.provider && x.available && x.auth?.loggedIn !== false);
 }
 
 /** The same items wherever an agent is right-clicked (sidebar row, Overview tile, its header). */
