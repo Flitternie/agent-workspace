@@ -37,6 +37,8 @@ export interface WorktreeInfo {
   branch: string;
   baseRef: string;
   parentRepo: string;
+  /** On this SSH host (made and removed there). */
+  host?: string;
 }
 
 export interface Task {

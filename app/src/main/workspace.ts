@@ -46,7 +46,7 @@ import { aliasFor, JsonStore } from './store';
 import { ALIAS_PROBLEM_TEXT, aliasProblem, normalizeAlias } from '../shared/agent-name';
 import { cleanLabel, labelLang, labelPrompt, labelRequest, labelRetry, needsNewLabel, titleLabel } from './label';
 import { MAIN_AGENT_PROMPT, pickMainProvider, workspaceTools } from './main-agent';
-import { gitRoot, WorktreeService } from './worktree';
+import { gitRoot, repoOf, WorktreeService } from './worktree';
 import { GROUPING_PROMPT, GROUPING_UPDATE_NOTE, GROUPING_VERSION, mergeGrouping, parseGrouping, turnsDigest, turnsOf, type MapGrouping } from '../shared/session-map';
 import { localPath, readLocal, readRemote, workDirs, type PreviewWhere } from './preview';
 import { run } from './util/exec';
@@ -750,14 +750,17 @@ export class Workspace {
     let cwd = project.rootPath;
     let worktree: Task['worktree'];
     let sharedCwdWarning: string | undefined;
-    if (args.isolate && project.isGitRepo && project.host) {
-      sharedCwdWarning = `Worktrees are not created on SSH hosts yet; this task edits ${cwd} on ${project.host} directly.`;
-    } else if (args.isolate && project.isGitRepo) {
+    // Isolated: a worktree of the repository its folder is in, here or on the project's host.
+    if (args.isolate) {
+      const slug = `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`;
       try {
-        worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(args.name || args.title || args.instruction?.slice(0, 60) || 'agent')}-${taskId.slice(2)}`);
-        cwd = worktree.path;
+        const repo = await repoOf(project.host, project.rootPath);
+        if (repo) {
+          worktree = project.host ? await this.worktrees.createRemote(project.host, repo.root, slug) : await this.worktrees.create(repo.root, project.projectId, slug);
+          cwd = repo.prefix ? (project.host ? `${worktree.path}/${repo.prefix}` : join(worktree.path, repo.prefix)) : worktree.path;
+        }
       } catch (error) {
-        sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd} directly.`;
+        sharedCwdWarning = `Worktree not created (${(error as Error).message}); this task edits ${cwd}${project.host ? ` on ${project.host}` : ''} directly.`;
       }
     }
     const title = (args.title ?? '').trim() || (args.instruction ?? '').trim().slice(0, 80);
@@ -1675,7 +1678,8 @@ export class Workspace {
     if (!adapter?.forkPoints || !(elsewhere ? adapter.readHistory : adapter.forkSession))
       throw new Error(`${providerName(task.provider)} conversations cannot be forked${elsewhere ? ' onto another CLI' : ''} yet.`);
     if (elsewhere && !this.opts.adapters[onto]) throw new Error(`${providerName(onto)} is not available here.`);
-    if (task.host) throw new Error('Conversations on SSH hosts cannot be forked yet.');
+    // Onto another CLI the conversation is read and passed on as text, which works on a host too.
+    if (task.host && !elsewhere) throw new Error('Conversations on SSH hosts can be forked onto another CLI only.');
     const nativeSessionId = this.currentSession(task)?.nativeSessionId;
     if (!nativeSessionId) throw new Error(`${task.alias} has no saved conversation to fork yet.`);
     return { task, adapter: adapter as Required<Pick<typeof adapter, 'forkPoints'>> & typeof adapter, nativeSessionId };
@@ -1720,6 +1724,8 @@ export class Workspace {
 
   /** Where the task's conversation can be forked: before each of the user's earlier prompts, oldest first. */
   async forkPoints(taskId: string): Promise<ForkPoint[]> {
+    // On a host a conversation is carried over as it is now (onto another CLI): no earlier points.
+    if (this.task(taskId).host) return [];
     const { task, adapter, nativeSessionId } = this.forkSource(taskId);
     return adapter.forkPoints(nativeSessionId, task.cwd);
   }
@@ -1737,6 +1743,7 @@ export class Workspace {
     const { task: src, adapter, nativeSessionId } = this.forkSource(taskId, opts.provider);
     // Onto another CLI: a new agent there, given the conversation as text with its first message.
     const onto = opts.provider && opts.provider !== src.provider ? opts.provider : undefined;
+    if (src.host && onto) this.requireOnHost(onto, src.host);
     // Mid-turn, the saved conversation can end on a tool call with no result yet.
     if (this.live.get(src.taskId)?.turnActive || ['running', 'starting'].includes(src.status))
       throw new Error(`${src.alias} is still working. Fork it once this turn ends.`);
@@ -1744,14 +1751,16 @@ export class Workspace {
     const title = clip(`${src.title} (fork)`, 120);
     let cwd = src.cwd;
     let worktree: Task['worktree'];
-    if (opts.isolate && project.isGitRepo) {
-      const head = await run('git', ['-C', src.cwd, 'rev-parse', '--verify', 'HEAD']);
-      if (head.code !== 0) throw new Error(`Could not read ${src.alias}'s last commit: ${head.stderr.trim()}`);
-      const id = randomUUID().slice(0, 8);
-      worktree = await this.worktrees.create(project.rootPath, project.projectId, `${slugify(`${src.name} fork`)}-${id}`, head.stdout.trim());
+    // Its own worktree of the repository the original works in (the project's, or one inside it; here or on its host).
+    const repo = opts.isolate ? await repoOf(src.host, src.cwd) : null;
+    if (repo) {
+      const head = await this.worktrees.headOf(src.host, src.cwd).catch((e: Error) => {
+        throw new Error(`${src.alias}: ${e.message}`);
+      });
+      const slug = `${slugify(`${src.name} fork`)}-${randomUUID().slice(0, 8)}`;
+      worktree = src.host ? await this.worktrees.createRemote(src.host, repo.root, slug, head) : await this.worktrees.create(repo.root, project.projectId, slug, head);
       // The same subfolder as the original (an imported session can work in one), so its paths still hold.
-      const prefix = (await run('git', ['-C', src.cwd, 'rev-parse', '--show-prefix'])).stdout.trim().replace(/\/+$/, '');
-      cwd = prefix ? join(worktree.path, prefix) : worktree.path;
+      cwd = repo.prefix ? (src.host ? `${worktree.path}/${repo.prefix}` : join(worktree.path, repo.prefix)) : worktree.path;
     }
     let forkId = '';
     let carried: { items: TranscriptItem[]; lines: SaidLine[] } | undefined;
@@ -1764,7 +1773,7 @@ export class Workspace {
     }
     // After the fork exists, so a failed fork still leaves a clean worktree to remove. Its conversation
     // remembers the original's edits, so its files must have them too.
-    const copied = worktree ? await this.worktrees.copyChanges(src.cwd, worktree.path) : undefined;
+    const copied = worktree ? (src.host ? await this.worktrees.copyChangesRemote(src.host, src.cwd, worktree.path) : await this.worktrees.copyChanges(src.cwd, worktree.path)) : undefined;
     const ids = this.newTaskIds();
     const { taskId: newId, alias } = ids;
     const point = opts.upToMessageId ? 'from an earlier point' : 'as it is now';
