@@ -2,6 +2,19 @@
 
 Entries from v0.16.2 on are written by release-please from the Conventional Commit titles of merged pull requests (see CONTRIBUTING.md). Earlier releases: [GitHub releases](https://github.com/Flitternie/agent-workspace/releases).
 
+## [0.17.0](https://github.com/Flitternie/agent-workspace/compare/v0.16.1...v0.17.0) (2026-11-28)
+
+
+### Features
+
+* **composer:** refer an agent to another agent's conversation ([#101](https://github.com/Flitternie/agent-workspace/issues/101)) ([041e6f4](https://github.com/Flitternie/agent-workspace/commit/041e6f444702436fe54766135c5d6e2d30ab70ea))
+
+
+### Bug Fixes
+
+* **agent-view:** keep following the end of the conversation while the agent works ([#100](https://github.com/Flitternie/agent-workspace/issues/100)) ([242b132](https://github.com/Flitternie/agent-workspace/commit/242b132e0601163bb4ff1a0d45c144990f14017a))
+* **agent-view:** list a written file once in its tool row ([#99](https://github.com/Flitternie/agent-workspace/issues/99)) ([7a68386](https://github.com/Flitternie/agent-workspace/commit/7a68386cd0c83ac11f499504c9a1acdce710e3f0))
+
 ## [0.16.1](https://github.com/Flitternie/agent-workspace/compare/v0.16.0...v0.16.1) (2026-11-27)
 
 ### Features
